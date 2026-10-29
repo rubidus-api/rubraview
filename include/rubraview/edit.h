@@ -334,7 +334,26 @@ typedef struct rubraview_edit_step {
     /* GMIC (RFC-0009 C): the command and its arguments as G'MIC is given them ("fx_array_mirror 1,0,2");
        FFMPEG (RFC-0009 D): the filter graph as avfilter is given it ("unsharp=5:5:1.0") */
     char                       command[RUBRAVIEW_EDIT_COMMAND_MAX];
+    /* RV-187 (D-220): which sizes are ratios of the picture before the step (RUBRAVIEW_RATIO_*), each kept as
+       `frac` (x, y, width, height of the area or crop; the resize's width and height). A ratio is the same part
+       of any picture; a size in pixels stays those pixels, held inside the picture. */
+    uint32_t                   ratio;
+    double                     frac[6];
 } rubraview_edit_step_t;
+
+enum {
+    RUBRAVIEW_RATIO_X = 1u << 0, RUBRAVIEW_RATIO_Y = 1u << 1, RUBRAVIEW_RATIO_W = 1u << 2, RUBRAVIEW_RATIO_H = 1u << 3,
+    RUBRAVIEW_RATIO_RESIZE_W = 1u << 4, RUBRAVIEW_RATIO_RESIZE_H = 1u << 5,
+    RUBRAVIEW_RATIO_AREA = 0x0Fu, RUBRAVIEW_RATIO_RESIZE = 0x30u, RUBRAVIEW_RATIO_ALL = 0x3Fu,
+};
+
+/**
+ * RV-187: `bits` of the step's sizes made ratios of a `base_w` x `base_h` picture, each from its pixels now
+ * (the ones not in `bits` made pixels again). A ratio already there is kept as it was.
+ */
+void rubraview_edit_step_set_ratio(rubraview_edit_step_t *step, uint32_t bits, int32_t base_w, int32_t base_h);
+/** RV-187: the step's pixels for a `base_w` x `base_h` picture: each ratio worked out, each pixel size held inside it. */
+void rubraview_edit_step_fit(rubraview_edit_step_t *step, int32_t base_w, int32_t base_h);
 
 /**
  * RFC-0007: what runs a plug-in step — the viewer's, which starts the plug-in's child process (RFC-0009 C: and a
@@ -368,10 +387,9 @@ bool rubraview_edit_steps_push(rubraview_edit_steps_t *steps, const rubraview_ed
  */
 bool rubraview_edit_steps_set_last(rubraview_edit_steps_t *steps, const rubraview_edit_step_t *step);
 /**
- * The owner (2026-10-18): the steps made on one picture, for another of
- * `width` x `height`: every area, cut and size scaled across by width and
- * down by height (a feather by the smaller), so the same parts of the
- * picture are changed. Pixel amounts (an effect's) are kept.
+ * The steps made on one picture, for another of `width` x `height` (RV-187, D-220; changes D-160): step by step,
+ * on the size the steps before it leave, a ratio is the same part of the picture and a size in pixels stays those
+ * pixels, held inside it (rubraview_edit_step_fit). A feather and an effect's pixel amounts are kept.
  */
 void rubraview_edit_steps_rebase(rubraview_edit_steps_t *steps, int32_t width, int32_t height);
 /** A rectangle of a `from_w` x `from_h` picture, the same part of a `to_w` x `to_h` one (at least 1 x 1, inside it). */
@@ -407,6 +425,22 @@ float rubraview_edit_area_weight(const rubraview_edit_area_t *area, int32_t x, i
  */
 rubraview_pixbuf_t rubraview_edit_step_apply(proven_arena_t *arena, const rubraview_edit_step_t *step,
                                              const rubraview_pixbuf_t *src, double scale);
+/** RV-187: the same steps in force, the same picture size, every field the same (a text round trip's test). */
+bool rubraview_edit_steps_equal(const rubraview_edit_steps_t *a, const rubraview_edit_steps_t *b);
+
+/**
+ * RV-187 (D-220): the steps in force as a `.rvsteps` file — the INI and TOML subset (D-13): `[steps]` with the
+ * version, the picture's size and the count, then `[step-1]` ... a section a step, every value it has. Empty
+ * when the arena is out of room.
+ */
+proven_u8str_view_t rubraview_edit_steps_serialize(proven_arena_t *arena, const rubraview_edit_steps_t *steps);
+/**
+ * A `.rvsteps` file read back into `out` (all of them in force). False, with `*why`, when it is not one: no
+ * `[steps]`, another version, more than RUBRAVIEW_EDIT_MAX_STEPS, a kind this build has not, a command or a
+ * plug-in's name too long. Unknown keys are passed over; values are held to their ranges.
+ */
+bool rubraview_edit_steps_parse(proven_arena_t *arena, proven_u8str_view_t text, rubraview_edit_steps_t *out, const char **why);
+
 /** The steps in force, in order. */
 rubraview_pixbuf_t rubraview_edit_steps_apply(proven_arena_t *arena, const rubraview_edit_steps_t *steps,
                                               const rubraview_pixbuf_t *src, double scale);

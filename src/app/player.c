@@ -110,7 +110,15 @@ rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_pal_rect
     return (rubraview_pal_rect_t){ box.x + box.width - s - 4.0, box.y + 4.0, s, s };
 }
 rubraview_pal_rect_t ab_box_rect(const app_state_t *app) { return answer_box_rect(app, 560.0, 158.0); }
-rubraview_pal_rect_t px_box_rect(const app_state_t *app) { return answer_box_rect(app, 560.0, 96.0); }
+rubraview_pal_rect_t px_box_rect(const app_state_t *app) { return answer_box_rect(app, 600.0, 132.0); }
+/* RV-187: a field's px / ratio switch, under the fields, a column each */
+rubraview_pal_rect_t px_unit_rect(const app_state_t *app, int32_t field) {
+    rubraview_pal_rect_t box = px_box_rect(app);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    int32_t n = px_edit_fields(app);
+    double col = box.width / (double)n, w = col - 16.0 * dpi;
+    return (rubraview_pal_rect_t){ box.x + col * field + 8.0 * dpi, box.y + 92.0 * dpi, w, 28.0 * dpi };
+}
 /* "A = now" (0) and "B = now" (1), side by side under the fields. */
 rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which) {
     rubraview_pal_rect_t box = ab_box_rect(app);

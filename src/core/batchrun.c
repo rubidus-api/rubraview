@@ -307,6 +307,11 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
         }
         if (proven_u8str_view_eq(arg, PROVEN_LIT("--whole"))) { result.shell_whole = true; continue; }
         if (starts_with(arg, "--paths-from=", &value)) { result.paths_from = value; continue; }
+        if (starts_with(arg, "--steps=", &value)) {   /* RV-187: Edit's steps, read when the run starts */
+            if (value.size == 0) { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            result.steps_file = value;
+            continue;
+        }
         if (proven_u8str_view_eq(arg, PROVEN_LIT("--paths-temp"))) { result.paths_temp = true; continue; }
         if (proven_u8str_view_eq(arg, PROVEN_LIT("--no-types"))) { result.shell_no_types = true; continue; }
         if (proven_u8str_view_eq(arg, PROVEN_LIT("--no-menu"))) { result.shell_no_menu = true; continue; }

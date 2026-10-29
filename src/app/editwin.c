@@ -20,7 +20,28 @@ rubraview_edit_session_t edit_whole(const app_state_t *app) {
     return s;
 }
 
+/* RV-187: the side a field is measured against: the width for x and w, the height for y and h. */
+static int32_t px_edit_base(const app_state_t *app, int32_t field) {
+    bool across = app->px_edit_crop ? (field == 0 || field == 2) : field == 0;
+    return across ? app->edit.image_width : app->edit.image_height;
+}
+
+/* RV-187: a field typed as a ratio, its number ("0.125"); -1 when it is not one. */
+static double px_edit_ratio_of(const app_state_t *app, int32_t field) {
+    if (!(app->px_edit_ratio & (1u << field)) || app->px_edit_length[field] == 0) return -1.0;
+    char text[20];
+    snprintf(text, sizeof(text), "%.*s", (int)app->px_edit_length[field], app->px_edit_text[field]);
+    for (char *c = text; *c; ++c) if (*c == ',') *c = '.';
+    char *end = NULL;
+    double v = strtod(text, &end);
+    return end != text && isfinite(v) && v >= 0.0 ? v : -1.0;
+}
+
 static int32_t px_edit_value(const app_state_t *app, int32_t field) {
+    if (app->px_edit_ratio & (1u << field)) {   /* RV-187: a ratio of the picture */
+        double r = px_edit_ratio_of(app, field);
+        return r < 0.0 ? 0 : (int32_t)lround(r * px_edit_base(app, field));
+    }
     if (!app->px_edit_crop) {   /* a size: pixels, or a length in any unit (RV-128) */
         int32_t whole = field == 0 ? app->edit.image_width : app->edit.image_height, px = 0;
         proven_u8str_view_t typed = { .ptr = (const proven_byte_t *)app->px_edit_text[field], .size = app->px_edit_length[field] };
@@ -31,21 +52,47 @@ static int32_t px_edit_value(const app_state_t *app, int32_t field) {
     return v;
 }
 
+/* RV-187: a field written in its unit — pixels, or the ratio with four decimals. */
+static void px_edit_show(app_state_t *app, int32_t field, int32_t px) {
+    if (app->px_edit_ratio & (1u << field)) {
+        int32_t base = px_edit_base(app, field);
+        int n = snprintf(app->px_edit_text[field], sizeof(app->px_edit_text[0]), "%.4f", base > 0 ? (double)px / base : 0.0);
+        app->px_edit_length[field] = n > 0 ? (size_t)n : 0;
+    } else {
+        px_edit_fill(app, field, px);
+    }
+}
+
+/* RV-187 (owner, 2026-10-29: "칸마다 px/비율 전환"): the field in pixels or as a ratio of the picture, its value kept. */
+void px_edit_toggle_unit(app_state_t *app, int32_t field) {
+    if (field < 0 || field >= px_edit_fields(app)) return;
+    int32_t px = px_edit_value(app, field);
+    app->px_edit_ratio ^= 1u << field;
+    px_edit_show(app, field, px);
+    app->px_edit_field = field;
+}
+
 int32_t px_edit_fields(const app_state_t *app) { return app->px_edit_crop ? 4 : 2; }
 
 /* The crop's numbers into the box, from the session: after a drag on the picture too. */
 void px_edit_fill_crop(app_state_t *app) {
     const rubraview_edit_session_t *e = &app->edit;
     rubraview_crop_rect_t c = e->crop_active ? e->crop : (rubraview_crop_rect_t){ 0, 0, e->image_width, e->image_height };
-    px_edit_fill(app, 0, c.x);
-    px_edit_fill(app, 1, c.y);
-    px_edit_fill(app, 2, c.width);
-    px_edit_fill(app, 3, c.height);
+    const int32_t v[4] = { c.x, c.y, c.width, c.height };
+    for (int32_t k = 0; k < 4; ++k) {   /* RV-187: a ratio typed shows as it was typed while its pixels stand */
+        if ((app->px_edit_ratio & (1u << k)) && (app->unit_frac_set & (1u << k)) && app->unit_frac_px[k] == v[k]) {
+            int n = snprintf(app->px_edit_text[k], sizeof(app->px_edit_text[0]), "%.6g", app->unit_frac[k]);
+            app->px_edit_length[k] = n > 0 ? (size_t)n : 0;
+        } else {
+            px_edit_show(app, k, v[k]);
+        }
+    }
 }
 
 void px_edit_begin_crop(app_state_t *app) {
     if (app->edit.image_width <= 0 || app->edit.image_height <= 0) { osd_say(app, TU8("the picture's size is not known yet")); return; }
     app->px_edit_crop = true;
+    app->px_edit_ratio = ~app->unit_px & RUBRAVIEW_RATIO_AREA;   /* RV-187: each field in the unit it has */
     px_edit_fill_crop(app);
     app->px_edit_field = 0;
     app->px_edit_open = true;
@@ -58,11 +105,28 @@ void px_edit_begin(app_state_t *app) {
     int32_t w = e->resize_width, h = e->resize_height;
     if (w <= 0 || h <= 0) { w = e->image_width; h = e->image_height; }   /* the whole picture (RV-128) */
     if (w <= 0 || h <= 0) { osd_say(app, TU8("the picture's size is not known yet")); return; }
-    px_edit_fill(app, 0, w);
-    px_edit_fill(app, 1, h);
+    /* RV-187: in pixels, as the button says, unless the size was given as a ratio (the % slider, or typed so) */
+    app->px_edit_ratio = (app->unit_frac_set & ~app->unit_px & RUBRAVIEW_RATIO_RESIZE) >> 4;
+    px_edit_show(app, 0, w);
+    px_edit_show(app, 1, h);
     app->px_edit_field = 0;
     app->px_edit_open = true;
     rubraview_pal_window_text_input(app->window, true);
+}
+
+/* A press on the pixel box, in whichever window it is drawn: its X, a field's px / ratio switch (RV-187), a field. */
+bool px_box_press(app_state_t *app, double x, double y) {
+    if (!app->px_edit_open) return false;
+    rubraview_pal_rect_t box = px_box_rect(app);
+    if (pal_rect_has(answer_box_close(app, box), x, y)) { px_edit_close(app); return true; }
+    for (int32_t k = 0; k < px_edit_fields(app); ++k) {
+        if (pal_rect_has(px_unit_rect(app, k), x, y)) { px_edit_toggle_unit(app, k); return true; }
+    }
+    if (!pal_rect_has(box, x, y)) return false;
+    int32_t n = px_edit_fields(app);
+    int32_t k = (int32_t)((x - box.x) / box.width * (double)n);
+    app->px_edit_field = k < 0 ? 0 : k >= n ? n - 1 : k;
+    return true;
 }
 
 void px_edit_close(app_state_t *app) {
@@ -86,7 +150,7 @@ static void px_edit_follow(app_state_t *app) {
     int32_t w = px_edit_value(app, 0), h = px_edit_value(app, 1);
     rubraview_edit_session_t whole = edit_whole(app);
     if (px_edit_value(app, f) > 0 && whole.resize_lock_aspect && rubraview_edit_resize_pair(&whole, px_edit_value(app, f), f == 0, &w, &h)) {
-        px_edit_fill(app, 1 - f, f == 0 ? h : w);
+        px_edit_show(app, 1 - f, f == 0 ? h : w);
     }
 }
 
@@ -96,6 +160,13 @@ static bool px_edit_commit(app_state_t *app) {
         if (!rubraview_edit_crop_set(&app->edit, px_edit_value(app, 0), px_edit_value(app, 1), px_edit_value(app, 2), px_edit_value(app, 3))) {
             osd_say(app, TU8("the corner must be inside the picture, and the size at least 1 pixel"));
             return false;
+        }
+        /* RV-187: the unit of each field kept for the step, and a ratio typed kept exactly */
+        app->unit_px = (app->unit_px & ~RUBRAVIEW_RATIO_AREA) | (~app->px_edit_ratio & RUBRAVIEW_RATIO_AREA);
+        for (int32_t k = 0; k < 4; ++k) {
+            double r = px_edit_ratio_of(app, k);
+            app->unit_frac_set &= ~(1u << k);
+            if (r >= 0.0) { app->unit_frac[k] = r; app->unit_frac_px[k] = px_edit_value(app, k); app->unit_frac_set |= 1u << k; }
         }
         if (app->panel.open) panel_build_edit(app);   /* the ratio is free now, the sizes from the cut */
         app->edit_shown_valid = false;
@@ -115,6 +186,12 @@ static bool px_edit_commit(app_state_t *app) {
     rubraview_edit_set_resize(&app->edit, w, h, f == 0);
     app->edit.resize_width = w;    /* both as typed, also with the lock off */
     app->edit.resize_height = h;
+    app->unit_px = (app->unit_px & ~RUBRAVIEW_RATIO_RESIZE) | ((~app->px_edit_ratio << 4) & RUBRAVIEW_RATIO_RESIZE);   /* RV-187 */
+    for (int32_t k = 0; k < 2; ++k) {
+        double r = px_edit_ratio_of(app, k);
+        app->unit_frac_set &= ~(1u << (4 + k));
+        if (r >= 0.0) { app->unit_frac[4 + k] = r; app->unit_frac_px[4 + k] = k == 0 ? w : h; app->unit_frac_set |= 1u << (4 + k); }
+    }
     if (app->panel.open) panel_build_edit(app);   /* Resize % and its pixels from the session */
     app->edit_shown_valid = false;
     char line[64];
@@ -152,12 +229,14 @@ void px_edit_text_typed(app_state_t *app, proven_u8str_view_t text) {
     for (size_t i = 0; i < text.size; ++i) {
         char c = text.ptr[i];
         bool digit = c >= '0' && c <= '9';
-        /* RV-128: a size may be typed with its unit: 21cm, 210 mm, 8.5in, 50% */
-        bool unit = !app->px_edit_crop && c != '\0' && strchr(".,% cmMiInNpPxX\"", c) != NULL;
+        if (c == '/') { px_edit_toggle_unit(app, f); continue; }   /* RV-187: pixels or a ratio */
+        bool ratio = (app->px_edit_ratio & (1u << f)) != 0;
+        /* RV-128: a size may be typed with its unit: 21cm, 210 mm, 8.5in, 50%; RV-187: a ratio its point */
+        bool unit = ratio ? (c == '.' || c == ',') : !app->px_edit_crop && c != '\0' && strchr(".,% cmMiInNpPxX\"", c) != NULL;
         if (!digit && !unit) continue;
-        size_t most = app->px_edit_crop ? 5u : sizeof(app->px_edit_text[0]) - 1u;
+        size_t most = ratio ? 12u : app->px_edit_crop ? 5u : sizeof(app->px_edit_text[0]) - 1u;
         if (app->px_edit_length[f] + 1 >= sizeof(app->px_edit_text[0]) || app->px_edit_length[f] >= most) break;
-        if (app->px_edit_length[f] == 1 && app->px_edit_text[f][0] == '0') app->px_edit_length[f] = 0;
+        if (app->px_edit_length[f] == 1 && app->px_edit_text[f][0] == '0' && c != '.' && c != ',') app->px_edit_length[f] = 0;
         app->px_edit_text[f][app->px_edit_length[f]++] = c;
         app->px_edit_text[f][app->px_edit_length[f]] = '\0';
     }
@@ -440,6 +519,33 @@ static rubraview_edit_area_t edit_area_now(const app_state_t *app) {
     return a;
 }
 
+/* RV-187 (D-220): a new step's sizes in the units they were given in — an area drawn on the picture, or a field
+   switched to a ratio, the same part of any picture; a size typed in pixels those pixels. */
+static void edit_step_units(app_state_t *app, rubraview_edit_step_t *s) {
+    int32_t bw = 0, bh = 0;
+    edit_cur_size(app, &bw, &bh);
+    uint32_t bits = 0;
+    if (s->area.shape != RUBRAVIEW_AREA_ALL || s->kind == RUBRAVIEW_STEP_CROP) bits |= RUBRAVIEW_RATIO_AREA & ~app->unit_px;
+    if (s->kind == RUBRAVIEW_STEP_RESIZE) bits |= RUBRAVIEW_RATIO_RESIZE & ~app->unit_px;
+    s->ratio = 0;
+    rubraview_edit_step_set_ratio(s, bits, bw, bh);
+    const int32_t px[6] = { s->area.rect.x, s->area.rect.y, s->area.rect.width, s->area.rect.height,
+                            s->values.resize_width, s->values.resize_height };
+    for (int k = 0; k < 6; ++k) {
+        if ((bits & (1u << k)) && (app->unit_frac_set & (1u << k)) && app->unit_frac_px[k] == px[k]) s->frac[k] = app->unit_frac[k];
+    }
+}
+
+bool edit_push(app_state_t *app, rubraview_edit_step_t *s) {
+    edit_step_units(app, s);
+    return rubraview_edit_steps_push(&app->edit_steps, s);
+}
+
+static bool edit_set_last(app_state_t *app, rubraview_edit_step_t *s) {
+    edit_step_units(app, s);
+    return rubraview_edit_steps_set_last(&app->edit_steps, s);
+}
+
 /* The step being made, as it would go into the list. */
 rubraview_edit_step_t edit_pending(const app_state_t *app) {
     rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_ADJUST, .area = edit_area_now(app), .values = app->edit };
@@ -502,11 +608,11 @@ void edit_live_update(app_state_t *app, int32_t kind) {
         ? (rubraview_edit_step_t){ .kind = RUBRAVIEW_STEP_EFFECT, .area = edit_area_now(app), .effect = app->effect_choice, .amount = app->effect_amount }
         : edit_pending(app);
     if (app->edit_live && app->edit_live_kind == kind && edit_area_same(&s.area, &app->edit_live_area) && app->edit_steps.cursor > 0) {
-        (void)rubraview_edit_steps_set_last(&app->edit_steps, &s);   /* set again; taken off when back to nothing */
+        (void)edit_set_last(app, &s);   /* set again; taken off when back to nothing */
         if (!rubraview_edit_step_does_something(&s)) app->edit_live = false;
     } else {
         app->edit_live = false;   /* another kind, or another area: a new step */
-        if (rubraview_edit_steps_push(&app->edit_steps, &s)) {
+        if (edit_push(app, &s)) {
             app->edit_live = true;
             app->edit_live_kind = kind;
             app->edit_live_area = s.area;
@@ -523,7 +629,7 @@ void edit_live_update(app_state_t *app, int32_t kind) {
 bool edit_apply_pending(app_state_t *app, bool say) {
     if (app->edit_live) { edit_live_close(app); return true; }   /* already a step: it ends here */
     rubraview_edit_step_t s = edit_pending(app);
-    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) {
+    if (!edit_push(app, &s)) {
         if (say) osd_say(app, app->edit_steps.cursor >= RUBRAVIEW_EDIT_MAX_STEPS ? TU8("the list of steps is full: save, or undo some")
                                                                               : TU8("nothing to apply: move a slider first"));
         return false;
@@ -539,7 +645,7 @@ void edit_crop_to_selection(app_state_t *app) {
     if (!app->edit.crop_active) { osd_say(app, TU8("select an area on the picture first")); return; }
     (void)edit_apply_pending(app, false);
     rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_CROP, .area = { .shape = RUBRAVIEW_AREA_RECT, .rect = app->edit.crop } };
-    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    if (!edit_push(app, &s)) return;
     app->edit.crop_active = false;
     edit_values_fresh(app);
     edit_steps_changed(app);
@@ -550,7 +656,7 @@ void edit_resize_apply(app_state_t *app) {
     if (app->edit.resize_width <= 0 || app->edit.resize_height <= 0) { osd_say(app, TU8("choose the size first (the Resize percent or its pixels)")); return; }
     (void)edit_apply_pending(app, false);
     rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_RESIZE, .values = app->edit };
-    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    if (!edit_push(app, &s)) return;
     app->edit.crop_active = false;
     edit_values_fresh(app);
     edit_steps_changed(app);
@@ -562,7 +668,7 @@ void edit_effect_apply(app_state_t *app) {
     if (app->effect_choice <= RUBRAVIEW_EFFECT_NONE) { osd_say(app, TU8("choose an effect first")); return; }
     (void)edit_apply_pending(app, false);
     rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_EFFECT, .area = edit_area_now(app), .effect = app->effect_choice, .amount = app->effect_amount };
-    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    if (!edit_push(app, &s)) return;
     app->effect_choice = RUBRAVIEW_EFFECT_NONE;
     edit_steps_changed(app);
     osd_say(app, TU8("effect applied (Ctrl+Z undoes it)"));
@@ -996,7 +1102,7 @@ void edit_plugin_apply(app_state_t *app) {
     memcpy(s.plugin_sha256, p->sha256, 32);
     memcpy(s.plugin_params, app->plugin_values, sizeof(s.plugin_params));
     rubraview_plugin_params_clamp(p, s.plugin_params, p->param_count);
-    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    if (!edit_push(app, &s)) return;
     edit_steps_changed(app);
     osd_say(app, TU8("plug-in applied (Ctrl+Z undoes it)"));
 }
@@ -1336,7 +1442,7 @@ bool gmic_button(app_state_t *app, int32_t id) {
     int w = snprintf(s.command, sizeof(s.command), "%.*s%s%s", (int)f->command.size, (const char *)f->command.ptr, n ? " " : "", args);
     if (w <= 0 || (size_t)w >= sizeof(s.command)) { osd_say(app, TU8("this filter's settings are too long for a step")); return true; }
     (void)edit_apply_pending(app, false);
-    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return true;
+    if (!edit_push(app, &s)) return true;
     edit_steps_changed(app);
     osd_say(app, TU8("G'MIC applied (Ctrl+Z undoes it)"));
     return true;
@@ -1359,7 +1465,7 @@ void gmic_typed(app_state_t *app) {
     memcpy(s.command, text.ptr, text.size);
     snprintf(app->gmic_last_typed, sizeof(app->gmic_last_typed), "%s", s.command);
     (void)edit_apply_pending(app, false);
-    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    if (!edit_push(app, &s)) return;
     edit_steps_changed(app);
     osd_say(app, TU8("G'MIC applied (Ctrl+Z undoes it)"));
 }
@@ -1647,7 +1753,7 @@ static void ffmpeg_push(app_state_t *app, proven_u8str_view_t graph) {
     if (graph.size == 0 || graph.size >= sizeof(s.command)) { osd_say(app, TU8("the filter graph is too long for a step")); return; }
     memcpy(s.command, graph.ptr, graph.size);
     (void)edit_apply_pending(app, false);
-    if (!rubraview_edit_steps_push(&app->edit_steps, &s)) return;
+    if (!edit_push(app, &s)) return;
     edit_steps_changed(app);
     osd_say(app, TU8("FFmpeg filter applied (Ctrl+Z undoes it)"));
 }
@@ -1841,6 +1947,8 @@ static void edit_rows_windowed(app_state_t *app) {
                 rubraview_panel_add_button(p, PANEL_CHANGES_REMOVE, TU8("Remove the ticked edits"));
                 rubraview_panel_add_button(p, PANEL_ALL_COPIES, TU8("Copies of every picture in the list..."));
                 rubraview_panel_add_button(p, PANEL_ALL_ORIGINALS, TU8("Apply to every original in the list..."));
+                rubraview_panel_add_button(p, PANEL_STEPS_SAVE, TU8("Save the steps (for Batch)..."));   /* RV-187 */
+                rubraview_panel_add_button(p, PANEL_STEPS_LOAD, TU8("Load steps..."));
                 rubraview_panel_add_button(p, PANEL_RESET, TU8("Reset: back to the picture as it was"));
                 break;
             case SAVE: edit_rows_save(app); break;
@@ -1896,6 +2004,8 @@ void panel_build_edit(app_state_t *app) {
     rubraview_panel_add_button(&app->panel, PANEL_UNDO, TU8("Undo (Ctrl+Z)"));
     rubraview_panel_add_button(&app->panel, PANEL_REDO, TU8("Redo (Ctrl+Y)"));
     rubraview_panel_add_button(&app->panel, PANEL_STEPS, TU8("Undo list..."));
+    rubraview_panel_add_button(&app->panel, PANEL_STEPS_SAVE, TU8("Save the steps (for Batch)..."));   /* RV-187 */
+    rubraview_panel_add_button(&app->panel, PANEL_STEPS_LOAD, TU8("Load steps..."));
     rubraview_panel_add_button(&app->panel, PANEL_RESET, TU8("Reset: back to the picture as it was"));
     rubraview_panel_add_separator(&app->panel);
     edit_rows_save(app);
@@ -2060,6 +2170,7 @@ proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_pane
         }
         case PANEL_BATCH_FLIP:    word = i == 0 ? T("no") : i == 1 ? T("left to right") : i == 2 ? T("upside down") : NULL; break;
         case PANEL_BATCH_EFFECT:  word = i == 0 ? T("none") : effect_word(i); break;
+        case PANEL_BATCH_STEPS:   word = i == 0 ? T("none") : i == 1 ? T("the steps in Edit now") : i == 2 ? T("a file of steps (.rvsteps)") : NULL; break;
         case PANEL_BATCH_FRAME_COLOUR: word = i == 0 ? T("white") : i == 1 ? T("black") : i == 2 ? T("grey") : NULL; break;
         case PANEL_BATCH_MARK_CORNER: {
             const char *const AT[] = { T("bottom right"), T("bottom left"), T("top right"), T("top left"), T("centre") };
@@ -2564,6 +2675,8 @@ void sel_drag_to(app_state_t *app, int32_t ix, int32_t iy) {
         if (right) x1 += dx;
         if (top) y0 += dy;
         if (bottom) y1 += dy;
+        app->unit_px &= ~(uint32_t)RUBRAVIEW_RATIO_AREA;   /* RV-187: moved by hand on the picture: that part of it */
+        app->unit_frac_set &= ~(uint32_t)RUBRAVIEW_RATIO_AREA;
         if (app->edit.crop_ratio != RUBRAVIEW_CROP_FREE && (k == 0 || k == 2 || k == 4 || k == 6)) {
             /* A corner with a ratio: drawn again from the opposite corner, the ratio kept. */
             int32_t ax = left ? r.x + r.width : r.x, ay = top ? r.y + r.height : r.y;
@@ -3050,6 +3163,7 @@ size_t edit_pump(app_state_t *app) {
                 if (chooser_press(app, CHOOSE_IN_EDIT, event.mouse.x, event.mouse.y)) break;   /* 1.24.0 */
                 if ((app->rename_is_value || app->rename_is_apply) && rename_box_press(app, event.mouse.x, event.mouse.y)) break;
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                if (px_box_press(app, event.mouse.x, event.mouse.y)) { app->edit_dirty = true; break; }   /* RV-187: its box is here too */
                 if (scrollbar_press(app, RVSB_CHANGES, event.mouse.x, event.mouse.y)) break;   /* RV-172: the list of edits' bar */
                 if (changes_press(app, event.mouse.x, event.mouse.y)) break;
                 if (edit_side_press(app, event.mouse.x, event.mouse.y)) break;
@@ -3092,4 +3206,68 @@ size_t edit_pump(app_state_t *app) {
         app->edit_text_on = typing;
     }
     return handled;
+}
+
+/* ---- RV-187 (D-220): Edit's steps to a .rvsteps file and back ---- */
+
+/* What a file's steps run besides Rubraview itself, said before anything runs (D-220: such a file may come
+   from someone else). */
+void edit_steps_say_programs(app_state_t *app, const rubraview_edit_steps_t *steps) {
+    char line[600];
+    size_t at = 0;
+    int counts[3] = { 0, 0, 0 };
+    for (size_t i = 0; i < steps->cursor; ++i) {
+        rubraview_edit_step_kind_t k = steps->steps[i].kind;
+        if (k == RUBRAVIEW_STEP_GMIC) counts[0]++;
+        else if (k == RUBRAVIEW_STEP_PLUGIN) counts[1]++;
+        else if (k == RUBRAVIEW_STEP_FFMPEG) counts[2]++;
+    }
+    int n = snprintf(line, sizeof(line), T("%zu steps"), steps->cursor);
+    if (n > 0) at = (size_t)n;
+    if (counts[0] && at < sizeof(line)) { n = snprintf(line + at, sizeof(line) - at, T(", %d by G'MIC"), counts[0]); if (n > 0) at += (size_t)n; }
+    if (counts[1] && at < sizeof(line)) { n = snprintf(line + at, sizeof(line) - at, T(", %d by a plug-in"), counts[1]); if (n > 0) at += (size_t)n; }
+    if (counts[2] && at < sizeof(line)) { n = snprintf(line + at, sizeof(line) - at, T(", %d by FFmpeg"), counts[2]); if (n > 0) at += (size_t)n; }
+    if ((counts[0] || counts[1]) && at < sizeof(line)) {
+        n = snprintf(line + at, sizeof(line) - at, "%s", T(" (they run with your rights: use files you trust)"));
+        if (n > 0) at += (size_t)n;
+    }
+    osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = at < sizeof(line) ? at : sizeof(line) - 1 });
+}
+
+void edit_steps_save_or_load(app_state_t *app, bool saving) {
+    static const rubraview_file_filter_t FILTERS[] = { { "Edit's steps (*.rvsteps)", "*.rvsteps" } };
+    rubraview_file_dialog_opts_t opts = {
+        .title = saving ? T("Save Edit's steps") : T("Load Edit's steps"),
+        .filters = FILTERS, .filter_count = 1,
+        .parent_window_handle = rubraview_pal_window_native_handle(app->edit_window ? app->edit_window : app->window),
+    };
+    if (saving) {
+        (void)edit_apply_pending(app, false);
+        if (app->edit_steps.cursor == 0) { osd_say(app, TU8("no steps yet: make a change first")); return; }
+        rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_save(app->arena, &opts);
+        if (!picked.accepted || picked.count == 0) return;
+        proven_u8str_view_t text = rubraview_edit_steps_serialize(app->arena, &app->edit_steps);
+        proven_u8str_view_t path = picked.paths[0];
+        osd_say(app, text.size > 0 && rubraview_pal_fs_write_file(path, text)
+                         ? TU8("the steps saved: Batch › Edit's steps › a file runs them on many pictures") : TU8("could not write that file"));
+        return;
+    }
+    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
+    if (!picked.accepted || picked.count == 0) return;
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, picked.paths[0], 4u << 20);
+    static rubraview_edit_steps_t loaded;
+    const char *why = NULL;
+    if (text.size == 0 || !rubraview_edit_steps_parse(app->arena, text, &loaded, &why)) {
+        char line[300];
+        int n = snprintf(line, sizeof(line), T("not loaded: %s"), why ? rubraview_tr(why) : T("the file could not be read"));
+        osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 });
+        return;
+    }
+    edit_live_close(app);
+    int32_t w = app->edit_steps.width, h = app->edit_steps.height;
+    if (w <= 0 || h <= 0) { w = app->edit.image_width; h = app->edit.image_height; }
+    app->edit_steps = loaded;
+    rubraview_edit_steps_rebase(&app->edit_steps, w, h);   /* onto this picture: ratios its parts, pixels kept */
+    edit_steps_changed(app);
+    edit_steps_say_programs(app, &loaded);
 }

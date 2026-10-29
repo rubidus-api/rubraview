@@ -415,14 +415,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 }
             }
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && app->px_edit_open) {
-                rubraview_pal_rect_t box = px_box_rect(app);
-                if (pal_rect_has(answer_box_close(app, box), event->mouse.x, event->mouse.y)) { px_edit_close(app); break; }
-                if (pal_rect_has(box, event->mouse.x, event->mouse.y)) {
-                    int32_t n = px_edit_fields(app);
-                    int32_t k = (int32_t)((event->mouse.x - box.x) / box.width * (double)n);
-                    app->px_edit_field = k < 0 ? 0 : k >= n ? n - 1 : k;
-                    break;
-                }
+                if (px_box_press(app, event->mouse.x, event->mouse.y)) break;
             }
 
             /* §3.13: with the workbench open, a drag on the picture
@@ -588,6 +581,8 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (app->crop_dragging) {
                 app->crop_dragging = false;
                 app->edit_rev++;
+                app->unit_px &= ~(uint32_t)RUBRAVIEW_RATIO_AREA;   /* RV-187: drawn, it is that part of the picture */
+                app->unit_frac_set &= ~(uint32_t)RUBRAVIEW_RATIO_AREA;
                 int32_t ix = 0, iy = 0;
                 if (crop_point_to_image(app, event->mouse.x, event->mouse.y, &ix, &iy)) {
                     rubraview_edit_crop_drag(&app->edit, app->crop_drag_x0, app->crop_drag_y0, ix, iy);

@@ -26,9 +26,15 @@ static const uint32_t BATCH_FRAME_RGB[3] = { 0xFFFFFF, 0x000000, 0x808080 };
 /* Everything chosen, as the run's options (without the input, --batch, --pause). */
 void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk) {
     tk->n = 0; tk->used = 0;
+    /* RV-187 (D-220): Edit's steps first; what they run (gmic.exe, the plug-ins) as the viewer has it */
+    if (b->steps_from > 0 && b->steps_file[0]) {
+        batch_token(tk, "--steps=%s", b->steps_file);
+        if (g_gmic_exe[0]) batch_token(tk, "--gmic-exe=%s", g_gmic_exe);
+        if (g_plugin_folder[0]) batch_token(tk, "--plugin-folder=%s", g_plugin_folder);
+    }
     double v = b->size_value;
     switch (b->size_by) {
-        case 1: if (fabs(v - 100.0) > 0.01) batch_token(tk, "--resize=%g%%", v); break;
+        case 1: if (fabs(v - 100.0) > 0.001) batch_token(tk, "--resize=%g%%", v); break;
         case 2: batch_token(tk, "--resize=l%d", (int)lround(v)); break;
         case 3: batch_token(tk, "--resize=s%d", (int)lround(v)); break;
         case 4: batch_token(tk, "--resize=w%d", (int)lround(v)); break;
@@ -186,6 +192,10 @@ static bool batch_from_text(app_state_t *app, struct batch_ui *b, proven_u8str_v
     if (r.job.replace_from.size > 0)
         snprintf(b->replace, sizeof(b->replace), "%.*s,%.*s", (int)r.job.replace_from.size, r.job.replace_from.ptr, (int)r.job.replace_to.size, r.job.replace_to.ptr);
     b->exists = r.exists; b->keep_dates = r.keep_dates; b->recursive = r.recursive; b->subfolders = r.subfolders;
+    if (r.steps_file.size > 0) {   /* RV-187: the steps in Edit, or a file of them */
+        snprintf(b->steps_file, sizeof(b->steps_file), "%.*s", (int)r.steps_file.size, r.steps_file.ptr);
+        b->steps_from = proven_u8str_view_eq(rubraview_path_basename(r.steps_file), PROVEN_LIT("batch-steps.rvsteps")) ? 1 : 2;
+    }
     if (r.output_dir.size > 0) snprintf(b->out, sizeof(b->out), "%.*s", (int)r.output_dir.size, r.output_dir.ptr);
     return true;
 }
@@ -233,11 +243,20 @@ void panel_open_batch(app_state_t *app) {
     rubraview_panel_t *pn = &app->panel;
     static char labels[8][1100];
 
+    /* RV-187 (D-220): Edit's steps first — its adjustments, effects, plug-ins, G'MIC and FFmpeg filters, crops */
+    rubraview_panel_add_choice(pn, PANEL_BATCH_STEPS, TU8("Edit's steps"), b->steps_from, 3);
+    if (b->steps_from == 2) {
+        proven_u8str_view_t base = rubraview_path_basename(cstr(b->steps_file));
+        char shown[300];
+        snprintf(shown, sizeof(shown), "%.*s", (int)(base.size < 200 ? base.size : 200), base.ptr);
+        rubraview_panel_add_button(pn, PANEL_BATCH_STEPS_FILE, batch_row_label(labels[0], sizeof(labels[0]), T("  Steps file"), shown, T("choose a .rvsteps file")));
+    }
+    rubraview_panel_add_separator(pn);
     /* The size */
     rubraview_panel_add_choice(pn, PANEL_BATCH_SIZE_BY, TU8("Size"), b->size_by, 8);
     if (b->size_by > 0) {
         double lo = 1, hi = 16000, step = 1;
-        if (b->size_by == 1) { lo = 1; hi = 1000; }
+        if (b->size_by == 1) { lo = 0.01; hi = 1000; step = 0.01; }   /* RV-187: finer than a percent */
         if (b->size_by == 7) { lo = 0.1; hi = 200; step = 0.1; }
         rubraview_panel_add_slider(pn, PANEL_BATCH_RESIZE, b->size_by == 6 ? TU8("  width") : TU8("  value"), b->size_value, lo, hi, step);
         if (b->size_by == 6) rubraview_panel_add_slider(pn, PANEL_BATCH_BOX_H, TU8("  height"), b->box_h, 1, 16000, 1);
@@ -250,18 +269,18 @@ void panel_open_batch(app_state_t *app) {
     /* Turning and cutting */
     rubraview_panel_add_choice(pn, PANEL_BATCH_ROTATE, TU8("Turn"), b->rotate, 5);
     rubraview_panel_add_choice(pn, PANEL_BATCH_FLIP, TU8("Mirror"), b->flip, 3);
-    rubraview_panel_add_button(pn, PANEL_BATCH_CROP, batch_row_label(labels[0], sizeof(labels[0]), T("Crop X,Y,W,H"), b->crop, T("none")));
     rubraview_panel_add_toggle(pn, PANEL_BATCH_AUTOCROP, TU8("Cut plain borders"), b->autocrop);
     rubraview_panel_add_separator(pn);
     /* Colour and effects */
     rubraview_panel_add_toggle(pn, PANEL_BATCH_AUTOCOLOUR, TU8("Automatic colour"), b->auto_colour);
     rubraview_panel_add_toggle(pn, PANEL_BATCH_GRAY, TU8("Grayscale"), b->grayscale);
     rubraview_panel_add_toggle(pn, PANEL_BATCH_NEGATIVE, TU8("Negative"), b->negative);
-    rubraview_panel_add_choice(pn, PANEL_BATCH_EFFECT, TU8("Effect"), b->effect, RUBRAVIEW_EFFECT_COUNT);
-    if (b->effect > 0) {
-        double lo = 0, hi = 1;
-        rubraview_effect_range((rubraview_effect_t)b->effect, &lo, &hi, NULL);
-        rubraview_panel_add_slider(pn, PANEL_BATCH_EFFECT_AMOUNT, TU8("  amount"), b->effect_amount, lo, hi, 1);
+    /* RV-187: a crop and an effect are Edit's steps now; ones from choices saved before still run, until dropped */
+    if (b->crop[0] || b->effect > 0) {
+        char kept[160];
+        snprintf(kept, sizeof(kept), T("Kept from saved choices: %s%s%s (press: drop them)"), b->crop[0] ? T("a crop") : "",
+                 b->crop[0] && b->effect > 0 ? ", " : "", b->effect > 0 ? effect_word(b->effect) : "");
+        rubraview_panel_add_button(pn, PANEL_BATCH_CROP, app_keep(app, cstr(kept)));
     }
     rubraview_panel_add_separator(pn);
     /* Frame, canvas, watermark */
@@ -445,4 +464,19 @@ void batch_save_or_load(app_state_t *app, bool saving) {
     app->batch = b;
     osd_say(app, TU8("the choices were loaded"));
     panel_open_batch(app);
+}
+
+/* ---- RV-187 (D-220): the steps in Edit, where Batch reads them ---- */
+
+proven_u8str_view_t batch_steps_path(app_state_t *app) {
+    return rubraview_path_join(app->arena, rubraview_path_dirname(app->settings_path), PROVEN_LIT("batch-steps.rvsteps"));
+}
+
+bool batch_steps_write(app_state_t *app) {
+    if (app->edit_steps.cursor == 0) return false;
+    proven_u8str_view_t text = rubraview_edit_steps_serialize(app->arena, &app->edit_steps);
+    proven_u8str_view_t path = batch_steps_path(app);
+    if (text.size == 0 || !rubraview_pal_fs_write_file_atomic(path, text)) return false;
+    snprintf(app->batch.steps_file, sizeof(app->batch.steps_file), "%.*s", (int)path.size, (const char *)path.ptr);
+    return true;
 }

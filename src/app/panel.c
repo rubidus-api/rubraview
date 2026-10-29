@@ -100,6 +100,15 @@ void panel_apply_row(app_state_t *app, int32_t index) {
                 break;
             }
             case PANEL_BATCH_EFFECT_AMOUNT: b->effect_amount = v; break;
+            case PANEL_BATCH_STEPS:   /* RV-187: none, the steps in Edit now, a file */
+                b->steps_from = (int32_t)v; again = true;
+                if (b->steps_from == 1 && !batch_steps_write(app)) {
+                    osd_say(app, TU8("Edit has no steps yet: make a change in Edit (E) first, or choose a steps file"));
+                    b->steps_from = 0;
+                }
+                if (b->steps_from == 0) b->steps_file[0] = '\0';
+                if (b->steps_from == 2 && !strstr(b->steps_file, ".rvsteps")) b->steps_file[0] = '\0';
+                break;
             case PANEL_BATCH_BORDER:        b->border = v; break;
             case PANEL_BATCH_FRAME_COLOUR:  b->frame_colour = (int32_t)v; break;
             case PANEL_BATCH_MARK_CORNER:   b->mark_corner = (int32_t)v; break;
@@ -187,6 +196,7 @@ void panel_apply_row(app_state_t *app, int32_t index) {
                                              sw, sh, app->edit.resize_lock_aspect, &w, &h)) {
                 app->edit.resize_width = w;
                 app->edit.resize_height = h;
+                app->unit_px |= RUBRAVIEW_RATIO_RESIZE;   /* RV-187: a size named in pixels stays those pixels */
                 rubraview_panel_set_value(&app->panel, PANEL_RESIZE, 100.0 * (double)w / (double)app->edit.image_width);
             }
             int32_t k = rubraview_panel_find(&app->panel, PANEL_RESIZE_PX);
@@ -221,6 +231,12 @@ void panel_apply_row(app_state_t *app, int32_t index) {
                 app->edit.resize_width = app->edit.resize_height = 0;
             } else {
                 rubraview_edit_set_resize(&app->edit, w, h, true);
+                /* RV-187: a percent is a ratio, the same share of any picture */
+                app->unit_px &= ~(uint32_t)RUBRAVIEW_RATIO_RESIZE;
+                app->unit_frac[4] = app->unit_frac[5] = v / 100.0;
+                app->unit_frac_px[4] = app->edit.resize_width;
+                app->unit_frac_px[5] = app->edit.resize_height;
+                app->unit_frac_set |= RUBRAVIEW_RATIO_RESIZE;
             }
             int32_t k = rubraview_panel_find(&app->panel, PANEL_RESIZE_PX);
             if (k >= 0) app->panel.rows[k].label = px_button_label(app);
@@ -276,6 +292,8 @@ static void panel_button(app_state_t *app, int32_t index) {
         case PANEL_UNDO:         edit_undo(app, false); break;
         case PANEL_REDO:         edit_undo(app, true); break;
         case PANEL_STEPS:        edit_steps_toggle(app); break;
+        case PANEL_STEPS_SAVE:   edit_steps_save_or_load(app, true); break;    /* RV-187 */
+        case PANEL_STEPS_LOAD:   edit_steps_save_or_load(app, false); break;
         case PANEL_CHANGES_REMOVE: changes_remove_checked(app); break;
         case PANEL_SEL_MODE:
             sel_mode_set(app, !app->sel_mode);
@@ -318,6 +336,8 @@ static void panel_button(app_state_t *app, int32_t index) {
             double sx = (double)app->edit.image_width / (double)small->width;
             double sy = (double)app->edit.image_height / (double)small->height;
             rubraview_edit_crop_set_ratio(&app->edit, RUBRAVIEW_CROP_FREE);
+            app->unit_px &= ~(uint32_t)RUBRAVIEW_RATIO_AREA;   /* RV-187: drawn, that part of the picture */
+            app->unit_frac_set &= ~(uint32_t)RUBRAVIEW_RATIO_AREA;
             rubraview_edit_crop_drag(&app->edit, (int32_t)floor(x * sx), (int32_t)floor(y * sy),
                                      (int32_t)ceil((x + w) * sx), (int32_t)ceil((y + h) * sy));
             app->edit_rev++;
@@ -339,7 +359,34 @@ static void panel_button(app_state_t *app, int32_t index) {
             panel_write_current(app, app->export_from_edit);   /* opened from Edit: the edits written in */
             panel_close(app);
             break;
-        case PANEL_BATCH_CROP: case PANEL_BATCH_CANVAS: case PANEL_BATCH_NAME: case PANEL_BATCH_REPLACE: case PANEL_BATCH_OUT: case PANEL_BATCH_TEXT:
+        case PANEL_BATCH_CROP:   /* RV-187: a crop or an effect kept from saved choices, dropped (Edit's steps do them now) */
+            app->batch.crop[0] = '\0';
+            app->batch.effect = 0;
+            panel_open_batch(app);
+            osd_say(app, TU8("the saved crop and effect dropped: Edit's steps do these"));
+            break;
+        case PANEL_BATCH_STEPS_FILE: {   /* RV-187: a .rvsteps file */
+            static const rubraview_file_filter_t FILTERS[] = { { "Edit's steps (*.rvsteps)", "*.rvsteps" } };
+            rubraview_file_dialog_opts_t opts = { .title = T("Edit's steps to run on each picture"), .filters = FILTERS, .filter_count = 1,
+                                                  .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
+            rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
+            if (picked.accepted && picked.count > 0) {
+                proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, picked.paths[0], 4u << 20);
+                static rubraview_edit_steps_t probe;
+                const char *why = NULL;
+                if (text.size == 0 || !rubraview_edit_steps_parse(app->arena, text, &probe, &why)) {
+                    char line[300];
+                    snprintf(line, sizeof(line), T("not used: %s"), why ? rubraview_tr(why) : T("the file could not be read"));
+                    osd_say(app, cstr(line));
+                } else {
+                    snprintf(app->batch.steps_file, sizeof(app->batch.steps_file), "%.*s", (int)picked.paths[0].size, picked.paths[0].ptr);
+                    edit_steps_say_programs(app, &probe);
+                }
+            }
+            panel_open_batch(app);
+            break;
+        }
+        case PANEL_BATCH_CANVAS: case PANEL_BATCH_NAME: case PANEL_BATCH_REPLACE: case PANEL_BATCH_OUT: case PANEL_BATCH_TEXT:
             batch_type_begin(app, app->panel.rows[index].id);
             break;
         case PANEL_BATCH_TEST: batch_try_names(app); break;

@@ -572,6 +572,14 @@ typedef struct app_state {
     bool                   px_edit_crop;      /* the crop's corner and size instead (owner, 2026-10-15) */
     int32_t                px_edit_field;     /* 0 = width, 1 = height; for the crop 0..3 = x, y, width, height */
     char                   px_edit_text[4][16];   /* RV-128: a size may carry its unit, "21cm" */
+    /* RV-187 (D-220): the box's fields as ratios of the picture (a bit a field) */
+    uint32_t               px_edit_ratio;
+    /* Which sizes a step is made with in pixels (RUBRAVIEW_RATIO_* bits set: pixels); none set, ratios — an area
+       drawn on the picture is that part of it. A ratio typed is kept exactly (unit_frac) while its pixels stand. */
+    uint32_t               unit_px;
+    double                 unit_frac[6];
+    int32_t                unit_frac_px[6];
+    uint32_t               unit_frac_set;
     size_t                 px_edit_length[4];
     /* D-44: the page bar held and dragged (owner, 2026-09-28), in the
        main window or the detached toolbox's, with the bar where it was pressed. */
@@ -954,6 +962,10 @@ typedef struct app_state {
         char    text[256];
         int32_t text_corner, text_colour;   /* text_colour: 0 white, 1 black, 2 yellow */
         double  text_size, dpi;
+        /* RV-187 (D-220): Edit's steps first — 0 none, 1 the steps in Edit now (written to batch-steps.rvsteps
+           beside the settings), 2 a .rvsteps file */
+        int32_t steps_from;
+        char    steps_file[1024];
     } batch;
     int32_t                   batch_typing;   /* RV-129: the panel row whose text the rename box holds; 0 none */
     bool                      panel_is_print;    /* D-87: a fourth, the choices made when printing */
@@ -1355,6 +1367,7 @@ enum {
     PANEL_BATCH_NAME, PANEL_BATCH_START, PANEL_BATCH_REPLACE, PANEL_BATCH_EXISTS, PANEL_BATCH_KEEP_DATES,
     PANEL_BATCH_RECURSIVE, PANEL_BATCH_SUBFOLDERS, PANEL_BATCH_OUT, PANEL_BATCH_TEST, PANEL_BATCH_SAVE, PANEL_BATCH_LOAD,
     PANEL_BATCH_TEXT, PANEL_BATCH_TEXT_CORNER, PANEL_BATCH_TEXT_SIZE, PANEL_BATCH_TEXT_COLOUR, PANEL_BATCH_DPI,   /* RV-134 */
+    PANEL_BATCH_STEPS, PANEL_BATCH_STEPS_FILE, PANEL_STEPS_SAVE, PANEL_STEPS_LOAD,   /* RV-187 */
     PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
     PANEL_PRINT_PER_SHEET, PANEL_PRINT_NOW,
     PANEL_PRINT_PRINTER, PANEL_PRINT_PAPER, PANEL_PRINT_ORIENT, PANEL_PRINT_COPIES, PANEL_PRINT_SHEET, PANEL_PRINT_DIALOG,   /* 1.19.0 */
@@ -1627,6 +1640,12 @@ void audio_track_set(app_state_t *app, int32_t next);
 void batch_save_or_load(app_state_t *app, bool saving);
 proven_u8str_view_t batch_text(app_state_t *app);
 void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk);
+/* RV-187: the steps in Edit written where Batch reads them (batch-steps.rvsteps beside the settings); false when none */
+bool batch_steps_write(app_state_t *app);
+proven_u8str_view_t batch_steps_path(app_state_t *app);
+/* RV-187: Edit's steps saved to a .rvsteps file, or loaded from one (each G'MIC, plug-in and FFmpeg step named) */
+void edit_steps_save_or_load(app_state_t *app, bool saving);
+void edit_steps_say_programs(app_state_t *app, const rubraview_edit_steps_t *steps);
 void batch_try_names(app_state_t *app);
 void batch_type_begin(app_state_t *app, int32_t id);
 void batch_typed(app_state_t *app);
@@ -2066,6 +2085,10 @@ int32_t px_edit_fields(const app_state_t *app);
 void px_edit_fill_crop(app_state_t *app);
 bool px_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo);
 void px_edit_text_typed(app_state_t *app, proven_u8str_view_t text);
+void px_edit_toggle_unit(app_state_t *app, int32_t field);   /* RV-187 */
+rubraview_pal_rect_t px_unit_rect(const app_state_t *app, int32_t field);
+bool px_box_press(app_state_t *app, double x, double y);
+bool edit_push(app_state_t *app, rubraview_edit_step_t *s);   /* RV-187: a step pushed in its units */
 void rebuild_layout(app_state_t *app);
 void recent_forget(app_state_t *app, const proven_u8str_view_t *paths, size_t count);
 bool recent_kept_out(const app_state_t *app, proven_u8str_view_t path);

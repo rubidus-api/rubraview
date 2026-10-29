@@ -1,6 +1,10 @@
 #include "rubraview/edit.h"
 #include "rubraview/filter.h"
 #include "rubraview/effects.h"
+#include "rubraview/ini.h"
+#include "rubraview/lang.h"
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
@@ -670,40 +674,64 @@ rubraview_crop_rect_t rubraview_edit_rect_rebase(rubraview_crop_rect_t r, int32_
     return (rubraview_crop_rect_t){ x, y, w, h };
 }
 
-void rubraview_edit_steps_rebase(rubraview_edit_steps_t *steps, int32_t width, int32_t height) {
-    if (!steps || width <= 0 || height <= 0 || steps->width <= 0 || steps->height <= 0) return;
-    if (steps->width == width && steps->height == height) return;
-    double sx = (double)width / steps->width, sy = (double)height / steps->height, s = sx < sy ? sx : sy;
-    /* the size each step was made on, all taken before any is changed */
-    int32_t before_w[RUBRAVIEW_EDIT_MAX_STEPS], before_h[RUBRAVIEW_EDIT_MAX_STEPS];
-    for (size_t i = 0; i < steps->count; ++i) rubraview_edit_steps_size(steps, i, &before_w[i], &before_h[i]);
-    for (size_t i = 0; i < steps->count; ++i) {
-        rubraview_edit_step_t *st = &steps->steps[i];
-        int32_t bw = before_w[i], bh = before_h[i];
-        int32_t nw = (int32_t)lround(bw * sx), nh = (int32_t)lround(bh * sy);
-        if (st->area.shape != RUBRAVIEW_AREA_ALL || st->kind == RUBRAVIEW_STEP_CROP)
-            st->area.rect = rubraview_edit_rect_rebase(st->area.rect, bw, bh, nw > 0 ? nw : 1, nh > 0 ? nh : 1);
-        st->area.feather = (int32_t)lround(st->area.feather * s);
-        if (st->kind == RUBRAVIEW_STEP_RESIZE) {
-            int32_t rw = (int32_t)lround(st->values.resize_width * sx), rh = (int32_t)lround(st->values.resize_height * sy);
-            st->values.resize_width = rw > 0 ? rw : 1;
-            st->values.resize_height = rh > 0 ? rh : 1;
-        }
+/* RV-187: a pixel position or length of a `base`-long side held inside it. */
+static int32_t held(int32_t v, int32_t lo, int32_t hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+void rubraview_edit_step_set_ratio(rubraview_edit_step_t *step, uint32_t bits, int32_t base_w, int32_t base_h) {
+    if (!step || base_w <= 0 || base_h <= 0) return;
+    bits &= RUBRAVIEW_RATIO_ALL;
+    const double px[6] = { step->area.rect.x, step->area.rect.y, step->area.rect.width, step->area.rect.height,
+                           step->values.resize_width, step->values.resize_height };
+    for (int k = 0; k < 6; ++k) {
+        uint32_t bit = 1u << k;
+        if ((bits & bit) && !(step->ratio & bit)) step->frac[k] = px[k] / (double)((k % 2 == 0) ? base_w : base_h);
+        if (!(bits & bit)) step->frac[k] = 0.0;
     }
-    steps->width = width;
-    steps->height = height;
+    step->ratio = bits;
 }
 
-/* Each step's area kept on the same part of the picture now that the size
-   it is made on may have changed: `old_w/h[i]` is step i's size before. */
+void rubraview_edit_step_fit(rubraview_edit_step_t *step, int32_t base_w, int32_t base_h) {
+    if (!step || base_w <= 0 || base_h <= 0) return;
+    rubraview_crop_rect_t *r = &step->area.rect;
+    int32_t v[4] = { r->x, r->y, r->width, r->height };
+    for (int k = 0; k < 4; ++k) {
+        if (step->ratio & (1u << k)) v[k] = (int32_t)lround(step->frac[k] * ((k % 2 == 0) ? base_w : base_h));
+    }
+    if (step->area.shape != RUBRAVIEW_AREA_ALL || step->kind == RUBRAVIEW_STEP_CROP) {
+        v[0] = held(v[0], 0, base_w - 1);
+        v[1] = held(v[1], 0, base_h - 1);
+        v[2] = held(v[2], 1, base_w - v[0]);
+        v[3] = held(v[3], 1, base_h - v[1]);
+        *r = (rubraview_crop_rect_t){ v[0], v[1], v[2], v[3] };
+    }
+    if (step->kind == RUBRAVIEW_STEP_RESIZE) {
+        int32_t rw = step->values.resize_width, rh = step->values.resize_height;
+        if (step->ratio & RUBRAVIEW_RATIO_RESIZE_W) rw = (int32_t)lround(step->frac[4] * base_w);
+        if (step->ratio & RUBRAVIEW_RATIO_RESIZE_H) rh = (int32_t)lround(step->frac[5] * base_h);
+        step->values.resize_width = held(rw, 1, 65535);
+        step->values.resize_height = held(rh, 1, 65535);
+    }
+}
+
+void rubraview_edit_steps_rebase(rubraview_edit_steps_t *steps, int32_t width, int32_t height) {
+    if (!steps || width <= 0 || height <= 0) return;
+    steps->width = width;
+    steps->height = height;
+    for (size_t i = 0; i < steps->count; ++i) {   /* each on the size the ones before it leave, already fitted */
+        int32_t bw = 0, bh = 0;
+        rubraview_edit_steps_size(steps, i, &bw, &bh);
+        rubraview_edit_step_fit(&steps->steps[i], bw, bh);
+    }
+}
+
+/* Each step fitted again now that the size it is made on may have changed (a crop or a resize moved or
+   gone): a ratio the same part, pixels held inside (RV-187). */
 static void steps_refit(rubraview_edit_steps_t *steps, const int32_t *old_w, const int32_t *old_h) {
+    (void)old_w; (void)old_h;
     for (size_t i = 0; i < steps->count; ++i) {
         int32_t nw = 0, nh = 0;
         rubraview_edit_steps_size(steps, i, &nw, &nh);   /* the steps before it are already put right */
-        rubraview_edit_step_t *st = &steps->steps[i];
-        if ((nw == old_w[i] && nh == old_h[i]) || old_w[i] <= 0 || old_h[i] <= 0 || nw <= 0 || nh <= 0) continue;
-        if (st->area.shape != RUBRAVIEW_AREA_ALL || st->kind == RUBRAVIEW_STEP_CROP)
-            st->area.rect = rubraview_edit_rect_rebase(st->area.rect, old_w[i], old_h[i], nw, nh);
+        rubraview_edit_step_fit(&steps->steps[i], nw, nh);
     }
 }
 
@@ -976,4 +1004,317 @@ void rubraview_edit_auto_colour(rubraview_edit_session_t *session, const rubravi
         *bal[c] = (float)(shift < -100.0 ? -100.0 : shift > 100.0 ? 100.0 : shift);
     }
     session->dirty = true;
+}
+
+/* ---- RV-187 (D-220): the steps as a .rvsteps file ---- */
+
+/* The session's numbers a step carries, one list for the writer, the reader and the comparison. */
+#define STEP_FLOATS(X) \
+    X(exposure, params.exposure_ev, -3.0, 3.0) X(brightness, params.brightness, -100.0, 100.0) \
+    X(contrast, params.contrast, -100.0, 100.0) X(saturation, params.saturation, -100.0, 100.0) \
+    X(temperature, params.temperature, -100.0, 100.0) X(tint, params.tint, -100.0, 100.0) \
+    X(gamma, params.midtone_gamma, 0.1, 10.0) X(balance_r, params.balance_r, -100.0, 100.0) \
+    X(balance_g, params.balance_g, -100.0, 100.0) X(balance_b, params.balance_b, -100.0, 100.0) \
+    X(blur, blur_sigma, 0.0, 50.0) X(sharpen, sharpen_amount, 0.0, 300.0) X(sharpen_radius, sharpen_radius, 0.0, 10.0) \
+    X(resize_sharpen, resize_sharpen, 0.0, 100.0)
+#define STEP_INTS(X) \
+    X(black, params.black_point, 0, 254) X(white, params.white_point, 1, 255) X(sharpen_threshold, sharpen_threshold, 0, 255) \
+    X(resize_width, resize_width, 0, 65535) X(resize_height, resize_height, 0, 65535) X(resize_filter, resize_filter, 0, 3)
+#define STEP_BOOLS(X) \
+    X(blur_box, blur_box) X(sharpen_laplacian, sharpen_laplacian) X(resize_lock, resize_lock_aspect) X(resize_linear, resize_linear)
+
+static const char *const STEP_KINDS[] = { "adjust", "crop", "resize", "effect", "plugin", "gmic", "ffmpeg" };
+static const char *const AREA_SHAPES[] = { "all", "rect", "ellipse" };
+static const char *const CURVE_NAMES[5] = { "curve_rgb", "curve_red", "curve_green", "curve_blue", "curve_luma" };
+static const char *const RATIO_WORDS[6] = { "x", "y", "w", "h", "rw", "rh" };
+static const char *const FRAC_KEYS[6] = { "frac_x", "frac_y", "frac_w", "frac_h", "frac_rw", "frac_rh" };
+
+static size_t bounded_len(const char *text, size_t cap) { size_t n = 0; while (n < cap && text[n]) ++n; return n; }
+
+static proven_u8str_view_t steps_cstr(const char *text) { return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = strlen(text) }; }
+
+/* A number written so it reads back the same (TOML: digits both sides of the point, no exponent). */
+static void steps_set_number(proven_arena_t *arena, rubraview_ini_doc_t *doc, proven_u8str_view_t section, const char *key, double v) {
+    char text[64];
+    int n = snprintf(text, sizeof(text), "%.17g", v);
+    if (n > 0 && (strchr(text, 'e') || strchr(text, 'E'))) {
+        n = snprintf(text, sizeof(text), "%.30f", v);
+        while (n > 2 && text[n - 1] == '0' && text[n - 2] != '.') text[--n] = '\0';
+    } else if (n > 0 && (size_t)n + 2 < sizeof(text) && !strchr(text, '.') && !strchr(text, 'n') && !strchr(text, 'i')) {
+        text[n++] = '.'; text[n++] = '0'; text[n] = '\0';
+    }
+    if (n <= 0 || !isfinite(v)) { text[0] = '0'; text[1] = '.'; text[2] = '0'; text[3] = '\0'; }
+    size_t len = strlen(text);
+    proven_result_mem_mut_t m = proven_arena_alloc(arena, len + 1);   /* the document keeps a view of it */
+    if (!proven_is_ok(m.err)) return;
+    memcpy(m.value.ptr, text, len + 1);
+    rubraview_ini_set(arena, doc, section, steps_cstr(key), (proven_u8str_view_t){ .ptr = m.value.ptr, .size = len });
+}
+
+proven_u8str_view_t rubraview_edit_steps_serialize(proven_arena_t *arena, const rubraview_edit_steps_t *steps) {
+    if (!arena || !steps) return PROVEN_LIT("");
+    rubraview_ini_doc_t doc = {0};
+    proven_u8str_view_t head = PROVEN_LIT("steps");
+    size_t in_force = steps->cursor < steps->count ? steps->cursor : steps->count;
+    rubraview_ini_set_int(arena, &doc, head, PROVEN_LIT("version"), 1);
+    rubraview_ini_set_int(arena, &doc, head, PROVEN_LIT("width"), steps->width);
+    rubraview_ini_set_int(arena, &doc, head, PROVEN_LIT("height"), steps->height);
+    rubraview_ini_set_int(arena, &doc, head, PROVEN_LIT("count"), (long long)in_force);
+    for (size_t i = 0; i < in_force; ++i) {
+        const rubraview_edit_step_t *st = &steps->steps[i];
+        char name[32];
+        snprintf(name, sizeof(name), "step-%u", (unsigned)(i + 1));
+        proven_result_mem_mut_t m = proven_arena_alloc(arena, strlen(name) + 1);
+        if (!proven_is_ok(m.err)) return PROVEN_LIT("");
+        memcpy(m.value.ptr, name, strlen(name) + 1);
+        proven_u8str_view_t sec = { .ptr = m.value.ptr, .size = strlen(name) };
+        rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("kind"), steps_cstr(STEP_KINDS[st->kind <= RUBRAVIEW_STEP_FFMPEG ? st->kind : 0]));
+        rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("area"), steps_cstr(AREA_SHAPES[st->area.shape <= RUBRAVIEW_AREA_ELLIPSE ? st->area.shape : 0]));
+        rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("x"), st->area.rect.x);
+        rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("y"), st->area.rect.y);
+        rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("w"), st->area.rect.width);
+        rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("h"), st->area.rect.height);
+        rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("feather"), st->area.feather);
+        char words[40] = "";
+        size_t used = 0;
+        for (int k = 0; k < 6; ++k) {
+            if (!(st->ratio & (1u << k))) continue;
+            int n = snprintf(words + used, sizeof(words) - used, "%s%s", used ? " " : "", RATIO_WORDS[k]);
+            if (n > 0) used += (size_t)n;
+            steps_set_number(arena, &doc, sec, FRAC_KEYS[k], st->frac[k]);
+        }
+        proven_result_mem_mut_t wm = proven_arena_alloc(arena, used + 1);
+        if (!proven_is_ok(wm.err)) return PROVEN_LIT("");
+        memcpy(wm.value.ptr, words, used + 1);
+        rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("ratio"), (proven_u8str_view_t){ .ptr = wm.value.ptr, .size = used });
+        const rubraview_edit_session_t *v = &st->values;
+        bool valued = st->kind == RUBRAVIEW_STEP_ADJUST || st->kind == RUBRAVIEW_STEP_RESIZE;   /* the others have no values */
+#define WRITE_FLOAT(key, field, lo, hi) steps_set_number(arena, &doc, sec, #key, (double)v->field);
+#define WRITE_INT(key, field, lo, hi) rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT(#key), (long long)v->field);
+#define WRITE_BOOL(key, field) rubraview_ini_set_bool(arena, &doc, sec, PROVEN_LIT(#key), v->field);
+        if (valued) {
+        STEP_FLOATS(WRITE_FLOAT)
+        steps_set_number(arena, &doc, sec, "resize_dpi", v->resize_dpi);
+        STEP_INTS(WRITE_INT)
+        STEP_BOOLS(WRITE_BOOL)
+        }
+#undef WRITE_FLOAT
+#undef WRITE_INT
+#undef WRITE_BOOL
+        for (int c = 0; valued && c < 5; ++c) {   /* "x,y x,y ..." */
+            char line[16 * 48] = "";
+            size_t at = 0;
+            for (size_t p = 0; p < v->curves[c].point_count && p < RUBRAVIEW_EDIT_MAX_CURVE_POINTS; ++p) {
+                int n = snprintf(line + at, sizeof(line) - at, "%s%.9g,%.9g", at ? " " : "", (double)v->curves[c].points[p].x,
+                                 (double)v->curves[c].points[p].y);
+                if (n > 0 && (size_t)n < sizeof(line) - at) at += (size_t)n;
+            }
+            proven_result_mem_mut_t cm = proven_arena_alloc(arena, at + 1);
+            if (!proven_is_ok(cm.err)) return PROVEN_LIT("");
+            memcpy(cm.value.ptr, line, at + 1);
+            rubraview_ini_set_string(arena, &doc, sec, steps_cstr(CURVE_NAMES[c]), (proven_u8str_view_t){ .ptr = cm.value.ptr, .size = at });
+        }
+        if (st->kind == RUBRAVIEW_STEP_EFFECT) {
+            rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("effect"), st->effect);
+            steps_set_number(arena, &doc, sec, "amount", st->amount);
+        }
+        if (st->kind == RUBRAVIEW_STEP_PLUGIN) {
+            char hex[65];
+            for (int b = 0; b < 32; ++b) snprintf(hex + b * 2, 3, "%02x", st->plugin_sha256[b]);
+            char params[8 * 32] = "";
+            size_t at = 0;
+            for (int32_t p = 0; p < st->plugin_param_count && p < 8; ++p) {
+                int n = snprintf(params + at, sizeof(params) - at, "%s%.17g", at ? " " : "", st->plugin_params[p]);
+                if (n > 0 && (size_t)n < sizeof(params) - at) at += (size_t)n;
+            }
+            proven_result_mem_mut_t pm = proven_arena_alloc(arena, sizeof(st->plugin) + 65 + at + 3);
+            if (!proven_is_ok(pm.err)) return PROVEN_LIT("");
+            char *store = (char *)pm.value.ptr;
+            size_t pn = bounded_len(st->plugin, sizeof(st->plugin) - 1);
+            memcpy(store, st->plugin, pn); store[pn] = '\0';
+            memcpy(store + pn + 1, hex, 65);
+            memcpy(store + pn + 66, params, at + 1);
+            rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("plugin"), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)store, .size = pn });
+            rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("plugin_sha256"), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)store + pn + 1, .size = 64 });
+            rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("plugin_params"), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)store + pn + 66, .size = at });
+        }
+        if (st->kind == RUBRAVIEW_STEP_GMIC || st->kind == RUBRAVIEW_STEP_FFMPEG) {
+            size_t cn = bounded_len(st->command, sizeof(st->command) - 1);
+            rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("command"), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)st->command, .size = cn });
+        }
+    }
+    proven_u8str_view_t body = rubraview_ini_serialize(arena, &doc);
+    if (body.size == 0) return body;
+    static const char HEAD[] = "# Rubraview edit steps (Edit > Save steps; Batch > Edit's steps)\n";
+    proven_result_mem_mut_t out = proven_arena_alloc(arena, sizeof(HEAD) - 1 + body.size + 1);
+    if (!proven_is_ok(out.err)) return PROVEN_LIT("");
+    memcpy(out.value.ptr, HEAD, sizeof(HEAD) - 1);
+    memcpy(out.value.ptr + sizeof(HEAD) - 1, body.ptr, body.size);
+    out.value.ptr[sizeof(HEAD) - 1 + body.size] = '\0';
+    return (proven_u8str_view_t){ .ptr = out.value.ptr, .size = sizeof(HEAD) - 1 + body.size };
+}
+
+static bool steps_word(proven_u8str_view_t v, const char *const *words, int count, int *out) {
+    for (int i = 0; i < count; ++i) if (proven_u8str_view_eq(v, steps_cstr(words[i]))) { *out = i; return true; }
+    return false;
+}
+
+static double held_d(double v, double lo, double hi) { return !(v >= lo) ? lo : v > hi ? hi : v; }
+
+bool rubraview_edit_steps_parse(proven_arena_t *arena, proven_u8str_view_t text, rubraview_edit_steps_t *out, const char **why) {
+    const char *said = NULL;
+    if (!why) why = &said;
+    *why = NULL;
+    if (!arena || !out) { *why = N_("nothing to read into"); return false; }
+    rubraview_ini_doc_t doc = rubraview_ini_parse(arena, text);
+    proven_u8str_view_t head = PROVEN_LIT("steps");
+    if (!rubraview_ini_get(&doc, head, PROVEN_LIT("version"))) { *why = N_("not a file of Edit's steps"); return false; }
+    if (rubraview_ini_get_int(&doc, head, PROVEN_LIT("version"), 0) != 1) { *why = N_("a newer version of Edit's steps"); return false; }
+    long long count = rubraview_ini_get_int(&doc, head, PROVEN_LIT("count"), -1);
+    long long w = rubraview_ini_get_int(&doc, head, PROVEN_LIT("width"), 0), h = rubraview_ini_get_int(&doc, head, PROVEN_LIT("height"), 0);
+    if (count < 0 || count > RUBRAVIEW_EDIT_MAX_STEPS) { *why = N_("more steps than Edit holds (64)"); return false; }
+    if (w < 1 || h < 1 || w > 1000000 || h > 1000000) { *why = N_("the picture's size is missing"); return false; }
+    rubraview_edit_steps_t steps;
+    rubraview_edit_steps_begin(&steps, (int32_t)w, (int32_t)h);
+    for (long long i = 0; i < count; ++i) {
+        char name[32];
+        snprintf(name, sizeof(name), "step-%u", (unsigned)(i + 1));
+        proven_u8str_view_t sec = steps_cstr(name);
+        rubraview_edit_step_t st = {0};
+        st.values = rubraview_edit_begin((int32_t)w, (int32_t)h);
+        int kind = 0, shape = 0;
+        const proven_u8str_view_t *k = rubraview_ini_get(&doc, sec, PROVEN_LIT("kind"));
+        if (!k || !steps_word(*k, STEP_KINDS, 7, &kind)) { *why = N_("a step of a kind this version has not"); return false; }
+        st.kind = (rubraview_edit_step_kind_t)kind;
+        const proven_u8str_view_t *a = rubraview_ini_get(&doc, sec, PROVEN_LIT("area"));
+        if (a && !steps_word(*a, AREA_SHAPES, 3, &shape)) { *why = N_("a step's area is of no shape this version has"); return false; }
+        st.area.shape = (rubraview_area_shape_t)shape;
+        st.area.rect.x = (int32_t)held_d((double)rubraview_ini_get_int(&doc, sec, PROVEN_LIT("x"), 0), 0, 1000000);
+        st.area.rect.y = (int32_t)held_d((double)rubraview_ini_get_int(&doc, sec, PROVEN_LIT("y"), 0), 0, 1000000);
+        st.area.rect.width = (int32_t)held_d((double)rubraview_ini_get_int(&doc, sec, PROVEN_LIT("w"), 0), 0, 1000000);
+        st.area.rect.height = (int32_t)held_d((double)rubraview_ini_get_int(&doc, sec, PROVEN_LIT("h"), 0), 0, 1000000);
+        st.area.feather = (int32_t)held_d((double)rubraview_ini_get_int(&doc, sec, PROVEN_LIT("feather"), 0), 0, 10000);
+        const proven_u8str_view_t *r = rubraview_ini_get(&doc, sec, PROVEN_LIT("ratio"));
+        for (size_t p = 0; r && p < r->size;) {   /* "x y w h rw rh", words between spaces */
+            size_t e = p;
+            while (e < r->size && r->ptr[e] != ' ') ++e;
+            int bit = -1;
+            if (e > p) (void)steps_word((proven_u8str_view_t){ .ptr = r->ptr + p, .size = e - p }, RATIO_WORDS, 6, &bit);
+            if (bit >= 0) {
+                st.ratio |= 1u << bit;
+                st.frac[bit] = held_d(rubraview_ini_get_float(&doc, sec, steps_cstr(FRAC_KEYS[bit]), 0.0), 0.0, bit >= 4 ? 100.0 : 1.0);
+            }
+            p = e + 1;
+        }
+        rubraview_edit_session_t *v = &st.values;
+#define READ_FLOAT(key, field, lo, hi) v->field = (float)held_d(rubraview_ini_get_float(&doc, sec, PROVEN_LIT(#key), (double)v->field), lo, hi);
+#define READ_INT(key, field, lo, hi) v->field = (typeof(v->field))held_d((double)rubraview_ini_get_int(&doc, sec, PROVEN_LIT(#key), (long long)v->field), lo, hi);
+#define READ_BOOL(key, field) v->field = rubraview_ini_get_bool(&doc, sec, PROVEN_LIT(#key), v->field);
+        STEP_FLOATS(READ_FLOAT)
+        v->resize_dpi = held_d(rubraview_ini_get_float(&doc, sec, PROVEN_LIT("resize_dpi"), v->resize_dpi), 0.0, 10000.0);
+        STEP_INTS(READ_INT)
+        STEP_BOOLS(READ_BOOL)
+#undef READ_FLOAT
+#undef READ_INT
+#undef READ_BOOL
+        if (v->params.white_point <= v->params.black_point) v->params.white_point = (uint8_t)(v->params.black_point + 1);
+        for (int c = 0; c < 5; ++c) {
+            const proven_u8str_view_t *cv = rubraview_ini_get(&doc, sec, steps_cstr(CURVE_NAMES[c]));
+            if (!cv || cv->size == 0) continue;
+            char line[16 * 48];
+            size_t n = cv->size < sizeof(line) - 1 ? cv->size : sizeof(line) - 1;
+            memcpy(line, cv->ptr, n);
+            line[n] = '\0';
+            rubraview_edit_curve_t curve = { .point_count = 0 };
+            char *at = line;
+            while (*at && curve.point_count < RUBRAVIEW_EDIT_MAX_CURVE_POINTS) {
+                char *end = NULL;
+                double x = strtod(at, &end);
+                if (end == at || *end != ',') break;
+                at = end + 1;
+                double y = strtod(at, &end);
+                if (end == at) break;
+                curve.points[curve.point_count++] = (rubraview_curve_point_t){ .x = (float)held_d(x, 0.0, 255.0), .y = (float)held_d(y, 0.0, 255.0) };
+                at = end;
+                while (*at == ' ') ++at;
+            }
+            if (curve.point_count >= 2) v->curves[c] = curve;
+        }
+        st.effect = (int32_t)held_d((double)rubraview_ini_get_int(&doc, sec, PROVEN_LIT("effect"), 0), 0, RUBRAVIEW_EFFECT_COUNT - 1);
+        st.amount = held_d(rubraview_ini_get_float(&doc, sec, PROVEN_LIT("amount"), 0.0), -100000.0, 100000.0);
+        const proven_u8str_view_t *pl = rubraview_ini_get(&doc, sec, PROVEN_LIT("plugin"));
+        if (pl) {
+            if (pl->size >= sizeof(st.plugin)) { *why = N_("a plug-in's name is too long"); return false; }
+            memcpy(st.plugin, pl->ptr, pl->size);
+            st.plugin[pl->size] = '\0';
+            const proven_u8str_view_t *hx = rubraview_ini_get(&doc, sec, PROVEN_LIT("plugin_sha256"));
+            for (int b = 0; hx && hx->size == 64 && b < 32; ++b) {
+                char two[3] = { (char)hx->ptr[b * 2], (char)hx->ptr[b * 2 + 1], '\0' };
+                st.plugin_sha256[b] = (uint8_t)strtoul(two, NULL, 16);
+            }
+            const proven_u8str_view_t *pp = rubraview_ini_get(&doc, sec, PROVEN_LIT("plugin_params"));
+            char line[8 * 40];
+            size_t n = pp ? (pp->size < sizeof(line) - 1 ? pp->size : sizeof(line) - 1) : 0;
+            if (pp) memcpy(line, pp->ptr, n);
+            line[n] = '\0';
+            char *at = line;
+            while (*at && st.plugin_param_count < 8) {
+                char *end = NULL;
+                double p = strtod(at, &end);
+                if (end == at) break;
+                st.plugin_params[st.plugin_param_count++] = isfinite(p) ? p : 0.0;
+                at = end;
+                while (*at == ' ') ++at;
+            }
+        }
+        const proven_u8str_view_t *cmd = rubraview_ini_get(&doc, sec, PROVEN_LIT("command"));
+        if (cmd) {
+            if (cmd->size >= sizeof(st.command)) { *why = N_("a step's command is longer than Edit takes (1 KiB)"); return false; }
+            memcpy(st.command, cmd->ptr, cmd->size);
+            st.command[cmd->size] = '\0';
+        }
+        steps.steps[steps.count++] = st;
+    }
+    steps.cursor = steps.count;
+    *out = steps;
+    return true;
+}
+
+bool rubraview_edit_steps_equal(const rubraview_edit_steps_t *a, const rubraview_edit_steps_t *b) {
+    if (!a || !b) return false;
+    size_t na = a->cursor < a->count ? a->cursor : a->count, nb = b->cursor < b->count ? b->cursor : b->count;
+    if (na != nb || a->width != b->width || a->height != b->height) return false;
+    for (size_t i = 0; i < na; ++i) {
+        const rubraview_edit_step_t *x = &a->steps[i], *y = &b->steps[i];
+        if (x->kind != y->kind || x->area.shape != y->area.shape || x->area.feather != y->area.feather ||
+            x->area.rect.x != y->area.rect.x || x->area.rect.y != y->area.rect.y ||
+            x->area.rect.width != y->area.rect.width || x->area.rect.height != y->area.rect.height ||
+            x->ratio != y->ratio) return false;
+        if (x->kind == RUBRAVIEW_STEP_EFFECT && (x->effect != y->effect || x->amount != y->amount)) return false;
+        for (int k = 0; k < 6; ++k) if ((x->ratio & (1u << k)) && x->frac[k] != y->frac[k]) return false;
+        const rubraview_edit_session_t *u = &x->values, *v = &y->values;
+        bool valued = x->kind == RUBRAVIEW_STEP_ADJUST || x->kind == RUBRAVIEW_STEP_RESIZE;
+        if (valued) {
+#define SAME(key, field, ...) if (u->field != v->field) return false;
+#define SAME_BOOL(key, field) if (u->field != v->field) return false;
+        STEP_FLOATS(SAME)
+        if (u->resize_dpi != v->resize_dpi) return false;
+        STEP_INTS(SAME)
+        STEP_BOOLS(SAME_BOOL)
+#undef SAME
+#undef SAME_BOOL
+        for (int c = 0; c < 5; ++c) {
+            if (u->curves[c].point_count != v->curves[c].point_count) return false;
+            for (size_t p = 0; p < u->curves[c].point_count; ++p)
+                if (u->curves[c].points[p].x != v->curves[c].points[p].x || u->curves[c].points[p].y != v->curves[c].points[p].y) return false;
+        }
+        }
+        if (x->kind == RUBRAVIEW_STEP_PLUGIN) {
+            if (strcmp(x->plugin, y->plugin) != 0 || memcmp(x->plugin_sha256, y->plugin_sha256, 32) != 0 ||
+                x->plugin_param_count != y->plugin_param_count) return false;
+            for (int32_t p = 0; p < x->plugin_param_count; ++p) if (x->plugin_params[p] != y->plugin_params[p]) return false;
+        }
+        if ((x->kind == RUBRAVIEW_STEP_GMIC || x->kind == RUBRAVIEW_STEP_FFMPEG) && strcmp(x->command, y->command) != 0) return false;
+    }
+    return true;
 }

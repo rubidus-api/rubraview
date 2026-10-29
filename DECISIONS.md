@@ -2518,3 +2518,32 @@ Do not store credentials, private infrastructure details, personal data, private
     the same list.
   - Home / End in a film were not changed (not asked; they stay the first and last file).
 - Consequences: T269 (host), T272 (VM).
+
+## 2026-10-29: D-220 Batch runs Edit's steps; a size is pixels or a ratio (RV-187; changes D-160)
+
+- Status: Accepted (owner 2026-10-29: "일괄처리(배치처리)에 편집(각종 필터 적용 등)을 넣어야 좋을 듯 합니다 ...
+  일괄처리가 편집을 잘 활용할 수 있게"; "편집에서 픽셀단위 크기나 범위 지정 뿐만 아니라 비율로도 ... 고정소수점이나
+  부동소수점으로 더 작은 범위 비율로도"; the plan's questions answered as recommended: both the steps in Edit and a
+  file; Batch's own crop, effect, plug-in, G'MIC and FFmpeg rows leave the panel; a px / ratio switch beside each
+  size; a pixel step stays pixels).
+- Decision:
+  - A step carries which of its sizes are ratios (`ratio`, `frac[6]`: x, y, w, h of the area or crop; the resize's
+    width and height). `rubraview_edit_step_fit` works a step out for a picture: a ratio the same part of it, a pixel
+    size those pixels held inside it; `rubraview_edit_steps_rebase` and the list's reordering fit each step on the
+    size the steps before it leave. A soft edge and an effect's pixel amounts stay pixels.
+  - The plan said a pixel area is rebased as before and the owner's answer that pixels stay pixels: tightened to one
+    rule — pixels stay pixels; an area drawn or moved on the picture, and a resize by percent, are ratios (the gesture
+    means "this part"), so D-160's "the same parts of the next picture" holds for them; a number typed takes its
+    field's unit (the size box opens in pixels, the crop box in the selection's units).
+  - `.rvsteps`: the INI and TOML subset (D-13), `[steps]` (version 1, the picture's size, the count) and a
+    `[step-N]` a step with every value it has, numbers written to read back the same. The reader is bounded (64
+    steps, 1 KiB a command, 95 bytes a plug-in's name), passes over unknown keys, holds values to their ranges, and
+    is fuzzed (`rvsteps`). A file's G'MIC, plug-in and FFmpeg steps are named when it is loaded and when a run reads
+    it: they run with the user's rights, as typed ones do.
+  - Batch: `--steps=FILE` runs the steps on each picture after it is turned and before Batch's resize, frame, canvas,
+    watermark, text and format; a run with steps never takes the lossless JPEG path; its memory is reckoned from the
+    largest size a step reaches. The panel's first row is Edit's steps (none, the steps in Edit now — written to
+    `batch-steps.rvsteps` beside the settings —, a file) and passes `--gmic-exe=` and `--plugin-folder=` as the viewer
+    has them. The crop and effect rows leave the panel; saved choices that hold them keep them, shown by a row that
+    drops them.
+- Consequences: T273 (host), T274 (VM).

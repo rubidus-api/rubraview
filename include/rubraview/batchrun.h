@@ -80,6 +80,7 @@ typedef struct rubraview_cli_result {
     int32_t             exists;       /* --exists=replace (0, as before) | skip (1) | number (2): name-1.ext */
     bool                keep_dates;   /* --keep-dates: each file written takes its source's modified time */
     bool                subfolders;   /* --subfolders: with --recursive, the folders under the input kept under --out */
+    proven_u8str_view_t steps_file;   /* RV-187: --steps=FILE, Edit's steps (.rvsteps) run on each picture first */
 
     rubraview_batch_job_t      job;
     rubraview_batch_action_t   actions[RUBRAVIEW_BATCH_MAX_ACTIONS];

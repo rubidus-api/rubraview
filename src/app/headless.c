@@ -124,6 +124,10 @@ static void batch_keep_date(proven_arena_t *arena, const batch_ctx_t *bc, proven
     if (!rubraview_pal_fs_stat(arena, source, &e) || !rubraview_pal_fs_set_mtime(written, e.mtime)) batch_say(written, "its date could not be set");
 }
 
+/* RV-187 (D-220): Edit's steps from --steps=, read once; each picture gets its own copy, fitted to its size. */
+static rubraview_edit_steps_t g_batch_steps;
+static bool g_batch_has_steps;
+
 /* Decode, turn, resize, adjust, save. A step that cannot be done fails the
    file: writing it without the step would say it was done. */
 static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview_batch_input_t *input,
@@ -161,6 +165,22 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
         rubraview_pixbuf_t turned = rubraview_pixbuf_orient(arena, &pixels, o);
         if (!rubraview_pixbuf_is_valid(&turned)) { batch_say(input->path, "could not be turned"); return false; }
         pixels = turned;
+    }
+
+    if (g_batch_has_steps) {   /* RV-187: Edit's steps, on the picture as it is turned, before Batch's own size and frame */
+        static rubraview_edit_steps_t steps;
+        steps = g_batch_steps;
+        rubraview_edit_steps_rebase(&steps, pixels.width, pixels.height);
+        for (size_t i = 0; i < steps.cursor; ++i) {
+            rubraview_pixbuf_t done = rubraview_edit_step_apply(arena, &steps.steps[i], &pixels, 1.0);
+            if (!rubraview_pixbuf_is_valid(&done)) {
+                char said[700];
+                snprintf(said, sizeof(said), "Edit's step %u did not run: %s", (unsigned)(i + 1), g_plugin_why ? g_plugin_why : "out of memory");
+                batch_say(input->path, said);
+                return false;
+            }
+            pixels = done;
+        }
     }
 
     if (resize) {
@@ -388,7 +408,7 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
        libjpeg-turbo is vendored. */
     if (source_format == RUBRAVIEW_EXPORT_JPEG &&
         (options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE || options.format == RUBRAVIEW_EXPORT_JPEG) &&
-        !resize && !color && !extra) {
+        !resize && !color && !extra && !g_batch_has_steps) {
         rubraview_jpegtran_op_t op = orient ? jpegtran_op_for(orient) : RUBRAVIEW_JPEGTRAN_NONE;
         bool lossless_possible = !orient || !orient->use_exif_auto_orient;
 
@@ -427,6 +447,18 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
         if ((int64_t)tw2 * th2 > (int64_t)tw * th) { tw = tw2; th = th2; }
         size_t need = rubraview_batch_work_bytes(sw, sh, tw, th, orient != NULL, resize != NULL,
                                                  color && color->has_unsharp);
+        if (g_batch_has_steps && need != SIZE_MAX) {   /* RV-187: each of Edit's steps makes a copy, at the largest size it reaches */
+            static rubraview_edit_steps_t sized;
+            sized = g_batch_steps;
+            rubraview_edit_steps_rebase(&sized, sw, sh);
+            int64_t most = (int64_t)sw * sh;
+            for (size_t i = 1; i <= sized.cursor; ++i) {
+                int32_t w = 0, h = 0;
+                rubraview_edit_steps_size(&sized, i, &w, &h);
+                if ((int64_t)w * h > most) most = (int64_t)w * h;
+            }
+            need += (size_t)most * 4u * 6u + (16u << 20);   /* the step's input, its output, an area's piece, a filter's work */
+        }
         if (extra && need != SIZE_MAX) {   /* RV-129: the extra steps make whole copies, a frame or a canvas a larger one */
             int64_t big = (int64_t)(tw > sw ? tw : sw) * (int64_t)(th > sh ? th : sh);
             int64_t framed = (int64_t)(tw + 2 * extra->border_px + extra->canvas_w) * (int64_t)(th + 2 * extra->border_px + extra->canvas_h);
@@ -444,7 +476,7 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
     }
     /* RV-109: an animation that is only changed to WebP keeps moving. */
     rubraview_export_format_t to = options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE ? source_format : options.format;
-    bool plain = !orient && !resize && !color && !extra;
+    bool plain = !orient && !resize && !color && !extra && !g_batch_has_steps;
     int moved = to == RUBRAVIEW_EXPORT_WEBP && plain ? rubraview_pal_image_save_animation_webp(out_path, input->path, NULL, 0, &options)
               : (to == RUBRAVIEW_EXPORT_AVIF || to == RUBRAVIEW_EXPORT_JXL) && plain   /* 1.31.0: AVIF and JPEG XL too */
                 ? rubraview_pal_image_save_animation_ffmpeg(out_path, input->path, NULL, 0, &options, to == RUBRAVIEW_EXPORT_AVIF) : 0;
@@ -602,6 +634,15 @@ void panel_run_batch(app_state_t *app) {
         return;
     }
 
+    /* RV-187: the steps in Edit now, written where the run reads them */
+    if (app->batch.steps_from == 1 && !batch_steps_write(app)) {
+        osd_say(app, TU8("Edit has no steps yet: make a change in Edit (E) first, or choose a steps file"));
+        return;
+    }
+    if (app->batch.steps_from == 2 && !app->batch.steps_file[0]) {
+        osd_say(app, TU8("choose the steps file first, or no steps"));
+        return;
+    }
     /* RV-129: the window's choices, as the tokens the run is given */
     batch_tokens_t tk;
     batch_tokens(&app->batch, &tk);
@@ -733,6 +774,28 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
         return 1;
     }
 
+    /* RV-187 (D-220): --steps=, Edit's steps, read before anything is opened; what they run is named */
+    bool steps_plugin = false, steps_gmic = false;
+    if (cli->steps_file.size > 0) {
+        proven_u8str_view_t text = rubraview_pal_fs_read_file(arena, cli->steps_file, 4u << 20);
+        const char *why = NULL;
+        if (text.size == 0 || !rubraview_edit_steps_parse(arena, text, &g_batch_steps, &why)) {
+            char line[700];
+            snprintf(line, sizeof(line), "rubraview: --steps: %s", text.size == 0 ? "the file could not be read" : why ? why : "not a file of Edit's steps");
+            console_line(line);
+            return 1;
+        }
+        g_batch_has_steps = g_batch_steps.cursor > 0;
+        for (size_t i = 0; i < g_batch_steps.cursor; ++i) {
+            const rubraview_edit_step_t *st = &g_batch_steps.steps[i];
+            char line[1200];
+            if (st->kind == RUBRAVIEW_STEP_PLUGIN) { steps_plugin = true; snprintf(line, sizeof(line), "rubraview: step %u runs the plug-in %s", (unsigned)(i + 1), st->plugin); console_line(line); }
+            if (st->kind == RUBRAVIEW_STEP_GMIC) { steps_gmic = true; snprintf(line, sizeof(line), "rubraview: step %u runs G'MIC: %s", (unsigned)(i + 1), st->command); console_line(line); }
+            if (st->kind == RUBRAVIEW_STEP_FFMPEG) { snprintf(line, sizeof(line), "rubraview: step %u runs the FFmpeg filter %s", (unsigned)(i + 1), st->command); console_line(line); }
+        }
+        rubraview_edit_set_plugin_runner(plugin_runner, NULL);
+    }
+
     /* RFC-0007: --plugin's folder (--plugin-folder, else the default one), looked in once */
     for (size_t i = 0; i < cli->job.action_count && i < RUBRAVIEW_BATCH_MAX_ACTIONS; ++i) {
         const rubraview_batch_action_t *a = &cli->job.actions[i];
@@ -742,12 +805,23 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
             memcpy(folder, a->params.extra.plugin_folder.ptr, a->params.extra.plugin_folder.size);
         else (void)rubraview_pal_plugins_default_folder(folder, sizeof(folder), false);
         plugins_look(cstr(folder));
+        steps_plugin = false;   /* looked in already */
         break;
     }
-    /* RFC-0009 C: --gmic's program, named by --gmic-exe */
+    if (steps_plugin) {   /* RV-187: a steps file's plug-in, in --plugin-folder or the default one */
+        char folder[520] = "";
+        for (size_t i = 0; i < cli->job.action_count && i < RUBRAVIEW_BATCH_MAX_ACTIONS; ++i) {
+            const rubraview_batch_action_t *a = &cli->job.actions[i];
+            if (a->kind == RUBRAVIEW_BATCH_EXTRA && a->params.extra.plugin_folder.size > 0 && a->params.extra.plugin_folder.size < sizeof(folder))
+                memcpy(folder, a->params.extra.plugin_folder.ptr, a->params.extra.plugin_folder.size);
+        }
+        if (!folder[0]) (void)rubraview_pal_plugins_default_folder(folder, sizeof(folder), false);
+        plugins_look(cstr(folder));
+    }
+    /* RFC-0009 C: --gmic's program, named by --gmic-exe (RV-187: a steps file's G'MIC step too) */
     for (size_t i = 0; i < cli->job.action_count && i < RUBRAVIEW_BATCH_MAX_ACTIONS; ++i) {
         const rubraview_batch_action_t *a = &cli->job.actions[i];
-        if (a->kind != RUBRAVIEW_BATCH_EXTRA || a->params.extra.gmic.size == 0) continue;
+        if (a->kind != RUBRAVIEW_BATCH_EXTRA || (a->params.extra.gmic.size == 0 && !(steps_gmic && a->params.extra.gmic_exe.size > 0))) continue;
         if (a->params.extra.gmic_exe.size > 0) {
             proven_u8str_view_t exe = rubraview_pal_gmic_find(arena, a->params.extra.gmic_exe);
             snprintf(g_gmic_exe, sizeof(g_gmic_exe), "%.*s", (int)exe.size, (const char *)exe.ptr);
@@ -757,6 +831,10 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
             return 1;
         }
         break;
+    }
+    if (steps_gmic && !g_gmic_exe[0]) {   /* RV-187 */
+        console_line("rubraview: the steps run G'MIC: name gmic.exe or its folder with --gmic-exe=");
+        return 1;
     }
 
     /* --out= names a folder that may not be there yet: made first, or every file would fail

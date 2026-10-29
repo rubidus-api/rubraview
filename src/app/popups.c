@@ -767,6 +767,20 @@ void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi) 
                                    hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
 }
 
+/* RV-187 (owner, 2026-10-29: "칸마다 px/비율 전환"): under each field, its unit, pressed to switch it. */
+static void px_unit_buttons(app_state_t *app, double dpi) {
+    static const char *const CROP[4] = { "X", "Y", "W", "H" }, *const SIZE[2] = { "W", "H" };
+    for (int32_t k = 0; k < px_edit_fields(app); ++k) {
+        rubraview_pal_rect_t b = px_unit_rect(app, k);
+        bool ratio = (app->px_edit_ratio & (1u << k)) != 0;
+        rubraview_pal_render_fill_rect(app->renderer, b, ratio ? 0xFF2E4A6Eu : 0xFF3A3A3Au, 3.0);
+        char word[64];
+        int n = snprintf(word, sizeof(word), "%s: %s", app->px_edit_crop ? CROP[k] : SIZE[k], ratio ? T("ratio") : T("pixels"));
+        rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)word, .size = n > 0 ? (size_t)n : 0 },
+                                       b, 13.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+}
+
 void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi) {
     if (!app->px_edit_open) return;
     (void)win_w; (void)win_h;
@@ -782,8 +796,9 @@ void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi) 
         int at = 0;
         for (int32_t k = 0; k < 4 && at < (int)sizeof(line); ++k) {
             bool here = app->px_edit_field == k;
-            int m = snprintf(line + at, sizeof(line) - (size_t)at, "%s%s %s%.*s%s", k == 0 ? "" : k == 2 ? "    " : "  ", NAME[k],
-                             here ? "[" : " ", (int)app->px_edit_length[k], app->px_edit_text[k], here ? (caret_lit ? "|]" : " ]") : " ");
+            int m = snprintf(line + at, sizeof(line) - (size_t)at, "%s%s %s%.*s%s%s", k == 0 ? "" : k == 2 ? "    " : "  ", NAME[k],
+                             here ? "[" : " ", (int)app->px_edit_length[k], app->px_edit_text[k], here ? (caret_lit ? "|]" : " ]") : " ",
+                             (app->px_edit_ratio & (1u << k)) ? "×" : "");
             if (m < 0) break;
             at += m;
         }
@@ -791,15 +806,16 @@ void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi) 
         rubraview_pal_rect_t top = { box.x, box.y + 10.0 * dpi, box.width, 34.0 * dpi };
         rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)at }, top, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         rubraview_pal_rect_t hint = { box.x, box.y + 50.0 * dpi, box.width, 34.0 * dpi };
-        rubraview_pal_render_draw_text(app->renderer, TU8("Pixels from the top left  ·  Tab next  ·  Enter cuts  ·  Esc  ·  or drag on the picture"),
+        rubraview_pal_render_draw_text(app->renderer, TU8("From the top left  ·  Tab next  ·  / pixels or a ratio (0.25 = a quarter)  ·  Enter cuts  ·  Esc"),
                                        hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        px_unit_buttons(app, dpi);
         return;
     }
-    int n = snprintf(line, sizeof(line), T("Width %s%.*s%s  x  Height %s%.*s%s  px"),
+    int n = snprintf(line, sizeof(line), T("Width %s%.*s%s%s  x  Height %s%.*s%s%s"),
                      app->px_edit_field == 0 ? "[" : " ", (int)app->px_edit_length[0], app->px_edit_text[0],
-                     app->px_edit_field == 0 ? (caret_lit ? "|]" : " ]") : " ",
+                     app->px_edit_field == 0 ? (caret_lit ? "|]" : " ]") : " ", (app->px_edit_ratio & 1u) ? "×" : "",
                      app->px_edit_field == 1 ? "[" : " ", (int)app->px_edit_length[1], app->px_edit_text[1],
-                     app->px_edit_field == 1 ? (caret_lit ? "|]" : " ]") : " ");
+                     app->px_edit_field == 1 ? (caret_lit ? "|]" : " ]") : " ", (app->px_edit_ratio & 2u) ? "×" : "");
     if (n > 0) {
         rubraview_pal_rect_t top = { box.x, box.y + 10.0 * dpi, box.width, 34.0 * dpi };
         rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
@@ -807,9 +823,10 @@ void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi) 
     }
     rubraview_pal_rect_t hint = { box.x, box.y + 50.0 * dpi, box.width, 34.0 * dpi };
     rubraview_pal_render_draw_text(app->renderer,
-                                   app->edit.resize_lock_aspect ? TU8("The other side follows the shape  ·  Tab swaps  ·  Enter keeps  ·  Esc")
-                                                                : TU8("Tab swaps  ·  Enter keeps  ·  Esc leaves"),
+                                   app->edit.resize_lock_aspect ? TU8("The other side follows the shape  ·  Tab swaps  ·  / pixels or a ratio  ·  Enter keeps  ·  Esc")
+                                                                : TU8("Tab swaps  ·  / pixels or a ratio (1.5 = half as big again)  ·  Enter keeps  ·  Esc"),
                                    hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+    px_unit_buttons(app, dpi);
 }
 
 /* §3.18's confirmation, the text boxes and the notices sit above

@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.38.exe              the viewer, as built
-dist/rubraview-v1.39.38/                 the release bundle
-dist/rubraview-v1.39.38.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.39.exe              the viewer, as built
+dist/rubraview-v1.39.39/                 the release bundle
+dist/rubraview-v1.39.39.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -421,6 +421,20 @@ named as the copies' pattern (`*_edit`) are left out of both, and a
 picture inside an archive is never written over. After it the list starts
 empty, as the pictures now hold the edits.
 
+**Pixels or ratios.** On another picture each edit keeps its sizes as they
+were given. An area drawn or moved on the picture, a resize by **Resize
+%**, and any number switched to a ratio are that part, or that share, of
+every picture: a quarter in from the left is a quarter in on a small
+picture and a large one. A number typed in pixels, or a size from **or a
+size**, stays those pixels — a 1920-wide resize is 1920 wide on every
+picture — held inside a smaller picture. A soft edge stays in pixels.
+
+**Save the steps (for Batch)...** writes the edits to a `.rvsteps` file and
+**Load steps...** puts a file's edits on the picture on screen. Batch runs
+them on many pictures (below). A file says when loaded how many of its
+edits run G'MIC, a plug-in or FFmpeg: those run with your rights, so load
+files you trust.
+
 **Then a change.** The tones, **Colour balance** (red, green, blue),
 **Automatic colour** (each channel stretched, a colour cast drawn in),
 an **Effect** with its amount, chosen by kind — **Colour** (grey, sepia,
@@ -459,7 +473,10 @@ cannot be written.
 640x480 to 8K (turned to the picture's way), the long side, or megapixels.
 **Size: ... px (... cm)...** types it: a number is pixels, and a unit
 makes it a length — `21cm`, `210mm`, `8.5in`, `50%` — at **DPI for cm and
-in**. **Keep the shape**, the **Filter**, **In linear light** (truer when
+in**. Under each number its button (or `/`) switches it between pixels
+and a **ratio** of the picture: `0.5` is half, `1.5` half as big again, as
+fine as you type it (`0.1234`). The crop's box has the same for X, Y, W
+and H (`0.25` is a quarter of the way in). **Keep the shape**, the **Filter**, **In linear light** (truer when
 shrinking: fine light detail does not darken) and **Sharpen after**. A
 resize is always of the whole picture.
 
@@ -772,7 +789,15 @@ No window opens. It prints how many files it converted, skipped and
 failed.
 
 `Ctrl+B` does the same thing from the viewer, over the folder you are
-reading: the window has every option below. **Try the names on the first
+reading: the window has every option below. Its first row, **Edit's
+steps**, runs Edit's edits on every picture before anything else: **the
+steps in Edit now** (they are written to `batch-steps.rvsteps` beside the
+settings), or **a file of steps** saved from Edit. Crops, effects,
+plug-ins, G'MIC and FFmpeg filters are done there, as many as you like, so
+the window no longer has rows of its own for them; choices saved before
+that still hold a crop or an effect keep them, and a row says so (press
+it to drop them). On the command line `--steps=FILE` does the same, with
+`--gmic-exe=` and `--plugin-folder=` for what the steps run. **Try the names on the first
 files** shows what the first three would be called. **Save these
 choices...** writes them to a `.rvbatch` file (an option a line) and
 **Load choices...** reads one back; the last ones used come back by
@@ -815,6 +840,7 @@ waits for a key before it closes.
 
 | `--resize=l1920` `--resize=s1080` `--resize=2.5mp` | The long side, the short side, megapixels |
 | `--no-enlarge`, `--linear` | Leave a smaller picture its size; resize in linear light |
+| `--steps=FILE.rvsteps` | Edit's steps on each picture first (each area and size a ratio or pixels, as saved) |
 | `--crop=X,Y,W,H`, `--autocrop` | Cut to a rectangle; cut off a plain border |
 | `--auto-colour`, `--negative`, `--effect=oil:4` | Correct the colours; a negative; any effect of Edit (its name in lower case, `radial-blur`, `red-eye`) |
 | `--plugin=posterise:6,1`, `--plugin-folder=D:\plug` | A plug-in by its file's name, its parameters in order (the rest at their defaults); the folder, else the default one |
