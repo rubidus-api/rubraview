@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.40.exe              the viewer, as built
-dist/rubraview-v1.39.40/                 the release bundle
-dist/rubraview-v1.39.40.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.41.exe              the viewer, as built
+dist/rubraview-v1.39.41/                 the release bundle
+dist/rubraview-v1.39.41.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -144,6 +144,14 @@ apps** is where to change that.
 Registered, Rubraview is also listed there by name, with the file types it
 registered, so it can be made the default for each of them in one place;
 removing the last of them takes it off the list.
+
+Each kind of file has its own icon in Explorer, white on Rubraview's red:
+a picture, a strip of film, notes for music, a written page for text and
+an open book for comics. Windows shows a type's icon from the program it
+opens with, so a type whose default is still another program (Media
+Player for MP4 or MP3, say) keeps that program's icon until Rubraview is
+made its default in **Open Windows' Default apps**. The Microsoft Store's
+copy shows Rubraview's own icon on every type for now.
 
 The menu is a **Rubraview** item with these under it:
 

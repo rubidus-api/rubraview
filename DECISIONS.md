@@ -2565,3 +2565,21 @@ Do not store credentials, private infrastructure details, personal data, private
     no longer under their boxes); the "Done" button's words shortened.
   - The viewer's docked panel (no window) keeps its one column as before.
 - Consequences: T275 (host), T276 (VM).
+
+## 2026-10-30: D-222 An icon for each kind of file, music added, the eye kept where it fits (RV-189)
+
+- Status: Accepted (owner 2026-10-29: "각 미디어 파일 종류에 따라 4종의 아이콘을 ... 적색 배경에 흰색으로 ... 눈알도
+  살리면 좋겠지만 크기상 그건 어렵겠지요?"; 2026-10-30: "모두 추천대로 진행해 주세요" — the designs as shown, a request
+  to rubrapack for the Store's copy, the blank `.jxl` and `.nfo` icons to the backlog).
+- Decision:
+  - Five type icons drawn by `scripts/make-icon.py --types`, white on the program's red: picture (a landscape; at 48 px
+    and larger its sun is the eye), video (a strip of film, as before), music (two beamed eighth notes, new, resource 6),
+    text (a written page), comics (an open book, as before). At 48 px and larger music and text carry a small eye at
+    the bottom right on a red patch; at 16 and 32 px the eye would be a dot, so it is left out there.
+  - `icon_for_ext` gives the music extensions resource 6 and `.apng` the picture's; `DefaultIcon` is `rubraview.exe,-N`.
+  - Windows shows a type's icon from the program it opens with: a type whose default is another app (Media Player for
+    MP4, MP3 and WAV on a fresh Windows 11) keeps that app's icon until the user makes Rubraview its default in Default
+    apps. The program does not set that choice (Windows protects it).
+  - The Store's copy: rubrapack's MSIX writes no logo per type (`icon` is unused there), so its types show the
+    program's logo; a request to rubrapack for a `uap:Logo` per `[assoc]` (RV-190).
+- Consequences: T277 (VM). RV-191: `.jxl` and `.nfo`, registered, show a blank icon (1.39.40 too).

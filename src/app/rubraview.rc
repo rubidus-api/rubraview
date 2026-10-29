@@ -9,6 +9,7 @@
 3 ICON "resources/distribution/rubraview-text.ico"
 4 ICON "resources/distribution/rubraview-image.ico"
 5 ICON "resources/distribution/rubraview-book.ico"
+6 ICON "resources/distribution/rubraview-audio.ico"   /* RV-189: music */
 
 1 VERSIONINFO
 FILEVERSION     RUBRAVIEW_VERSION_MAJOR, RUBRAVIEW_VERSION_MINOR, RUBRAVIEW_VERSION_PATCH, 0
