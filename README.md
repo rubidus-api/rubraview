@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.39.35** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.35/rubraview-v1.39.35.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.35/rubraview-v1.39.35.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.39.36** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.36/rubraview-v1.39.36.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.36/rubraview-v1.39.36.msi) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -114,8 +114,8 @@ ships with, so it cannot drift from them.
 | `Ctrl+Backspace` | Up to the folder |
 | `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
-| `Ctrl+]` | Next folder or archive |
-| `Ctrl+[` | Previous folder or archive |
+| `]` | Next folder or archive |
+| `[` | Previous folder or archive |
 
 **The view**
 
@@ -148,8 +148,8 @@ ships with, so it cannot drift from them.
 | Keys | What it does |
 |---|---|
 | `S`, `F5` | Start or stop the slide show |
-| `]` | Slower slides (0.5 s) |
-| `[` | Faster slides (0.5 s) |
+| `Ctrl+]` | Slower slides (0.5 s) |
+| `Ctrl+[` | Faster slides (0.5 s) |
 | `Shift+]` | Slower slides (0.1 s) |
 | `Shift+[` | Faster slides (0.1 s) |
 
@@ -160,8 +160,8 @@ ships with, so it cannot drift from them.
 | `Space` | Play / pause |
 | `.` | One frame forward |
 | `,` | One frame back |
-| `Ctrl+]` | Faster (0.25x a step) |
-| `Ctrl+[` | Slower (0.25x a step) |
+| `]` | Faster (0.25x a step) |
+| `[` | Slower (0.25x a step) |
 | `Right` | 5 seconds on; its Toolbar button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
 | `Left` | 5 seconds back; its Toolbar button, held, offers 5 s to 5 min the same way |
 | `Shift+Right` | 30 seconds on |
@@ -171,8 +171,8 @@ ships with, so it cannot drift from them.
 | `Up` | Volume up 5% |
 | `Down` | Volume down 5% |
 | `Shift+M` | Mute / sound |
-| `[` | Repeat from here (A) |
-| `]` | Repeat to here (B) |
+| `Ctrl+[` | Repeat from here (A) |
+| `Ctrl+]` | Repeat to here (B) |
 | `\` | Repeat off |
 | `Shift+\` | Repeat by number: the A-B box (Toolbar `Set A-B`), A = now and B = now take the moment playing |
 | `Ctrl+\` | Normal speed |

@@ -1665,15 +1665,18 @@ static void settings_path_draw(app_state_t *app) {
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ box.x, box.y + box.height, box.width, bh + 2.0 * pad }, SETTINGS_BACKGROUND, 0.0);   /* the rows under it covered */
     app->spath_btn_n = n;
     for (int32_t i = 0; i < n; ++i) {
-        size_t letters = rubraview_utf8_chars(cstr(words[i]));
-        size_t cells = letters + 6;
-        rubraview_pal_rect_t b = { bx, by, cw * (double)cells, bh };
+        /* RV-182 (owner, 2026-10-29: the words were pushed right): as wide as the words measure, plus room either side */
+        double tw = 0.0;
+        if (!rubraview_pal_render_measure_text(r, cstr(words[i]), fs, &tw) || tw <= 0.0) tw = cw * (double)rubraview_utf8_chars(cstr(words[i]));
+        double width = tw + cw * 4.0;
+        if (width < cw * 10.0) width = cw * 10.0;
+        rubraview_pal_rect_t b = { bx, by, width, bh };
         app->spath_btn[i] = b;
         bool over = pal_rect_has(b, app->settings_px, app->settings_py);
         rubraview_pal_render_fill_rect(r, b, i == 0 ? SETTINGS_FOCUS : over ? 0xFF3A3A3Au : 0xFF2A2A2Au, 3.0);
         rubraview_pal_render_stroke_rect(r, b, 0xFF5B9BD5u, 1.0, 3.0);
-        /* the words in its middle, both ways */
-        rubraview_pal_render_draw_text_mono(r, cstr(words[i]), b.x + (b.width - cw * (double)letters) * 0.5, b.y + (b.height - ch) * 0.5, fs, SETTINGS_TEXT);
+        /* the words in its middle, both ways, laid out by their own font */
+        rubraview_pal_render_draw_text(r, cstr(words[i]), b, fs, SETTINGS_TEXT, RUBRAVIEW_TEXT_CENTER);
         bx += b.width + cw;
     }
 }

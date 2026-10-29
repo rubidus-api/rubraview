@@ -535,11 +535,11 @@ static void draw_box_in(app_state_t *app, const rubraview_box_t *box, const rubr
 
         /* RFC-0002 §6.1 (owner, 2026-09-15): M for the menu box, T for the toolbox. */
         /* 1.25.0 (owner, 2026-10-20): F (the Floating Widget) and T (its toolbar) */
-        rubraview_pal_render_draw_text(app->renderer,
-                                       box->kind == RUBRAVIEW_BOX_MENU ? PROVEN_LIT("M") : PROVEN_LIT("F"),
-                                       left, metrics->anchor_size * 0.42 * place_size(app, PF_BUTTONS), COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("T"), right,
-                                       metrics->anchor_size * 0.42 * place_size(app, PF_BUTTONS), COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        /* RV-181: icons — F a grid of buttons, T arrows four ways (M's three lines) */
+        double sign = metrics->anchor_size * 0.42 * place_size(app, PF_BUTTONS);
+        draw_sign(app->renderer, box->kind == RUBRAVIEW_BOX_MENU ? RUBRAVIEW_ICON_MENU : RUBRAVIEW_ICON_TOOLBAR,
+                  box->kind == RUBRAVIEW_BOX_MENU ? "M" : "F", left, sign, COLOR_TEXT);
+        draw_sign(app->renderer, RUBRAVIEW_ICON_MOVE, "T", right, sign, COLOR_TEXT);
     }
 
     if (box->state == RUBRAVIEW_BOX_COLLAPSED) return;
@@ -554,7 +554,8 @@ static void draw_box_in(app_state_t *app, const rubraview_box_t *box, const rubr
         /* 1.25.0: P, lit and bold while on */
         rubraview_pal_render_fill_rect(app->renderer, pin, pinned ? TITLEBAR_ON : box_fill, 2.0);
         rubraview_pal_render_stroke_rect(app->renderer, pin, box_border, 1.0, 2.0);
-        draw_text_weight(app, PROVEN_LIT("P"), pin, pr.height * 0.42, pinned ? COLOR_TEXT : 0xC8F0F0F0u, pinned);
+        if (!rubraview_pal_render_draw_icon(app->renderer, RUBRAVIEW_ICON_PIN, pin, pr.height * 0.42, pinned ? COLOR_TEXT : 0xC8F0F0F0u))   /* RV-181 */
+            draw_text_weight(app, PROVEN_LIT("P"), pin, pr.height * 0.42, pinned ? COLOR_TEXT : 0xC8F0F0F0u, pinned);
         draw_box_grip(app, box, metrics, box_fill, box_border);
     }
 
@@ -1373,6 +1374,7 @@ void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
         rubraview_rect_t buttons[RUBRAVIEW_SUBBOX_BUTTONS];
         rubraview_subbox_buttons(box, SUBBOX_BUTTON * dpi, SUBBOX_GAP * dpi, buttons);
         static const char *const LETTERS[RUBRAVIEW_SUBBOX_BUTTONS] = { "S", "M", "R", "X" };
+        static const uint32_t ICONS[RUBRAVIEW_SUBBOX_BUTTONS] = { RUBRAVIEW_ICON_SETTINGS, RUBRAVIEW_ICON_MOVE, RUBRAVIEW_ICON_RESIZE, RUBRAVIEW_ICON_CLOSE };   /* RV-181 */
         for (int i = 0; i < RUBRAVIEW_SUBBOX_BUTTONS; ++i) {
             rubraview_pal_rect_t b = { buttons[i].x, buttons[i].y, buttons[i].width, buttons[i].height };
             bool dragging = (i == 1 && app->subbox.dragging == RUBRAVIEW_SUBBOX_MOVE) ||
@@ -1380,8 +1382,7 @@ void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h) {
             rubraview_pal_render_fill_rect(app->renderer, b, dragging ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 4.0 * dpi);
             rubraview_pal_render_stroke_rect(app->renderer, b, i == 3 ? COLOR_CLOSE_HOVER : COLOR_TILE_CURRENT,
                                              1.5 * dpi, 4.0 * dpi);
-            rubraview_pal_render_draw_text(app->renderer, cstr(LETTERS[i]), b, b.height * 0.5,
-                                           COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            draw_sign(app->renderer, ICONS[i], LETTERS[i], b, b.height * 0.5, COLOR_TEXT);
         }
     }
     if (!cue) return;

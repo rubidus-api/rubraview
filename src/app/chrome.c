@@ -129,7 +129,10 @@ void draw_titlebar(app_state_t *app, double win_w) {
         RUBRAVIEW_TITLEBAR_FULLSCREEN, RUBRAVIEW_TITLEBAR_MINIMIZE, RUBRAVIEW_TITLEBAR_MAXIMIZE, RUBRAVIEW_TITLEBAR_RESIZE,
         RUBRAVIEW_TITLEBAR_CLOSE,
     };
-    const char *const GLYPHS[] = { T("Set"), "P", "H", "T", "F", "_", "[]", "R", "X" };
+    const char *const GLYPHS[] = { T("Set"), "P", "H", "T", "F", "_", "[]", "R", "X" };   /* where the icons are missing */
+    const uint32_t ICONS[] = { RUBRAVIEW_ICON_SETTINGS, RUBRAVIEW_ICON_PIN, RUBRAVIEW_ICON_HIDE, RUBRAVIEW_ICON_ON_TOP, RUBRAVIEW_ICON_FULLSCREEN,
+                               RUBRAVIEW_ICON_MINIMIZE, rubraview_pal_window_is_maximized(app->window) ? RUBRAVIEW_ICON_RESTORE : RUBRAVIEW_ICON_MAXIMIZE,
+                               RUBRAVIEW_ICON_RESIZE, RUBRAVIEW_ICON_CLOSE };   /* RV-181 */
     bool on[9] = { app->settings_open,
                    rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5,
                    app->chrome_hidden,
@@ -146,7 +149,8 @@ void draw_titlebar(app_state_t *app, double win_w) {
         bool hovered = rubraview_rect_contains(r, app->pointer_x, app->pointer_y);
         if (on[i]) rubraview_pal_render_fill_rect(app->renderer, br, TITLEBAR_ON, 0.0);
         if (hovered) rubraview_pal_render_fill_rect(app->renderer, br, BUTTONS[i] == RUBRAVIEW_TITLEBAR_CLOSE ? COLOR_CLOSE_HOVER : COLOR_TILE_FILL, 0.0);
-        draw_text_weight(app, cstr(GLYPHS[i]), br, bh * 0.36 * bk, on[i] ? COLOR_TEXT : 0xC8F0F0F0u, on[i]);
+        if (!rubraview_pal_render_draw_icon(app->renderer, ICONS[i], br, bh * 0.34 * bk, on[i] ? COLOR_TEXT : 0xC8F0F0F0u))
+            draw_text_weight(app, cstr(GLYPHS[i]), br, bh * 0.36 * bk, on[i] ? COLOR_TEXT : 0xC8F0F0F0u, on[i]);
     }
     place_font_end(app, before_buttons);
     draw_tmenu(app, win_w);

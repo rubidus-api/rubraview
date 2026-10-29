@@ -16,7 +16,7 @@ void draw_box_grip(app_state_t *app, const rubraview_box_t *box, const rubraview
     bool hot = box->grip_active || rubraview_rect_contains(gr, app->pointer_x, app->pointer_y);
     rubraview_pal_render_fill_rect(app->renderer, grip, hot ? COLOR_TILE_FILL : fill, 2.0);
     rubraview_pal_render_stroke_rect(app->renderer, grip, border, 1.0, 2.0);
-    rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("R"), grip, gr.height * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);   /* 1.25.0: R, resize */
+    draw_sign(app->renderer, RUBRAVIEW_ICON_RESIZE, "R", grip, gr.height * 0.42, COLOR_TEXT);   /* 1.25.0: R, resize; RV-181 its icon */
     if (!box->grip_active) return;
     rubraview_tile_metrics_t sized = rubraview_box_metrics(box, metrics);
     char line[64];
@@ -187,7 +187,7 @@ void draw_toolbox_window(app_state_t *app) {
     rubraview_pal_rect_t right = { m.anchor_size, 0.0, m.anchor_size, m.anchor_size };
     rubraview_pal_render_stroke_rect(r, left, COLOR_BOX_BORDER, 1.0, 2.0);
     rubraview_pal_render_fill_rect(r, right, COLOR_TILE_FILL, 2.0);
-    rubraview_pal_render_draw_text(r, PROVEN_LIT("T"), left, m.anchor_size * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    draw_sign(r, RUBRAVIEW_ICON_MOVE, "T", left, m.anchor_size * 0.42, COLOR_TEXT);   /* RV-181 */
     rubraview_pal_render_draw_text(r, TU8("Dock"), right, m.anchor_size * 0.3, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     rubraview_toolbox_layout_t l = toolbox_window_layout(app, &m);
     rubraview_action_facts_t facts = action_facts(app);

@@ -1838,6 +1838,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action);
 bool handle_chrome_click(app_state_t *app, double x, double y);
 void handle_drop(app_state_t *app, const rubraview_window_event_t *event);
 void hdr_screen_tick(app_state_t *app, double dt);
+void draw_sign(rubraview_renderer_t *r, uint32_t icon, const char *letter, rubraview_pal_rect_t box, double size, uint32_t argb);   /* RV-181 */
+void listwin_sign_button(app_state_t *app, rubraview_renderer_t *rr, rubraview_rect_t r, uint32_t icon, const char *letter, double size, bool on);
 void media_stopped_tick(app_state_t *app);   /* RV-176 */
 void help_close(app_state_t *app);
 size_t help_pump(app_state_t *app);

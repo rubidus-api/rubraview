@@ -2431,3 +2431,34 @@ Do not store credentials, private infrastructure details, personal data, private
     multipage, animation, video, music, text, as the archive's had them), since they step the folder too (D-212).
   - `Ctrl+PageDown` / `Ctrl+PageUp` are skipping's again; the folder or archive is `Ctrl+]` / `Ctrl+[`.
 - Consequences: T263, T265 (host), T266 (VM).
+
+## 2026-10-27: D-214 The Floating Widget and the title bar draw icons, not letters (RV-181)
+
+- Status: Accepted (owner 2026-10-27: "특히 현재 F, T 등으로 알파벳으로 표기된 아이콘들이 좀 개선이 되면 좋겠네요.
+  플로팅 바나 타이틀 바의 아이콘들이요"; "타이틀바의 설정 아이콘도 톱니바퀴로 변경하면 좋겠어요").
+- Decision:
+  - The title bar draws Segoe MDL2 icons: settings E713 (a gear), keep shown E840, hide ED1A, always on top E81E,
+    full screen E740, minimise E921, maximise / restore E922 / E923, resize E744, close E8BB. The Floating Widget's
+    anchors: the Toolbar E80A (the menu's E700), move E7C2, pin E840, resize E744; the subtitle box, the panels and
+    the lists' close, move and resize buttons the same (`RUBRAVIEW_ICON_*`, `draw_sign`).
+  - The letter stays as the fallback where the font is missing; the tooltips and hints name the button instead of
+    the letter, in every language pack.
+- Consequences: T267 (host, the hints), T268 (VM).
+
+## 2026-10-27: D-215 The plain brackets step the folder or archive; Ctrl takes the rest (RV-183; changes D-213)
+
+- Status: Accepted (owner 2026-10-27: "단축키 중 [, ]와 Ctrl+[ Ctrl+] 을 서로 기능을 바꿔줘요. [와 ]를 더 자주 쓰는
+  네비게이션 쪽으로 옮기는게 좋겠어요").
+- Decision: `[` / `]` are `prev_archive` / `next_archive`; `Ctrl+[` / `Ctrl+]` take what the plain ones did — the
+  slideshow's interval, a film's repeat A / B, a text's line spacing — and a film's or an animation's speed moves to
+  the plain brackets, as the media context wins there. The Shift variants are unchanged. The A-B edit box takes the
+  brackets with or without Ctrl.
+- Consequences: T267 (host, `test_default_keymap`), T268 (VM).
+
+## 2026-10-27: D-216 A box's buttons fit and centre their words (RV-182)
+
+- Status: Accepted (owner 2026-10-27: "확인, 취소, 찾아보기 버튼들이 글자가 버튼 중앙에 오지 않고 오른쪽으로 밀려
+  있어요. 다른 비슷한 디렉토리 또는 문자열 입력하는 창에서도 버튼들 모양 다듬어 주세요").
+- Decision: settings' path boxes measure each word (`rubraview_pal_render_measure_text`), make the button the word
+  plus four characters (ten at least) and draw it centred; the rename box's buttons are the longest word plus a margin.
+- Consequences: T268 (VM).

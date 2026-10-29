@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.39.35** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.35/rubraview-v1.39.35.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.35/rubraview-v1.39.35.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.39.36** — [Microsoft Store v1.0.0](https://apps.microsoft.com/detail/9n99b2x63k7x) · [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.36/rubraview-v1.39.36.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.36/rubraview-v1.39.36.msi) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -113,8 +113,8 @@
 | `Ctrl+Backspace` | 상위 폴더로 |
 | `B` | 보기 방식: 한 장 → 두 장 → 책(표지만 한 장) → 웹툰(세로로 이어 보기) → 코믹(가로로 긴 쪽은 반반) 순서로 바꾸기. 두 장·책·코믹 뒤에는 같은 방식의 오른쪽→왼쪽(rtl)이 이어짐 (툴바 버튼을 누르면 목록에서 고름) |
 | `Shift+B` | 펼침면 자동 인식 |
-| `Ctrl+]` | 다음 폴더 또는 압축 |
-| `Ctrl+[` | 이전 폴더 또는 압축 |
+| `]` | 다음 폴더 또는 압축 |
+| `[` | 이전 폴더 또는 압축 |
 
 **보기**
 
@@ -147,8 +147,8 @@
 | 키 | 하는 일 |
 |---|---|
 | `S`, `F5` | 슬라이드 쇼 시작/정지 |
-| `]` | 느리게(0.5초) |
-| `[` | 빠르게(0.5초) |
+| `Ctrl+]` | 느리게(0.5초) |
+| `Ctrl+[` | 빠르게(0.5초) |
 | `Shift+]` | 느리게(0.1초) |
 | `Shift+[` | 빠르게(0.1초) |
 
@@ -159,8 +159,8 @@
 | `Space` | 재생/일시정지 |
 | `.` | 한 프레임 앞으로 |
 | `,` | 한 프레임 뒤로 |
-| `Ctrl+]` | 빠르게(0.25배씩) |
-| `Ctrl+[` | 느리게(0.25배씩) |
+| `]` | 빠르게(0.25배씩) |
+| `[` | 느리게(0.25배씩) |
 | `Right` | 5초 뒤로; 툴바 버튼을 길게 누르면 5초·10초·30초·1분·5분이 떠서 끌어다 놓아 고름 |
 | `Left` | 5초 앞으로; 툴바 버튼을 길게 누르면 같은 방식으로 5초~5분 |
 | `Shift+Right` | 30초 뒤로 |
@@ -170,8 +170,8 @@
 | `Up` | 소리 5% 크게 |
 | `Down` | 소리 5% 작게 |
 | `Shift+M` | 음소거/해제 |
-| `[` | 여기서부터 반복(A) |
-| `]` | 여기까지 반복(B) |
+| `Ctrl+[` | 여기서부터 반복(A) |
+| `Ctrl+]` | 여기까지 반복(B) |
 | `\` | 반복 끄기 |
 | `Shift+\` | 반복 구간 숫자로: A-B 상자 (툴바 `Set A-B`), A = now·B = now로 지금 재생 위치를 넣음 |
 | `Ctrl+\` | 보통 속도 |

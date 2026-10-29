@@ -545,7 +545,7 @@ void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool number
         rubraview_rect_t xr = rubraview_panel_close_rect(panel);
         rubraview_pal_rect_t xb = { xr.x, xr.y, xr.width, xr.height };
         if (rubraview_rect_contains(xr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(app->renderer, xb, COLOR_CLOSE_HOVER, 2.0);
-        rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("X"), xb, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        draw_sign(app->renderer, RUBRAVIEW_ICON_CLOSE, "X", xb, text_size * 0.9, COLOR_TEXT);   /* RV-181 */
     }
 
 rows:

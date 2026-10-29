@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.35.exe              the viewer, as built
-dist/rubraview-v1.39.35/                 the release bundle
-dist/rubraview-v1.39.35.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.36.exe              the viewer, as built
+dist/rubraview-v1.39.36/                 the release bundle
+dist/rubraview-v1.39.36.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -357,8 +357,8 @@ when it closes.
 ## Animated images
 
 An animated GIF, WebP or PNG (APNG, named `.png` or `.apng`) is played as a film is. `Space` pauses it, `.`
-and `,` step a frame, `Left` and `Right` seek five seconds, `[` and `]`
-set the two ends of a repeat and `\` clears it, and `Ctrl+]` / `Ctrl+[`
+and `,` step a frame, `Left` and `Right` seek five seconds, `Ctrl+[` and
+`Ctrl+]` set the two ends of a repeat and `\` clears it, and `]` / `[`
 change its speed from 0.25x to 4x. The Toolbar has the same on buttons,
 with Stop and a seek bar to click; paused, the title says where it is.
 
@@ -829,18 +829,18 @@ While it does:
 
 - `Space` plays and pauses, `←` / `→` jump 5 seconds, `↑` / `↓` change the
   volume, `Shift+M` mutes.
-- `[` marks where a repeat starts and `]` where it ends; `\` turns it off.
+- `Ctrl+[` marks where a repeat starts and `Ctrl+]` where it ends; `\` turns it off.
   The point you just set wins: an A at or after B moves B to the end of
   the film, a B at or before A (or with no A) moves A to its start.
 - `Shift+\` opens the same two points as numbers, so a repeat can be set
   to the millisecond: each point has three fields, hours, minutes and
   seconds (with up to three decimals); a field you come to is replaced by
   the first digit you type, and `:` goes on to the next field. Inside
-  that box **A = now** and **B = now** (or `[` and `]`) put the moment you are at into A or B, with the same rule —
+  that box **A = now** and **B = now** (or `[` and `]`, with or without `Ctrl`) put the moment you are at into A or B, with the same rule —
   so you can tap a point, correct the number, and tap it again. Click a
   field or press `Tab` to move between them (`Up` / `Down` go to the
   other point), `Enter` keeps them, `Esc` or the `X` at the box's top right leaves them as they were.
-  `Ctrl+]` / `Ctrl+[` play faster or slower (0.25x to 4x — the sound's pitch
+  `]` / `[` play faster or slower (0.25x to 4x — the sound's pitch
   follows), `Ctrl+\` goes back to normal.
 - The Toolbar's seek bar shows the time; click or drag on it to go
   somewhere else.
@@ -1012,7 +1012,7 @@ wheel, or `↑` / `↓` change its speed, in lines a minute, shown at the
 bottom right; a click stops it. It stops at the end.
 
 **Size and spacing.** `Ctrl+wheel` or `Ctrl+Plus` / `Ctrl+Minus` the size of
-the letters, `Alt+wheel` or `[` / `]` the space between lines. `W` wraps the
+the letters, `Alt+wheel` or `Ctrl+[` / `Ctrl+]` the space between lines. `W` wraps the
 lines to the window or lets long lines run on (`Shift+wheel` then moves
 sideways); the Toolbar has the same, and **Word wrap** for the wrapping.
 Settings › Text also has the font, the side margins, a column at most so
@@ -1180,7 +1180,7 @@ and the first, the right ones to the next, ten on and the last; for a film
 or a song they go 5 s and 30 s back or on, and to the previous or next file
 (`Shift` + `Left`/`Right` also go 30 s). The fourth, |◁ or ▷|, opens the
 archive before or after this one in its folder — or, for files in a
-folder, the folder before or after — as `Ctrl+[` / `Ctrl+]` do, and the
+folder, the folder before or after — as `[` / `]` do, and the
 Toolbar's |◁ ▷|, which stand beside its page buttons (◁◁ ▷▷) for every
 kind of file.
 
@@ -1696,8 +1696,8 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+Backspace` | Up to the folder |
 | `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
-| `Ctrl+]` | Next folder or archive |
-| `Ctrl+[` | Previous folder or archive |
+| `]` | Next folder or archive |
+| `[` | Previous folder or archive |
 
 **The view**
 
@@ -1730,8 +1730,8 @@ listed under a later heading only means that while that is on screen.
 | Keys | What it does |
 |---|---|
 | `S`, `F5` | Start or stop the slide show |
-| `]` | Slower slides (0.5 s) |
-| `[` | Faster slides (0.5 s) |
+| `Ctrl+]` | Slower slides (0.5 s) |
+| `Ctrl+[` | Faster slides (0.5 s) |
 | `Shift+]` | Slower slides (0.1 s) |
 | `Shift+[` | Faster slides (0.1 s) |
 
@@ -1742,8 +1742,8 @@ listed under a later heading only means that while that is on screen.
 | `Space` | Play / pause |
 | `.` | One frame forward |
 | `,` | One frame back |
-| `Ctrl+]` | Faster (0.25x a step) |
-| `Ctrl+[` | Slower (0.25x a step) |
+| `]` | Faster (0.25x a step) |
+| `[` | Slower (0.25x a step) |
 | `Right` | 5 seconds on; its Toolbar button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
 | `Left` | 5 seconds back; its Toolbar button, held, offers 5 s to 5 min the same way |
 | `Shift+Right` | 30 seconds on |
@@ -1753,8 +1753,8 @@ listed under a later heading only means that while that is on screen.
 | `Up` | Volume up 5% |
 | `Down` | Volume down 5% |
 | `Shift+M` | Mute / sound |
-| `[` | Repeat from here (A) |
-| `]` | Repeat to here (B) |
+| `Ctrl+[` | Repeat from here (A) |
+| `Ctrl+]` | Repeat to here (B) |
 | `\` | Repeat off |
 | `Shift+\` | Repeat by number: the A-B box (Toolbar `Set A-B`), A = now and B = now take the moment playing |
 | `Ctrl+\` | Normal speed |

@@ -114,6 +114,23 @@ bool rubraview_confirm_press(rubraview_confirm_t *confirm, int64_t key, double n
 bool rubraview_confirm_armed(const rubraview_confirm_t *confirm, int64_t key, double now);
 void rubraview_confirm_clear(rubraview_confirm_t *confirm);
 
+/* RV-181 (owner, 2026-10-29: "F, T 등으로 알파벳으로 표기된 아이콘들이 좀 개선이 되면 좋겠네요. 플로팅 바나 타이틀 바의
+   아이콘들이요"; "타이틀바의 설정 아이콘도 톱니바퀴로"): the window's own buttons as icons of Segoe MDL2 Assets, chosen
+   from the font drawn on the VM; where the font is missing the letter stays. */
+#define RUBRAVIEW_ICON_SETTINGS   0xE713u   /* a gear */
+#define RUBRAVIEW_ICON_PIN        0xE840u   /* a pushpin: the title bar kept shown, the Toolbar kept open */
+#define RUBRAVIEW_ICON_HIDE       0xED1Au   /* an eye struck through */
+#define RUBRAVIEW_ICON_ON_TOP     0xE81Eu   /* layers: always on top */
+#define RUBRAVIEW_ICON_FULLSCREEN 0xE740u   /* arrows out to two corners */
+#define RUBRAVIEW_ICON_MINIMIZE   0xE921u
+#define RUBRAVIEW_ICON_MAXIMIZE   0xE922u
+#define RUBRAVIEW_ICON_RESTORE    0xE923u
+#define RUBRAVIEW_ICON_RESIZE     0xE744u   /* a square with its corner block: sizes it */
+#define RUBRAVIEW_ICON_CLOSE      0xE8BBu
+#define RUBRAVIEW_ICON_TOOLBAR    0xE80Au   /* a grid of buttons: the Floating Widget's F */
+#define RUBRAVIEW_ICON_MOVE       0xE7C2u   /* arrows four ways: T (its drag goes through files and folders), the box moved */
+#define RUBRAVIEW_ICON_MENU       0xE700u   /* three lines */
+
 #ifdef __cplusplus
 }
 #endif

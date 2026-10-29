@@ -69,13 +69,13 @@ void tick_timers(app_state_t *app, double dt) {
                 { RUBRAVIEW_TITLEBAR_MENU, "", N_("Menu") },
                 { RUBRAVIEW_TITLEBAR_NAME, "open_picker", N_("The open-file screen, here") },
                 { RUBRAVIEW_TITLEBAR_SETTINGS, "open_settings", N_("Settings") },
-                { RUBRAVIEW_TITLEBAR_BARPIN, "toggle_titlebar_pin", N_("P: keep the title bar shown") },
-                { RUBRAVIEW_TITLEBAR_HIDE, "hide_boxes", N_("H: hide the title bar and the Floating Widget") },
-                { RUBRAVIEW_TITLEBAR_PIN, "toggle_always_on_top", N_("T: always on top") },
-                { RUBRAVIEW_TITLEBAR_FULLSCREEN, "toggle_fullscreen", N_("F: full screen") },
+                { RUBRAVIEW_TITLEBAR_BARPIN, "toggle_titlebar_pin", N_("Keep the title bar shown") },
+                { RUBRAVIEW_TITLEBAR_HIDE, "hide_boxes", N_("Hide the title bar and the Floating Widget") },
+                { RUBRAVIEW_TITLEBAR_PIN, "toggle_always_on_top", N_("Always on top") },
+                { RUBRAVIEW_TITLEBAR_FULLSCREEN, "toggle_fullscreen", N_("Full screen") },
                 { RUBRAVIEW_TITLEBAR_MINIMIZE, "", N_("Minimise") },
                 { RUBRAVIEW_TITLEBAR_MAXIMIZE, "", N_("Maximise, or back to a window") },
-                { RUBRAVIEW_TITLEBAR_RESIZE, "", N_("R: drag to size the window") },
+                { RUBRAVIEW_TITLEBAR_RESIZE, "", N_("Drag to size the window") },
                 { RUBRAVIEW_TITLEBAR_CLOSE, "quit", N_("Close Rubraview") },
             };
             rubraview_titlebar_button_t over = rubraview_titlebar_hit(&app->titlebar, app->pointer_x, app->pointer_y, (double)bw);

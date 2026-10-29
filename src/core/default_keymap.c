@@ -99,9 +99,10 @@ const char *rubraview_default_keymap(void) {
     "toggle_layout = \"B\"\n"
     "toggle_spread_detect = \"Shift+B\"\n"
     /* §3.8.1 point 4; in a folder, the folder beside (RV-179). Ctrl+PageDown/PageUp stay skipping's (owner,
-       2026-10-27, RV-180, after a day as these). */
-    "next_archive = \"Ctrl+BracketRight\"\n"
-    "prev_archive = \"Ctrl+BracketLeft\"\n"
+       2026-10-27, RV-180). The plain brackets, the keys used more (owner, 2026-10-29, RV-183: [ ] and Ctrl+[ ]
+       swapped in every context). */
+    "next_archive = \"BracketRight\"\n"
+    "prev_archive = \"BracketLeft\"\n"
     "\n"
     "[view]\n"
     "fit_window = \"1\"\n"
@@ -129,8 +130,8 @@ const char *rubraview_default_keymap(void) {
     "\n"
     "[slideshow]\n"
     "toggle_slideshow = \"S, F5\"\n"
-    "interval_up = \"BracketRight\"\n"
-    "interval_down = \"BracketLeft\"\n"
+    "interval_up = \"Ctrl+BracketRight\"\n"   /* RV-183 */
+    "interval_down = \"Ctrl+BracketLeft\"\n"
     "interval_up_fine = \"Shift+BracketRight\"\n"
     "interval_down_fine = \"Shift+BracketLeft\"\n"
     "\n"
@@ -150,8 +151,8 @@ const char *rubraview_default_keymap(void) {
     "media_play_pause = \"Space\"\n"
     "anim_step_forward = \"Period\"\n"
     "anim_step_back = \"Comma\"\n"
-    "anim_speed_up = \"Ctrl+BracketRight\"\n"
-    "anim_speed_down = \"Ctrl+BracketLeft\"\n"
+    "anim_speed_up = \"BracketRight\"\n"   /* RV-183: the plain brackets */
+    "anim_speed_down = \"BracketLeft\"\n"
     /* D-16 (owner, 2026-09-15): the arrows seek 5 s and change the volume
        5 % while a video or music page is on screen. They turn no pages
        (owner, 2026-09-09), so nothing else is lost. */
@@ -169,8 +170,8 @@ const char *rubraview_default_keymap(void) {
     /* D-15 A-B repeat, the keys RFC-0001 §3.7.2 gives it. [ and ] are the
        slide show's interval keys too; that context is asked only while a
        slide show runs, so here they mean A and B. */
-    "media_ab_a = \"BracketLeft\"\n"
-    "media_ab_b = \"BracketRight\"\n"
+    "media_ab_a = \"Ctrl+BracketLeft\"\n"   /* RV-183: with Ctrl */
+    "media_ab_b = \"Ctrl+BracketRight\"\n"
     "media_ab_clear = \"Backslash\"\n"
     /* The same two points, typed (owner, 2026-09-24). */
     "media_ab_edit = \"Shift+Backslash\"\n"
@@ -213,8 +214,8 @@ const char *rubraview_default_keymap(void) {
     "text_bottom = \"End\"\n"
     "text_bigger = \"Ctrl+Plus\"\n"
     "text_smaller = \"Ctrl+Minus\"\n"
-    "text_spacing_more = \"BracketRight\"\n"
-    "text_spacing_less = \"BracketLeft\"\n"
+    "text_spacing_more = \"Ctrl+BracketRight\"\n"   /* RV-183 */
+    "text_spacing_less = \"Ctrl+BracketLeft\"\n"
     "text_breaks = \"B\"\n"
     "text_indent = \"Shift+B\"\n"
     "text_wrap = \"W\"\n"

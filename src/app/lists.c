@@ -642,8 +642,8 @@ static void draw_recentwin_in(app_state_t *app, double win_w, double win_h) {
     rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
     rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
     if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(rr, close, COLOR_CLOSE_HOVER, 4.0);
-    rubraview_pal_render_draw_text(rr, PROVEN_LIT("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-    listwin_button(app, rubraview_listwin_resize_rect(lw), "R", lw->title_height * 0.45, lw->resizing, COLOR_TEXT);
+    draw_sign(rr, RUBRAVIEW_ICON_CLOSE, "X", close, lw->title_height * 0.4, COLOR_TEXT);   /* RV-181 */
+    listwin_sign_button(app, rr, rubraview_listwin_resize_rect(lw), RUBRAVIEW_ICON_RESIZE, "R", lw->title_height * 0.4, lw->resizing);
 
     /* the bar: all, Remove (the checked), Clear all */
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
@@ -860,8 +860,8 @@ static void draw_favwin_in(app_state_t *app, double win_w, double win_h) {
     rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
     rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
     if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(rr, close, COLOR_CLOSE_HOVER, 4.0);
-    rubraview_pal_render_draw_text(rr, PROVEN_LIT("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-    listwin_button(app, rubraview_listwin_resize_rect(lw), "R", lw->title_height * 0.45, lw->resizing, COLOR_TEXT);
+    draw_sign(rr, RUBRAVIEW_ICON_CLOSE, "X", close, lw->title_height * 0.4, COLOR_TEXT);   /* RV-181 */
+    listwin_sign_button(app, rr, rubraview_listwin_resize_rect(lw), RUBRAVIEW_ICON_RESIZE, "R", lw->title_height * 0.4, lw->resizing);
 
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
     size_t checked = favwin_checked(app);

@@ -693,6 +693,10 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             words[n] = T("Cancel"); kinds[n++] = RENAME_BTN_CANCEL;
         }
         double bw = 120.0 * dpi, bh = 48.0 * dpi, gap = 10.0 * dpi;   /* 1.25.0: roomier */
+        for (int32_t i = 0; i < n; ++i) {   /* RV-182: one width for all, the longest word's with room, never less */
+            double tw = 0.0;
+            if (rubraview_pal_render_measure_text(app->renderer, cstr(words[i]), 15.0 * dpi, &tw) && tw + 36.0 * dpi > bw) bw = tw + 36.0 * dpi;
+        }
         double bx = app->rename_is_path || app->rename_is_filter ? box.x + box.width - (bw + gap) * (double)n
                                                                    : box.x + (box.width - (bw + gap) * (double)n + gap) * 0.5;
         double by = box.y + box.height + 10.0 * dpi;
@@ -714,7 +718,7 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
 static void draw_answer_close(app_state_t *app, rubraview_pal_rect_t box, double dpi) {
     rubraview_pal_rect_t x = answer_box_close(app, box);
     if (pal_rect_has(x, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(app->renderer, x, COLOR_CLOSE_HOVER, 2.0);
-    rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("X"), x, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    draw_sign(app->renderer, RUBRAVIEW_ICON_CLOSE, "X", x, 12.0 * dpi, COLOR_TEXT);
 }
 
 void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi) {
@@ -916,6 +920,15 @@ void list_button(rubraview_renderer_t *rr, double px, double py, rubraview_rect_
     rubraview_pal_render_draw_text(rr, cstr(label), box, size, color, RUBRAVIEW_TEXT_CENTER);
 }
 
+/* RV-181: a list window's button that shows an icon (its letter where the font is missing). */
+void listwin_sign_button(app_state_t *app, rubraview_renderer_t *rr, rubraview_rect_t r, uint32_t icon, const char *letter, double size, bool on) {
+    if (r.width <= 0.0) return;
+    rubraview_pal_rect_t box = { r.x + 1.0, r.y + 1.0, r.width - 2.0, r.height - 2.0 };
+    if (on) rubraview_pal_render_fill_rect(rr, box, (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0xC0000000u, 2.0);
+    else if (rubraview_rect_contains(r, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(rr, box, COLOR_TILE_FILL, 2.0);
+    draw_sign(rr, icon, letter, box, size, COLOR_TEXT);
+}
+
 void listwin_button(app_state_t *app, rubraview_rect_t r, const char *label, double size, bool on, uint32_t color) {
     list_button(app->renderer, app->pointer_x, app->pointer_y, r, label, size, on, color);
 }
@@ -1077,12 +1090,12 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
     if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) {
         rubraview_pal_render_fill_rect(app->renderer, close, COLOR_CLOSE_HOVER, 4.0);
     }
-    rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("X"), close, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    draw_sign(app->renderer, RUBRAVIEW_ICON_CLOSE, "X", close, lw->title_height * 0.4, COLOR_TEXT);
 
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
     if (lw->editable) {
         /* D-111: R sizes the window when dragged; the bar acts on the list. */
-        listwin_button(app, rubraview_listwin_resize_rect(lw), "R", lw->title_height * 0.45, lw->resizing, COLOR_TEXT);
+        listwin_sign_button(app, app->renderer, rubraview_listwin_resize_rect(lw), RUBRAVIEW_ICON_RESIZE, "R", lw->title_height * 0.4, lw->resizing);
         draw_list_bar(app, app->renderer, lw, app->pointer_x, app->pointer_y);
         draw_list_tools(app, app->renderer, lw, app->pointer_x, app->pointer_y, false);
     }
@@ -1140,7 +1153,7 @@ void draw_eqwin(app_state_t *app, double win_w, double win_h) {
     if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) {
         rubraview_pal_render_fill_rect(app->renderer, close, COLOR_CLOSE_HOVER, 4.0);
     }
-    rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("X"), close, w->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    draw_sign(app->renderer, RUBRAVIEW_ICON_CLOSE, "X", close, w->title_height * 0.4, COLOR_TEXT);
 
     for (int p = 0; p < RUBRAVIEW_EQWIN_PRESETS; ++p) {
         rubraview_rect_t r = rubraview_eqwin_preset_rect(w, (size_t)p);
@@ -1217,6 +1230,12 @@ int place_font_begin(app_state_t *app, int which, double *size) {
 void place_font_end(app_state_t *app, int before) {
     g_place = before;
     place_font_apply(app, before);
+}
+
+/* RV-181: a button's icon, at `size` (a share of its height), or its letter where the icon font is missing. */
+void draw_sign(rubraview_renderer_t *r, uint32_t icon, const char *letter, rubraview_pal_rect_t box, double size, uint32_t argb) {
+    if (icon && rubraview_pal_render_draw_icon(r, icon, box, size, argb)) return;
+    rubraview_pal_render_draw_text(r, cstr(letter), box, size, argb, RUBRAVIEW_TEXT_CENTER);
 }
 
 /* 1.25.0: words drawn bold (twice, a hair apart) for what is on, plain for what is off. */
