@@ -277,6 +277,11 @@ bool rubraview_pal_print_pictures_on(proven_u8str_view_t printer, int32_t paper_
  *  False when there is no such file to show. */
 bool rubraview_pal_shell_reveal(proven_u8str_view_t path);
 
+/** An Explorer window on a folder (RV-185): a file named is picked out in its folder; a folder that is not
+ *  there is made first when `make` (none of its parents need be there). False when nothing could be shown;
+ *  nothing named is ever run. */
+bool rubraview_pal_shell_open_folder(proven_u8str_view_t path, bool make);
+
 /** Windows' own Default apps page, where a type's default is chosen. */
 void rubraview_pal_shell_open_default_apps(void);
 

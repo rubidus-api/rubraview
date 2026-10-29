@@ -539,6 +539,11 @@ void append_arg_cstr(char *buf, size_t cap, size_t *pos, const char *text) {
 /* File › New window (owner, 2026-10-16): this program once more, with
    nothing open, a window of its own whatever "Reuse the open window" says. */
 void new_window(app_state_t *app) {
+    new_window_open(app, PROVEN_LIT(""));
+}
+
+/* RV-186: the viewer once more, on `path` (none: as it starts). */
+void new_window_open(app_state_t *app, proven_u8str_view_t path) {
     proven_u8str_view_t exe = rubraview_pal_process_executable(app->arena);
     char line[4096];
     size_t pos = 0;
@@ -546,6 +551,7 @@ void new_window(app_state_t *app) {
     if (exe.size > 0) {
         append_arg(line, sizeof(line), &pos, exe);
         append_arg_cstr(line, sizeof(line), &pos, "--new-instance");
+        if (path.size > 0) append_arg(line, sizeof(line), &pos, path);
     }
     if (exe.size == 0 || !rubraview_pal_process_start((proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = pos })) {
         osd_say(app, TU8("a new window could not be started"));

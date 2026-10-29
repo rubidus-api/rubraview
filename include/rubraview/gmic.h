@@ -87,6 +87,13 @@ size_t rubraview_gmic_split(proven_u8str_view_t line, proven_u8str_view_t *items
 /** Whether `word` is a G'MIC command name as the list gives one: letters, digits and `_`, a letter first. */
 bool rubraview_gmic_is_command(proven_u8str_view_t word);
 
+/**
+ * RV-186: how far making the filter list is, in percent, reckoned from the last run's times: `step` 1 fetching,
+ * 2 listing, `in_step` seconds into it, `fetch` and `list` the seconds each took last time. A step that runs longer
+ * than it did stays at its end; never 100 while it runs. -1 when there is no last run to go by.
+ */
+int rubraview_gmic_list_percent(int step, double in_step, double fetch, double list);
+
 #ifdef __cplusplus
 }
 #endif

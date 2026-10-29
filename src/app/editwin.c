@@ -1064,15 +1064,29 @@ void gmic_from_settings(app_state_t *app) {
 
 gmic_list_job_t *g_gmic_job;
 
+/* RV-186: once a second the viewer is woken, so the settings' line counts on while G'MIC says nothing */
+static bool gmic_list_tick(void *context) {
+    gmic_list_job_t *job = (gmic_list_job_t *)context;
+    double now = rubraview_pal_time_now_seconds();
+    if (now - job->last_wake >= 1.0) { job->last_wake = now; rubraview_pal_window_wake(job->wake); }
+    return false;
+}
+
 static DWORD WINAPI gmic_list_run(LPVOID arg) {
     gmic_list_job_t *job = (gmic_list_job_t *)arg;
     proven_u8str_view_t exe = cstr(job->exe);
     const proven_u8str_view_t up[] = { PROVEN_LIT("up") };
-    rubraview_gmic_exec_t r = rubraview_pal_gmic_exec(exe, up, 1, 5u * 60u * 1000u, NULL, NULL);
+    job->step_started = rubraview_pal_time_now_seconds();
+    InterlockedExchange(&job->step, 1);
+    rubraview_gmic_exec_t r = rubraview_pal_gmic_exec(exe, up, 1, 5u * 60u * 1000u, gmic_list_tick, job);
+    job->took[0] = rubraview_pal_time_now_seconds() - job->step_started;
     if (r.ok) {
         const proven_u8str_view_t list[] = { PROVEN_LIT("-v"), PROVEN_LIT("-1"), PROVEN_LIT("parse_gui"), PROVEN_LIT("json"),
                                              PROVEN_LIT("ot"), cstr(job->out) };
-        r = rubraview_pal_gmic_exec(exe, list, 6, 15u * 60u * 1000u, NULL, NULL);
+        job->step_started = rubraview_pal_time_now_seconds();
+        InterlockedExchange(&job->step, 2);
+        r = rubraview_pal_gmic_exec(exe, list, 6, 15u * 60u * 1000u, gmic_list_tick, job);
+        job->took[1] = rubraview_pal_time_now_seconds() - job->step_started;
     }
     job->ok = r.ok;
     snprintf(job->said, sizeof(job->said), "%s", r.said);
@@ -1090,10 +1104,63 @@ void gmic_list_make(app_state_t *app) {
     snprintf(job->exe, sizeof(job->exe), "%s", g_gmic_exe);
     snprintf(job->out, sizeof(job->out), "%.*s.json", (int)(out.size - 4), (const char *)out.ptr);   /* ...-out.png -> ...-out.json */
     job->wake = app->window;
+    job->started = job->step_started = rubraview_pal_time_now_seconds();
     job->thread = CreateThread(NULL, 0, gmic_list_run, job, 0, NULL);
     if (!job->thread) { free(job); settings_say(app, T("the filter list could not be made")); return; }
     g_gmic_job = job;
     settings_say(app, T("G'MIC is fetching its filters and listing them: a few minutes"));
+}
+
+size_t gmic_list_progress(char *buffer, size_t capacity, const app_state_t *app) {
+    const gmic_list_job_t *job = g_gmic_job;
+    if (!job || capacity == 0) return 0;
+    double now = rubraview_pal_time_now_seconds();
+    LONG step = job->step ? job->step : 1;
+    int all = (int)(now - job->started), in = (int)(now - job->step_started);
+    if (all < 0) all = 0;
+    if (in < 0) in = 0;
+    double fetch = rubraview_settings_get(&app->settings, PROVEN_LIT("gmic"), PROVEN_LIT("took_fetch"));
+    double list = rubraview_settings_get(&app->settings, PROVEN_LIT("gmic"), PROVEN_LIT("took_list"));
+    int n = snprintf(buffer, capacity, step == 1 ? T("step 1 of 2: G'MIC is fetching its filters from gmic.eu, %d:%02d")
+                                                 : T("step 2 of 2: G'MIC is listing its filters, %d:%02d"), all / 60, all % 60);
+    int pct = rubraview_gmic_list_percent((int)step, (double)in, fetch, list);
+    if (n > 0 && (size_t)n < capacity && pct >= 0) n += snprintf(buffer + n, capacity - (size_t)n, T(" (about %d %%, by the last run)"), pct);
+    return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
+}
+
+void gmic_list_show(app_state_t *app) {
+    if (g_gmic.filter_count == 0) { settings_say(app, T("there is no filter list yet: make it first")); return; }
+    size_t cap = 256;
+    for (int32_t c = 0; c < g_gmic.category_count; ++c) cap += g_gmic.categories[c].size + 32;
+    for (int32_t i = 0; i < g_gmic.filter_count; ++i) cap += g_gmic.filters[i].name.size + g_gmic.filters[i].command.size + 16;
+    char *text = (char *)malloc(cap);
+    if (!text) { settings_say(app, T("the filter list could not be shown")); return; }
+    size_t at = 0;
+    int w = snprintf(text, cap, T("G'MIC %.*s: %d filters in %d categories (Edit > G'MIC)"), (int)g_gmic.version.size,
+                     (const char *)g_gmic.version.ptr, g_gmic.filter_count, g_gmic.category_count);
+    if (w > 0 && (size_t)w + 1 < cap) { at = (size_t)w; text[at++] = '\n'; }
+    for (int32_t c = 0; c < g_gmic.category_count; ++c) {
+        int32_t count = 0;
+        for (int32_t i = 0; i < g_gmic.filter_count; ++i) count += g_gmic.filters[i].category == c;
+        w = snprintf(text + at, cap - at, "\n%.*s (%d)\n", (int)g_gmic.categories[c].size, (const char *)g_gmic.categories[c].ptr, (int)count);
+        if (w > 0 && (size_t)w < cap - at) at += (size_t)w;
+        for (int32_t i = 0; i < g_gmic.filter_count; ++i) {
+            const rubraview_gmic_filter_t *f = &g_gmic.filters[i];
+            if (f->category != c) continue;
+            /* G'MIC's own pages (About, Release Notes) have no command: "_none_" */
+            if (proven_u8str_view_eq(f->command, PROVEN_LIT("_none_")))
+                w = snprintf(text + at, cap - at, "  %.*s\n", (int)f->name.size, (const char *)f->name.ptr);
+            else w = snprintf(text + at, cap - at, "  %.*s  -  %.*s\n", (int)f->name.size, (const char *)f->name.ptr,
+                              (int)f->command.size, (const char *)f->command.ptr);
+            if (w > 0 && (size_t)w < cap - at) at += (size_t)w;
+        }
+    }
+    proven_u8str_view_t path = rubraview_path_join(app->arena, rubraview_path_dirname(app->settings_path), PROVEN_LIT("gmic-filters.txt"));
+    bool ok = rubraview_pal_fs_write_file(path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = at });
+    free(text);
+    if (!ok) { settings_say(app, T("the filter list could not be shown")); return; }
+    new_window_open(app, path);
+    settings_say(app, T("the filter list opens in a window of its own"));
 }
 
 /* Once a pass: the list made is moved beside the settings and read. */
@@ -1109,6 +1176,10 @@ void gmic_list_poll(app_state_t *app) {
         (void)rubraview_pal_fs_delete(kept);
         ok = rubraview_pal_fs_move(made, kept) && gmic_list_load(app);
     }
+    if (ok) {   /* RV-186: the next run's percentage is reckoned from these */
+        rubraview_settings_set(&app->settings, PROVEN_LIT("gmic"), PROVEN_LIT("took_fetch"), floor(job->took[0] + 0.5));
+        rubraview_settings_set(&app->settings, PROVEN_LIT("gmic"), PROVEN_LIT("took_list"), floor(job->took[1] + 0.5));
+    }
     char line[240];   /* the settings window's message line */
     char said[160];
     snprintf(said, sizeof(said), "%s", job->said[0] ? job->said + (strlen(job->said) > 150 ? strlen(job->said) - 150 : 0) : T("G'MIC said nothing"));
@@ -1117,7 +1188,7 @@ void gmic_list_poll(app_state_t *app) {
     (void)rubraview_pal_fs_delete(made);
     free(job);
     osd_say(app, cstr(line));
-    if (app->settings_window) settings_say(app, line);
+    if (app->settings_window) { skip_dirs_table_rows(app); settings_say(app, line); }   /* RV-186: the list's rows */
 }
 
 /* ---- the Edit window's rows ---- */

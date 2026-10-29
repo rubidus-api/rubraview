@@ -462,3 +462,11 @@ size_t rubraview_gmic_args(const rubraview_gmic_filter_t *filter, const double *
     if (o.full) { out[0] = '\0'; return 0; }
     return o.n;
 }
+
+int rubraview_gmic_list_percent(int step, double in_step, double fetch, double list) {
+    if (!(fetch >= 0.0) || !(list >= 0.0) || fetch + list < 1.0 || (step != 1 && step != 2)) return -1;
+    if (!(in_step >= 0.0)) in_step = 0.0;
+    double done = step == 1 ? fmin(in_step, fetch) : fetch + fmin(in_step, list);
+    int pct = (int)(100.0 * done / (fetch + list));
+    return pct > 99 ? 99 : pct < 0 ? 0 : pct;
+}

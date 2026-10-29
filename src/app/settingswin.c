@@ -63,6 +63,30 @@ void settings_read_file(app_state_t *app) {
     skip_dirs_take_old(app);
 }
 
+/* RV-185: the folder rubraview.exe runs from, with Windows' separator. */
+static proven_u8str_view_t program_folder(app_state_t *app) {
+    proven_u8str_view_t exe = rubraview_pal_process_executable(app->arena);
+    proven_u8str_view_t dir = rubraview_path_dirname(exe);
+    proven_result_mem_mut_t m = proven_arena_alloc(app->arena, dir.size + 1);
+    if (dir.size == 0 || !proven_is_ok(m.err)) return PROVEN_LIT("");
+    for (size_t i = 0; i < dir.size; ++i) m.value.ptr[i] = dir.ptr[i] == '/' ? '\\' : dir.ptr[i];
+    m.value.ptr[dir.size] = '\0';
+    return (proven_u8str_view_t){ .ptr = m.value.ptr, .size = dir.size };
+}
+
+/* The place named for G'MIC: a folder, or the folder of the .exe named. */
+static proven_u8str_view_t gmic_named_folder(app_state_t *app) {
+    proven_u8str_view_t where = rubraview_pal_fs_expand_env(app->arena, rubraview_path_typed_folder(cstr(g_gmic_where)));
+    if (where.size > 4 && _strnicmp((const char *)where.ptr + where.size - 4, ".exe", 4) == 0) where = rubraview_path_dirname(where);
+    return where;
+}
+
+/* RV-185: G'MIC-Qt's stand-alone download is the one most often taken by mistake; it has no gmic.exe. */
+static bool gmic_qt_named(app_state_t *app) {
+    proven_u8str_view_t dir = gmic_named_folder(app);
+    return dir.size > 0 && rubraview_pal_fs_exists(rubraview_path_join(app->arena, dir, PROVEN_LIT("gmic_qt.exe")));
+}
+
 
 #define SETTINGS_BACKGROUND  0xFF161616u
 #define SETTINGS_PANE        0xFF1E1E1Eu
@@ -103,6 +127,9 @@ static size_t settings_info(void *user, proven_u8str_view_t source, char *buffer
                      : o->msi && o->msi_menu && app->packaged ? T("the MSI's too, with its menu: Windows 11's menu shows twice (Remove for every user in that copy)")
                      : o->msi ? T("the one the MSI installed too")
                      : T("none"));
+    } else if (proven_u8str_view_eq(source, PROVEN_LIT("app.folder"))) {   /* RV-185: where this copy runs from */
+        proven_u8str_view_t dir = program_folder(app);
+        n = snprintf(buffer, capacity, "%.*s", (int)dir.size, (const char *)dir.ptr);
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("app.kind"))) {
         n = snprintf(buffer, capacity, "%s",
                      app->packaged ? T("the Microsoft Store's: Windows has its file types from the package")
@@ -132,8 +159,10 @@ static size_t settings_info(void *user, proven_u8str_view_t source, char *buffer
                          : s == RUBRAVIEW_FFILTER_READY ? T("none: avfilter lists no filter")
                          : T("none: avfilter-12.dll is not beside FFmpeg's other DLLs"));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("gmic.status"))) {   /* RFC-0009 C */
-        if (!g_gmic_exe[0]) n = snprintf(buffer, capacity, "%s", g_gmic_where[0] ? T("gmic.exe is not in the place named") : T("not set: name gmic.exe or its folder below"));
-        else if (g_gmic_job) n = snprintf(buffer, capacity, "%s", T("found; the filter list is being made (a few minutes)"));
+        if (!g_gmic_exe[0]) n = snprintf(buffer, capacity, "%s", !g_gmic_where[0] ? T("not set: name gmic.exe or its folder below")
+                                                              : gmic_qt_named(app) ? T("that is G'MIC-Qt's stand-alone: the command-line (CLI) zip holds gmic.exe")
+                                                              : T("gmic.exe is not in the place named: the command-line (CLI) zip holds it"));
+        else if (g_gmic_job) n = (int)gmic_list_progress(buffer, capacity, app);   /* RV-186 */
         else if (g_gmic.filter_count > 0)
             n = snprintf(buffer, capacity, T("found; %d filters in %d categories (G'MIC %.*s), under Edit"), g_gmic.filter_count,
                          g_gmic.category_count, (int)g_gmic.version.size, (const char *)g_gmic.version.ptr);
@@ -199,6 +228,8 @@ void skip_dirs_table_rows(app_state_t *app) {
     }
     /* RFC-0007: the plug-ins' heading and one row each (or one that says why there are none) */
     rubraview_settings_view_set_named_table_rows(&app->settings_view, PROVEN_LIT("plugins"), (int32_t)(g_plugin_count > 0 ? g_plugin_count : 1) + 1);
+    /* RV-186: G'MIC's list made, a row a category */
+    rubraview_settings_view_set_named_table_rows(&app->settings_view, PROVEN_LIT("gmic_filters"), (g_gmic.category_count > 0 ? g_gmic.category_count : 1) + 1);
 }
 
 /* The eight folders of before go into the list, once, and are emptied in the file. */
@@ -252,6 +283,26 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
               : index == n + 1 ? (typing ? 0
                                   : snprintf(buffer, capacity, T(" type or paste a folder to add  (Enter or a click; Ctrl+O browses)")))
               : 0;
+        return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
+    }
+    if (proven_u8str_view_eq(source, PROVEN_LIT("gmic_filters"))) {   /* RV-186: the list G'MIC made, a row a category */
+        int w = 0;
+        if (index == 0) w = snprintf(buffer, capacity, "%s", T("Category (filters)  -  the first of them"));
+        else if (g_gmic.category_count == 0) w = index == 1 ? snprintf(buffer, capacity, "%s", T("no list yet: Make the filter list above")) : 0;
+        else if ((int32_t)index <= g_gmic.category_count) {
+            int32_t c = (int32_t)index - 1, count = 0;
+            for (int32_t i = 0; i < g_gmic.filter_count; ++i) count += g_gmic.filters[i].category == c;
+            w = snprintf(buffer, capacity, "%.*s (%d)  - ", (int)g_gmic.categories[c].size, (const char *)g_gmic.categories[c].ptr, (int)count);
+            bool first = true;
+            for (int32_t i = 0; i < g_gmic.filter_count && w > 0 && (size_t)w + 8 < capacity; ++i) {
+                if (g_gmic.filters[i].category != c) continue;
+                int m = snprintf(buffer + w, capacity - (size_t)w, "%s%.*s", first ? " " : ", ", (int)g_gmic.filters[i].name.size,
+                                 (const char *)g_gmic.filters[i].name.ptr);
+                if (m <= 0 || (size_t)m >= capacity - (size_t)w) break;
+                w += m;
+                first = false;
+            }
+        }
         return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
     }
     if (proven_u8str_view_eq(source, PROVEN_LIT("plugins"))) {   /* RFC-0007: what the folder holds */
@@ -1298,6 +1349,38 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 settings_say(app, rubraview_pal_shell_open_web("https://gmic.eu/download.html")
                                       ? T("the G'MIC download page is opening in the browser")
                                       : T("the browser could not be started"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("app.open_folder"))) {   /* RV-185 */
+                settings_say(app, rubraview_pal_shell_open_folder(program_folder(app), false)
+                                      ? T("Rubraview's folder is opening") : T("the folder could not be opened"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("app.copy_folder"))) {
+                settings_say(app, rubraview_pal_clipboard_set_text(app->settings_window, program_folder(app))
+                                      ? T("Rubraview's folder was copied") : T("the clipboard could not be written"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("ffmpeg.open_folder"))) {
+                proven_u8str_view_t chosen = rubraview_pal_fs_expand_env(app->arena,
+                    rubraview_path_typed_folder(rubraview_settings_get_text(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("ffmpeg_dir"))));
+                int place = rubraview_pal_ffmpeg_place();
+                /* the one in use; none yet: the one named, else beside the program, where it is looked for first */
+                proven_u8str_view_t dir = place == 2 ? imported_folder(app, "ffmpeg")
+                                        : place == 3 || (place == 0 && chosen.size > 0) ? chosen : program_folder(app);
+                settings_say(app, rubraview_pal_shell_open_folder(dir, false)
+                                      ? T("FFmpeg's folder is opening") : T("the folder named is not there"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("gmic.open_folder"))) {
+                gmic_from_settings(app);
+                proven_u8str_view_t at = g_gmic_exe[0] ? cstr(g_gmic_exe) : gmic_named_folder(app);
+                settings_say(app, at.size == 0 ? T("not set: name gmic.exe or its folder above")
+                                  : rubraview_pal_shell_open_folder(at, false) ? T("G'MIC's folder is opening")
+                                  : T("the folder named is not there"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("plugins.open_folder"))) {
+                /* the folder plug-ins are looked for in, the default one when none is named; made when missing,
+                   as it is where the files are to be put */
+                proven_u8str_view_t named = rubraview_settings_get_text(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("plugin_folder"));
+                char folder[520] = "";
+                if (named.size > 0 && named.size < sizeof(folder)) { memcpy(folder, named.ptr, named.size); folder[named.size] = '\0'; }
+                else (void)rubraview_pal_plugins_default_folder(folder, sizeof(folder), true);
+                settings_say(app, folder[0] && rubraview_pal_shell_open_folder(cstr(folder), true)
+                                      ? T("the plug-in folder is opening") : T("the folder could not be opened"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("gmic.show_list"))) {   /* RV-186 */
+                gmic_list_show(app);
             } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("gmic.list"))) {
                 gmic_list_make(app);
             } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("app.restart"))) {

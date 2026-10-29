@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.36.exe              the viewer, as built
-dist/rubraview-v1.39.36/                 the release bundle
-dist/rubraview-v1.39.36.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.37.exe              the viewer, as built
+dist/rubraview-v1.39.37/                 the release bundle
+dist/rubraview-v1.39.37.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -596,13 +596,22 @@ eight parameters) and a complete sample, `posterise.c`.
 filters. Rubraview does not ship it; it runs G'MIC's own program, so you
 choose which version you use and its licence is between you and G'MIC.
 
-1. Get the **command-line** zip for Windows from gmic.eu/download.html
-   (`gmic_..._cli_win64.zip`; Settings › External › G'MIC has the link)
-   and unpack it anywhere.
-2. In Settings › External › G'MIC, name `gmic.exe` or its folder.
+1. Get the **command-line** zip for Windows from gmic.eu/download.html:
+   under *G'MIC for Windows - Other interfaces*, the row *Command-line
+   interface (CLI)*, its *.zip archive* (`gmic_<version>_cli_win64.zip`;
+   Settings › External › G'MIC has the link). The GIMP, Photoshop,
+   Paint.NET and Qt stand-alone downloads hold no `gmic.exe`. Unpack it
+   anywhere.
+2. In Settings › External › G'MIC, name `gmic.exe` or its folder;
+   **Open the folder** shows it in Explorer.
 3. Press **Make the filter list**, once. G'MIC fetches its filter
-   definitions from gmic.eu and lists them; it takes a few minutes, and the
-   status line says when it is done. Press it again after updating G'MIC.
+   definitions from gmic.eu (step 1 of 2) and lists them (step 2 of 2); it
+   takes a few minutes. The G'MIC line counts the time, and from the second
+   time on says about how far it is in percent, by how long the last run
+   took. Press it again after updating G'MIC.
+4. The list made is shown under it, a row a category with how many filters
+   it has; **Open the whole list** opens every filter, by category and with
+   its command, in a window of its own, where `Ctrl+F` finds one.
 
 In Edit, **G'MIC** chooses a category, **filter** one of its filters, and
 the filter's own settings follow as rows (a text, a colour or a point is
@@ -1452,10 +1461,13 @@ filename code page, the memory cap). Some worth knowing:
   as `Malgun Gothic`) and **colour**, and **Preferred sound** and
   **Preferred subtitles**: a language as films name it (`kor`, `eng`,
   `jpn`), chosen when a film has it.
-- **External** — what Rubraview can use but does not ship, each in
-  a section of its own: a **Get it** link that opens its makers' download
-  page in the browser, a note of which file to take, and the place you put
-  it. Nothing is copied anywhere; each tool's licence is its own.
+- **External** — first, the folder Rubraview runs from, with **Open its
+  folder** and **Copy the path**. Then what Rubraview can use but does not
+  ship, each in a section of its own: a **Get it** link that opens its
+  makers' download page in the browser, a note of which file to take, and
+  the place you put it, with **Open the folder** under it (FFmpeg's: the one
+  in use; the plug-ins' is made if it is not there yet). Nothing is copied
+  anywhere; each tool's licence is its own.
   - **FFmpeg** — FFmpeg 9.0's *shared* build (BtbN's
     `ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip`; the LGPL build is
     enough). **FFmpeg folder** names its `bin` folder, which must hold all

@@ -1388,7 +1388,16 @@ typedef struct gmic_list_job {
     char exe[520], out[600];
     bool ok;
     char said[512];
+    /* RV-186: where it is, for the settings' line — 1 fetching, 2 listing; when each began; how long each took */
+    volatile LONG step;
+    double started, step_started, took[2];
+    double last_wake;
 } gmic_list_job_t;
+/* RV-186: "step 2 of 2: listing the filters, 1:12 (about 60 %)", the percentage from the last run's times */
+size_t gmic_list_progress(char *buffer, size_t capacity, const app_state_t *app);
+/* RV-186: the list made, as text beside the settings, opened in a viewer of its own */
+void gmic_list_show(app_state_t *app);
+void new_window_open(app_state_t *app, proven_u8str_view_t path);
 #define PANEL_FFMPEG_ROWS 24   /* options shown; the rest keep FFmpeg's defaults */
 typedef struct batch_tokens {
     const char *v[64];

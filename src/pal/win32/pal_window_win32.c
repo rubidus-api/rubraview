@@ -1770,6 +1770,31 @@ bool rubraview_pal_shell_reveal(proven_u8str_view_t path) {
     return SUCCEEDED(hr);
 }
 
+bool rubraview_pal_shell_open_folder(proven_u8str_view_t path, bool make) {
+    WCHAR wide[MAX_PATH * 2];
+    if (path.size == 0 || path.size > INT_MAX) return false;
+    int n = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)path.ptr, (int)path.size, wide, (int)(sizeof(wide) / sizeof(wide[0])) - 1);
+    if (n <= 0) return false;
+    wide[n] = L'\0';
+    for (int i = 0; i < n; ++i) if (wide[i] == L'/') wide[i] = L'\\';
+    while (n > 3 && wide[n - 1] == L'\\') wide[--n] = L'\0';
+    DWORD at = GetFileAttributesW(wide);
+    if (at == INVALID_FILE_ATTRIBUTES) {
+        if (!make || SHCreateDirectoryExW(NULL, wide, NULL) != ERROR_SUCCESS) return false;
+        at = GetFileAttributesW(wide);
+        if (at == INVALID_FILE_ATTRIBUTES) return false;
+    }
+    if (!(at & FILE_ATTRIBUTE_DIRECTORY)) return rubraview_pal_shell_reveal(path);   /* a file: shown, not run */
+    PIDLIST_ABSOLUTE item = ILCreateFromPathW(wide);
+    if (!item) return false;
+    /* the folder itself opened, as Explorer's double click does */
+    SHELLEXECUTEINFOW info = { .cbSize = sizeof(info), .fMask = SEE_MASK_IDLIST, .lpVerb = L"open",
+                               .lpIDList = item, .nShow = SW_SHOWNORMAL };
+    BOOL ok = ShellExecuteExW(&info);
+    ILFree(item);
+    return ok != FALSE;
+}
+
 void rubraview_pal_shell_open_default_apps(void) {
     ShellExecuteW(NULL, L"open", L"ms-settings:defaultapps", NULL, NULL, SW_SHOWNORMAL);
 }

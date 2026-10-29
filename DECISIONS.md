@@ -2462,3 +2462,31 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: settings' path boxes measure each word (`rubraview_pal_render_measure_text`), make the button the word
   plus four characters (ten at least) and draw it centred; the rename box's buttons are the longest word plus a margin.
 - Consequences: T268 (VM).
+
+## 2026-10-29: D-217 The External page: Rubraview's folder, a button to open each folder, the G'MIC download named (RV-185)
+
+- Status: Accepted (owner 2026-10-29: "g'mic 설정 화면에서, 어떤 종류의 파일을 받아야 하는지 명확히 알려줘요";
+  "현재 설정된 위치의 폴더를 여는 버튼도 각 폴더 위치 설정 항목 근처에"; "맨 위에 현재 rubraview 위치를 보여주고,
+  그 위치 폴더를 여는 버튼과 그 경로를 텍스트 복사하는 버튼도").
+- Decision:
+  - The page opens with "Rubraview is in" (the program's folder), "Open its folder" and "Copy the path".
+  - Each folder setting has an action row under it: FFmpeg's opens the folder in use (`rubraview_pal_ffmpeg_place`:
+    beside the program, the old import, the chosen one; none yet: the chosen, else the program's); G'MIC's shows
+    gmic.exe picked out, or the folder named; the plug-ins' is made when missing, since files are to be put there.
+  - `rubraview_pal_shell_open_folder` opens a folder (a file is shown, never run).
+  - The note names gmic.eu's row (Other interfaces › Command-line interface (CLI) › .zip, `gmic_<version>_cli_win64.zip`)
+    and the downloads that hold no gmic.exe; a folder with gmic_qt.exe is said to be G'MIC-Qt's.
+- Consequences: T271 (VM).
+
+## 2026-10-29: D-218 G'MIC's list followed while made and seen when made (RV-186)
+
+- Status: Accepted (owner 2026-10-29: "g'mic가 필터 목록 만들 때, 그 만든 목록 확인할 수 있는 기능도 설정 페이지에";
+  "퍼센트로나 몇 단계가 남았는지 등을 gmic 필터 목록 만들 때 사용자가 알 수 있게").
+- Decision:
+  - G'MIC says nothing while it works, so the line gives the step (1 of 2 fetching, 2 of 2 listing) and the time,
+    the viewer woken once a second; the percentage is reckoned from the last run's two times, kept as
+    `gmic.took_fetch` / `gmic.took_list` (hidden), never 100 while it runs and not shown before a first run
+    (`rubraview_gmic_list_percent`).
+  - The list is shown on the page a row a category (`table gmic_filters`), and whole as `gmic-filters.txt` beside the
+    settings, opened in a viewer of its own (`new_window_open`), where it can be searched.
+- Consequences: T270 (host), T271 (VM).
