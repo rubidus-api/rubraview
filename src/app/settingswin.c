@@ -63,6 +63,14 @@ void settings_read_file(app_state_t *app) {
     skip_dirs_take_old(app);
 }
 
+/* RV-184: the Keys table, by function (headings and bindings) or by key */
+#define KEY_ROWS_MAX 1024
+typedef struct { size_t binding, combo; } key_combo_row_t;
+static bool g_keys_by_key;
+static int32_t g_key_row[KEY_ROWS_MAX];          /* by function: a binding, or -(context + 1) for a heading */
+static key_combo_row_t g_key_combo[KEY_ROWS_MAX];  /* by key: where each key was first met */
+static size_t g_key_row_count;
+
 /* RV-185: the folder rubraview.exe runs from, with Windows' separator. */
 static proven_u8str_view_t program_folder(app_state_t *app) {
     proven_u8str_view_t exe = rubraview_pal_process_executable(app->arena);
@@ -321,11 +329,45 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
     }
     if (!proven_u8str_view_eq(source, PROVEN_LIT("keymap"))) return 0;
     if (index == 0) {
-        int n = snprintf(buffer, capacity, "%-12s %-24s %s", "context", "action", T("keys  (Enter adds a key, Delete takes the last off)"));
+        int n = g_keys_by_key ? snprintf(buffer, capacity, "%-16s %s", T("key"), T("what it does, and where  (Show by function to change them)"))
+                              : snprintf(buffer, capacity, "%-24s %s", T("action"), T("keys  (Enter adds a key, Delete takes the last off)"));
         return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
     }
-    if (index - 1 >= app->keymap.count) return 0;
-    const rubraview_key_binding_t *b = &app->keymap.bindings[index - 1];
+    if (index > g_key_row_count) return 0;
+    if (g_keys_by_key) {   /* RV-184: a key, and what it does in each context that binds it */
+        const rubraview_key_binding_t *first = &app->keymap.bindings[g_key_combo[index - 1].binding];
+        rubraview_key_combo_t combo = first->combos[g_key_combo[index - 1].combo];
+        char one[64];
+        proven_u8str_view_t named = rubraview_key_combo_format(one, sizeof(one), combo);
+        int n = snprintf(buffer, capacity, "%-16.*s", (int)named.size, (const char *)named.ptr);
+        bool more = false;
+        for (size_t e = g_key_combo[index - 1].binding; e < app->keymap.count && n > 0 && (size_t)n + 8 < capacity; ++e) {
+            const rubraview_key_binding_t *o = &app->keymap.bindings[e];
+            bool binds = false;
+            for (size_t f = 0; f < o->combo_count && !binds; ++f) binds = rubraview_key_combo_equal(o->combos[f], combo);
+            if (!binds) continue;
+            const rubraview_key_context_info_t *info = rubraview_keymap_context_info(o->context);
+            const char *words = rubraview_action_words(o->action);
+            int m = words ? snprintf(buffer + n, capacity - (size_t)n, "%s%s (%s)", more ? "  ·  " : " ", rubraview_tr(words),
+                                     info ? rubraview_tr(info->heading) : "?")
+                          : snprintf(buffer + n, capacity - (size_t)n, "%s%.*s (%s)", more ? "  ·  " : " ", (int)o->action.size,
+                                     (const char *)o->action.ptr, info ? rubraview_tr(info->heading) : "?");
+            if (m <= 0 || (size_t)m >= capacity - (size_t)n) break;
+            n += m;
+            more = true;
+        }
+        return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
+    }
+    int32_t at = g_key_row[index - 1];
+    if (at < 0) {   /* RV-184: a context's heading, with when it is asked */
+        size_t count = 0;
+        const rubraview_key_context_info_t *all = rubraview_keymap_contexts(&count);
+        size_t c = (size_t)(-at - 1);
+        int n = c < count ? snprintf(buffer, capacity, "-- %s (%s) --", rubraview_tr(all[c].heading), rubraview_tr(all[c].when))
+                          : snprintf(buffer, capacity, "-- %s --", T("other"));
+        return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
+    }
+    const rubraview_key_binding_t *b = &app->keymap.bindings[at];
     char keys[160];
     size_t used = 0;
     keys[0] = '\0';
@@ -342,7 +384,7 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
            only one of them is ever reached. Named, not fixed (D-14). */
         for (size_t i = 0; i < app->keymap.count && used + 40 < sizeof(keys); ++i) {
             const rubraview_key_binding_t *o = &app->keymap.bindings[i];
-            if (i == index - 1 || !rubraview_keymap_contexts_meet(o->context, b->context)) continue;
+            if (i == (size_t)at || !rubraview_keymap_contexts_meet(o->context, b->context)) continue;
             bool clash = false;
             for (size_t x = 0; x < b->combo_count && !clash; ++x)
                 for (size_t y = 0; y < o->combo_count && !clash; ++y)
@@ -355,11 +397,48 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
         if (used >= sizeof(keys)) used = sizeof(keys) - 1;
         if (b->combo_count == 0 && used == 0) used = (size_t)snprintf(keys, sizeof(keys), T("(no key)"));
     }
-    int n = snprintf(buffer, capacity, "%-12.*s %-24.*s %.*s",
-                     b->context.size ? (int)b->context.size : 2, b->context.size ? (const char *)b->context.ptr : "ui",
-                     (int)b->action.size, b->action.ptr, (int)used, keys);
+    int n = snprintf(buffer, capacity, "  %-22.*s %.*s", (int)b->action.size, b->action.ptr, (int)used, keys);
     if (n <= 0) return 0;
     return (size_t)n < capacity ? (size_t)n : capacity - 1;
+}
+
+/* RV-184 (D-219): the Keys table's rows — by function, a heading a context (in the order of
+   rubraview_keymap_contexts, then any other) with its actions under it; by key, each key once. Built again
+   whenever the keymap or the way it is shown changes. */
+void keymap_table_refresh(app_state_t *app) {
+    g_key_row_count = 0;
+    if (g_keys_by_key) {
+        for (size_t i = 0; i < app->keymap.count; ++i) {
+            for (size_t c = 0; c < app->keymap.bindings[i].combo_count && g_key_row_count < KEY_ROWS_MAX; ++c) {
+                rubraview_key_combo_t combo = app->keymap.bindings[i].combos[c];
+                bool seen = false;
+                for (size_t r = 0; r < g_key_row_count && !seen; ++r)
+                    seen = rubraview_key_combo_equal(app->keymap.bindings[g_key_combo[r].binding].combos[g_key_combo[r].combo], combo);
+                if (!seen) g_key_combo[g_key_row_count++] = (key_combo_row_t){ .binding = i, .combo = c };
+            }
+        }
+    } else {
+        size_t count = 0;
+        const rubraview_key_context_info_t *all = rubraview_keymap_contexts(&count);
+        for (size_t c = 0; c <= count; ++c) {
+            bool heading = false;
+            for (size_t i = 0; i < app->keymap.count && g_key_row_count + 1 < KEY_ROWS_MAX; ++i) {
+                proven_u8str_view_t ctx = app->keymap.bindings[i].context;
+                bool here = c < count ? proven_u8str_view_eq(ctx, proven_u8str_view_from_cstr(all[c].name))
+                                      : rubraview_keymap_context_info(ctx) == NULL;
+                if (!here) continue;
+                if (!heading) { g_key_row[g_key_row_count++] = -(int32_t)c - 1; heading = true; }
+                g_key_row[g_key_row_count++] = (int32_t)i;
+            }
+        }
+    }
+    rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)g_key_row_count + 1);   /* heading + rows */
+}
+
+/* The binding a Keys row is, or -1 for a heading or a row of the by-key list. */
+static int32_t keymap_row_binding(int32_t row) {
+    if (g_keys_by_key || row < 1 || (size_t)row > g_key_row_count) return -1;
+    return g_key_row[row - 1];
 }
 
 static void settings_measure(app_state_t *app) {
@@ -445,7 +524,7 @@ void settings_open(app_state_t *app) {
     settings_grid(app, &cols, &rows);
     app->settings_view = rubraview_settings_view_create(rubraview_settings_document(), cols, rows);
     rubraview_settings_view_set_info(&app->settings_view, app, settings_info);   /* 1.30.1: long values wrap */
-    rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);  /* heading + bindings */
+    keymap_table_refresh(app);
     skip_dirs_table_rows(app);
     app->settings_open = true;
     app->settings_dirty = true;
@@ -908,7 +987,7 @@ static void keys_export_or_import(app_state_t *app, bool writing) {
         return;
     }
     app->keymap = keymap;
-    rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
+    keymap_table_refresh(app);
     skip_dirs_table_rows(app);
     settings_say(app, T("keys imported (Revert undoes this)"));
 }
@@ -1211,7 +1290,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             app->settings = app->settings_opened;
             app->settings.revision_total = total + 1;
             app->keymap = rubraview_keymap_copy(app->arena, &app->keymap_saved);
-            rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
+            keymap_table_refresh(app);
             skip_dirs_table_rows(app);
             app->key_capture = 0;
             settings_took_effect(app);
@@ -1221,7 +1300,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
         case RUBRAVIEW_SEVENT_DEFAULTS:
             rubraview_settings_reset(&app->settings);
             app->keymap = rubraview_keymap_parse(app->arena, cstr(rubraview_default_keymap()));
-            rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
+            keymap_table_refresh(app);
             skip_dirs_table_rows(app);
             app->key_capture = 0;
             settings_took_effect(app);
@@ -1232,7 +1311,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             rubraview_settings_reset_page(&app->settings, (rubraview_settings_tab_t)app->settings_view.page);
             if (app->settings_view.page == RUBRAVIEW_TAB_KEYS) {
                 app->keymap = rubraview_keymap_parse(app->arena, cstr(rubraview_default_keymap()));
-                rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)app->keymap.count + 1);
+                keymap_table_refresh(app);
                 app->key_capture = 0;
             }
             skip_dirs_table_rows(app);
@@ -1283,8 +1362,10 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 }
                 break;
             }
-            if (row < 1 || (size_t)row > app->keymap.count) break;
-            const rubraview_key_binding_t *b = &app->keymap.bindings[row - 1];
+            if (g_keys_by_key) { settings_say(app, T("the keys by key are to read: Show by function to change them")); break; }
+            int32_t at = keymap_row_binding(row);
+            if (at < 0) break;   /* a context's heading */
+            const rubraview_key_binding_t *b = &app->keymap.bindings[at];
             char text[160];
             if (event == RUBRAVIEW_SEVENT_TABLE_EDIT) {
                 app->key_capture = row;
@@ -1295,7 +1376,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             } else {
                 char one[64];
                 proven_u8str_view_t last = rubraview_key_combo_format(one, sizeof(one), b->combos[b->combo_count - 1]);
-                rubraview_keymap_unbind_last(&app->keymap, (size_t)row - 1);
+                rubraview_keymap_unbind_last(&app->keymap, (size_t)at);
                 snprintf(text, sizeof(text), T("took %.*s off %.*s (Revert puts it back)"),
                          (int)last.size, last.ptr, (int)b->action.size, b->action.ptr);
             }
@@ -1349,6 +1430,11 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 settings_say(app, rubraview_pal_shell_open_web("https://gmic.eu/download.html")
                                       ? T("the G'MIC download page is opening in the browser")
                                       : T("the browser could not be started"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("keys.by_key"))) {   /* RV-184 */
+                g_keys_by_key = !g_keys_by_key;
+                app->key_capture = 0;
+                keymap_table_refresh(app);
+                settings_say(app, g_keys_by_key ? T("the keys by key: what each does, and where") : T("the keys by function, a context at a time"));
             } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("app.open_folder"))) {   /* RV-185 */
                 settings_say(app, rubraview_pal_shell_open_folder(program_folder(app), false)
                                       ? T("Rubraview's folder is opening") : T("the folder could not be opened"));
@@ -1439,9 +1525,10 @@ static bool settings_key_of(rubraview_key_combo_t combo, rubraview_settings_key_
 /* The key pressed for a Keys row (D-14): added, or refused with the name
    of the action that has it — never taken away from it (owner, 2026-09-14). */
 static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) {
-    size_t index = (size_t)app->key_capture - 1;
+    int32_t at = keymap_row_binding(app->key_capture);
     app->key_capture = 0;
-    if (index >= app->keymap.count) return;
+    if (at < 0) return;
+    size_t index = (size_t)at;
     if (combo.modifiers == 0 && proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Escape"))) {
         settings_say(app, T("no key added"));
         return;

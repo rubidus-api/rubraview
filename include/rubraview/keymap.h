@@ -21,9 +21,9 @@ extern "C" {
  * layer maps to and from VK codes.
  *
  * A keymap.ini `[section]` is the binding's *context* (§3.7.1: which
- * viewing context is active — "navigation", "media", "slideshow", ...);
- * keys before any `[section]` (the ini global section) are context-
- * independent bindings. Each `key = value` line is one action id bound
+ * viewing context is active — "navigation", "playback", "slideshow", ...);
+ * `[common]` (once `[ui]`, or keys before any section) holds the bindings
+ * asked everywhere, kept as the context "" (RV-184, D-219). Each `key = value` line is one action id bound
  * to a comma-separated list of key combos, e.g.
  * `next_page = Right, PageDown, Space, J, D`.
  */
@@ -79,16 +79,59 @@ bool rubraview_key_combo_equal(rubraview_key_combo_t a, rubraview_key_combo_t b)
 
 /**
  * Whether one key bound in both contexts would leave one of the two
- * actions unreachable. The rule follows the viewer's dispatch: the
- * `navigation` context is asked first, then the global one, then `view`
- * — so a key in two of those three always reaches the same action and
- * never the other. `slideshow`, `media` and `subpage` are asked
- * *before* them only while a slide show runs or an animation or
- * multi-page file is open; a key they share with the rest keeps both
- * meanings (Space pauses a GIF and turns a page), so that is not a clash.
- * Neither is the same context, which is always a clash.
+ * actions unreachable. The rule follows the mode chains
+ * (rubraview_keymap_mode_chain, D-219): common, file, navigation and image
+ * are the layer under every kind of file, so a key in two of them always
+ * reaches the same one. The slide show's, a multi-page file's, playback's,
+ * a film's, music's and a text's own contexts are asked before that layer
+ * only while theirs is on screen; a key they share with it keeps both
+ * meanings (Space plays a film and turns a page), so that is not a clash.
+ * The same context always is.
  */
 bool rubraview_keymap_contexts_meet(proven_u8str_view_t a, proven_u8str_view_t b);
+
+/* ---- RV-184 (D-219): contexts by the kind of file on screen ---- */
+
+/** What is on screen, which decides the contexts a key is looked up in. */
+typedef enum rubraview_key_mode {
+    RUBRAVIEW_KEY_MODE_PICTURE = 0,   /* a picture or a comic's page */
+    RUBRAVIEW_KEY_MODE_MULTIPAGE,     /* a TIFF or an ICO of several pages */
+    RUBRAVIEW_KEY_MODE_ANIMATION,     /* an animated picture */
+    RUBRAVIEW_KEY_MODE_FILM,
+    RUBRAVIEW_KEY_MODE_MUSIC,
+    RUBRAVIEW_KEY_MODE_TEXT,
+    RUBRAVIEW_KEY_MODE_COUNT
+} rubraview_key_mode_t;
+
+typedef struct rubraview_key_context_info {
+    const char *name;      /* the ini section; "" is common, written [common] */
+    const char *heading;   /* the reader's words, for the Keymap page and F1 (N_) */
+    const char *when;      /* when it is asked (N_) */
+} rubraview_key_context_info_t;
+
+/** The contexts in the order the Keymap page and F1 show them; `*count` set. */
+const rubraview_key_context_info_t *rubraview_keymap_contexts(size_t *count);
+
+/** The context's entry, or NULL for a name this build does not have. */
+const rubraview_key_context_info_t *rubraview_keymap_context_info(proven_u8str_view_t context);
+
+/**
+ * The contexts `mode` asks, first to last, into `out` (at most `cap`): the slide show's first while one runs,
+ * the mode's own, then navigation, file and common, and the slide show's last (so S starts one).
+ * The one table dispatch, the clash rule, the Keymap page and the tests read. Returns how many.
+ */
+size_t rubraview_keymap_mode_chain(rubraview_key_mode_t mode, bool slideshow_running, proven_u8str_view_t *out, size_t cap);
+
+/** The action `combo` means in `mode`: the first context of its chain that binds it; empty for none. */
+proven_u8str_view_t rubraview_keymap_resolve(const rubraview_keymap_t *keymap, rubraview_key_mode_t mode, bool slideshow_running,
+                                             rubraview_key_combo_t combo);
+
+/**
+ * An older keymap.ini's sections ([ui], [view], [media], [subpage], [animation]) read into today's: each binding
+ * whose action `defaults` binds goes to that action's context there; any other keeps its section, renamed by
+ * the old names (view → image, media and animation → playback, subpage → multipage). Changes `keymap` in place.
+ */
+void rubraview_keymap_place_by_action(rubraview_keymap_t *keymap, const rubraview_keymap_t *defaults);
 
 /** A copy that shares nothing mutable with `source` — what Revert goes back to. */
 rubraview_keymap_t rubraview_keymap_copy(proven_arena_t *arena, const rubraview_keymap_t *source);
@@ -118,7 +161,7 @@ bool rubraview_keymap_unbind_last(rubraview_keymap_t *keymap, size_t index);
 
 /**
  * keymap.ini in the INI and TOML subset (D-13): a section per context in
- * order of first appearance, the global one as `[ui]`, every value a
+ * order of first appearance, the global one as `[common]`, every value a
  * quoted comma-separated list. Parsing the result gives an equal keymap.
  */
 proven_u8str_view_t rubraview_keymap_serialize(proven_arena_t *arena, const rubraview_keymap_t *keymap);

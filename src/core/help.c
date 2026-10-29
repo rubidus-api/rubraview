@@ -4,18 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 
-/* The contexts, in the order the help shows them, each with the words a
-   reader would use for it. A context the keymap has and this table does
-   not still appears, under its own name. */
-static const struct { const char *context; const char *heading; } GROUPS[] = {
-    { "",           N_("Everywhere") },
-    { "navigation", N_("Moving about") },
-    { "view",       N_("Looking at a picture") },
-    { "media",      N_("Film and music") },
-    { "subpage",    N_("Pages inside one file") },
-    { "slideshow",  N_("Slide show") },
-};
-
 static proven_u8str_view_t arena_text(proven_arena_t *arena, const char *text, size_t len) {
     proven_result_mem_mut_t res = proven_arena_alloc(arena, len + 1);
     if (!proven_is_ok(res.err)) return PROVEN_LIT("");
@@ -109,8 +97,10 @@ size_t rubraview_help_build(proven_arena_t *arena,
     if (!push(out, max, &count, RUBRAVIEW_HELP_NOTE, empty, lit_text(T("F1 opens and closes this window. It stays open while you read.")))) return count;
     if (!push(out, max, &count, RUBRAVIEW_HELP_NOTE, empty, lit_text(T("Every key below can be changed on the settings window's Keys page.")))) return count;
 
-    size_t group_count = sizeof(GROUPS) / sizeof(GROUPS[0]);
-    /* The known groups in their order, then anything else the keymap has. */
+    /* RV-184 (D-219): the keymap's contexts in their order, each named with when it is asked; then anything
+       else the keymap has, under its own name. */
+    size_t group_count = 0;
+    const rubraview_key_context_info_t *groups = rubraview_keymap_contexts(&group_count);
     for (size_t pass = 0; pass <= group_count; ++pass) {
         bool wrote_heading = false;
         for (size_t i = 0; i < keymap->count; ++i) {
@@ -118,15 +108,18 @@ size_t rubraview_help_build(proven_arena_t *arena,
             if (binding->combo_count == 0) continue;
 
             if (pass < group_count) {
-                if (!proven_u8str_view_eq(binding->context, proven_u8str_view_from_cstr(GROUPS[pass].context))) continue;
-            } else {
-                bool known = false;
-                for (size_t g = 0; g < group_count && !known; ++g) known = proven_u8str_view_eq(binding->context, proven_u8str_view_from_cstr(GROUPS[g].context));
-                if (known) continue;
+                if (!proven_u8str_view_eq(binding->context, proven_u8str_view_from_cstr(groups[pass].name))) continue;
+            } else if (rubraview_keymap_context_info(binding->context)) {
+                continue;
             }
 
             if (!wrote_heading) {
-                proven_u8str_view_t heading = pass < group_count ? lit_text(rubraview_tr(GROUPS[pass].heading)) : binding->context;
+                proven_u8str_view_t heading = binding->context;
+                if (pass < group_count) {
+                    char line[160];
+                    int n = snprintf(line, sizeof(line), "%s (%s)", rubraview_tr(groups[pass].heading), rubraview_tr(groups[pass].when));
+                    heading = arena_text(arena, line, n > 0 ? ((size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1) : 0);
+                }
                 if (!push(out, max, &count, RUBRAVIEW_HELP_BLANK, empty, empty)) return count;
                 if (!push(out, max, &count, RUBRAVIEW_HELP_HEADING, empty, heading)) return count;
                 wrote_heading = true;
@@ -135,6 +128,42 @@ size_t rubraview_help_build(proven_arena_t *arena,
             proven_u8str_view_t label = rubraview_help_action_label(boxes, binding->action);
             if (label.size == 0) label = spell_out(arena, binding->action);
             if (!push(out, max, &count, RUBRAVIEW_HELP_ENTRY, combo_list(arena, binding), label)) return count;
+        }
+    }
+
+    /* RV-184 (owner, 2026-10-29: "키->기능 화면도"): each key once, with what it does where — the first time it is
+       met in the keymap's order, every context that binds it after the first named. */
+    if (!push(out, max, &count, RUBRAVIEW_HELP_BLANK, empty, empty)) return count;
+    if (!push(out, max, &count, RUBRAVIEW_HELP_HEADING, empty, lit_text(T("By key")))) return count;
+    for (size_t i = 0; i < keymap->count; ++i) {
+        for (size_t c = 0; c < keymap->bindings[i].combo_count; ++c) {
+            rubraview_key_combo_t combo = keymap->bindings[i].combos[c];
+            bool seen = false;
+            for (size_t e = 0; e < i && !seen; ++e)
+                for (size_t f = 0; f < keymap->bindings[e].combo_count && !seen; ++f) seen = rubraview_key_combo_equal(keymap->bindings[e].combos[f], combo);
+            for (size_t f = 0; f < c && !seen; ++f) seen = rubraview_key_combo_equal(keymap->bindings[i].combos[f], combo);
+            if (seen) continue;
+            char line[512];
+            size_t at = 0;
+            line[0] = '\0';
+            for (size_t e = i; e < keymap->count; ++e) {
+                const rubraview_key_binding_t *b = &keymap->bindings[e];
+                bool binds = false;
+                for (size_t f = 0; f < b->combo_count && !binds; ++f) binds = rubraview_key_combo_equal(b->combos[f], combo);
+                if (!binds) continue;
+                proven_u8str_view_t label = rubraview_help_action_label(boxes, b->action);
+                if (label.size == 0) label = spell_out(arena, b->action);
+                const rubraview_key_context_info_t *info = rubraview_keymap_context_info(b->context);
+                proven_u8str_view_t where = info ? lit_text(rubraview_tr(info->heading)) : b->context;
+                int n = snprintf(line + at, sizeof(line) - at, "%s%.*s (%.*s)", at ? "  ·  " : "", (int)label.size, (const char *)label.ptr,
+                                 (int)where.size, (const char *)where.ptr);
+                if (n <= 0 || (size_t)n >= sizeof(line) - at) break;
+                at += (size_t)n;
+            }
+            char key[64];
+            proven_u8str_view_t named = rubraview_key_combo_format(key, sizeof(key), combo);
+            if (!push(out, max, &count, RUBRAVIEW_HELP_ENTRY, arena_text(arena, (const char *)named.ptr, named.size),
+                      arena_text(arena, line, at))) return count;
         }
     }
 

@@ -450,6 +450,9 @@ static const char *const PARTS[] = {
 "  toggle keys.use_keymap_file     \"Use keymap.ini\"          = true wired\n"
 "  action keys.export              \"Export keys to a file\"\n"
 "  action keys.import              \"Import keys from a file\"\n"
+"  action keys.by_key              \"Show by key / by function\"\n"
+"  note   \"By function: each kind of file's keys under its heading, which says when they are asked. By key: each key\"\n"
+"  note   \"once, with what it does in each (Space: next page, play or pause, auto-scroll).\"\n"
 "  table  keymap\n",
 /* The owner (2026-10-17): a fuller explanation on each harder setting's name. */
 "help general.single_instance \"On: a file opened from Explorer goes to the window already open instead of starting a second viewer. Off: every file opens its own window.\"\n"

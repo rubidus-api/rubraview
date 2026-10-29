@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.37.exe              the viewer, as built
-dist/rubraview-v1.39.37/                 the release bundle
-dist/rubraview-v1.39.37.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.38.exe              the viewer, as built
+dist/rubraview-v1.39.38/                 the release bundle
+dist/rubraview-v1.39.38.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -312,7 +312,9 @@ settings have a button for it). The Toolbar then starts
 with a stop button and the delay between slides ("3 s") where a film's
 speed button would be: turn the wheel over it, or hold it and drag up or
 down, and the delay moves half a second; a tap lists 1, 2, 3, 5 and
-10 seconds to choose from. A right click on the picture while it runs opens **the slide
+10 seconds to choose from. `Ctrl+]` shortens it (faster slides) and `Ctrl+[` lengthens it, half a
+second at a time, a tenth with `Shift` as well — the same keys as a film's speed and a text's
+auto-scroll. A right click on the picture while it runs opens **the slide
 show's settings**: the delay — type it in the field (`Enter` keeps it) or
 press **-** and **+** for half a second less or more — how one slide
 changes to the next (**Cut**, **Fade**, **Slide**, **Zoom**, the same as
@@ -357,9 +359,9 @@ when it closes.
 ## Animated images
 
 An animated GIF, WebP or PNG (APNG, named `.png` or `.apng`) is played as a film is. `Space` pauses it, `.`
-and `,` step a frame, `Left` and `Right` seek five seconds, `Ctrl+[` and
-`Ctrl+]` set the two ends of a repeat and `\` clears it, and `]` / `[`
-change its speed from 0.25x to 4x. The Toolbar has the same on buttons,
+and `,` step a frame, `Left` and `Right` seek five seconds, `Shift+[` and
+`Shift+]` set the two ends of a repeat and `\` clears it, and `Ctrl+]` /
+`Ctrl+[` change its speed from 0.25x to 4x. The Toolbar has the same on buttons,
 with Stop and a seek bar to click; paused, the title says where it is.
 
 At its end an animation goes round again. Settings › Viewer › When an
@@ -838,18 +840,18 @@ While it does:
 
 - `Space` plays and pauses, `←` / `→` jump 5 seconds, `↑` / `↓` change the
   volume, `Shift+M` mutes.
-- `Ctrl+[` marks where a repeat starts and `Ctrl+]` where it ends; `\` turns it off.
+- `Shift+[` marks where a repeat starts and `Shift+]` where it ends; `\` turns it off.
   The point you just set wins: an A at or after B moves B to the end of
   the film, a B at or before A (or with no A) moves A to its start.
 - `Shift+\` opens the same two points as numbers, so a repeat can be set
   to the millisecond: each point has three fields, hours, minutes and
   seconds (with up to three decimals); a field you come to is replaced by
   the first digit you type, and `:` goes on to the next field. Inside
-  that box **A = now** and **B = now** (or `[` and `]`, with or without `Ctrl`) put the moment you are at into A or B, with the same rule —
+  that box **A = now** and **B = now** (or `[` and `]`, with or without `Shift`) put the moment you are at into A or B, with the same rule —
   so you can tap a point, correct the number, and tap it again. Click a
   field or press `Tab` to move between them (`Up` / `Down` go to the
   other point), `Enter` keeps them, `Esc` or the `X` at the box's top right leaves them as they were.
-  `]` / `[` play faster or slower (0.25x to 4x — the sound's pitch
+  `Ctrl+]` / `Ctrl+[` play faster or slower (0.25x to 4x — the sound's pitch
   follows), `Ctrl+\` goes back to normal.
 - The Toolbar's seek bar shows the time; click or drag on it to go
   somewhere else.
@@ -999,7 +1001,7 @@ same place.
 (CP949 / EUC-KR, ISO-2022-KR, Johab), Japanese (Shift_JIS, EUC-JP,
 ISO-2022-JP), Chinese (GBK / GB2312, GB18030, HZ, Big5, CNS 11643) and
 Western (CP1252, DOS's CP437 for `.nfo` art). Each file's encoding is
-guessed; the title bar says which it was read as. `E` reads it in the next
+guessed; the title bar says which it was read as. `Shift+N` reads it in the next
 one, and the one chosen by hand is kept for that file. Settings › Text ›
 Encoding can name one for every file instead. Files over 64 MB are not shown.
 
@@ -1016,12 +1018,13 @@ Joined lines get a space between them, except between Chinese or Japanese
 characters, which are written without one. `Shift+B` removes the indents at
 the start of each line or paragraph, or keeps them.
 
-**Auto-scroll.** `S` (or `Space`) starts and stops it. While it runs, `+` / `-`, the
+**Auto-scroll.** `S` (or `Space`) starts and stops it. While it runs, `Ctrl+]` / `Ctrl+[`
+(faster and slower, as a film's speed and the slide show's), the
 wheel, or `↑` / `↓` change its speed, in lines a minute, shown at the
 bottom right; a click stops it. It stops at the end.
 
-**Size and spacing.** `Ctrl+wheel` or `Ctrl+Plus` / `Ctrl+Minus` the size of
-the letters, `Alt+wheel` or `Ctrl+[` / `Ctrl+]` the space between lines. `W` wraps the
+**Size and spacing.** `Ctrl+wheel`, `+` / `-` or `Ctrl+Plus` / `Ctrl+Minus` the size of
+the letters (as `+` / `-` zoom a picture), `Alt+wheel` or `Alt+Plus` / `Alt+Minus` the space between lines. `W` wraps the
 lines to the window or lets long lines run on (`Shift+wheel` then moves
 sideways); the Toolbar has the same, and **Word wrap** for the wrapping.
 Settings › Text also has the font, the side margins, a column at most so
@@ -1033,8 +1036,9 @@ of your own for the text, the background, links and what Find found
 by screens, `Home` / `End` to the start and the end. The place read to is
 kept for each file, and the file opens there the next time.
 
-**Finding and copying.** `Ctrl+F` opens a box above the text: `Enter` or `F3`
-the next, `Shift+Enter` or `Shift+F3` the one before; letters' case and
+**Finding and copying.** `Ctrl+F` opens a box above the text: `Enter`, `F3` or `Ctrl+G`
+the next, `Shift+Enter`, `Shift+F3` or `Ctrl+Shift+G` the one before (with the box closed,
+`Ctrl+G` / `Ctrl+Shift+G`; `F3` is the file list there, as everywhere); letters' case and
 full-width forms are ignored, and the bar says which match of how many it
 is. Drag over the text to select it, `Ctrl+A` for all, `Ctrl+C` copies what
 is selected, as it is shown.
@@ -1042,9 +1046,9 @@ is selected, as it is shown.
 
 Settings › Text › **Kind** under Auto-scroll: **smooth** glides at its
 speed; **pages** moves a screen at a time (one line kept to read on from)
-every **A screen every** seconds, `+` / `-` changing it while it runs. `A`, `Space` or a click in the middle of
+every **A screen every** seconds, `Ctrl+]` / `Ctrl+[` changing it while it runs. `A`, `Space` or a click in the middle of
 the window starts and stops auto-scroll; the wheel always moves the text
-(the speed is `+` / `-` or the arrows). `,` and `.` go to the previous and
+(the speed is `Ctrl+]` / `Ctrl+[` or the arrows). `,` and `.` go to the previous and
 the next file; the Toolbar has the list (**List**) too.
 **Headings stand alone** keeps a short line with no sentence's end and a
 blank line before and after it (`제2장`, `Chapter 2`) as a paragraph of
@@ -1099,7 +1103,7 @@ bar while it shows; ☰ › Align the Floating Widget puts it back there):
   bigger or smaller buttons. The wheel over R makes the Floating Widget
   itself — F, T, P and R — bigger or smaller, 10 % a notch from 50 % to
   250 %; Settings › Display › Floating Widget size holds the same number,
-  and settings.ini keeps it (`[ui] widget_size`).
+  and settings.ini keeps it (`[ui] widget_size`; settings.ini's sections are its own, not the keys').
 
 The Toolbar changes with what is on screen — playing controls for a
 video or music, frame steps for an animation, layout and the next or
@@ -1612,9 +1616,20 @@ shows are the ones in force, so a key you change appears changed.
 `F10` or `Ctrl+,` opens the settings window, a window of its own. A change
 takes effect at once; **Revert** goes back to what was there when it
 opened, **Reset: all** to the defaults, and the file is written when the
-window closes. The **Keys** page lists every key: select one and press
-`Enter`, then the key to add; `Delete` takes the last one off. A key another
-action already uses is refused, and the message says which. **Export keys
+window closes. The **Keys** page lists every key, under a heading for each kind of file
+that says when its keys are asked (everywhere; files; moving about;
+pictures; pages inside one file; the slide show; playing — a film, music or
+an animation; films; music; text): select one and press `Enter`, then the
+key to add; `Delete` takes the last one off. A key another action already
+uses where the two are asked together is refused, and the message says
+which. **Show by key / by function** turns the list round: each key once,
+with what it does in each kind of file (`Space`: next page, play or pause,
+auto-scroll); F1's help ends with the same list. One key does one thing,
+or a like one, wherever it is pressed: `]` / `[` the folder or archive,
+`Ctrl+]` / `Ctrl+[` faster and slower (a film's speed, the slide show's
+delay, a text's auto-scroll), `+` / `-` bigger and smaller, `Shift+N` the
+next code page. A `keymap.ini` written by an earlier version is read into
+these headings by what each key does. **Export keys
 to a file** saves them to share or keep; **Import keys from a file** puts a
 saved set on the page, and Revert takes it back off.
 
@@ -1654,38 +1669,13 @@ listed under a later heading only means that while that is on screen.
 | `Shift+T` | Pin the Toolbar open |
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |
 | `Ctrl+Shift+T` | Always on top of other windows |
-| `O`, `Ctrl+O` | Open a file |
-| `Ctrl+Shift+O` | Open a folder |
-| `F4` | Filmstrip |
 | `Shift+I` | Information bar |
-| `E` | Adjust the picture |
-| `Ctrl+E` | Export |
-| `Ctrl+Shift+S` | Save a copy as |
-| `Ctrl+C` | Copy the frame on screen (a film, an animation), or the picture itself |
-| `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
-| `Ctrl+B` | Convert many files |
 | `Ctrl+N` | A new window: the viewer once more, nothing open |
 | `F10`, `Ctrl+,` | Settings |
 | `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
-| `P` | The playlist, or this folder's files, floating over the picture |
-| `Ctrl+R` | At the end of a film or a song: stop, the next file, this one again, all round, shuffle; a tap on its button lists them to choose from |
 | `Shift+P` | Mini player |
-| `G` | Pixel grid past 400% |
 | `Esc` | Quit |
-| `Delete` | To the recycle bin; a page inside an archive is deleted from it (asks first) |
-| `Shift+Delete` | Delete for good (asks first) |
-| `Ctrl+Z` | Undo a move, copy or rename |
-| `F2` | Rename, keeping the extension; a page inside an archive too |
-| `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
-| `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
-| `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
-| `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
-| `K` | Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once |
-| `Ctrl+Shift+R` | The recent files in a list window: when each was opened, its size and folder; take files off the list |
-| `F7` | Move the file on screen to the folder set for it |
-| `Shift+F6` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
-| `Shift+F7` | Move the file on screen to a folder typed or browsed; one not there yet is made |
 | `Ctrl+Left` | Window narrower |
 | `Ctrl+Right` | Window wider |
 | `Ctrl+Up` | Window shorter |
@@ -1695,7 +1685,32 @@ listed under a later heading only means that while that is on screen.
 | `Alt+Up` | Move the window up |
 | `Alt+Down` | Move the window down |
 
-**Moving between pages**
+**Files (always)**
+
+| Keys | What it does |
+|---|---|
+| `O`, `Ctrl+O` | Open a file |
+| `Ctrl+Shift+O` | Open a folder |
+| `Ctrl+Shift+R` | The recent files in a list window: when each was opened, its size and folder; take files off the list |
+| `E` | Adjust the picture |
+| `Ctrl+E` | Export |
+| `Ctrl+Shift+S` | Save a copy as |
+| `Ctrl+B` | Convert many files |
+| `Delete` | To the recycle bin; a page inside an archive is deleted from it (asks first) |
+| `Shift+Delete` | Delete for good (asks first) |
+| `Ctrl+Z` | Undo a move, copy or rename |
+| `F2` | Rename, keeping the extension; a page inside an archive too |
+| `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
+| `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
+| `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
+| `F7` | Move the file on screen to the folder set for it |
+| `Shift+F6` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
+| `Shift+F7` | Move the file on screen to a folder typed or browsed; one not there yet is made |
+| `K` | Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once |
+| `Ctrl+C` | Copy the frame on screen (a film, an animation), or the picture itself |
+| `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
+
+**Moving about (always)**
 
 | Keys | What it does |
 |---|---|
@@ -1706,12 +1721,14 @@ listed under a later heading only means that while that is on screen.
 | `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
 | `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
-| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
-| `Shift+B` | Detect two-page spreads |
 | `]` | Next folder or archive |
 | `[` | Previous folder or archive |
+| `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
+| `F4` | Filmstrip |
+| `P` | The playlist, or this folder's files, floating over the picture |
+| `Shift+N` | Read the open archive's file names in the next code page (Shift-JIS, GBK, Big5, ...), for that archive only |
 
-**The view**
+**Pictures (a picture, a comic's page, an animation, a film)**
 
 | Keys | What it does |
 |---|---|
@@ -1735,27 +1752,37 @@ listed under a later heading only means that while that is on screen.
 | `H` | Flip left-right |
 | `V` | Flip upside down |
 | `N` | Crisp scaling for pixel art |
-| `Shift+N` | Read the open archive's file names in the next code page (Shift-JIS, GBK, Big5, ...), for that archive only |
+| `G` | Pixel grid past 400% |
+| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
+| `Shift+B` | Detect two-page spreads |
 
-**While a slide show runs**
+**Pages inside one file (a TIFF or an ICO of several pages)**
+
+| Keys | What it does |
+|---|---|
+| `.` | Next page of the file |
+| `,` | Previous page of the file |
+
+**Slide show (while one runs; S starts one anywhere)**
 
 | Keys | What it does |
 |---|---|
 | `S`, `F5` | Start or stop the slide show |
-| `Ctrl+]` | Slower slides (0.5 s) |
-| `Ctrl+[` | Faster slides (0.5 s) |
-| `Shift+]` | Slower slides (0.1 s) |
-| `Shift+[` | Faster slides (0.1 s) |
+| `Ctrl+]` | Faster slides (0.5 s) |
+| `Ctrl+[` | Slower slides (0.5 s) |
+| `Ctrl+Shift+]` | Faster slides (0.1 s) |
+| `Ctrl+Shift+[` | Slower slides (0.1 s) |
 
-**While a video, music or animated picture is on screen**
+**Playing (a film, music, an animation)**
 
 | Keys | What it does |
 |---|---|
 | `Space` | Play / pause |
 | `.` | One frame forward |
 | `,` | One frame back |
-| `]` | Faster (0.25x a step) |
-| `[` | Slower (0.25x a step) |
+| `Ctrl+]` | Faster (0.25x a step) |
+| `Ctrl+[` | Slower (0.25x a step) |
+| `Ctrl+\` | Normal speed |
 | `Right` | 5 seconds on; its Toolbar button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
 | `Left` | 5 seconds back; its Toolbar button, held, offers 5 s to 5 min the same way |
 | `Shift+Right` | 30 seconds on |
@@ -1765,11 +1792,16 @@ listed under a later heading only means that while that is on screen.
 | `Up` | Volume up 5% |
 | `Down` | Volume down 5% |
 | `Shift+M` | Mute / sound |
-| `Ctrl+[` | Repeat from here (A) |
-| `Ctrl+]` | Repeat to here (B) |
+| `Shift+[` | Repeat from here (A) |
+| `Shift+]` | Repeat to here (B) |
 | `\` | Repeat off |
 | `Shift+\` | Repeat by number: the A-B box (Toolbar `Set A-B`), A = now and B = now take the moment playing |
-| `Ctrl+\` | Normal speed |
+| `Ctrl+R` | At the end of a film or a song: stop, the next file, this one again, all round, shuffle; a tap on its button lists them to choose from |
+
+**Films**
+
+| Keys | What it does |
+|---|---|
 | `Z` | Subtitles half a second earlier |
 | `X` | Subtitles half a second later |
 | `Shift+Z` | Subtitles a tenth of a second earlier |
@@ -1779,12 +1811,32 @@ listed under a later heading only means that while that is on screen.
 | `C` | Next subtitles |
 | `Shift+C` | The film's subtitles as a list in a window of their own: a click goes to one, the boxes choose, Earlier and Later move the chosen |
 
-**A multi-page TIFF or ICO**
+**Text (a text page)**
 
 | Keys | What it does |
 |---|---|
-| `.` | Next page of the file |
-| `,` | Previous page of the file |
+| `S`, `Space` | Auto-scroll a text file: start or stop |
+| `Ctrl+]`, `Shift+Up` | Auto-scroll faster |
+| `Ctrl+[`, `Shift+Down` | Auto-scroll slower |
+| `Down` | Text: a line down (while auto-scrolling, faster) |
+| `Up` | Text: a line up (while auto-scrolling, slower) |
+| `PageDown` | Text: a screen down; at the end, the next file |
+| `PageUp`, `Shift+Space` | Text: a screen up; at the start, the file before |
+| `Home` | Text: to its start |
+| `End` | Text: to its end |
+| `+`, `Ctrl++` | Text: larger letters |
+| `-`, `Ctrl+-` | Text: smaller letters |
+| `Alt++` | Text: more space between lines |
+| `Alt+-` | Text: less space between lines |
+| `B` | Text: line breaks as they are, all in one run, blank lines dropped, or paragraphs, round; a tap on its button lists them to choose from |
+| `Shift+B` | Text: remove or keep the indents |
+| `W` | Text: wrap lines to the window, or not |
+| `Ctrl+F` | Text: find |
+| `Ctrl+G` | Text: find the next |
+| `Ctrl+Shift+G` | Text: find the one before |
+| `Shift+N` | Text: read the file in the next encoding; a tap on its button lists them to choose from |
+| `Ctrl+C` | Text: copy what is selected |
+| `Ctrl+A` | Text: select all |
 
 **No key of its own: on the Toolbar or the right click**
 

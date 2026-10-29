@@ -1683,6 +1683,8 @@ bool details_beside(proven_arena_t *arena, proven_u8str_view_t picture, rubravie
 int details_keep(proven_u8str_view_t source, proven_u8str_view_t written, proven_u8str_view_t named, rubraview_export_format_t format,
                         const rubraview_export_options_t *options);
 void dispatch_key(app_state_t *app, rubraview_key_combo_t combo);
+rubraview_key_mode_t key_mode(const app_state_t *app);   /* RV-184: what is on screen, for the keys */
+void keymap_table_refresh(app_state_t *app);              /* RV-184: the Keys table's rows */
 bool drain_one_pending_decode(app_state_t *app);
 void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi);
 void draw_box(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,

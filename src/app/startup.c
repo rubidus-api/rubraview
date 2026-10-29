@@ -41,8 +41,14 @@ void load_keymap(app_state_t *app) {
     if (use_file && text.size == 0 && app->config_mode != RUBRAVIEW_CONFIG_PORTABLE) {
         text = rubraview_pal_fs_read_file(app->arena, PROVEN_LIT("keymap.ini"), KEYMAP_MAX_BYTES);
     }
+    bool own = text.size > 0;
     if (text.size == 0) text = cstr(rubraview_default_keymap());
     app->keymap = rubraview_keymap_parse(app->arena, text);
+    /* RV-184 (D-219): a file saved before the contexts were split puts each action where it is now */
+    if (own) {
+        rubraview_keymap_t defaults = rubraview_keymap_parse(app->arena, cstr(rubraview_default_keymap()));
+        rubraview_keymap_place_by_action(&app->keymap, &defaults);
+    }
 }
 
 void build_slides(app_state_t *app) {

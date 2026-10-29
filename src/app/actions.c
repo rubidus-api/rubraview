@@ -1452,7 +1452,8 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
        screen took its Enter, and the typed path went nowhere (VM,
        2026-09-28). */
     if (app->rename_active) {
-        if (app->rename_is_find && (key_is(combo, "F3") || ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && key_is(combo, "Enter")))) {
+        if (app->rename_is_find && (key_is(combo, "F3") || ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && key_is(combo, "Enter")) ||
+                                    ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "G")))) {   /* RV-184: Ctrl+G as with the box closed */
             text_find_step(app, !(combo.modifiers & RUBRAVIEW_MOD_SHIFT));   /* RFC-0005: back with Shift */
             return true;
         }
@@ -1572,33 +1573,17 @@ void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     }
     if (triage_handle_key(app, combo)) return;
     if (picker_handle_key(app, combo)) return;
-    /* §3.7.1: the slide show's own bindings win while it is running,
-       then the viewing context, then the global section. */
-    if (app->slideshow_running) {
-        proven_u8str_view_t action = rubraview_keymap_find_action(&app->keymap, PROVEN_LIT("slideshow"), combo);
-        if (action.size > 0) { handle_action(app, action); return; }
-    }
+    /* §3.7.1, RV-184 (D-219): the contexts of what is on screen, in the order rubraview_keymap_mode_chain gives —
+       the slide show's while one runs, the kind of file's own, then navigation, file and common. One table, so
+       what a key does here is what the Keymap page and F1 say it does. */
+    handle_action(app, rubraview_keymap_resolve(&app->keymap, key_mode(app), app->slideshow_running, combo));
+}
 
-    /* §3.20: while an animated image or a multi-page file is the page
-       being read, its own context is consulted first. This is what lets
-       `Space` and `Ctrl + [` mean two things without either meaning
-       being lost — see the comment on those sections in
-       src/core/default_keymap.c. */
-    /* RFC-0005: a text page's own keys first. */
-    if (text_active(app)) {
-        proven_u8str_view_t action = rubraview_keymap_find_action(&app->keymap, PROVEN_LIT("text"), combo);
-        if (action.size > 0) { handle_action(app, action); return; }
-    }
-
-    if (app->anim_active || app->media) {
-        proven_u8str_view_t context = (app->media || app->animation.kind == RUBRAVIEW_FRAMES_ANIMATION)
-                            ? PROVEN_LIT("media") : PROVEN_LIT("subpage");
-        proven_u8str_view_t action = rubraview_keymap_find_action(&app->keymap, context, combo);
-        if (action.size > 0) { handle_action(app, action); return; }
-    }
-
-    proven_u8str_view_t action = rubraview_keymap_find_action(&app->keymap, PROVEN_LIT("navigation"), combo);
-    if (action.size == 0) action = rubraview_keymap_find_action(&app->keymap, PROVEN_LIT("view"), combo);
-    if (action.size == 0) action = rubraview_keymap_find_action(&app->keymap, PROVEN_LIT("slideshow"), combo);
-    handle_action(app, action);
+/* RV-184: what is on screen, for the keys. */
+rubraview_key_mode_t key_mode(const app_state_t *app) {
+    if (text_active(app)) return RUBRAVIEW_KEY_MODE_TEXT;
+    if (app->media) return app->media_info.has_video ? RUBRAVIEW_KEY_MODE_FILM : RUBRAVIEW_KEY_MODE_MUSIC;
+    if (app->anim_active) return app->animation.kind == RUBRAVIEW_FRAMES_ANIMATION ? RUBRAVIEW_KEY_MODE_ANIMATION
+                                                                                 : RUBRAVIEW_KEY_MODE_MULTIPAGE;
+    return RUBRAVIEW_KEY_MODE_PICTURE;
 }

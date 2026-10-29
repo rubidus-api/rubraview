@@ -1,5 +1,6 @@
 #include "rubraview/keymap.h"
 #include "rubraview/ini.h"
+#include "rubraview/lang.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -99,9 +100,12 @@ rubraview_keymap_t rubraview_keymap_parse(proven_arena_t *arena, proven_u8str_vi
            had a name those bindings sat above the first section, and an
            older keymap.ini that still does that reads the same way. */
         proven_u8str_view_t context = doc.entries[i].section;
-        if (proven_u8str_view_eq(context, PROVEN_LIT("ui"))) context = PROVEN_LIT("");
-        /* D-16: [animation] became [media]; a keymap.ini saved before still loads. */
-        if (proven_u8str_view_eq(context, PROVEN_LIT("animation"))) context = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)"media", .size = 5 };
+        /* RV-184: [common] is the name now; [ui] still reads the same */
+        if (proven_u8str_view_eq(context, PROVEN_LIT("ui")) || proven_u8str_view_eq(context, PROVEN_LIT("common"))) context = PROVEN_LIT("");
+        /* D-16: [animation] became [media], which RV-184 split; what is not placed by its action is playback's. */
+        else if (proven_u8str_view_eq(context, PROVEN_LIT("animation")) || proven_u8str_view_eq(context, PROVEN_LIT("media"))) context = PROVEN_LIT("playback");
+        else if (proven_u8str_view_eq(context, PROVEN_LIT("view"))) context = PROVEN_LIT("image");
+        else if (proven_u8str_view_eq(context, PROVEN_LIT("subpage"))) context = PROVEN_LIT("multipage");
         rubraview_key_binding_t binding = {
             .context = context,
             .action = doc.entries[i].key,
@@ -172,10 +176,88 @@ bool rubraview_key_combo_equal(rubraview_key_combo_t a, rubraview_key_combo_t b)
     return combo_matches(a, b);
 }
 
+/* RV-184 (D-219): the contexts, in the order they are shown. */
+static const rubraview_key_context_info_t CONTEXTS[] = {
+    { "",           N_("Everywhere"),                N_("always") },
+    { "file",       N_("Files"),                     N_("always") },
+    { "navigation", N_("Moving about"),              N_("always") },
+    { "image",      N_("Pictures"),                  N_("a picture, a comic's page, an animation, a film") },
+    { "multipage",  N_("Pages inside one file"),     N_("a TIFF or an ICO of several pages") },
+    { "slideshow",  N_("Slide show"),                N_("while a slide show runs; S starts one") },
+    { "playback",   N_("Playing"),                   N_("a film, music, an animation") },
+    { "video",      N_("Films"),                     N_("a film") },
+    { "audio",      N_("Music"),                     N_("music") },
+    { "text",       N_("Text"),                      N_("a text page") },
+};
+#define CONTEXT_COUNT (sizeof(CONTEXTS) / sizeof(CONTEXTS[0]))
+
+const rubraview_key_context_info_t *rubraview_keymap_contexts(size_t *count) {
+    if (count) *count = CONTEXT_COUNT;
+    return CONTEXTS;
+}
+
+const rubraview_key_context_info_t *rubraview_keymap_context_info(proven_u8str_view_t context) {
+    for (size_t i = 0; i < CONTEXT_COUNT; ++i) {
+        if (proven_u8str_view_eq(context, proven_u8str_view_from_cstr(CONTEXTS[i].name))) return &CONTEXTS[i];
+    }
+    return NULL;
+}
+
+/* Each mode's own contexts, first to last; navigation, file and common follow every one. */
+static const char *const MODE_OWN[RUBRAVIEW_KEY_MODE_COUNT][3] = {
+    [RUBRAVIEW_KEY_MODE_PICTURE]   = { "image", NULL, NULL },
+    [RUBRAVIEW_KEY_MODE_MULTIPAGE] = { "multipage", "image", NULL },
+    [RUBRAVIEW_KEY_MODE_ANIMATION] = { "playback", "image", NULL },
+    [RUBRAVIEW_KEY_MODE_FILM]      = { "video", "playback", "image" },   /* a film is fitted, zoomed and turned too */
+    [RUBRAVIEW_KEY_MODE_MUSIC]     = { "audio", "playback", NULL },
+    [RUBRAVIEW_KEY_MODE_TEXT]      = { "text", NULL, NULL },
+};
+
+size_t rubraview_keymap_mode_chain(rubraview_key_mode_t mode, bool slideshow_running, proven_u8str_view_t *out, size_t cap) {
+    size_t n = 0;
+    if (!out || (unsigned)mode >= RUBRAVIEW_KEY_MODE_COUNT) return 0;
+#define CHAIN_PUSH(text) do { if (n < cap) out[n++] = proven_u8str_view_from_cstr(text); } while (0)
+    if (slideshow_running) CHAIN_PUSH("slideshow");
+    for (size_t i = 0; i < 3 && MODE_OWN[mode][i]; ++i) CHAIN_PUSH(MODE_OWN[mode][i]);
+    CHAIN_PUSH("navigation");
+    CHAIN_PUSH("file");
+    CHAIN_PUSH("");
+    if (!slideshow_running) CHAIN_PUSH("slideshow");
+#undef CHAIN_PUSH
+    return n;
+}
+
+proven_u8str_view_t rubraview_keymap_resolve(const rubraview_keymap_t *keymap, rubraview_key_mode_t mode, bool slideshow_running,
+                                             rubraview_key_combo_t combo) {
+    proven_u8str_view_t chain[8];
+    size_t n = rubraview_keymap_mode_chain(mode, slideshow_running, chain, 8);
+    if (!keymap || !keymap->bindings) return PROVEN_LIT("");
+    for (size_t i = 0; i < n; ++i) {
+        proven_u8str_view_t found = find_action_in_context(keymap, chain[i], combo);
+        if (found.size > 0) return found;
+    }
+    return PROVEN_LIT("");
+}
+
+void rubraview_keymap_place_by_action(rubraview_keymap_t *keymap, const rubraview_keymap_t *defaults) {
+    if (!keymap || !defaults) return;
+    for (size_t i = 0; i < keymap->count; ++i) {
+        for (size_t d = 0; d < defaults->count; ++d) {
+            if (!proven_u8str_view_eq(keymap->bindings[i].action, defaults->bindings[d].action)) continue;
+            keymap->bindings[i].context = defaults->bindings[d].context;
+            break;
+        }
+    }
+}
+
+/* The layer under the kinds of file (D-219): common, file and navigation, asked in every mode, and image, asked
+   with them wherever a picture is shown. A key in two of these reaches only one of them; the slide show's,
+   a multi-page file's, playing's, a film's, music's and a text's own keys are asked first on purpose. */
 static bool in_base_layer(proven_u8str_view_t context) {
     return context.size == 0 ||
            (proven_u8str_view_eq(context, PROVEN_LIT("navigation"))) ||
-           (proven_u8str_view_eq(context, PROVEN_LIT("view")));
+           (proven_u8str_view_eq(context, PROVEN_LIT("file"))) ||
+           (proven_u8str_view_eq(context, PROVEN_LIT("image")));
 }
 
 bool rubraview_keymap_contexts_meet(proven_u8str_view_t a, proven_u8str_view_t b) {
@@ -277,7 +359,7 @@ proven_u8str_view_t rubraview_keymap_serialize(proven_arena_t *arena, const rubr
         if (!proven_is_ok(res.err)) return PROVEN_LIT("");
         memcpy(res.value.ptr, list, used);
         res.value.ptr[used] = '\0';
-        proven_u8str_view_t section = b->context.size == 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)"ui", .size = 2 } : b->context;
+        proven_u8str_view_t section = b->context.size == 0 ? PROVEN_LIT("common") : b->context;
         rubraview_ini_set_string(arena, &doc, section, b->action,
                                  (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = used });
     }

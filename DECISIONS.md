@@ -2490,3 +2490,31 @@ Do not store credentials, private infrastructure details, personal data, private
   - The list is shown on the page a row a category (`table gmic_filters`), and whole as `gmic-filters.txt` beside the
     settings, opened in a viewer of its own (`new_window_open`), where it can be searched.
 - Consequences: T270 (host), T271 (VM).
+
+## 2026-10-29: D-219 Key contexts by kind of file; one key, one family (RV-184; changes D-215)
+
+- Status: Accepted (owner 2026-10-29: "하나의 단축키는 서로 다른 모드에서 같거나 혹은 비슷하기라도 한 기능을
+  지원했으면"; "context를 더 잘 세분화해서 나눠주세요. common 이라거나 text, video, file, audio"; "키->기능 화면도";
+  then the plan's four questions answered as recommended: the ten contexts; tempo on `Ctrl+[` / `Ctrl+]`, A-B on
+  `Shift+[` / `Shift+]`, `[` `]` the folder in a film too; find next `Ctrl+G`; by key in the Keys page and F1).
+- Decision:
+  - Contexts: common ([common], once [ui], kept as ""), file, navigation, image, multipage, slideshow, playback,
+    video, audio, text. `rubraview_keymap_mode_chain` is the one table: picture image; multipage multipage, image;
+    animation playback, image; film video, playback, image; music audio, playback; text text; then navigation,
+    file, common; the slide show first while one runs, else last. Dispatch, the clash rule (common, file,
+    navigation and image are the layer under every kind), the Keys page and the tests read it.
+  - Families: `]` / `[` the folder or archive everywhere; `Ctrl+]` faster / `Ctrl+[` slower (a film's speed, the
+    slide show's delay — `interval_down` on `Ctrl+]` —, a text's auto-scroll), `Ctrl+Shift` the slide show's fine
+    step; `Shift+[` / `Shift+]` a repeat's A / B; `+` / `-` bigger and smaller (a text's letters too), spacing with
+    Alt; `Shift+N` the next code page (a text's encoding too); `Ctrl+G` / `Ctrl+Shift+G` find next and before
+    (the find box takes F3 as well); `E` Edit and `F3` the file list on a text page too. Frame copy and save are
+    the file context's (Ctrl+C on a picture copies it; a text's Ctrl+C is its selection).
+  - A key bound in two contexts of one mode must hide only a like action: T269 names every such pair.
+  - An older keymap.ini is read by action into the new contexts (`rubraview_keymap_place_by_action`); an action
+    this build does not bind keeps its section, renamed (view → image, media and animation → playback, subpage →
+    multipage). Action names are unchanged.
+  - The Keys page groups the keys under each context's heading with when it is asked, and "Show by key / by
+    function" lists each key once with what it does where (to read; changes are made by function). F1 ends with
+    the same list.
+  - Home / End in a film were not changed (not asked; they stay the first and last file).
+- Consequences: T269 (host), T272 (VM).
