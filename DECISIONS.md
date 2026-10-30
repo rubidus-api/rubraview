@@ -2696,3 +2696,28 @@ Do not store credentials, private infrastructure details, personal data, private
 - Consequences: T285 (host), T286 (VM). Known: with `{w}`/`{h}` in the name, a details `.txt` written beside the file
   (`keep_details` = or_txt) keeps the temporary name, and a rename that fails (other than "leave it") leaves the
   file under its temporary name `rubraview-sizing-N` in the output folder.
+
+## 2026-10-30: D-229 The floating windows maximize (RV-197)
+
+- Status: Accepted (owner 2026-10-30: "창 내의 창에 대해 최대화/해제 버튼도 타이틀바에 달아주세요. 지금은 X와 R만
+  있을거에요. 창 내의 파일목록 같은 곳에요").
+- Decision:
+  - `rubraview_listwin_t` gains `maximized`, the place to go back to, and `view_top`; the button
+    (`RUBRAVIEW_LISTWIN_MAXIMIZE`, `rubraview_listwin_maximize_rect`) is left of R, of Close without R, none in a
+    window of its own (the files window, Edit's changes). It is the floating list's, the recent files' and the
+    favourites'. The panels (Edit, Export, ...) and the subtitle box are not list windows and are left as they are.
+  - Maximized fills the view below `view_top`; the viewer sets it to its own title bar's height whenever it has one,
+    pinned or not: that bar is drawn over the floating windows while the lists take the press first, so a list's
+    title under it would be hidden yet answer. The same floor holds for a window placed, dragged or sized.
+  - A drag by the title of a maximized window restores its size, the title held at the same fraction under the
+    pointer (as Windows does); R starts from the whole view. Not saved: a new session opens it as before.
+- Consequences: T287 (host), T288 (VM).
+
+## 2026-10-30: D-230 Rubrapack 0.51.0 vendored, and packaging with it
+
+- Status: Accepted (owner 2026-10-30: "rubrapack이 업그레이드 되었습니다. 앞으로의 패키징은 새 벤더링으로 해 주세요").
+- Decision: `vendor/rubrapack/rp_appx.h` is taken again from `d85da48` (v0.51.0), unmodified; its only change lets
+  `external` be NULL, which Rubraview does not pass. The installer and the Store package are made with rubrapack
+  0.51.0 (`RUBRAPACK`), the version `make store` already needs for the file types' logos (D-224). Upstream's menu
+  DLL gained `List` and `HideWhen`; Rubraview's adapted menu keeps its own list file and takes neither.
+- Consequences: the Windows build compiles with it (the release's); nothing in the program's behaviour changes.

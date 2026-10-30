@@ -1102,8 +1102,7 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
     if (n > 0 && list_viewed(app) && (size_t)n < sizeof(title))
         n += snprintf(title + n, sizeof(title) - (size_t)n, T("   (%zu shown)"), count);
     if (n >= (int)sizeof(title)) n = (int)sizeof(title) - 1;
-    double buttons = lw->title_height * (lw->editable ? 2.0 : 1.0);
-    rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, lw->width - buttons - lw->row_height * 0.4, lw->title_height };
+    rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, rubraview_listwin_title_text_right(lw) - lw->x - lw->row_height * 0.4, lw->title_height };
     if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, lw->title_height * 0.45,
                                               COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
@@ -1112,6 +1111,7 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_render_fill_rect(app->renderer, close, COLOR_CLOSE_HOVER, 4.0);
     }
     draw_sign(app->renderer, RUBRAVIEW_ICON_CLOSE, "X", close, lw->title_height * 0.4, COLOR_TEXT);
+    draw_listwin_maximize(app, app->renderer, lw);   /* RV-197 */
 
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
     if (lw->editable) {

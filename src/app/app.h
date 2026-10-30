@@ -1973,6 +1973,8 @@ void list_insert_paths(app_state_t *app, const proven_u8str_view_t *paths, size_
 void list_motion(app_state_t *app, double x, double y, bool in_files);
 size_t list_page(app_state_t *app, size_t row);
 bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, double y, bool right, bool in_files);
+void listwin_maximize_toggle(app_state_t *app, rubraview_listwin_t *lw);   /* RV-197 */
+void draw_listwin_maximize(app_state_t *app, rubraview_renderer_t *rr, const rubraview_listwin_t *lw);
 void list_remove(app_state_t *app, const bool *gone);
 void list_row_menu(app_state_t *app, size_t row, double x, double y, bool in_files);
 size_t list_row_of(app_state_t *app, size_t page);

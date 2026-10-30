@@ -46,6 +46,7 @@ typedef enum rubraview_listwin_part {
     RUBRAVIEW_LISTWIN_ORDER,      /* rising or falling */
     RUBRAVIEW_LISTWIN_URL,        /* RV-158, the bar beside Add: a station's address typed joins the list */
     RUBRAVIEW_LISTWIN_SHAPE,      /* RV-192, the tools row after .ext: rows checked or not by shape (wide, tall, square) */
+    RUBRAVIEW_LISTWIN_MAXIMIZE,   /* RV-197, left of R (of Close without R): the whole view, or back */
 } rubraview_listwin_part_t;
 
 typedef struct rubraview_listwin {
@@ -68,6 +69,10 @@ typedef struct rubraview_listwin {
        sizes and closes it, so it has no R, no X and no title to drag */
     bool   own_window;
     bool   tools;              /* 1.25.0: the tools row under the bar (an editable list) */
+    /* RV-197 (owner, 2026-10-30): maximized, it fills the view; the place it had is kept to go back to */
+    bool   maximized;
+    double restore_x, restore_y, restore_width, restore_height;
+    double view_top;           /* the view starts here (below the viewer's own title bar): set by the viewer */
 } rubraview_listwin_t;
 
 /** 1.25.0: one of the tools row's parts (EXT, FILTER, SORT, ORDER); empty without the row. */
@@ -76,7 +81,7 @@ rubraview_rect_t rubraview_listwin_tool_rect(const rubraview_listwin_t *lw, rubr
 rubraview_listwin_t rubraview_listwin_create(double dpi_scale);
 
 /**
- * Keep it inside a `view_w` x `view_h` client area; the first time, put it
+ * Keep it inside a `view_w` x `view_h` client area, below `view_top`; maximized, all of it. The first time, put it
  * at the right, a little below the top, a third of the view wide (within
  * reason) and three quarters of it tall.
  */
@@ -84,6 +89,19 @@ void rubraview_listwin_place(rubraview_listwin_t *lw, double view_w, double view
 
 rubraview_rect_t rubraview_listwin_rect(const rubraview_listwin_t *lw);
 rubraview_rect_t rubraview_listwin_close_rect(const rubraview_listwin_t *lw);
+
+/** RV-197: the maximize button, left of R, or of Close when there is no R (empty in a window of its own). */
+rubraview_rect_t rubraview_listwin_maximize_rect(const rubraview_listwin_t *lw);
+
+/** Where the title's text ends: the left edge of its buttons. */
+double rubraview_listwin_title_text_right(const rubraview_listwin_t *lw);
+
+/**
+ * RV-197: maximized, back where it was; else the place kept and the whole `view_w` x `view_h` view taken, below
+ * `view_top` (the viewer's own title bar). Dragging a maximized window by its title takes it back to its size under the pointer; sizing it
+ * starts from the whole view.
+ */
+void rubraview_listwin_toggle_maximized(rubraview_listwin_t *lw, double view_w, double view_h);
 
 /** The height above the first row: the title, and the bar of an editable list. */
 double rubraview_listwin_head_height(const rubraview_listwin_t *lw);

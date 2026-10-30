@@ -6,10 +6,17 @@
 
 /* ---- The playlist window (owner, 2026-09-29) ---- */
 
+/* RV-197: the floating lists stay below our own title bar, pinned or shown on hover (it is drawn over them), so
+   their own title and buttons are never under it. */
+static double list_view_top(const app_state_t *app) {
+    return app->frameless && !app->chrome_hidden ? app->titlebar.height : 0.0;
+}
+
 /* Places the floating list; while Edit is open, left of its panel and
    below its curve box, so the list's bar ("Edit to all") is not under them. */
 void listwin_place_clear(app_state_t *app, double win_w, double win_h) {
     rubraview_listwin_t *lw = &app->listwin;
+    lw->view_top = list_view_top(app);
     double view_w = win_w;
     if (edit_panel_open(app) && !app->edit_window && app->panel.open && app->panel.bounds.x > win_w * 0.3 && app->panel.bounds.x < win_w)
         view_w = app->panel.bounds.x - 4.0;
@@ -21,6 +28,20 @@ void listwin_place_clear(app_state_t *app, double win_w, double win_h) {
     if (below > win_h * 0.6) return;   /* no room under it: leave the list where it is */
     lw->y = below;
     if (lw->y + lw->height > win_h) lw->height = win_h - lw->y;
+}
+
+/* RV-197: a floating list window's maximize button — the whole view below a pinned title bar, or back. */
+void listwin_maximize_toggle(app_state_t *app, rubraview_listwin_t *lw) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    lw->view_top = list_view_top(app);
+    rubraview_listwin_toggle_maximized(lw, (double)w, (double)h);
+    if (lw == &app->listwin) listwin_place_clear(app, (double)w, (double)h);
+}
+
+void draw_listwin_maximize(app_state_t *app, rubraview_renderer_t *rr, const rubraview_listwin_t *lw) {
+    listwin_sign_button(app, rr, rubraview_listwin_maximize_rect(lw), lw->maximized ? RUBRAVIEW_ICON_RESTORE : RUBRAVIEW_ICON_MAXIMIZE, "[]",
+                        lw->title_height * 0.4, false);
 }
 
 void listwin_toggle(app_state_t *app) {
@@ -456,6 +477,7 @@ bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, double y, b
         case RUBRAVIEW_LISTWIN_CLOSE: lw->open = false; break;
         case RUBRAVIEW_LISTWIN_TITLE: if (!in_files) rubraview_listwin_drag_begin(lw, x, y); break;
         case RUBRAVIEW_LISTWIN_RESIZE: rubraview_listwin_resize_begin(lw, x, y); break;
+        case RUBRAVIEW_LISTWIN_MAXIMIZE: if (!in_files) listwin_maximize_toggle(app, lw); break;
         case RUBRAVIEW_LISTWIN_ROW:
             /* Known when it is let go: not moved, it goes to that file; carried, the row moves. */
             if (index >= count) break;
@@ -607,6 +629,7 @@ void recentwin_toggle(app_state_t *app) {
         app->recentwin.y = (double)h * 0.12;
         app->recentwin.placed = true;
     }
+    app->recentwin.view_top = list_view_top(app);
     rubraview_listwin_place(&app->recentwin, (double)w, (double)h);
 }
 
@@ -635,6 +658,7 @@ void draw_recentwin(app_state_t *app, double win_w, double win_h) {
 static void draw_recentwin_in(app_state_t *app, double win_w, double win_h) {
     rubraview_listwin_t *lw = &app->recentwin;
     if (!lw->open) return;
+    lw->view_top = list_view_top(app);
     rubraview_listwin_place(lw, win_w, win_h);
     size_t count = app->recent_row_count;
     rubraview_renderer_t *rr = app->renderer;
@@ -643,13 +667,14 @@ static void draw_recentwin_in(app_state_t *app, double win_w, double win_h) {
     rubraview_pal_render_stroke_rect(rr, body, COLOR_BOX_BORDER, 1.0, 4.0);
     char title[96];
     int n = snprintf(title, sizeof(title), T("Recent files   %zu"), count);
-    rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->title_height * 2.0 - lw->row_height * 0.4, lw->title_height };
+    rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, rubraview_listwin_title_text_right(lw) - lw->x - lw->row_height * 0.4, lw->title_height };
     if (n > 0) rubraview_pal_render_draw_text(rr, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
     rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
     if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(rr, close, COLOR_CLOSE_HOVER, 4.0);
     draw_sign(rr, RUBRAVIEW_ICON_CLOSE, "X", close, lw->title_height * 0.4, COLOR_TEXT);   /* RV-181 */
     listwin_sign_button(app, rr, rubraview_listwin_resize_rect(lw), RUBRAVIEW_ICON_RESIZE, "R", lw->title_height * 0.4, lw->resizing);
+    draw_listwin_maximize(app, rr, lw);   /* RV-197 */
 
     /* the bar: all, Remove (the checked), Clear all */
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
@@ -715,6 +740,7 @@ bool recentwin_press(app_state_t *app, double x, double y) {
         case RUBRAVIEW_LISTWIN_CLOSE:  lw->open = false; break;
         case RUBRAVIEW_LISTWIN_TITLE:  rubraview_listwin_drag_begin(lw, x, y); break;
         case RUBRAVIEW_LISTWIN_RESIZE: rubraview_listwin_resize_begin(lw, x, y); break;
+        case RUBRAVIEW_LISTWIN_MAXIMIZE: listwin_maximize_toggle(app, lw); break;
         case RUBRAVIEW_LISTWIN_ALL: {
             bool all = recentwin_checked(app) < count;
             for (size_t i = 0; i < count; ++i) app->recent_rows[i].checked = all;
@@ -833,6 +859,7 @@ void favwin_toggle(app_state_t *app) {
         app->favwin.y = (double)h * 0.14;
         app->favwin.placed = true;
     }
+    app->favwin.view_top = list_view_top(app);
     rubraview_listwin_place(&app->favwin, (double)w, (double)h);
 }
 
@@ -853,6 +880,7 @@ void draw_favwin(app_state_t *app, double win_w, double win_h) {
 static void draw_favwin_in(app_state_t *app, double win_w, double win_h) {
     rubraview_listwin_t *lw = &app->favwin;
     if (!lw->open) return;
+    lw->view_top = list_view_top(app);
     rubraview_listwin_place(lw, win_w, win_h);
     size_t count = app->favorites.count;
     rubraview_renderer_t *rr = app->renderer;
@@ -861,13 +889,14 @@ static void draw_favwin_in(app_state_t *app, double win_w, double win_h) {
     rubraview_pal_render_stroke_rect(rr, body, COLOR_BOX_BORDER, 1.0, 4.0);
     char title[96];
     int n = snprintf(title, sizeof(title), T("Favourites   %zu"), count);
-    rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->title_height * 2.0 - lw->row_height * 0.4, lw->title_height };
+    rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, rubraview_listwin_title_text_right(lw) - lw->x - lw->row_height * 0.4, lw->title_height };
     if (n > 0) rubraview_pal_render_draw_text(rr, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
     rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
     if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(rr, close, COLOR_CLOSE_HOVER, 4.0);
     draw_sign(rr, RUBRAVIEW_ICON_CLOSE, "X", close, lw->title_height * 0.4, COLOR_TEXT);   /* RV-181 */
     listwin_sign_button(app, rr, rubraview_listwin_resize_rect(lw), RUBRAVIEW_ICON_RESIZE, "R", lw->title_height * 0.4, lw->resizing);
+    draw_listwin_maximize(app, rr, lw);   /* RV-197 */
 
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
     size_t checked = favwin_checked(app);
@@ -930,6 +959,7 @@ bool favwin_press(app_state_t *app, double x, double y) {
         case RUBRAVIEW_LISTWIN_CLOSE:  lw->open = false; break;
         case RUBRAVIEW_LISTWIN_TITLE:  rubraview_listwin_drag_begin(lw, x, y); break;
         case RUBRAVIEW_LISTWIN_RESIZE: rubraview_listwin_resize_begin(lw, x, y); break;
+        case RUBRAVIEW_LISTWIN_MAXIMIZE: listwin_maximize_toggle(app, lw); break;
         case RUBRAVIEW_LISTWIN_ALL: {
             bool all = favwin_checked(app) < count;
             for (size_t i = 0; i < count; ++i) app->fav_checked[i] = all;

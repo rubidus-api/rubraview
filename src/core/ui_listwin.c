@@ -33,10 +33,39 @@ void rubraview_listwin_place(rubraview_listwin_t *lw, double view_w, double view
         lw->y = view_h * 0.1;
         lw->placed = true;
     }
+    double top = lw->view_top > 0.0 && lw->view_top < view_h ? lw->view_top : 0.0;
+    double room = view_h - top;
+    if (lw->maximized) {
+        lw->x = 0.0;
+        lw->y = top;
+        lw->width = view_w;
+        lw->height = room;
+        return;
+    }
     lw->width = clampd(lw->width, min_w < view_w ? min_w : view_w, view_w);
-    lw->height = clampd(lw->height, min_h < view_h ? min_h : view_h, view_h);
+    lw->height = clampd(lw->height, min_h < room ? min_h : room, room);
     lw->x = clampd(lw->x, 0.0, view_w - lw->width);
-    lw->y = clampd(lw->y, 0.0, view_h - lw->height);
+    lw->y = clampd(lw->y, top, view_h - lw->height);
+}
+
+void rubraview_listwin_toggle_maximized(rubraview_listwin_t *lw, double view_w, double view_h) {
+    if (!lw || lw->own_window) return;
+    if (lw->maximized) {
+        lw->maximized = false;
+        lw->x = lw->restore_x;
+        lw->y = lw->restore_y;
+        lw->width = lw->restore_width;
+        lw->height = lw->restore_height;
+    } else {
+        lw->restore_x = lw->x;
+        lw->restore_y = lw->y;
+        lw->restore_width = lw->width;
+        lw->restore_height = lw->height;
+        lw->maximized = true;
+    }
+    lw->dragging = false;
+    lw->resizing = false;
+    rubraview_listwin_place(lw, view_w, view_h);
 }
 
 rubraview_rect_t rubraview_listwin_rect(const rubraview_listwin_t *lw) {
@@ -54,6 +83,17 @@ rubraview_rect_t rubraview_listwin_resize_rect(const rubraview_listwin_t *lw) {
     if (!lw || !lw->editable || lw->own_window) return (rubraview_rect_t){0};
     double s = lw->title_height;
     return (rubraview_rect_t){ lw->x + lw->width - s * 2.0, lw->y, s, s };
+}
+
+rubraview_rect_t rubraview_listwin_maximize_rect(const rubraview_listwin_t *lw) {
+    if (!lw || lw->own_window) return (rubraview_rect_t){0};
+    double s = lw->title_height;
+    return (rubraview_rect_t){ lw->x + lw->width - s * (lw->editable ? 3.0 : 2.0), lw->y, s, s };
+}
+
+double rubraview_listwin_title_text_right(const rubraview_listwin_t *lw) {
+    if (!lw) return 0.0;
+    return lw->own_window ? lw->x + lw->width : rubraview_listwin_maximize_rect(lw).x;
 }
 
 #define BAR_COUNT 7
@@ -126,6 +166,7 @@ size_t rubraview_listwin_insert_index(const rubraview_listwin_t *lw, double py, 
 
 void rubraview_listwin_resize_begin(rubraview_listwin_t *lw, double px, double py) {
     if (!lw) return;
+    lw->maximized = false;   /* RV-197: sized from the whole view */
     lw->resizing = true;
     lw->resize_dx = lw->x + lw->width - px;   /* the right edge from the pointer */
     lw->resize_dy = lw->y - py;               /* the top edge from the pointer */
@@ -140,7 +181,8 @@ void rubraview_listwin_resize_to(rubraview_listwin_t *lw, double px, double py, 
     if (bottom > view_h) bottom = view_h;
     /* Never past the view: the place rule would move the window instead of stopping it. */
     double right = clampd(px + lw->resize_dx, lw->x + (min_w < view_w - lw->x ? min_w : view_w - lw->x), view_w);
-    double top = clampd(py + lw->resize_dy, 0.0, bottom - (min_h < bottom ? min_h : bottom));
+    double floor = lw->view_top > 0.0 && lw->view_top < bottom ? lw->view_top : 0.0;   /* RV-197: not under the title bar */
+    double top = clampd(py + lw->resize_dy, floor, bottom - (min_h < bottom - floor ? min_h : bottom - floor));
     lw->width = right - lw->x > 1.0 ? right - lw->x : 1.0;
     lw->y = top;
     lw->height = bottom - top > 1.0 ? bottom - top : 1.0;
@@ -170,6 +212,7 @@ rubraview_listwin_part_t rubraview_listwin_hit(const rubraview_listwin_t *lw, do
     if (!lw || !lw->open || !rubraview_rect_contains(rubraview_listwin_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_NONE;
     if (rubraview_rect_contains(rubraview_listwin_close_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_CLOSE;
     if (lw->editable && rubraview_rect_contains(rubraview_listwin_resize_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_RESIZE;
+    if (rubraview_rect_contains(rubraview_listwin_maximize_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_MAXIMIZE;
     if (py < lw->y + lw->title_height) return RUBRAVIEW_LISTWIN_TITLE;
     double head = rubraview_listwin_head_height(lw);
     if (py < lw->y + head) {
@@ -221,6 +264,13 @@ void rubraview_listwin_reveal(rubraview_listwin_t *lw, size_t index, size_t coun
 
 void rubraview_listwin_drag_begin(rubraview_listwin_t *lw, double px, double py) {
     if (!lw) return;
+    if (lw->maximized) {   /* RV-197: back to its size, the title under the pointer where it was held */
+        double at = lw->width > 0.0 ? (px - lw->x) / lw->width : 0.5;
+        lw->maximized = false;
+        lw->width = lw->restore_width;
+        lw->height = lw->restore_height;
+        lw->x = px - at * lw->width;
+    }
     lw->dragging = true;
     lw->grab_dx = px - lw->x;
     lw->grab_dy = py - lw->y;
