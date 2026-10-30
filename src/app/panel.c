@@ -498,6 +498,11 @@ static bool edit_type_value_at(app_state_t *app, rubraview_panel_t *panel, int32
     return true;
 }
 
+/* RV-200: the same in Batch's and the names' windows, on the panel standing in `app->panel`. */
+bool panel_type_value_at(app_state_t *app, double px, double py) {
+    return edit_type_value_at(app, &app->panel, 1, px, py);
+}
+
 void edit_value_typed(app_state_t *app) {
     proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
     char buf[48];

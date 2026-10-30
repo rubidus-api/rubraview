@@ -2729,3 +2729,35 @@ Do not store credentials, private infrastructure details, personal data, private
   changed): sizing is not changing the list. Every list window not in a window of its own has R, maximize left of it
   (D-229 put maximize left of Close without R; that case is gone).
 - Consequences: T289 (host), T290 (VM).
+
+## 2026-10-31: D-232 Batch's sized names: details after the name, nothing left behind (RV-199)
+
+- Status: Accepted (owner 2026-10-31: "나머지도 처리 바람"; D-228's known gaps).
+- Decision: with `{w}`/`{h}` in the name, `batch_process` keeps the details for after `batch_name_sized` (`details_later`,
+  `details_format`), so the `.txt` is found and named from the final name; `batch_sizing_fails` removes the file under
+  its sizing name whenever it cannot be named (size unread, no name made, the move refused), and says so.
+- Consequences: T291 (VM, A/B).
+
+## 2026-10-31: D-233 An extension's own icon for a type no default holds (RV-191)
+
+- Status: Accepted (owner 2026-10-31: "RV-191 처리 바람").
+- Decision: the cause, seen on the VM: `.jxl` is also offered by Photos (`OpenWithProgids` under the extension) and
+  `.nfo` by System Information (Explorer's `FileExts` list); with no UserChoice Explorer takes no program's icon and
+  `AssocQueryString(DEFAULTICON)` gives shell32's blank page, and the type's name is our ProgID's. Registering writes
+  the kind's icon on `Software\Classes\.ext\DefaultIcon` with a `Rubraview.Ours` value, unless another program's is
+  there; Explorer falls back to it then. A UserChoice still wins (`.png` with Photos kept Photos' icon). Removal deletes
+  it only when it carries `Rubraview.Ours`. The type's name stays the ProgID's in that case (a FriendlyTypeName did
+  not change it).
+- Consequences: T292 (VM).
+
+## 2026-10-31: D-234 Values typed in Batch's windows (RV-200)
+
+- Status: Accepted (owner 2026-10-31: "RV-200 확인 바람"; found while checking).
+- Decision: `owned_press` asks `panel_type_value_at` (the viewer panels' `edit_type_value_at` on the panel standing in)
+  before the press; `batch_typing` is `BATCH_TYPING_VALUE` or `NAMES_TYPING_VALUE` so the window's keys, text and
+  box are the box's, and `rename_commit` sends a value typed for Batch to `batch_typed`, which puts that window's panel
+  in place before `edit_value_typed`. Seen with it: Explorer's Convert... (its command once a file) gives one Batch
+  window "The 2 files chosen in Explorer"; a filtered list's ten pictures; `{taken:...}` from EXIF; Recent files,
+  Favourites and the list with Edit open maximized and back; the Store's copy (an unsigned test package of 1.39.42)
+  starting its `--media-host` child from the package.
+- Consequences: T293 (VM).

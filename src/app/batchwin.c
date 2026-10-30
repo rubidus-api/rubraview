@@ -445,7 +445,8 @@ static void batch_typed_in(app_state_t *app);
 void batch_typed(app_state_t *app) {
     if (!app->batch_window || owned_panel_active()) { batch_typed_in(app); return; }
     int32_t id = app->batch_typing;
-    bool names = app->names_window && ((id >= PANEL_NAMES_NAME && id <= PANEL_NAMES_REPLACE7) || id == PANEL_BATCH_START || id == PANEL_BATCH_EXISTS);
+    bool names = app->names_window && ((id >= PANEL_NAMES_NAME && id <= PANEL_NAMES_REPLACE7) || id == PANEL_BATCH_START || id == PANEL_BATCH_EXISTS ||
+                                       id == NAMES_TYPING_VALUE);
     owned_panel_in(app, names ? 2 : 1);
     batch_typed_in(app);
     owned_panel_out(app);
@@ -454,6 +455,7 @@ void batch_typed(app_state_t *app) {
 }
 
 static void batch_typed_in(app_state_t *app) {
+    if (app->rename_is_value) { edit_value_typed(app); return; }   /* RV-200: a slider's value, on this panel */
     proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
     int32_t id = app->batch_typing;
     size_t cap = 0;
@@ -754,7 +756,9 @@ static void draw_owned(app_state_t *app, int which) {
     rubraview_pal_window_get_size(win, &ww, &wh);
     double dpi = rubraview_pal_window_dpi_scale(win);
     if (which == 2) draw_names_preview(app, (double)ww, (double)wh, dpi);
-    if (app->rename_active && app->batch_typing && ((which == 2) == (app->names_window != NULL))) draw_rename_box(app, (double)ww, (double)wh, dpi);
+    bool box_here = app->batch_typing == BATCH_TYPING_VALUE ? which == 1 : app->batch_typing == NAMES_TYPING_VALUE ? which == 2
+                  : (which == 2) == (app->names_window != NULL);   /* RV-200: a value typed in the window it was asked in */
+    if (app->rename_active && app->batch_typing && box_here) draw_rename_box(app, (double)ww, (double)wh, dpi);
     draw_chooser(app, app->renderer, which == 1 ? CHOOSE_IN_BATCH : CHOOSE_IN_NAMES, app->pointer_x, app->pointer_y);
     owned_panel_out(app);
     bool ok = rubraview_pal_render_end(app->renderer);
@@ -776,6 +780,12 @@ void draw_batch_window(app_state_t *app) {
    outside closing it). */
 static void owned_press(app_state_t *app, int which, double x, double y) {
     if (scrollbar_press_panel(app, &app->panel, x, y)) return;
+    /* RV-200: a value's name pressed: the value typed, as in the viewer's panels (1.39.46 lost it here); the box is
+       this window's, so the keys and Enter reach this panel (batch_typed) */
+    if (panel_type_value_at(app, x, y)) {
+        app->batch_typing = which == 1 ? BATCH_TYPING_VALUE : NAMES_TYPING_VALUE;
+        return;
+    }
     int32_t row = -1;
     rubraview_panel_event_t event = rubraview_panel_press(&app->panel, x, y, &row);
     if (event == RUBRAVIEW_PANEL_VALUE_CHANGED) panel_apply_row(app, row);

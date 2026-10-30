@@ -78,6 +78,9 @@ typedef struct batch_ctx {
     void *mark_memory;
     size_t seen;              /* RV-134: files begun so far, for {n} in a text */
     int64_t counter;          /* the {n} of the file in hand */
+    /* RV-199: a name with {w} or {h} gets its details once it has its name, so a .txt beside it is named after it */
+    bool details_later;
+    rubraview_export_format_t details_format;
 } batch_ctx_t;
 
 static rubraview_orientation_t orientation_from_action(const rubraview_batch_orient_params_t *o) {
@@ -127,6 +130,14 @@ static void batch_keep_date(proven_arena_t *arena, const batch_ctx_t *bc, proven
 /* RV-187 (D-220): Edit's steps from --steps=, read once; each picture gets its own copy, fitted to its size. */
 static rubraview_edit_steps_t g_batch_steps;
 static bool g_batch_has_steps;
+
+/* 1.17.0: the source's details kept in the file written, or in a .txt beside it, as the options say. */
+static void batch_details(proven_u8str_view_t source, proven_u8str_view_t out_path, rubraview_export_format_t format,
+                          const rubraview_export_options_t *options) {
+    int kept = details_keep(source, out_path, out_path, format, options);
+    if (kept == DETAILS_TXT) batch_say(out_path, "its details that it cannot hold are in a .txt beside it");
+    if (kept == DETAILS_FAILED) batch_say(out_path, "its details could not be kept");
+}
 
 /* Decode, turn, resize, adjust, save. A step that cannot be done fails the
    file: writing it without the step would say it was done. */
@@ -330,12 +341,18 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
         batch_say(input->path, why ? why : "could not be written");
         return false;
     }
-    int kept = details_keep(input->path, out_path, out_path, options.format, &options);   /* 1.17.0 */
-    if (kept == DETAILS_TXT) batch_say(out_path, "its details that it cannot hold are in a .txt beside it");
-    if (kept == DETAILS_FAILED) batch_say(out_path, "its details could not be kept");
+    if (bc->details_later) bc->details_format = options.format;   /* RV-199: after it is named */
+    else batch_details(input->path, out_path, options.format, &options);
 
     bc->written++;
     return true;
+}
+
+/* RV-199: the file under its sizing name is not left in the output folder when it cannot be named. */
+static bool batch_sizing_fails(proven_u8str_view_t temp, const char *why) {
+    batch_say(temp, why);
+    (void)rubraview_pal_fs_delete(temp);
+    return false;
 }
 
 /* RV-194: a name with {w} or {h} is written under a name of its own first; made, it takes its size and its
@@ -343,20 +360,20 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
 static bool batch_name_sized(proven_arena_t *arena, batch_ctx_t *bc, proven_u8str_view_t out_dir, proven_u8str_view_t pattern,
                              proven_u8str_view_t *out_path) {
     int32_t w = 0, h = 0;
-    if (!rubraview_pal_image_size(*out_path, &w, &h)) { batch_say(*out_path, "its size could not be read for its name"); return false; }
+    if (!rubraview_pal_image_size(*out_path, &w, &h)) return batch_sizing_fails(*out_path, "its size could not be read for its name: not kept");
     char ws[16], hs[16];
     snprintf(ws, sizeof(ws), "%d", (int)w);
     snprintf(hs, sizeof(hs), "%d", (int)h);
     proven_u8str_view_t name = rubraview_batch_replace_all(arena, pattern, PROVEN_LIT("{w}"), cstr(ws));
     name = rubraview_batch_replace_all(arena, name, PROVEN_LIT("{h}"), cstr(hs));
     proven_u8str_view_t target = rubraview_path_join(arena, out_dir, name);
-    if (target.size == 0) return false;
+    if (target.size == 0) return batch_sizing_fails(*out_path, "its name could not be made: not kept");
     if (rubraview_pal_fs_exists(target)) {
         if (bc->cli->exists == 1) { batch_say(target, "is there already: left as it is"); (void)rubraview_pal_fs_delete(*out_path); return false; }
         if (bc->cli->exists == 2) target = rubraview_filing_target(arena, out_dir, name, filing_exists, NULL);
         else (void)rubraview_pal_fs_delete(target);
     }
-    if (target.size == 0 || !rubraview_pal_fs_move(*out_path, target)) { batch_say(*out_path, "could not be given its name"); return false; }
+    if (target.size == 0 || !rubraview_pal_fs_move(*out_path, target)) return batch_sizing_fails(*out_path, "could not be given its name: not kept");
     *out_path = target;
     return true;
 }
@@ -415,6 +432,8 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
     proven_u8str_view_t out_path = rubraview_path_join(arena, out_dir, output_name);
     if (out_path.size == 0) return false;
     /* RV-129: --exists: replace it (as before), leave it, or take the next free name */
+    bc->details_later = sized_name.size > 0;
+    bc->details_format = RUBRAVIEW_EXPORT_SAME_AS_SOURCE;
     if (sized_name.size == 0 && bc->cli->exists != 0 && rubraview_pal_fs_exists(out_path)) {
         if (bc->cli->exists == 1) { batch_say(out_path, "is there already: left as it is"); return true; }
         out_path = rubraview_filing_target(arena, out_dir, output_name, filing_exists, NULL);
@@ -517,13 +536,20 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
               : (to == RUBRAVIEW_EXPORT_AVIF || to == RUBRAVIEW_EXPORT_JXL) && plain   /* 1.31.0: AVIF and JPEG XL too */
                 ? rubraview_pal_image_save_animation_ffmpeg(out_path, input->path, NULL, 0, &options, to == RUBRAVIEW_EXPORT_AVIF) : 0;
     bool ok = false;
-    if (moved > 0) { ok = true; bc->written++; (void)details_keep(input->path, out_path, out_path, to, &options); }
+    if (moved > 0) {
+        ok = true;
+        bc->written++;
+        if (bc->details_later) bc->details_format = to; else (void)details_keep(input->path, out_path, out_path, to, &options);
+    }
     else if (moved < 0) {
         const char *why = rubraview_pal_image_save_why();
         batch_say(input->path, why ? why : "the animation could not be written");
     }
     else ok = batch_pixels(arena, bc, input, out_path, orient, resize, color, extra, options, source_format);
-    if (ok && sized_name.size > 0 && !batch_name_sized(arena, bc, out_dir, sized_name, &out_path)) ok = bc->cli->exists == 1;   /* skipped is no failure */
+    if (ok && sized_name.size > 0) {
+        if (!batch_name_sized(arena, bc, out_dir, sized_name, &out_path)) ok = bc->cli->exists == 1;   /* skipped is no failure */
+        else if (bc->details_format != RUBRAVIEW_EXPORT_SAME_AS_SOURCE) batch_details(input->path, out_path, bc->details_format, &options);   /* RV-199 */
+    }
     if (ok) batch_keep_date(arena, bc, input->path, out_path);
     free(own);
     return ok;

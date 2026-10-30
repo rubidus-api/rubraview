@@ -992,7 +992,8 @@ typedef struct app_state {
         int32_t steps_from;
         char    steps_file[1024];
     } batch;
-    int32_t                   batch_typing;   /* RV-129: the panel row whose text the rename box holds; 0 none */
+    int32_t                   batch_typing;   /* RV-129: the panel row whose text the rename box holds; 0 none;
+                                                 BATCH_TYPING_VALUE / NAMES_TYPING_VALUE: a slider's value (RV-200) */
     bool                      panel_is_print;    /* D-87: a fourth, the choices made when printing */
     /* D-88: editing inside an archive */
     arc_job_t                *arc_job;           /* the archive is being written again, or NULL */
@@ -1712,6 +1713,7 @@ int64_t batch_taken_of(proven_arena_t *arena, proven_u8str_view_t path);
 void batch_preview_files(app_state_t *app);
 proven_u8str_view_t batch_preview_name(app_state_t *app, size_t i, proven_arena_t *arena);
 void batch_type_begin(app_state_t *app, int32_t id);
+enum { BATCH_TYPING_VALUE = -1, NAMES_TYPING_VALUE = -2 };   /* RV-200: app->batch_typing for a typed slider value */
 void batch_typed(app_state_t *app);
 void bgm_close(app_state_t *app);
 void bgm_do(app_state_t *app, rubraview_bgm_action_t action);
@@ -1862,6 +1864,7 @@ void edit_steps_changed(app_state_t *app);
 void edit_steps_toggle(app_state_t *app);
 void edit_undo(app_state_t *app, bool redo);
 void edit_value_typed(app_state_t *app);
+bool panel_type_value_at(app_state_t *app, double px, double py);   /* RV-200 */
 void edit_values_fresh(app_state_t *app);
 bool edit_view_rect(app_state_t *app, rubraview_pal_rect_t *out, double *out_scale, bool *changed);
 rubraview_edit_session_t edit_whole(const app_state_t *app);

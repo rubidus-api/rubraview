@@ -604,6 +604,7 @@ void rename_picker_commit(app_state_t *app) {
 void rename_commit(app_state_t *app) {
     if (!app->rename_active) return;
     if (app->rename_is_find) { text_find_step(app, true); return; }   /* the box stays for the next */
+    if (app->rename_is_value && app->batch_typing) { batch_typed(app); return; }   /* RV-200: Batch's own panel */
     if (app->rename_is_value) { edit_value_typed(app); return; }
     if (app->rename_is_gmic) { gmic_typed(app); return; }   /* RFC-0009 C */
     if (app->rename_is_ffmpeg) { ffmpeg_typed(app); return; }   /* RFC-0009 D */

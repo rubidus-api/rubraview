@@ -1513,6 +1513,7 @@ static bool for_each_extension(proven_u8str_view_t list, bool (*each)(const WCHA
 static HKEY g_shell_root = HKEY_CURRENT_USER;   /* where the next registration writes; main thread only */
 
 #define SHELL_WAS L"Rubraview.Was"   /* the type's default before us, kept under the extension */
+#define SHELL_OURS L"Rubraview.Ours" /* RV-191: under an extension's DefaultIcon that we wrote */
 
 /* RV-174 (RFC-0004 §4, owner 2026-10-26): Windows' Default apps lists the program by its capabilities, each type
    it registered named there with its ProgID; RegisteredApplications points at them. */
@@ -1587,6 +1588,23 @@ static bool register_one(const WCHAR *ext, const WCHAR *progid) {
     wcscat(icon, id == 2 ? L",-2" : id == 3 ? L",-3" : id == 4 ? L",-4" : id == 5 ? L",-5" : id == 6 ? L",-6" : L",0");
     write_key(g_shell_root, subkey, NULL, icon);
 
+    /* RV-191: the same icon on the extension itself. While another program also offers to open the type (Photos for
+       .jxl, System Information for .nfo) and the reader has chosen none, Explorer takes no program's icon and shows a
+       blank one; the extension's own DefaultIcon is what it shows then. A chosen program's icon still comes first.
+       One another program put there is left alone. */
+    wcscpy(subkey, L"Software\\Classes\\");
+    wcscat(subkey, ext);
+    wcscat(subkey, L"\\DefaultIcon");
+    WCHAR held[MAX_PATH * 2 + 8];
+    HKEY mine = NULL;
+    bool ours = RegOpenKeyExW(g_shell_root, subkey, 0, KEY_READ, &mine) == ERROR_SUCCESS &&
+                RegQueryValueExW(mine, SHELL_OURS, NULL, NULL, NULL, NULL) == ERROR_SUCCESS;
+    if (mine) RegCloseKey(mine);
+    if (ours || !read_default(g_shell_root, subkey, held, sizeof(held)) || !held[0]) {
+        write_key(g_shell_root, subkey, NULL, icon);
+        write_key(g_shell_root, subkey, SHELL_OURS, L"");
+    }
+
     /* Also among the programs "Open with" offers for the type, whoever
        its default is. */
     wcscpy(subkey, L"Software\\Classes\\");
@@ -1643,6 +1661,16 @@ static bool unregister_one(const WCHAR *ext, const WCHAR *progid) {
     }
     RegDeleteValueW(key, SHELL_WAS);
     RegCloseKey(key);
+
+    WCHAR icon_key[300];   /* RV-191: the extension's icon, when we put it there */
+    wcscpy(icon_key, subkey);
+    wcscat(icon_key, L"\\DefaultIcon");
+    HKEY icon = NULL;
+    if (RegOpenKeyExW(g_shell_root, icon_key, 0, KEY_READ, &icon) == ERROR_SUCCESS) {
+        bool mine = RegQueryValueExW(icon, SHELL_OURS, NULL, NULL, NULL, NULL) == ERROR_SUCCESS;
+        RegCloseKey(icon);
+        if (mine) RegDeleteTreeW(g_shell_root, icon_key);
+    }
 
     WCHAR with[300];
     wcscpy(with, subkey);
