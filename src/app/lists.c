@@ -427,6 +427,12 @@ bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, double y, b
     note_activity(app);
     size_t index = list_page(app, row);   /* 1.25.0: the page of that row */
     bool viewed = list_viewed(app);       /* rows of a filtered list keep their pages' order */
+    if (!right && part == RUBRAVIEW_LISTWIN_SHAPE) {   /* RV-192 */
+        rubraview_rect_t t = rubraview_listwin_tool_rect(lw, part);
+        shape_begin(app, SHAPE_FOR_LIST, in_files ? CHOOSE_IN_FILES : CHOOSE_IN_MAIN, t.x, t.y + t.height, t.y);
+        if (in_files) app->files_dirty = true;
+        return true;
+    }
     if (!right && part >= RUBRAVIEW_LISTWIN_EXT && part <= RUBRAVIEW_LISTWIN_ORDER) {
         rubraview_rect_t t = rubraview_listwin_tool_rect(lw, part);
         int where = in_files ? CHOOSE_IN_FILES : CHOOSE_IN_MAIN;

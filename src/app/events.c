@@ -297,6 +297,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                             case PICKER_TOOL_RANGE:      picker_button(app, PICKER_BTN_RANGE); break;
                             case PICKER_TOOL_SAME:       picker_button(app, PICKER_BTN_SAME_TYPE); break;
                             case PICKER_TOOL_MEDIA:      picker_button(app, PICKER_BTN_MEDIA); break;
+                            case PICKER_TOOL_SHAPE:      shape_begin(app, SHAPE_FOR_PICKER, CHOOSE_IN_MAIN, t.x, t.y + t.height, t.y); break;
                             case PICKER_TOOL_SORT:       chooser_open_sort(app, false, t.x, t.y + t.height, t.y); break;
                             case PICKER_TOOL_ORDER:      chooser_open_sort(app, true, t.x, t.y + t.height, t.y); break;
                             case PICKER_TOOL_VIEW:       picker_button(app, PICKER_BTN_VIEW); break;

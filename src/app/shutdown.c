@@ -52,6 +52,7 @@ void app_end(app_state_t *app) {
     }
 
     picker_thumbs_free(app);
+    shape_free(app);   /* RV-192: its reader stopped before the window goes */
     rubraview_pal_thumbs_stop(app->thumbs);   /* D-34: before the renderer and the window go */
     rubraview_pal_thumbs_stop(app->strip_thumbs);
     strip_cells_free(app);

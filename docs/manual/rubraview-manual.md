@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.41.exe              the viewer, as built
-dist/rubraview-v1.39.41/                 the release bundle
-dist/rubraview-v1.39.41.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.42.exe              the viewer, as built
+dist/rubraview-v1.39.42/                 the release bundle
+dist/rubraview-v1.39.42.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1283,7 +1283,9 @@ its own with the pictures shown large.
 
 Both lists have a row of tools under their buttons. **.ext** lists the
 extensions in the list, each with a box: untick one and its files are
-not shown (the list keeps them; **All** shows every one again). **Filter**
+not shown (the list keeps them; **All** shows every one again). **Shape**
+ticks or unticks the rows of wide, tall or square pictures and films, as
+in the open-file screen; it acts on the rows shown. **Filter**
 shows only the names holding what is typed — in the floating list the
 typing box opens over the picture and the rows follow each letter; in
 the window it is typed in place; `Esc` or the **×** shows them all.
@@ -1602,7 +1604,12 @@ everything here but `..` (a dash when some are), **Individual** makes
 every tap turn one file on or off (a tap only picks; nothing opens),
 **Range** takes two taps and turns over everything between them, **Same type** takes every file with the same
 extension as the one in focus, **Media** the pictures, films, music and
-text. **Sort by ▾** and **Rising ▾** each open a list to choose from, and
+text. **Shape ▾** lists **Wide**, **Tall** and **Square**, each with how
+many are picked of how many: a choice picks every picture and film of that
+shape, and the same choice again lets them go; the list stays open for
+another. A photo turned by its camera counts as it is shown, and square
+means width and height exactly equal. The first time, the sizes are read
+(how far it has got is shown), then kept. **Sort by ▾** and **Rising ▾** each open a list to choose from, and
 **Details** (or **Tiles**) at its end changes the view. The bottom row
 acts on what is picked: **Add to the list**, **Recycle** (press
 it twice), **Move to**, **Copy to**, **Cancel** and **Open** (**OK** when

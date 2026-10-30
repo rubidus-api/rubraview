@@ -2583,3 +2583,27 @@ Do not store credentials, private infrastructure details, personal data, private
   - The Store's copy: rubrapack's MSIX writes no logo per type (`icon` is unused there), so its types show the
     program's logo; a request to rubrapack for a `uap:Logo` per `[assoc]` (RV-190).
 - Consequences: T277 (VM). RV-191: `.jxl` and `.nfo`, registered, show a blank icon (1.39.40 too).
+
+## 2026-10-30: D-223 Picking by shape (RV-192)
+
+- Status: Accepted (owner 2026-10-30: "파일 브라우저, 재생목록 등에서 가로로 긴 파일, 세로로 긴 파일, 정사각형 비율
+  파일 등만 선택하거나 해제할 수 있게 해줘요"; of three questions, the owner chose a Shape button with its list, square
+  only when exactly equal (over 2 % or 5 % tolerances), and pictures and films (over pictures only)).
+- Decision:
+  - `PICKER_TOOL_SHAPE` after Media in the open-file screen's tool row and `RUBRAVIEW_LISTWIN_SHAPE` after .ext in the
+    lists' tools row (the floating list and the files window); each opens a list (`CHOOSE_SHAPE`): Wide, Tall,
+    Square with `picked / total`, and "Size not known (n)" when some could not be read. A choice is
+    `rubraview_shape_toggle`: all of that shape picked, or let go when all were, the others untouched; the list stays
+    open with its counts new. In the open-file screen a pick from Single turns Individual on, as Same type does.
+  - `rubraview_shape_of`: wider than tall, taller than wide, else square — to the pixel.
+  - The rows: the open-file screen's pictures and films (by `IMAGE_FILTER` and `VIDEO_FILTER`); a list's rows shown
+    (after its filter and hidden extensions), as its box for all. Folders, music, text and stations are no row.
+  - The sizes: `rubraview_pal_sizes_*`, a thread of its own reading each file's size as shown — WIC's frame size turned
+    by its EXIF orientation (`rubraview_pal_image_shown_size`), else the shell's property store (films; pictures WIC
+    has no codec for). The shell's own orientation property was not given on the VM for a JPEG turned by EXIF, so WIC
+    reads it. Each pass says "reading the sizes: n of m" every quarter second; the choice opens when all are read; a
+    folder or list changed meanwhile drops the reading.
+  - Kept (`rubraview_shape_cache_t`, 65 536 at most, then started over) — the open-file screen's by path and modified
+    time, a list's by path (its pages carry no time) — so another press, another order or the other list reads nothing
+    again. The thread ends its own WIC factory (`rubraview_pal_image_thread_end`).
+- Consequences: T278 (host), T279 (VM).

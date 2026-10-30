@@ -66,6 +66,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     sub_tile_result(app, rubraview_tap_tick(&app->sub_tap, now));   /* D-33: a tap decided, or a hold */
     if (rubraview_seekfan_tick(&app->seekfan, now)) app->toolbox_window_drawn = 0.0;   /* held: its choices open */
     /* D-34: thumbnails for the picker's tiles, a few a pass; given back when it closes. */
+    shape_step(app);   /* RV-192: sizes being read for Shape */
     if (app->picker_open) {
         picker_thumbs_step(app);
     } else if (app->picker_thumbs) {

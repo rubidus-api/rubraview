@@ -173,6 +173,8 @@ bool rubraview_pal_image_describe(proven_u8str_view_t path, const uint8_t *data,
  * cannot be read.
  */
 bool rubraview_pal_image_size(proven_u8str_view_t path, int32_t *out_width, int32_t *out_height);
+/* RV-192: the same, as shown — width and height swapped when the EXIF orientation lays it on its side (5-8). */
+bool rubraview_pal_image_shown_size(proven_u8str_view_t path, int32_t *out_width, int32_t *out_height);
 
 rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
                                                    proven_u8str_view_t path,

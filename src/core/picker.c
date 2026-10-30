@@ -541,3 +541,115 @@ int32_t rubraview_folder_show_for(int32_t show, int32_t opened_kind, bool same_k
     if (show < 0 || show > 3) show = 0;
     return show == 0 && same_kind && opened_kind >= 1 && opened_kind <= 3 ? opened_kind : show;
 }
+
+/* ---- RV-192: by shape ---- */
+
+rubraview_shape_t rubraview_shape_of(int32_t width, int32_t height) {
+    if (width <= 0 || height <= 0) return RUBRAVIEW_SHAPE_UNKNOWN;
+    return width > height ? RUBRAVIEW_SHAPE_WIDE : width < height ? RUBRAVIEW_SHAPE_TALL : RUBRAVIEW_SHAPE_SQUARE;
+}
+
+void rubraview_shape_count(const bool *selected, const uint8_t *shapes, const size_t *rows, size_t n,
+                           size_t total[RUBRAVIEW_SHAPE_COUNT], size_t picked[RUBRAVIEW_SHAPE_COUNT]) {
+    for (size_t k = 0; k < RUBRAVIEW_SHAPE_COUNT; ++k) total[k] = picked[k] = 0;
+    if (!shapes) return;
+    for (size_t r = 0; r < n; ++r) {
+        size_t i = rows ? rows[r] : r;
+        uint8_t k = shapes[i] < RUBRAVIEW_SHAPE_COUNT ? shapes[i] : RUBRAVIEW_SHAPE_UNKNOWN;
+        total[k]++;
+        if (selected && selected[i]) picked[k]++;
+    }
+}
+
+size_t rubraview_shape_toggle(bool *selected, const uint8_t *shapes, const size_t *rows, size_t n,
+                              rubraview_shape_t which, bool *out_picked) {
+    if (out_picked) *out_picked = false;
+    if (!selected || !shapes || which <= RUBRAVIEW_SHAPE_UNKNOWN || which >= RUBRAVIEW_SHAPE_COUNT) return 0;
+    size_t total[RUBRAVIEW_SHAPE_COUNT], picked[RUBRAVIEW_SHAPE_COUNT];
+    rubraview_shape_count(selected, shapes, rows, n, total, picked);
+    if (total[which] == 0) return 0;
+    bool pick = picked[which] < total[which];
+    for (size_t r = 0; r < n; ++r) {
+        size_t i = rows ? rows[r] : r;
+        if (shapes[i] == (uint8_t)which) selected[i] = pick;
+    }
+    if (out_picked) *out_picked = pick;
+    return total[which];
+}
+
+struct rubraview_shape_slot {
+    char *path;          /* NULL: empty */
+    size_t len;
+    int64_t mtime;
+    uint64_t hash;
+    uint8_t shape;
+};
+
+static uint64_t shape_hash(proven_u8str_view_t path, int64_t mtime) {
+    uint64_t h = 1469598103934665603ull;
+    for (size_t i = 0; i < path.size; ++i) { h ^= (uint8_t)path.ptr[i]; h *= 1099511628211ull; }
+    h ^= (uint64_t)mtime;
+    h *= 1099511628211ull;
+    return h;
+}
+
+static struct rubraview_shape_slot *shape_find(const rubraview_shape_cache_t *cache, proven_u8str_view_t path,
+                                               int64_t mtime, uint64_t h) {
+    if (!cache->slots || cache->capacity == 0) return NULL;
+    size_t mask = cache->capacity - 1;
+    for (size_t at = (size_t)h & mask, tries = 0; tries < cache->capacity; at = (at + 1) & mask, ++tries) {
+        struct rubraview_shape_slot *s = &cache->slots[at];
+        if (!s->path) return s;
+        if (s->hash == h && s->mtime == mtime && s->len == path.size && memcmp(s->path, path.ptr, path.size) == 0) return s;
+    }
+    return NULL;
+}
+
+bool rubraview_shape_cache_get(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
+                               rubraview_shape_t *out) {
+    if (!cache || path.size == 0) return false;
+    struct rubraview_shape_slot *s = shape_find(cache, path, mtime, shape_hash(path, mtime));
+    if (!s || !s->path) return false;
+    if (out) *out = (rubraview_shape_t)s->shape;
+    return true;
+}
+
+bool rubraview_shape_cache_put(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
+                               rubraview_shape_t shape) {
+    if (!cache || path.size == 0) return false;
+    if (cache->count >= RUBRAVIEW_SHAPE_CACHE_MAX) rubraview_shape_cache_free(cache);   /* starts over */
+    if (!cache->slots || (cache->count + 1) * 10 > cache->capacity * 7) {
+        size_t capacity = cache->capacity ? cache->capacity * 2 : 256;
+        struct rubraview_shape_slot *slots = (struct rubraview_shape_slot*)calloc(capacity, sizeof(*slots));
+        if (!slots) return false;
+        rubraview_shape_cache_t grown = { .slots = slots, .capacity = capacity, .count = cache->count };
+        for (size_t i = 0; i < cache->capacity; ++i) {
+            if (!cache->slots[i].path) continue;
+            struct rubraview_shape_slot *to = shape_find(&grown, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)cache->slots[i].path,
+                                                                                        .size = cache->slots[i].len },
+                                                         cache->slots[i].mtime, cache->slots[i].hash);
+            *to = cache->slots[i];
+        }
+        free(cache->slots);
+        *cache = grown;
+    }
+    uint64_t h = shape_hash(path, mtime);
+    struct rubraview_shape_slot *s = shape_find(cache, path, mtime, h);
+    if (!s) return false;
+    if (!s->path) {
+        char *copy = (char*)malloc(path.size);
+        if (!copy) return false;
+        memcpy(copy, path.ptr, path.size);
+        *s = (struct rubraview_shape_slot){ .path = copy, .len = path.size, .mtime = mtime, .hash = h };
+        cache->count++;
+    }
+    s->shape = (uint8_t)shape;
+    return true;
+}
+
+void rubraview_shape_cache_free(rubraview_shape_cache_t *cache) {
+    if (!cache) return;
+    for (size_t i = 0; i < cache->capacity; ++i) free(cache->slots[i].path);
+    free(cache->slots);
+    *cache = (rubraview_shape_cache_t){0};
+}

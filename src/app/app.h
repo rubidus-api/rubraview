@@ -381,7 +381,8 @@ typedef struct apply_all_job {
 } apply_all_job_t;
 
 /* 1.24.0 (owner, 2026-10-19): the list a one-of-many choice opens, in the window where it was pressed. */
-enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_ORDER, CHOOSE_LISTEXT, CHOOSE_LISTSORT };
+enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_ORDER, CHOOSE_LISTEXT, CHOOSE_LISTSORT, CHOOSE_SHAPE };
+enum { SHAPE_FOR_PICKER = 1, SHAPE_FOR_LIST };   /* RV-192 */
 enum { CHOOSE_IN_MAIN = 0, CHOOSE_IN_SETTINGS, CHOOSE_IN_EDIT, CHOOSE_IN_FILES };
 #define CHOOSE_MAX 48
 typedef struct chooser {
@@ -1298,6 +1299,15 @@ typedef struct app_state {
     rubraview_thumbs_t    *thumbs;              /* the thread, started with the first picker */
     uint32_t               picker_generation;   /* one per listing: late results are known by it */
     bool                   picker_thumbs_arrived;   /* a picture came in this pass: draw */
+    /* RV-192: picking by shape — sizes read once, kept by path; a reading under way, and for what */
+    rubraview_shape_cache_t shape_cache;
+    rubraview_sizes_t     *shape_reader;
+    int64_t               *shape_reader_mtime;     /* the reader's n-th file's modified time */
+    int32_t                shape_for;              /* SHAPE_FOR_PICKER, SHAPE_FOR_LIST */
+    uint32_t               shape_generation;       /* the open-file screen's listing it was read for */
+    const void            *shape_pages;            /* the list's pages it was read for */
+    int32_t                shape_where;            /* where its choice opens, and at what */
+    double                 shape_x, shape_y, shape_above, shape_said;
     /* Move and Copy wait for the digit that names a curation folder;
        Recycle waits to be pressed a second time (§3.18.1's rule). */
     int32_t                picker_pending;     /* a picker_button_t, waiting for its digit */
@@ -1477,6 +1487,7 @@ static const picker_button_t PICKER_BOTTOM[] = { PICKER_BTN_PLAYLIST, PICKER_BTN
 #define PICKER_BOTTOM_COUNT ((int32_t)(sizeof(PICKER_BOTTOM) / sizeof(PICKER_BOTTOM[0])))
 #define PICKER_CRUMB_START (8.0 + 3.0 * (PICKER_NAV_W + 4.0) + 6.0)
 enum { PICKER_TOOL_ALL = 0, PICKER_TOOL_INDIVIDUAL, PICKER_TOOL_RANGE, PICKER_TOOL_SAME, PICKER_TOOL_MEDIA,
+       PICKER_TOOL_SHAPE,   /* RV-192 */
        PICKER_TOOL_SORT, PICKER_TOOL_ORDER, PICKER_TOOL_VIEW, PICKER_TOOL_COUNT };
 enum {
     FILES_PREVIEW_NONE = 0,   /* nothing asked for yet */
@@ -1674,6 +1685,7 @@ void chooser_open_listext(app_state_t *app, int where, double x, double y, doubl
 void chooser_open_listsort(app_state_t *app, int where, double x, double y, double above_y);
 void chooser_open_panel(app_state_t *app, int32_t which, int32_t row, double x, double y, double above_y);
 void chooser_open_setting(app_state_t *app);
+void chooser_open_shape(app_state_t *app, int where, double x, double y, double above_y);
 void chooser_open_sort(app_state_t *app, bool order, double x, double y, double above_y);
 bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, double y, double above_y);
 bool chooser_press(app_state_t *app, int where, double x, double y);
@@ -2035,6 +2047,13 @@ void picker_path_begin(app_state_t *app);
 size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out);
 void picker_recycle(app_state_t *app);
 void picker_select_everything(app_state_t *app);
+/* RV-192 (shapes.c) */
+void shape_begin(app_state_t *app, int32_t target, int where, double x, double y, double above_y);
+void shape_step(app_state_t *app);
+void shape_free(app_state_t *app);
+void shape_pick(app_state_t *app, int32_t which);
+const char *shape_name(int32_t shape);
+bool shape_table(app_state_t *app, int32_t target, uint8_t **out_shapes, size_t **out_rows, size_t *out_n, bool **out_selected);
 void picker_sort_by(app_state_t *app, int key);
 void picker_sort_set(app_state_t *app, int key, bool desc);
 proven_u8str_view_t picker_star_label(const app_state_t *app);

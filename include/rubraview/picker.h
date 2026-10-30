@@ -245,6 +245,46 @@ size_t rubraview_picker_type_text(char *buf, size_t cap, proven_u8str_view_t nam
  */
 int32_t rubraview_folder_show_for(int32_t show, int32_t opened_kind, bool same_kind);
 
+/**
+ * RV-192 (owner, 2026-10-30: "가로로 긴 파일, 세로로 긴 파일, 정사각형 비율 파일 등만 선택하거나 해제"):
+ * files picked or let go by their shape, in the open-file screen and the list windows. A shape is
+ * the size as shown (a photo turned as its EXIF says); square only when width and height are the
+ * same to the pixel (the owner's choice).
+ */
+typedef enum rubraview_shape {
+    RUBRAVIEW_SHAPE_UNKNOWN = 0,   /* not a picture or a film, or its size could not be read */
+    RUBRAVIEW_SHAPE_WIDE,
+    RUBRAVIEW_SHAPE_TALL,
+    RUBRAVIEW_SHAPE_SQUARE,
+    RUBRAVIEW_SHAPE_COUNT,
+} rubraview_shape_t;
+
+rubraview_shape_t rubraview_shape_of(int32_t width, int32_t height);
+
+/* Over `n` rows — the indices in `rows`, or 0..n-1 when `rows` is NULL — into `selected` and
+   `shapes`: how many of each shape there are, and how many of those are picked. */
+void rubraview_shape_count(const bool *selected, const uint8_t *shapes, const size_t *rows, size_t n,
+                           size_t total[RUBRAVIEW_SHAPE_COUNT], size_t picked[RUBRAVIEW_SHAPE_COUNT]);
+/* The rows of shape `which` all picked, or, when they all already are, all let go. Returns how
+   many there are; `*out_picked` (may be NULL) says which way they went. Others are not touched. */
+size_t rubraview_shape_toggle(bool *selected, const uint8_t *shapes, const size_t *rows, size_t n,
+                              rubraview_shape_t which, bool *out_picked);
+
+/* Shapes already read, by path and modification time, so a second press or another order of the
+   same files reads nothing again. Starts zeroed; grows as needed and starts over past a limit. */
+typedef struct rubraview_shape_cache {
+    struct rubraview_shape_slot *slots;
+    size_t capacity, count;
+} rubraview_shape_cache_t;
+
+#define RUBRAVIEW_SHAPE_CACHE_MAX 65536u
+
+bool rubraview_shape_cache_get(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
+                               rubraview_shape_t *out);
+bool rubraview_shape_cache_put(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
+                               rubraview_shape_t shape);
+void rubraview_shape_cache_free(rubraview_shape_cache_t *cache);
+
 #ifdef __cplusplus
 }
 #endif

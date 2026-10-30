@@ -2920,6 +2920,29 @@ void chooser_open_listext(app_state_t *app, int where, double x, double y, doubl
     if (first > 0 && first < c->count) c->layout.first = first;
 }
 
+/* RV-192: Shape — wide, tall, square, each with how many are picked of how many; a pick takes all
+   of that shape, or lets them go when all already were, and the list stays open. */
+void chooser_open_shape(app_state_t *app, int where, double x, double y, double above_y) {
+    uint8_t *shapes = NULL;
+    size_t *rows = NULL, n = 0;
+    bool *selected = NULL;
+    if (!shape_table(app, app->shape_for, &shapes, &rows, &n, &selected)) return;
+    size_t total[RUBRAVIEW_SHAPE_COUNT], picked[RUBRAVIEW_SHAPE_COUNT];
+    rubraview_shape_count(selected, shapes, rows, n, total, picked);
+    free(shapes);
+    free(rows);
+    chooser_t *c = &app->chooser;
+    *c = (chooser_t){ .kind = CHOOSE_SHAPE, .current = -1 };
+    snprintf(c->title, sizeof(c->title), "%s", T("Pick by shape"));
+    for (int k = RUBRAVIEW_SHAPE_WIDE; k < RUBRAVIEW_SHAPE_COUNT; ++k) {
+        bool all = total[k] > 0 && picked[k] == total[k];
+        chooser_word(c, (double)k, "%s  %s  %d / %d", all ? "\xE2\x98\x91" : "\xE2\x98\x90", shape_name(k), (int)picked[k], (int)total[k]);
+    }
+    if (total[RUBRAVIEW_SHAPE_UNKNOWN] > 0)   /* folders, music, text, what could not be read: never picked by shape */
+        chooser_word(c, 0.0, "    %s  (%d)", shape_name(RUBRAVIEW_SHAPE_UNKNOWN), (int)total[RUBRAVIEW_SHAPE_UNKNOWN]);
+    chooser_show(app, where, x, y, above_y);
+}
+
 static void list_ext_toggle(app_state_t *app, int32_t k) {
     if (k < 0) { app->list_ext_off_n = 0; list_view_changed(app); return; }
     proven_u8str_view_t e = cstr(app->list_ext_seen[k]);
@@ -3043,6 +3066,16 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             break;
         }
         case CHOOSE_LISTSORT: list_sort(app, (int)lround(c->values[index]), app->list_sort_desc); break;
+        case CHOOSE_SHAPE: {   /* RV-192: stays open, its counts new */
+            int32_t which = (int32_t)lround(c->values[index]);
+            if (which == RUBRAVIEW_SHAPE_UNKNOWN) { c->open = true; break; }
+            int where = c->where;
+            rubraview_rect_t f = c->layout.frame;
+            shape_pick(app, which);
+            c->open = true;
+            chooser_open_shape(app, where, f.x, f.y, f.y);
+            break;
+        }
         default: break;
     }
 }

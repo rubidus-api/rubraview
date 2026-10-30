@@ -993,6 +993,9 @@ void draw_list_tools(app_state_t *app, rubraview_renderer_t *rr, const rubraview
     char ext[32];
     if (app->list_ext_off_n > 0) snprintf(ext, sizeof(ext), ".ext (-%zu)", app->list_ext_off_n); else snprintf(ext, sizeof(ext), ".ext");
     list_button(rr, px, py, rubraview_listwin_tool_rect(lw, RUBRAVIEW_LISTWIN_EXT), ext, small, app->list_ext_off_n > 0, COLOR_TEXT);
+    char shape[48];   /* RV-192 */
+    snprintf(shape, sizeof(shape), "%s \xE2\x96\xBE", T("Shape"));
+    list_button(rr, px, py, rubraview_listwin_tool_rect(lw, RUBRAVIEW_LISTWIN_SHAPE), shape, small, false, COLOR_TEXT);
     rubraview_rect_t f = rubraview_listwin_tool_rect(lw, RUBRAVIEW_LISTWIN_FILTER);
     if (f.width > 0.0) {
         rubraview_pal_rect_t box = { f.x + 2.0, f.y + 2.0, f.width - 4.0, f.height - 4.0 };

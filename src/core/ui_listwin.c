@@ -76,11 +76,12 @@ rubraview_rect_t rubraview_listwin_bar_rect(const rubraview_listwin_t *lw, rubra
     return (rubraview_rect_t){0};
 }
 
-/* 1.25.0: the tools row — .ext, the filter (the widest), the sort, the order — under the bar. */
+/* 1.25.0: the tools row — .ext, the shape (RV-192), the filter (the widest), the sort, the order — under the bar. */
 rubraview_rect_t rubraview_listwin_tool_rect(const rubraview_listwin_t *lw, rubraview_listwin_part_t part) {
     if (!lw || !lw->editable || !lw->tools) return (rubraview_rect_t){0};
     static const struct { rubraview_listwin_part_t part; double share; } TOOLS[] = {
-        { RUBRAVIEW_LISTWIN_EXT, 0.16 }, { RUBRAVIEW_LISTWIN_FILTER, 0.44 }, { RUBRAVIEW_LISTWIN_SORT, 0.22 }, { RUBRAVIEW_LISTWIN_ORDER, 0.18 },
+        { RUBRAVIEW_LISTWIN_EXT, 0.14 }, { RUBRAVIEW_LISTWIN_SHAPE, 0.16 }, { RUBRAVIEW_LISTWIN_FILTER, 0.36 }, { RUBRAVIEW_LISTWIN_SORT, 0.20 },
+        { RUBRAVIEW_LISTWIN_ORDER, 0.14 },
     };
     double x = lw->x, y = lw->y + lw->title_height + lw->bar_height;
     for (size_t i = 0; i < sizeof(TOOLS) / sizeof(TOOLS[0]); ++i) {
@@ -173,8 +174,9 @@ rubraview_listwin_part_t rubraview_listwin_hit(const rubraview_listwin_t *lw, do
     double head = rubraview_listwin_head_height(lw);
     if (py < lw->y + head) {
         if (lw->tools && py >= lw->y + lw->title_height + lw->bar_height) {   /* 1.25.0: the tools row */
-            static const rubraview_listwin_part_t PARTS[] = { RUBRAVIEW_LISTWIN_EXT, RUBRAVIEW_LISTWIN_FILTER, RUBRAVIEW_LISTWIN_SORT, RUBRAVIEW_LISTWIN_ORDER };
-            for (size_t i = 0; i < 4; ++i) if (rubraview_rect_contains(rubraview_listwin_tool_rect(lw, PARTS[i]), px, py)) return PARTS[i];
+            static const rubraview_listwin_part_t PARTS[] = { RUBRAVIEW_LISTWIN_EXT, RUBRAVIEW_LISTWIN_SHAPE, RUBRAVIEW_LISTWIN_FILTER,
+                                                              RUBRAVIEW_LISTWIN_SORT, RUBRAVIEW_LISTWIN_ORDER };
+            for (size_t i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); ++i) if (rubraview_rect_contains(rubraview_listwin_tool_rect(lw, PARTS[i]), px, py)) return PARTS[i];
             return RUBRAVIEW_LISTWIN_BODY;
         }
         if (px < lw->x + lw->row_height) return RUBRAVIEW_LISTWIN_ALL;

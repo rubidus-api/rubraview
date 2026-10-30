@@ -526,4 +526,116 @@ bool rubraview_pal_thumbs_busy(rubraview_thumbs_t *t) {
     return busy;
 }
 
+/* ---- RV-192: the sizes of many files, as shown ---- */
+
+struct rubraview_sizes {
+    HANDLE thread;
+    volatile LONG stop;
+    volatile LONG done;
+    size_t count;
+    char **paths;
+    size_t *lens;
+    int32_t *w, *h;
+    rubraview_thumbs_wake_fn wake;
+    void *context;
+};
+
+/* A picture's size from WIC, turned as its EXIF says; a film's (and a picture WIC has no codec
+   for) from the shell's property store. (The shell's System.Photo.Orientation was not given on
+   the VM for a JPEG turned by EXIF, 2026-10-30.) */
+static void shown_size(proven_u8str_view_t path, int32_t *out_w, int32_t *out_h) {
+    int32_t w = 0, h = 0;
+    if (!rubraview_pal_image_shown_size(path, &w, &h)) {
+        double seconds = 0.0;
+        w = h = 0;
+        shell_meta(path, &w, &h, &seconds);
+    }
+    *out_w = w;
+    *out_h = h;
+}
+
+static DWORD WINAPI sizes_thread(LPVOID param) {
+    rubraview_sizes_t *s = (rubraview_sizes_t*)param;
+    bool com = SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE));
+    double told = rubraview_pal_time_now_seconds();
+    for (size_t i = 0; i < s->count && !InterlockedCompareExchange(&s->stop, 0, 0); ++i) {
+        int32_t w = 0, h = 0;
+        if (com && s->lens[i] > 0) shown_size((proven_u8str_view_t){ .ptr = (const proven_byte_t *)s->paths[i], .size = s->lens[i] }, &w, &h);
+        s->w[i] = w;
+        s->h[i] = h;
+        InterlockedExchange(&s->done, (LONG)(i + 1));   /* a full barrier: the size is written before it is counted */
+        double now = rubraview_pal_time_now_seconds();
+        if (s->wake && (i + 1 == s->count || now - told > 0.2)) { told = now; s->wake(s->context); }
+    }
+    if (s->count == 0 && s->wake) s->wake(s->context);
+    rubraview_pal_image_thread_end();   /* this thread's own WIC factory */
+    if (com) CoUninitialize();
+    return 0;
+}
+
+static void sizes_free(rubraview_sizes_t *s) {
+    for (size_t i = 0; i < s->count; ++i) free(s->paths[i]);
+    free(s->paths); free(s->lens); free(s->w); free(s->h);
+    free(s);
+}
+
+rubraview_sizes_t *rubraview_pal_sizes_start(const proven_u8str_view_t *paths, size_t count,
+                                             rubraview_thumbs_wake_fn wake, void *context) {
+    if (count > 0 && !paths) return NULL;
+    rubraview_sizes_t *s = (rubraview_sizes_t*)calloc(1, sizeof(*s));
+    if (!s) return NULL;
+    size_t n = count ? count : 1;
+    s->paths = (char**)calloc(n, sizeof(char*));
+    s->lens = (size_t*)calloc(n, sizeof(size_t));
+    s->w = (int32_t*)calloc(n, sizeof(int32_t));
+    s->h = (int32_t*)calloc(n, sizeof(int32_t));
+    s->count = count;
+    bool ok = s->paths && s->lens && s->w && s->h;
+    for (size_t i = 0; ok && i < count; ++i) {
+        if (paths[i].size == 0) continue;
+        s->paths[i] = (char*)malloc(paths[i].size);
+        if (!s->paths[i]) { ok = false; break; }
+        memcpy(s->paths[i], paths[i].ptr, paths[i].size);
+        s->lens[i] = paths[i].size;
+    }
+    if (!ok) { if (!s->paths) s->count = 0; sizes_free(s); return NULL; }
+    s->wake = wake;
+    s->context = context;
+    s->thread = CreateThread(NULL, 0, sizes_thread, s, 0, NULL);
+    if (!s->thread) { sizes_free(s); return NULL; }
+    SetThreadPriority(s->thread, THREAD_PRIORITY_BELOW_NORMAL);
+    return s;
+}
+
+size_t rubraview_pal_sizes_done(rubraview_sizes_t *s) {
+    return s ? (size_t)InterlockedCompareExchange(&s->done, 0, 0) : 0;
+}
+
+size_t rubraview_pal_sizes_count(const rubraview_sizes_t *s) {
+    return s ? s->count : 0;
+}
+
+void rubraview_pal_sizes_get(const rubraview_sizes_t *s, size_t index, int32_t *out_width, int32_t *out_height) {
+    int32_t w = 0, h = 0;
+    if (s && index < s->count && index < (size_t)InterlockedCompareExchange((volatile LONG*)&s->done, 0, 0)) { w = s->w[index]; h = s->h[index]; }
+    if (out_width) *out_width = w;
+    if (out_height) *out_height = h;
+}
+
+proven_u8str_view_t rubraview_pal_sizes_path(const rubraview_sizes_t *s, size_t index) {
+    if (!s || index >= s->count || !s->paths[index]) return (proven_u8str_view_t){0};
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s->paths[index], .size = s->lens[index] };
+}
+
+void rubraview_pal_sizes_stop(rubraview_sizes_t *s) {
+    if (!s) return;
+    InterlockedExchange(&s->stop, 1);
+    /* A shell call may be in flight; it is waited for, briefly. */
+    if (WaitForSingleObject(s->thread, 3000) == WAIT_OBJECT_0) {
+        CloseHandle(s->thread);
+        sizes_free(s);
+    }
+    /* Otherwise the thread still holds `s`; it is left, not freed under it. */
+}
+
 #endif /* _WIN32 */
