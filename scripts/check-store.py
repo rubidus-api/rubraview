@@ -10,9 +10,14 @@ Its [menu.*] tables are Explorer's right-click menu (RV-113 (3)): one for each
 item of MENU_ITEMS in src/core/shellreq.c, with the same flag, texts and
 "single", on the extensions of the item's kinds (SHELL_GROUPS in
 src/core/filemanage.c).
+
+Each [assoc.*] names its prog-id's logo (RV-190), the same for every table of
+one prog-id; the logo and its .targetsize-16/24/32/48/256 pictures (and their
+_altform-unplated twins) are there, square, N x N.
 """
 
 import re
+import struct
 import sys
 from pathlib import Path
 
@@ -64,6 +69,43 @@ def check_menu(code, source):
     return problems
 
 
+def png_size(path):
+    head = path.read_bytes()[:24]
+    if head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
+        return None
+    return struct.unpack(">II", head[16:24])
+
+
+def check_logos(source):
+    problems = []
+    logos = {}
+    for name, body in re.findall(r"^\[assoc\.(\w+)\]$\n(.*?)(?=^\[|\Z)", source, re.M | re.S):
+        prog = re.search(r'^prog-id = "([^"]+)"$', body, re.M)
+        logo = re.search(r'^logo = "([^"]+)"$', body, re.M)
+        if not logo:
+            problems.append("[assoc.%s] has no logo" % name)
+            continue
+        logos.setdefault(prog.group(1) if prog else name, set()).add(logo.group(1))
+    if not logos:
+        problems.append("no [assoc.*] was read")
+    base = ROOT / "resources" / "distribution"
+    for prog, names in sorted(logos.items()):
+        if len(names) != 1:
+            problems.append("%s has %d logos" % (prog, len(names)))
+            continue
+        logo = base / names.pop()
+        stem = logo.with_suffix("")
+        files = [(logo, None)] + [(Path("%s.targetsize-%d%s.png" % (stem, n, alt)), n)
+                                  for n in (16, 24, 32, 48, 256) for alt in ("", "_altform-unplated")]
+        for path, n in files:
+            size = png_size(path) if path.is_file() else None
+            if size is None:
+                problems.append("%s: %s is not there or not a PNG" % (prog, path.relative_to(ROOT)))
+            elif size[0] != size[1] or (n is not None and size != (n, n)):
+                problems.append("%s: %s is %d x %d" % (prog, path.relative_to(ROOT), size[0], size[1]))
+    return problems
+
+
 def main():
     code = (ROOT / "src" / "core" / "filemanage.c").read_text(encoding="utf-8")
     body = code[code.index("rubraview_shell_extensions(void)"):]
@@ -78,6 +120,7 @@ def main():
     for ext in sorted(set(store) - viewer):
         problems.append(".%s is the Store package's and not the viewer's" % ext)
     problems += check_menu(code, source)
+    problems += check_logos(source)
     for problem in problems:
         print("check-store: " + problem, file=sys.stderr)
     return 1 if problems else 0

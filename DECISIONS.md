@@ -2607,3 +2607,20 @@ Do not store credentials, private infrastructure details, personal data, private
     time, a list's by path (its pages carry no time) — so another press, another order or the other list reads nothing
     again. The thread ends its own WIC factory (`rubraview_pal_image_thread_end`).
 - Consequences: T278 (host), T279 (VM).
+
+## 2026-10-30: D-224 The Store's copy shows each kind's icon (RV-190)
+
+- Status: Accepted (owner 2026-10-30: "모두 추천대로 진행해 주세요" — the request to rubrapack and, once it had it,
+  one logo per group in `rubraview-store.toml`; rubrapack 0.51.0 released it 2026-10-30).
+- Decision:
+  - `scripts/make-icon.py --store` draws the five kinds of D-222 as PNG files in `resources/distribution/menu/types/`:
+    `<kind>.png` (256 px, the logo the source names) and `<kind>.targetsize-16/24/32/48/256.png` with their
+    `_altform-unplated` twins (the same pixels: the red square is its own plate; without them Explorer drew a grey
+    plate around the program's logo). Kinds: picture, video, music, text, comic.
+  - Every `[assoc.*]` names its group's logo (`logo = "menu/types/<kind>.png"`); rubrapack packs it once per prog-id
+    as `Assets\Types\<prog-id>.png` with the sizes through resources.pri.
+  - `scripts/check-store.py` (run by `scripts/project-check.sh`) refuses a type without a logo, two logos in one
+    prog-id, a missing size, a picture not square or not N x N.
+  - The Store build needs rubrapack 0.51.0; 0.48.0 refuses `logo`.
+- Consequences: T280 (VM). Music and video were not seen on the VM (Media Player is their chosen app there); their
+  types name their own logos. RK-10 closed.
