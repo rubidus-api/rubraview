@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.43.exe              the viewer, as built
-dist/rubraview-v1.39.43/                 the release bundle
-dist/rubraview-v1.39.43.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.44.exe              the viewer, as built
+dist/rubraview-v1.39.44/                 the release bundle
+dist/rubraview-v1.39.44.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1670,9 +1670,12 @@ pictures; pages inside one file; the slide show; playing — a film, music or
 an animation; films; music; text): select one and press `Enter`, then the
 key to add; `Delete` takes the last one off. A key another action already
 uses where the two are asked together is refused, and the message says
-which. **Show by key / by function** turns the list round: each key once,
-with what it does in each kind of file (`Space`: next page, play or pause,
-auto-scroll); F1's help ends with the same list. One key does one thing,
+which. **Show by key / by function** turns the list round: the keys in order, each
+key's family together (`A`, `Shift+A`, `Ctrl+A`, ...), with a row for each
+kind of file it does something in (`Space`: next page, play or pause,
+auto-scroll). **By key, in the order of** puts the keys as they lie on the
+keyboard (Esc, F1 to F12, the number row, Q W E R T Y ...) or A to Z, then
+0 to 9 and F1 to F12. F1's help ends with a list by key too. One key does one thing,
 or a like one, wherever it is pressed: `]` / `[` the folder or archive,
 `Ctrl+]` / `Ctrl+[` faster and slower (a film's speed, the slide show's
 delay, a text's auto-scroll), `+` / `-` bigger and smaller, `Shift+N` the

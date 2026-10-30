@@ -77,6 +77,19 @@ proven_u8str_view_t rubraview_key_combo_format(char *buffer, size_t capacity, ru
 /** Whether two combos are the same key (names compare without case). */
 bool rubraview_key_combo_equal(rubraview_key_combo_t a, rubraview_key_combo_t b);
 
+/* RV-193 (owner, 2026-10-30): the Keys page by key, each key's family together (A, Shift+A, Ctrl+A, ...). */
+typedef enum rubraview_key_order {
+    RUBRAVIEW_KEY_ORDER_KEYBOARD = 0,   /* as the keys lie: Esc, F1-F12, the number row, Q W E R T Y ..., then the rest */
+    RUBRAVIEW_KEY_ORDER_ALPHABET,       /* A-Z, 0-9, F1-F24, then the rest as the keyboard has them */
+} rubraview_key_order_t;
+
+/**
+ * <0, 0 or >0: whether `a` comes before `b` — first by its key (names without case; one this list does not
+ * know after all it knows, by name), then by its modifiers: none, Shift, Ctrl, Ctrl+Shift, Alt, Shift+Alt,
+ * Ctrl+Alt, all three.
+ */
+int rubraview_key_combo_order(rubraview_key_combo_t a, rubraview_key_combo_t b, rubraview_key_order_t order);
+
 /**
  * Whether one key bound in both contexts would leave one of the two
  * actions unreachable. The rule follows the mode chains

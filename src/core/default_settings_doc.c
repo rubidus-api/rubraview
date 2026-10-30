@@ -451,8 +451,9 @@ static const char *const PARTS[] = {
 "  action keys.export              \"Export keys to a file\"\n"
 "  action keys.import              \"Import keys from a file\"\n"
 "  action keys.by_key              \"Show by key / by function\"\n"
-"  note   \"By function: each kind of file's keys under its heading, which says when they are asked. By key: each key\"\n"
-"  note   \"once, with what it does in each (Space: next page, play or pause, auto-scroll).\"\n"
+"  choice keys.key_order           \"By key, in the order of\" keyboard | abc = keyboard wired\n"
+"  note   \"By function: each kind of file's keys under its heading, which says when they are asked. By key: a key's\"\n"
+"  note   \"family together (A, Shift+A, Ctrl+A, ...), a row for each kind of file it does something in.\"\n"
 "  table  keymap\n",
 /* The owner (2026-10-17): a fuller explanation on each harder setting's name. */
 "help general.single_instance \"On: a file opened from Explorer goes to the window already open instead of starting a second viewer. Off: every file opens its own window.\"\n"
@@ -502,6 +503,7 @@ static const char *const PARTS[] = {
 "help display.gpu_resize \"On: pictures are scaled on the graphics card, faster for very large photos. Off if a picture looks wrong on this computer.\"\n"
 "help cache.memory_cap_mb \"How much memory the pages kept ready may take. More makes turning back and forth instant; less leaves room for other programs.\"\n"
 "help cache.lookahead \"How many pages after the one on screen are read ahead, so the next page appears at once.\"\n"
+"help keys.key_order \"The keys by key: as they lie on the keyboard (Esc, F1 to F12, the number row, Q W E R T Y ...) or A to Z, then 0 to 9 and F1 to F12. Each key's Shift, Ctrl and Alt follow it.\"\n"
 "help cache.keep_details \"Camera details, comments, XMP and IPTC, when Export, Edit or the batch writes a picture again: dropped; kept in the new file where its format has a place (JPEG, PNG, GIF, WebP, AVIF, JPEG XL; the rest in words in its comment); or that, and what the file cannot hold in a .txt of the same name beside it (photo.txt, then photo-1.txt). Never with the metadata stripped.\"\n"
 "help cache.privacy_clean \"On: every exported or batch-saved picture loses its metadata (camera, GPS place, dates) unless you choose otherwise there.\"\n"
 "help keys.use_keymap_file \"On: the keys come from keymap.ini, which the Keys page edits. Off: the built-in keys are used whatever the file says.\"\n",

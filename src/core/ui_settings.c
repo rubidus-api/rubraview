@@ -51,6 +51,8 @@ static int32_t cells_of(proven_u8str_view_t text) {
     return cells;
 }
 
+int32_t rubraview_settings_text_cells(proven_u8str_view_t text) { return cells_of(text); }
+
 /* The document's texts in the language in use (RV-114): labels, titles and
    notes as they are, a choice's word and a unit with a context, since the
    same short word means other things elsewhere. */

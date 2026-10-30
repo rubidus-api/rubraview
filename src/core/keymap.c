@@ -2,6 +2,7 @@
 #include "rubraview/ini.h"
 #include "rubraview/lang.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 
@@ -174,6 +175,62 @@ proven_u8str_view_t rubraview_key_combo_format(char *buffer, size_t capacity, ru
 
 bool rubraview_key_combo_equal(rubraview_key_combo_t a, rubraview_key_combo_t b) {
     return combo_matches(a, b);
+}
+
+/* RV-193: the keys as they lie on a keyboard, row by row, left to right; then the editing and arrow keys
+   and the number pad. Letters, digits and F-keys are worked out, not listed. */
+static const char *const KEYBOARD_REST[] = {
+    "Backquote", "Minus", "Plus", "Backspace", "Tab", "BracketLeft", "BracketRight", "Backslash",
+    "Semicolon", "Quote", "Enter", "Comma", "Period", "Slash", "Space",
+    "Insert", "Home", "PageUp", "Delete", "End", "PageDown", "Up", "Left", "Down", "Right",
+};
+static const char QWERTY[] = "QWERTYUIOPASDFGHJKLZXCVBNM";
+
+/* A key's place: smaller first; 10000 and up for a name not known (then by name). */
+static int key_rank(proven_u8str_view_t name, rubraview_key_order_t order) {
+    const char *s = (const char *)name.ptr;
+    size_t n = name.size;
+    bool alpha = order == RUBRAVIEW_KEY_ORDER_ALPHABET;
+    if (n == 1 && isalpha((unsigned char)s[0])) {
+        int up = toupper((unsigned char)s[0]);
+        int at = (int)(strchr(QWERTY, up) - QWERTY);   /* rows of 10, 9 and 7: Q-P 400, A-L 420, Z-M 440 */
+        return alpha ? 100 + (up - 'A') : at < 10 ? 400 + at : at < 19 ? 420 + (at - 10) : 440 + (at - 19);
+    }
+    if (n == 1 && isdigit((unsigned char)s[0])) {
+        int d = s[0] - '0';
+        return alpha ? 200 + d : 300 + (d == 0 ? 10 : d);   /* the number row runs 1 ... 9, 0 */
+    }
+    if (n >= 2 && n <= 3 && (s[0] == 'F' || s[0] == 'f') && isdigit((unsigned char)s[1]) && (n == 2 || isdigit((unsigned char)s[2]))) {
+        int f = atoi(s + 1);
+        if (f >= 1 && f <= 24) return (alpha ? 250 : 10) + f;
+    }
+    if (proven_u8str_view_eq_ascii_ci(name, PROVEN_LIT("Escape"))) return alpha ? 500 : 0;
+    if (n == 7 && strncmp(s, "Numpad", 6) == 0 && isdigit((unsigned char)s[6])) return 700 + (s[6] - '0');
+    for (size_t i = 0; i < sizeof(KEYBOARD_REST) / sizeof(KEYBOARD_REST[0]); ++i) {
+        if (proven_u8str_view_eq_ascii_ci(name, proven_u8str_view_from_cstr(KEYBOARD_REST[i]))) {
+            /* the keyboard's own place: the number row's two after 0, Tab's row's after P, and so on */
+            static const int AT[] = { 299, 311, 312, 313, 399, 410, 411, 412, 429, 430, 431, 447, 448, 449, 450,
+                                      600, 601, 602, 603, 604, 605, 606, 607, 608, 609 };
+            return alpha ? 510 + (int)i : AT[i];
+        }
+    }
+    return 10000;
+}
+
+int rubraview_key_combo_order(rubraview_key_combo_t a, rubraview_key_combo_t b, rubraview_key_order_t order) {
+    int ra = key_rank(a.key_name, order), rb = key_rank(b.key_name, order);
+    if (ra != rb) return ra < rb ? -1 : 1;
+    if (ra == 10000) {   /* two names not known: by name, without case */
+        size_t n = a.key_name.size < b.key_name.size ? a.key_name.size : b.key_name.size;
+        for (size_t i = 0; i < n; ++i) {
+            int ca = tolower(a.key_name.ptr[i]), cb = tolower(b.key_name.ptr[i]);
+            if (ca != cb) return ca < cb ? -1 : 1;
+        }
+        if (a.key_name.size != b.key_name.size) return a.key_name.size < b.key_name.size ? -1 : 1;
+    }
+    /* Shift 1, Ctrl 2, Alt 4: the mask is the order the modifiers are wanted in */
+    uint32_t ma = a.modifiers & 7u, mb = b.modifiers & 7u;
+    return ma == mb ? 0 : ma < mb ? -1 : 1;
 }
 
 /* RV-184 (D-219): the contexts, in the order they are shown. */

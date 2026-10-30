@@ -68,7 +68,7 @@ void settings_read_file(app_state_t *app) {
 typedef struct { size_t binding, combo; } key_combo_row_t;
 static bool g_keys_by_key;
 static int32_t g_key_row[KEY_ROWS_MAX];          /* by function: a binding, or -(context + 1) for a heading */
-static key_combo_row_t g_key_combo[KEY_ROWS_MAX];  /* by key: where each key was first met */
+static key_combo_row_t g_key_combo[KEY_ROWS_MAX];  /* by key: every key of every binding, sorted (RV-193) */
 static size_t g_key_row_count;
 
 /* RV-185: the folder rubraview.exe runs from, with Windows' separator. */
@@ -329,33 +329,30 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
     }
     if (!proven_u8str_view_eq(source, PROVEN_LIT("keymap"))) return 0;
     if (index == 0) {
-        int n = g_keys_by_key ? snprintf(buffer, capacity, "%-16s %s", T("key"), T("what it does, and where  (Show by function to change them)"))
+        int32_t pad_key = 20 - rubraview_settings_text_cells(proven_u8str_view_from_cstr(T("key")));
+        int32_t pad = 14 - rubraview_settings_text_cells(proven_u8str_view_from_cstr(T("where")));
+        int n = g_keys_by_key ? snprintf(buffer, capacity, "%s%*s %s%*s %s", T("key"), pad_key > 0 ? (int)pad_key : 0, "", T("where"),
+                                         pad > 0 ? (int)pad : 0, "", T("what it does  (Show by function to change them)"))
                               : snprintf(buffer, capacity, "%-24s %s", T("action"), T("keys  (Enter adds a key, Delete takes the last off)"));
         return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
     }
     if (index > g_key_row_count) return 0;
-    if (g_keys_by_key) {   /* RV-184: a key, and what it does in each context that binds it */
-        const rubraview_key_binding_t *first = &app->keymap.bindings[g_key_combo[index - 1].binding];
-        rubraview_key_combo_t combo = first->combos[g_key_combo[index - 1].combo];
+    if (g_keys_by_key) {   /* RV-193: a key and what it does in one context; the next context's on the next row, the key left blank */
+        key_combo_row_t row = g_key_combo[index - 1];
+        const rubraview_key_binding_t *o = &app->keymap.bindings[row.binding];
+        rubraview_key_combo_t combo = o->combos[row.combo];
+        bool again = index >= 2 && rubraview_key_combo_equal(app->keymap.bindings[g_key_combo[index - 2].binding].combos[g_key_combo[index - 2].combo], combo);
         char one[64];
-        proven_u8str_view_t named = rubraview_key_combo_format(one, sizeof(one), combo);
-        int n = snprintf(buffer, capacity, "%-16.*s", (int)named.size, (const char *)named.ptr);
-        bool more = false;
-        for (size_t e = g_key_combo[index - 1].binding; e < app->keymap.count && n > 0 && (size_t)n + 8 < capacity; ++e) {
-            const rubraview_key_binding_t *o = &app->keymap.bindings[e];
-            bool binds = false;
-            for (size_t f = 0; f < o->combo_count && !binds; ++f) binds = rubraview_key_combo_equal(o->combos[f], combo);
-            if (!binds) continue;
-            const rubraview_key_context_info_t *info = rubraview_keymap_context_info(o->context);
-            const char *words = rubraview_action_words(o->action);
-            int m = words ? snprintf(buffer + n, capacity - (size_t)n, "%s%s (%s)", more ? "  ·  " : " ", rubraview_tr(words),
-                                     info ? rubraview_tr(info->heading) : "?")
-                          : snprintf(buffer + n, capacity - (size_t)n, "%s%.*s (%s)", more ? "  ·  " : " ", (int)o->action.size,
-                                     (const char *)o->action.ptr, info ? rubraview_tr(info->heading) : "?");
-            if (m <= 0 || (size_t)m >= capacity - (size_t)n) break;
-            n += m;
-            more = true;
-        }
+        proven_u8str_view_t named = again ? PROVEN_LIT("") : rubraview_key_combo_format(one, sizeof(one), combo);
+        const rubraview_key_context_info_t *info = rubraview_keymap_context_info(o->context);
+        const char *where = info ? rubraview_tr(info->heading) : T("other");
+        const char *words = rubraview_action_words(o->action);
+        /* the context's column by cells, not bytes: a Korean heading is two cells a letter */
+        int32_t pad = 14 - rubraview_settings_text_cells(proven_u8str_view_from_cstr(where));
+        int n = words ? snprintf(buffer, capacity, "%-20.*s %s%*s %s", (int)named.size, (const char *)named.ptr, where, pad > 0 ? (int)pad : 0, "",
+                                 rubraview_tr(words))
+                      : snprintf(buffer, capacity, "%-20.*s %s%*s %.*s", (int)named.size, (const char *)named.ptr, where, pad > 0 ? (int)pad : 0, "",
+                                 (int)o->action.size, (const char *)o->action.ptr);
         return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
     }
     int32_t at = g_key_row[index - 1];
@@ -405,18 +402,38 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
 /* RV-184 (D-219): the Keys table's rows — by function, a heading a context (in the order of
    rubraview_keymap_contexts, then any other) with its actions under it; by key, each key once. Built again
    whenever the keymap or the way it is shown changes. */
+static const rubraview_keymap_t *g_sort_keymap;
+static rubraview_key_order_t g_sort_order;
+
+static size_t context_place(proven_u8str_view_t context) {
+    size_t count = 0;
+    const rubraview_key_context_info_t *all = rubraview_keymap_contexts(&count);
+    for (size_t c = 0; c < count; ++c) if (proven_u8str_view_eq(context, proven_u8str_view_from_cstr(all[c].name))) return c;
+    return count;
+}
+
+static int key_row_compare(const void *pa, const void *pb) {
+    const key_combo_row_t *a = pa, *b = pb;
+    const rubraview_key_binding_t *ba = &g_sort_keymap->bindings[a->binding], *bb = &g_sort_keymap->bindings[b->binding];
+    int k = rubraview_key_combo_order(ba->combos[a->combo], bb->combos[b->combo], g_sort_order);
+    if (k != 0) return k;
+    size_t ca = context_place(ba->context), cb = context_place(bb->context);
+    if (ca != cb) return ca < cb ? -1 : 1;
+    return a->binding < b->binding ? -1 : a->binding > b->binding ? 1 : 0;
+}
+
 void keymap_table_refresh(app_state_t *app) {
     g_key_row_count = 0;
     if (g_keys_by_key) {
-        for (size_t i = 0; i < app->keymap.count; ++i) {
-            for (size_t c = 0; c < app->keymap.bindings[i].combo_count && g_key_row_count < KEY_ROWS_MAX; ++c) {
-                rubraview_key_combo_t combo = app->keymap.bindings[i].combos[c];
-                bool seen = false;
-                for (size_t r = 0; r < g_key_row_count && !seen; ++r)
-                    seen = rubraview_key_combo_equal(app->keymap.bindings[g_key_combo[r].binding].combos[g_key_combo[r].combo], combo);
-                if (!seen) g_key_combo[g_key_row_count++] = (key_combo_row_t){ .binding = i, .combo = c };
-            }
-        }
+        /* RV-193 (owner, 2026-10-30): every key of every context, a key's family together (A, Shift+A, Ctrl+A, ...),
+           the keys as the keyboard lies or A-Z (Keys › order); one key's contexts in the order of the headings */
+        for (size_t i = 0; i < app->keymap.count; ++i)
+            for (size_t c = 0; c < app->keymap.bindings[i].combo_count && g_key_row_count < KEY_ROWS_MAX; ++c)
+                g_key_combo[g_key_row_count++] = (key_combo_row_t){ .binding = i, .combo = c };
+        g_sort_keymap = &app->keymap;
+        g_sort_order = rubraview_settings_get(&app->settings, PROVEN_LIT("keys"), PROVEN_LIT("key_order")) > 0.5 ? RUBRAVIEW_KEY_ORDER_ALPHABET
+                                                                                                                : RUBRAVIEW_KEY_ORDER_KEYBOARD;
+        qsort(g_key_combo, g_key_row_count, sizeof(g_key_combo[0]), key_row_compare);
     } else {
         size_t count = 0;
         const rubraview_key_context_info_t *all = rubraview_keymap_contexts(&count);
@@ -756,9 +773,16 @@ void load_keymap(app_state_t *app);
 static void settings_apply_rest(app_state_t *app) {
     static bool first = true;
     static double last_fit = -1.0, last_layout = -1.0, last_grid = -1.0, last_color = -1.0,
-                  last_privacy = -1.0, last_keymap = -1.0, last_collapse = -1.0, last_details = -1.0;
+                  last_privacy = -1.0, last_keymap = -1.0, last_collapse = -1.0, last_details = -1.0, last_key_order = -1.0;
     rubraview_settings_t *st = &app->settings;
     double dpi = rubraview_pal_window_dpi_scale(app->window);
+
+    /* RV-193: the keys by key in the other order */
+    double key_order = rubraview_settings_get(st, PROVEN_LIT("keys"), PROVEN_LIT("key_order"));
+    if (key_order != last_key_order) {
+        last_key_order = key_order;
+        if (g_keys_by_key) keymap_table_refresh(app);
+    }
 
     /* General */
     lang_apply(app);

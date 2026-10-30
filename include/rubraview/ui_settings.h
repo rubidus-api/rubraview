@@ -173,6 +173,9 @@ typedef enum rubraview_settings_event {
 /** 1.24.0: a choice's word `index`, as the settings window shows it (a language by its own name). */
 proven_u8str_view_t rubraview_settings_choice_word(const rubraview_setting_def_t *def, int32_t index);
 
+/** How many cells of the grid `text` takes: a Hangul or CJK character two, a bidi mark none (RV-193: a column after it). */
+int32_t rubraview_settings_text_cells(proven_u8str_view_t text);
+
 rubraview_settings_event_t rubraview_settings_view_key(rubraview_settings_view_t *view,
                                                         rubraview_settings_t *settings,
                                                         rubraview_settings_key_t key);

@@ -2624,3 +2624,22 @@ Do not store credentials, private infrastructure details, personal data, private
   - The Store build needs rubrapack 0.51.0; 0.48.0 refuses `logo`.
 - Consequences: T280 (VM). Music and video were not seen on the VM (Media Player is their chosen app there); their
   types name their own logos. RK-10 closed.
+
+## 2026-10-30: D-225 The Keys page by key, in order (RV-193)
+
+- Status: Accepted (owner 2026-10-30: "키별 보기로 할 때는 키를 오름차순으로 ... A 계열 단축키 다 보여주고 ... qwert 순서대로
+  보여주거나 혹은 abcde 순서대로 ... 선택할 수 있으면"; "모드에 따라 서로 다른 기능이 주어질 수 있으니 그런 것들을 다 같이
+  볼 수 있게").
+- Decision:
+  - `rubraview_key_combo_order(a, b, order)` in the keymap: the key's place, then the modifiers in the order of their
+    mask (none, Shift, Ctrl, Ctrl+Shift, Alt, Shift+Alt, Ctrl+Alt, all three). Keyboard order: Esc, F1–F24, the
+    number row (Backquote, 1–9, 0, Minus, Plus, Backspace), Tab and Q–P with the brackets and Backslash, A–L with
+    Semicolon, Quote and Enter, Z–M with Comma, Period and Slash, Space, the editing keys, the arrows, the number
+    pad. Abc order: A–Z, 0–9, F1–F24, then Escape and the rest in the keyboard's order. A name neither knows comes
+    last, by name.
+  - Keys › "By key, in the order of" (`keys.key_order`: keyboard, the default, as the owner named it first; abc).
+  - By key, every binding's every key is a row, sorted by that order, then by the context's place among the
+    headings: a key doing something in several contexts has a row each, the key written on the first only. The
+    rows say the key, the context and what it does, the context's column measured in the grid's cells
+    (`rubraview_settings_text_cells`), so Korean headings keep the column.
+- Consequences: T281 (host), T282 (VM). F1's own list by key is unchanged.
