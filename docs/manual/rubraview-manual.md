@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.47.exe              the viewer, as built
-dist/rubraview-v1.39.47/                 the release bundle
-dist/rubraview-v1.39.47.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.48.exe              the viewer, as built
+dist/rubraview-v1.39.48/                 the release bundle
+dist/rubraview-v1.39.48.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1267,7 +1267,8 @@ kind of file.
 floating over the picture: the playlist, or the folder's or the archive's
 files when there is none. The file on screen is marked and kept in view; a
 click goes to a file, the wheel scrolls, the title drags it, `X` or `Esc`
-closes it. The square left of `R` (of `X` in a book's list) maximizes it:
+closes it. **R**, beside the `X`, sizes it (see below; a book's list too).
+The square left of `R` maximizes it:
 it fills the viewer below its title bar, and the same button, now two
 squares, puts it back where it was. Dragged by its title while maximized,
 it goes back to its size under the pointer. The recent files and the

@@ -27,7 +27,7 @@ typedef enum rubraview_listwin_part {
     RUBRAVIEW_LISTWIN_ROW,
     RUBRAVIEW_LISTWIN_BODY,    /* inside, below the last row */
     /* D-111, a list that can be changed (`editable`): */
-    RUBRAVIEW_LISTWIN_RESIZE,     /* left of Close: dragged, it sizes the window */
+    RUBRAVIEW_LISTWIN_RESIZE,     /* left of Close: dragged, it sizes the window (RV-198: in any list) */
     RUBRAVIEW_LISTWIN_ADD,        /* the bar under the title: files picked go into the list (RV-117) */
     RUBRAVIEW_LISTWIN_DEL,        /* the checked rows leave the list */
     RUBRAVIEW_LISTWIN_SAVE,
@@ -46,7 +46,7 @@ typedef enum rubraview_listwin_part {
     RUBRAVIEW_LISTWIN_ORDER,      /* rising or falling */
     RUBRAVIEW_LISTWIN_URL,        /* RV-158, the bar beside Add: a station's address typed joins the list */
     RUBRAVIEW_LISTWIN_SHAPE,      /* RV-192, the tools row after .ext: rows checked or not by shape (wide, tall, square) */
-    RUBRAVIEW_LISTWIN_MAXIMIZE,   /* RV-197, left of R (of Close without R): the whole view, or back */
+    RUBRAVIEW_LISTWIN_MAXIMIZE,   /* RV-197, left of R: the whole view, or back */
 } rubraview_listwin_part_t;
 
 typedef struct rubraview_listwin {
@@ -90,7 +90,7 @@ void rubraview_listwin_place(rubraview_listwin_t *lw, double view_w, double view
 rubraview_rect_t rubraview_listwin_rect(const rubraview_listwin_t *lw);
 rubraview_rect_t rubraview_listwin_close_rect(const rubraview_listwin_t *lw);
 
-/** RV-197: the maximize button, left of R, or of Close when there is no R (empty in a window of its own). */
+/** RV-197: the maximize button, left of R (empty in a window of its own). */
 rubraview_rect_t rubraview_listwin_maximize_rect(const rubraview_listwin_t *lw);
 
 /** Where the title's text ends: the left edge of its buttons. */
@@ -106,7 +106,7 @@ void rubraview_listwin_toggle_maximized(rubraview_listwin_t *lw, double view_w, 
 /** The height above the first row: the title, and the bar of an editable list. */
 double rubraview_listwin_head_height(const rubraview_listwin_t *lw);
 
-/** The resize button, left of Close (empty unless editable). */
+/** The resize button, left of Close (RV-198: a list only looked at has it too; empty in a window of its own). */
 rubraview_rect_t rubraview_listwin_resize_rect(const rubraview_listwin_t *lw);
 
 /** One of the bar's four buttons (DEL, SAVE, LOAD, PATHS), left to right; empty unless editable. */

@@ -1111,12 +1111,13 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_render_fill_rect(app->renderer, close, COLOR_CLOSE_HOVER, 4.0);
     }
     draw_sign(app->renderer, RUBRAVIEW_ICON_CLOSE, "X", close, lw->title_height * 0.4, COLOR_TEXT);
-    draw_listwin_maximize(app, app->renderer, lw);   /* RV-197 */
+    /* R sizes the window when dragged, in a book's list too (RV-198); RV-197 maximizes it. */
+    listwin_sign_button(app, app->renderer, rubraview_listwin_resize_rect(lw), RUBRAVIEW_ICON_RESIZE, "R", lw->title_height * 0.4, lw->resizing);
+    draw_listwin_maximize(app, app->renderer, lw);
 
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
     if (lw->editable) {
-        /* D-111: R sizes the window when dragged; the bar acts on the list. */
-        listwin_sign_button(app, app->renderer, rubraview_listwin_resize_rect(lw), RUBRAVIEW_ICON_RESIZE, "R", lw->title_height * 0.4, lw->resizing);
+        /* D-111: the bar acts on the list. */
         draw_list_bar(app, app->renderer, lw, app->pointer_x, app->pointer_y);
         draw_list_tools(app, app->renderer, lw, app->pointer_x, app->pointer_y, false);
     }

@@ -80,7 +80,7 @@ rubraview_rect_t rubraview_listwin_close_rect(const rubraview_listwin_t *lw) {
 }
 
 rubraview_rect_t rubraview_listwin_resize_rect(const rubraview_listwin_t *lw) {
-    if (!lw || !lw->editable || lw->own_window) return (rubraview_rect_t){0};
+    if (!lw || lw->own_window) return (rubraview_rect_t){0};   /* RV-198: a book's list is sized too */
     double s = lw->title_height;
     return (rubraview_rect_t){ lw->x + lw->width - s * 2.0, lw->y, s, s };
 }
@@ -88,7 +88,7 @@ rubraview_rect_t rubraview_listwin_resize_rect(const rubraview_listwin_t *lw) {
 rubraview_rect_t rubraview_listwin_maximize_rect(const rubraview_listwin_t *lw) {
     if (!lw || lw->own_window) return (rubraview_rect_t){0};
     double s = lw->title_height;
-    return (rubraview_rect_t){ lw->x + lw->width - s * (lw->editable ? 3.0 : 2.0), lw->y, s, s };
+    return (rubraview_rect_t){ lw->x + lw->width - s * 3.0, lw->y, s, s };
 }
 
 double rubraview_listwin_title_text_right(const rubraview_listwin_t *lw) {
@@ -211,7 +211,7 @@ rubraview_listwin_part_t rubraview_listwin_hit(const rubraview_listwin_t *lw, do
                                                size_t *out_index) {
     if (!lw || !lw->open || !rubraview_rect_contains(rubraview_listwin_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_NONE;
     if (rubraview_rect_contains(rubraview_listwin_close_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_CLOSE;
-    if (lw->editable && rubraview_rect_contains(rubraview_listwin_resize_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_RESIZE;
+    if (rubraview_rect_contains(rubraview_listwin_resize_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_RESIZE;
     if (rubraview_rect_contains(rubraview_listwin_maximize_rect(lw), px, py)) return RUBRAVIEW_LISTWIN_MAXIMIZE;
     if (py < lw->y + lw->title_height) return RUBRAVIEW_LISTWIN_TITLE;
     double head = rubraview_listwin_head_height(lw);

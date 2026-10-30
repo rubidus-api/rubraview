@@ -2721,3 +2721,11 @@ Do not store credentials, private infrastructure details, personal data, private
   0.51.0 (`RUBRAPACK`), the version `make store` already needs for the file types' logos (D-224). Upstream's menu
   DLL gained `List` and `HideWhen`; Rubraview's adapted menu keeps its own list file and takes neither.
 - Consequences: the Windows build compiles with it (the release's); nothing in the program's behaviour changes.
+
+## 2026-10-30: D-231 R in every floating list (RV-198)
+
+- Status: Accepted (owner 2026-10-30: "R이 없는 창(책의 쪽 목록) ... 여기에도 R로 크기조절 버튼이 있어야 하지 않나요").
+- Decision: `rubraview_listwin_resize_rect` no longer asks `editable` (D-111 gave R only to a list that could be
+  changed): sizing is not changing the list. Every list window not in a window of its own has R, maximize left of it
+  (D-229 put maximize left of Close without R; that case is gone).
+- Consequences: T289 (host), T290 (VM).
