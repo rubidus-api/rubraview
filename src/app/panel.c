@@ -70,6 +70,32 @@ void panel_apply_row(app_state_t *app, int32_t index) {
         return;
     }
 
+    if (app->panel_is_names) {   /* RV-194: the names window; a part changed makes the pattern again */
+        struct batch_ui *b = &app->batch;
+        bool parts = true;
+        switch (row->id) {
+            case PANEL_NAMES_NAME:       b->p_name = v > 0.5; break;
+            case PANEL_NAMES_PARENT:     b->p_parent = v > 0.5; break;
+            case PANEL_NAMES_COUNTER:    b->p_counter = v > 0.5; break;
+            case PANEL_NAMES_SIZE:       b->p_size = v > 0.5; break;
+            case PANEL_NAMES_TAKEN:      b->p_taken = v > 0.5; if (b->p_taken) batch_preview_files(app); break;
+            case PANEL_NAMES_TAKEN_FORM: b->taken_form = (int32_t)v; break;
+            case PANEL_NAMES_SEP:        b->sep = (int32_t)v; break;
+            case PANEL_NAMES_DIGITS:     b->digits = v; break;
+            case PANEL_BATCH_START:      b->start = v; parts = false; break;
+            case PANEL_NAMES_STEP:       b->n_step = v; parts = false; break;
+            case PANEL_NAMES_CASE:       b->name_case = (int32_t)v; parts = false; break;
+            case PANEL_NAMES_SPACES:     b->no_spaces = v > 0.5; parts = false; break;
+            case PANEL_BATCH_EXISTS:     b->exists = (int32_t)v; parts = false; break;
+            default: parts = false; break;
+        }
+        if (parts) batch_compose_name(app);
+        /* a slider dragged keeps its row (a rebuild would end the drag): the preview follows the pattern anyway */
+        bool rows = row->id == PANEL_NAMES_COUNTER || row->id == PANEL_NAMES_TAKEN || (parts && row->id != PANEL_NAMES_DIGITS);
+        if (rows) names_panel_build(app);
+        return;
+    }
+
     if (app->panel_is_batch) {   /* RV-129 */
         struct batch_ui *b = &app->batch;
         bool again = false;
@@ -264,7 +290,7 @@ void panel_apply_row(app_state_t *app, int32_t index) {
     }
 }
 
-static void panel_button(app_state_t *app, int32_t index) {
+void panel_button(app_state_t *app, int32_t index) {
     if (index < 0 || (size_t)index >= app->panel.row_count) return;
     if (app->panel.rows[index].id >= PANEL_GMIC_P0 && app->panel.rows[index].id < PANEL_GMIC_P0 + PANEL_GMIC_ROWS &&
         gmic_button(app, app->panel.rows[index].id)) return;   /* RFC-0009 C: a text, a colour or a point typed */
@@ -389,7 +415,23 @@ static void panel_button(app_state_t *app, int32_t index) {
         case PANEL_BATCH_CANVAS: case PANEL_BATCH_NAME: case PANEL_BATCH_REPLACE: case PANEL_BATCH_OUT: case PANEL_BATCH_TEXT:
             batch_type_begin(app, app->panel.rows[index].id);
             break;
-        case PANEL_BATCH_TEST: batch_try_names(app); break;
+        /* RV-194: Batch's window and its names window; what opens another window waits until the panel is put back */
+        case PANEL_BATCH_SHOW_LIST: batch_after(app, 1); break;
+        case PANEL_BATCH_OPEN_EDIT: batch_after(app, 2); break;
+        case PANEL_BATCH_NAMES: if (app->batch_window) batch_after(app, 3); else osd_say(app, TU8("the names window opens from Batch's own window")); break;
+        case PANEL_BATCH_CLOSE: batch_after(app, 4); break;
+        case PANEL_NAMES_DONE: batch_after(app, 5); break;
+        case PANEL_NAMES_BEFORE: case PANEL_NAMES_AFTER: case PANEL_NAMES_PATTERN:
+            batch_type_begin(app, app->panel.rows[index].id);
+            break;
+        case PANEL_NAMES_REPLACE0: case PANEL_NAMES_REPLACE0 + 1: case PANEL_NAMES_REPLACE0 + 2: case PANEL_NAMES_REPLACE0 + 3:
+        case PANEL_NAMES_REPLACE0 + 4: case PANEL_NAMES_REPLACE0 + 5: case PANEL_NAMES_REPLACE0 + 6: case PANEL_NAMES_REPLACE7:
+            batch_type_begin(app, app->panel.rows[index].id);
+            break;
+        case PANEL_NAMES_ADD_REPLACE:
+            for (int32_t r = 0; r < RUBRAVIEW_BATCH_MAX_REPLACES; ++r)
+                if (!app->batch.replace[r][0]) { batch_type_begin(app, PANEL_NAMES_REPLACE0 + r); break; }
+            break;
         case PANEL_BATCH_SAVE: batch_save_or_load(app, true); break;
         case PANEL_BATCH_LOAD: batch_save_or_load(app, false); break;
         case PANEL_BATCH_MARK:
@@ -408,7 +450,8 @@ static void panel_button(app_state_t *app, int32_t index) {
             /* The dialog builds the same job the command line builds,
                and hands it to the same engine (§3.11). */
             panel_run_batch(app);
-            panel_close(app);
+            if (app->batch_window && owned_panel_active()) batch_after(app, 4);   /* RV-194: its window closes */
+            else panel_close(app);
             break;
         case PANEL_PRINT_DIALOG:
             app->print_with_dialog = true;

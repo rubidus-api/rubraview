@@ -338,6 +338,29 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
     return true;
 }
 
+/* RV-194: a name with {w} or {h} is written under a name of its own first; made, it takes its size and its
+   name, as "A name already there" says. Returns false when the file was left out or could not be named. */
+static bool batch_name_sized(proven_arena_t *arena, batch_ctx_t *bc, proven_u8str_view_t out_dir, proven_u8str_view_t pattern,
+                             proven_u8str_view_t *out_path) {
+    int32_t w = 0, h = 0;
+    if (!rubraview_pal_image_size(*out_path, &w, &h)) { batch_say(*out_path, "its size could not be read for its name"); return false; }
+    char ws[16], hs[16];
+    snprintf(ws, sizeof(ws), "%d", (int)w);
+    snprintf(hs, sizeof(hs), "%d", (int)h);
+    proven_u8str_view_t name = rubraview_batch_replace_all(arena, pattern, PROVEN_LIT("{w}"), cstr(ws));
+    name = rubraview_batch_replace_all(arena, name, PROVEN_LIT("{h}"), cstr(hs));
+    proven_u8str_view_t target = rubraview_path_join(arena, out_dir, name);
+    if (target.size == 0) return false;
+    if (rubraview_pal_fs_exists(target)) {
+        if (bc->cli->exists == 1) { batch_say(target, "is there already: left as it is"); (void)rubraview_pal_fs_delete(*out_path); return false; }
+        if (bc->cli->exists == 2) target = rubraview_filing_target(arena, out_dir, name, filing_exists, NULL);
+        else (void)rubraview_pal_fs_delete(target);
+    }
+    if (target.size == 0 || !rubraview_pal_fs_move(*out_path, target)) { batch_say(*out_path, "could not be given its name"); return false; }
+    *out_path = target;
+    return true;
+}
+
 static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *job,
                           const rubraview_batch_input_t *input, proven_u8str_view_t output_name, void *ctx) {
     batch_ctx_t *bc = (batch_ctx_t*)ctx;
@@ -377,10 +400,22 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
             }
         }
     }
+    /* RV-194: {w} and {h} are known once it is made: written under a name of its own first */
+    proven_u8str_view_t sized_name = PROVEN_LIT("");
+    if (rubraview_batch_name_wants_size(output_name)) {
+        sized_name = output_name;
+        char temp[64];
+        proven_u8str_view_t ext = rubraview_path_ext(output_name);
+        int n = snprintf(temp, sizeof(temp), "rubraview-sizing-%lld%.*s", (long long)bc->counter, (int)(ext.size < 16 ? ext.size : 16), (const char *)ext.ptr);
+        proven_result_mem_mut_t m = n > 0 ? proven_arena_alloc(arena, (size_t)n + 1) : (proven_result_mem_mut_t){ .err = PROVEN_ERR_NOMEM };
+        if (!proven_is_ok(m.err)) return false;
+        memcpy(m.value.ptr, temp, (size_t)n + 1);
+        output_name = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)m.value.ptr, .size = (size_t)n };
+    }
     proven_u8str_view_t out_path = rubraview_path_join(arena, out_dir, output_name);
     if (out_path.size == 0) return false;
     /* RV-129: --exists: replace it (as before), leave it, or take the next free name */
-    if (bc->cli->exists != 0 && rubraview_pal_fs_exists(out_path)) {
+    if (sized_name.size == 0 && bc->cli->exists != 0 && rubraview_pal_fs_exists(out_path)) {
         if (bc->cli->exists == 1) { batch_say(out_path, "is there already: left as it is"); return true; }
         out_path = rubraview_filing_target(arena, out_dir, output_name, filing_exists, NULL);
         if (out_path.size == 0) { batch_say(input->path, "no free name left beside it"); return false; }
@@ -423,6 +458,7 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
                               rubraview_jpeg_set_dpi((uint8_t*)(uintptr_t)turned.data.ptr, turned.data.size, options.dpi));
                 if (turned.err == RUBRAVIEW_JPEGTRAN_OK && dpi_ok) {
                     if (rubraview_pal_fs_write_file(out_path, turned.data)) {
+                        if (sized_name.size > 0 && !batch_name_sized(arena, bc, out_dir, sized_name, &out_path)) return bc->cli->exists == 1;
                         bc->written++;
                         batch_keep_date(arena, bc, input->path, out_path);
                         return true;
@@ -487,6 +523,7 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
         batch_say(input->path, why ? why : "the animation could not be written");
     }
     else ok = batch_pixels(arena, bc, input, out_path, orient, resize, color, extra, options, source_format);
+    if (ok && sized_name.size > 0 && !batch_name_sized(arena, bc, out_dir, sized_name, &out_path)) ok = bc->cli->exists == 1;   /* skipped is no failure */
     if (ok) batch_keep_date(arena, bc, input->path, out_path);
     free(own);
     return ok;
@@ -502,6 +539,7 @@ static size_t collect_inputs(proven_arena_t *arena, proven_u8str_view_t root, bo
         if (count < capacity && rubraview_pal_fs_exists(root)) {
             out[count].path = root;
             out[count].size_bytes = 0;
+            out[count].taken = 0;
             count++;
         }
         return count;
@@ -515,6 +553,7 @@ static size_t collect_inputs(proven_arena_t *arena, proven_u8str_view_t root, bo
         }
         out[count].path = entry->path;
         out[count].size_bytes = entry->size_bytes;
+        out[count].taken = 0;
         count++;
     }
     return count;
@@ -621,12 +660,8 @@ static proven_u8str_view_t batch_list_file(app_state_t *app) {
     return rubraview_pal_fs_write_file(path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = total }) ? path : none;
 }
 
-void panel_run_batch(app_state_t *app) {
-    bool on_list = app->batch_list_count > 0;
-    if (!on_list && (app->source_dir.size == 0 || app->archive_bytes.size > 0)) {
-        osd_say(app, TU8("batch runs on a folder of pictures, not on an archive"));
-        return;
-    }
+static void batch_start(app_state_t *app) {
+    bool on_list = true;
 
     proven_u8str_view_t exe = rubraview_pal_process_executable(app->arena);
     if (exe.size == 0) {
@@ -650,9 +685,11 @@ void panel_run_batch(app_state_t *app) {
     for (size_t i = 0; i < tk.n; ++i) {
         const char *k = tk.v[i];
         if (strncmp(k, "--name=", 7) && strncmp(k, "--start=", 8) && strncmp(k, "--replace=", 10) && strncmp(k, "--exists=", 9) &&
-            strncmp(k, "--out=", 6) && strcmp(k, "--keep-dates") && strcmp(k, "--recursive") && strcmp(k, "--subfolders")) any_step = true;
+            strncmp(k, "--out=", 6) && strcmp(k, "--keep-dates") && strcmp(k, "--recursive") && strcmp(k, "--subfolders") &&
+            strncmp(k, "--n-step=", 9) && strncmp(k, "--case=", 7) && strcmp(k, "--no-spaces")) any_step = true;   /* RV-194: names only */
     }
-    bool renaming = (app->batch.name[0] && strcmp(app->batch.name, "{name}.{ext}") != 0) || app->batch.replace[0];
+    bool renaming = (app->batch.name[0] && strcmp(app->batch.name, "{name}.{ext}") != 0) || app->batch.replace[0][0] ||
+                    app->batch.name_case != 0 || app->batch.no_spaces;
     if (!any_step && !renaming) {
         osd_say(app, TU8("nothing to do: choose a size, a step, a format, or new names"));
         return;
@@ -710,6 +747,25 @@ void panel_run_batch(app_state_t *app) {
     } else {
         osd_say(app, TU8("could not start the batch run"));
     }
+}
+
+void panel_run_batch(app_state_t *app) {
+    /* RV-194 (owner, 2026-10-30: the pictures of the list now open): Explorer's chosen files, else the list's pictures */
+    bool explorer = app->batch_list_count > 0;
+    if (!explorer) {
+        size_t total = 0, n = batch_list_pictures(app, NULL, 0, &total);
+        if (n == 0) {
+            osd_say(app, app->archive_bytes.size > 0 ? TU8("batch works on picture files, not on an archive's pages")
+                                                     : TU8("no pictures in the list now open"));
+            return;
+        }
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n, sizeof(proven_u8str_view_t));
+        if (!proven_is_ok(res.err)) return;
+        app->batch_list = (proven_u8str_view_t*)(void*)res.value.ptr;
+        app->batch_list_count = batch_list_pictures(app, app->batch_list, n, NULL);
+    }
+    batch_start(app);
+    if (!explorer) app->batch_list_count = 0;   /* the list's pictures were for this run */
 }
 
 /* D-38 in a batch run, which starts before the viewer reads its settings:
@@ -772,6 +828,17 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
     if (count == 0) {
         console_line("rubraview: nothing to do — no files matched");
         return 1;
+    }
+    /* RV-194: {taken} in the names: each file's date, read before the run (its EXIF, else its file's time) */
+    bool dated = false;
+    for (size_t k = 0; k + 6 <= cli->job.naming_pattern.size && !dated; ++k) dated = memcmp(cli->job.naming_pattern.ptr + k, "{taken", 6) == 0;
+    if (dated) {
+        void *mem = malloc(80u << 20);
+        if (mem) {
+            proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t *)mem, .size = 80u << 20 });
+            for (size_t i = 0; i < count; ++i) { proven_arena_reset(&scratch); inputs[i].taken = batch_taken_of(&scratch, inputs[i].path); }
+            free(mem);
+        }
     }
 
     /* RV-187 (D-220): --steps=, Edit's steps, read before anything is opened; what they run is named */

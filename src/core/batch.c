@@ -28,7 +28,36 @@ proven_u8str_view_t rubraview_batch_format_name(proven_arena_t *arena, proven_u8
 
 proven_u8str_view_t rubraview_batch_format_name_ex(proven_arena_t *arena, proven_u8str_view_t pattern, proven_u8str_view_t name_stem, proven_u8str_view_t ext,
                                        int32_t width, int32_t height, proven_u8str_view_t date_str, int64_t counter, proven_u8str_view_t parent) {
-    if (!arena) return PROVEN_LIT("");
+    rubraview_batch_name_facts_t facts = { .stem = name_stem, .ext = ext, .parent = parent, .date = date_str,
+                                           .width = width, .height = height, .counter = counter, .taken = 0 };
+    return rubraview_batch_format_name_facts(arena, pattern, &facts);
+}
+
+/* RV-194: {taken:FORMAT} — yyyy, yy, mm, dd, hh, mi, ss from yyyymmddhhmmss; the rest copied */
+static void append_taken(proven_arena_t *arena, proven_u8str_t *buf, int64_t taken, const char *format, size_t len) {
+    if (taken <= 0) return;
+    int part[6] = { (int)(taken / 10000000000LL), (int)(taken / 100000000LL % 100), (int)(taken / 1000000LL % 100),
+                    (int)(taken / 10000LL % 100), (int)(taken / 100LL % 100), (int)(taken % 100) };
+    for (size_t i = 0; i < len;) {
+        char num[8];
+        int n = -1, used = 0;
+        if (i + 4 <= len && memcmp(format + i, "yyyy", 4) == 0) { n = snprintf(num, sizeof(num), "%04d", part[0]); used = 4; }
+        else if (i + 2 <= len && memcmp(format + i, "yy", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[0] % 100); used = 2; }
+        else if (i + 2 <= len && memcmp(format + i, "mm", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[1]); used = 2; }
+        else if (i + 2 <= len && memcmp(format + i, "dd", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[2]); used = 2; }
+        else if (i + 2 <= len && memcmp(format + i, "hh", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[3]); used = 2; }
+        else if (i + 2 <= len && memcmp(format + i, "mi", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[4]); used = 2; }
+        else if (i + 2 <= len && memcmp(format + i, "ss", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[5]); used = 2; }
+        if (n > 0) { rubraview_text_append(arena, buf, num, (size_t)n); i += (size_t)used; }
+        else { rubraview_text_append(arena, buf, format + i, 1); i++; }
+    }
+}
+
+proven_u8str_view_t rubraview_batch_format_name_facts(proven_arena_t *arena, proven_u8str_view_t pattern, const rubraview_batch_name_facts_t *facts) {
+    if (!arena || !facts) return PROVEN_LIT("");
+    proven_u8str_view_t name_stem = facts->stem, ext = facts->ext, date_str = facts->date, parent = facts->parent;
+    int32_t width = facts->width, height = facts->height;
+    int64_t counter = facts->counter;
 
     /* rubraview_path_ext keeps the leading dot; the {ext} token does not. */
     proven_u8str_view_t ext_no_dot = ext;
@@ -61,6 +90,11 @@ proven_u8str_view_t rubraview_batch_format_name_ex(proven_arena_t *arena, proven
             rubraview_text_append(arena, &buf, (name_stem).ptr, (name_stem).size);
         } else if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = (const proven_byte_t *)tok, .size = tok_len }, PROVEN_LIT("ext"))) {
             rubraview_text_append(arena, &buf, (ext_no_dot).ptr, (ext_no_dot).size);
+        } else if (tok_len == 1 && (tok[0] == 'w' || tok[0] == 'h') && (tok[0] == 'w' ? width : height) < 0) {
+            rubraview_text_append(arena, &buf, (const char *)pattern.ptr + i, close - i + 1);   /* RV-194: filled in once known */
+        } else if (tok_len >= 5 && memcmp(tok, "taken", 5) == 0 && (tok_len == 5 || tok[5] == ':')) {
+            if (tok_len == 5) append_taken(arena, &buf, facts->taken, "yyyy-mm-dd", 10);
+            else append_taken(arena, &buf, facts->taken, tok + 6, tok_len - 6);
         } else if (tok_len == 1 && tok[0] == 'w') {
             char num[16];
             int n = snprintf(num, sizeof(num), "%d", width);
@@ -87,6 +121,43 @@ proven_u8str_view_t rubraview_batch_format_name_ex(proven_arena_t *arena, proven
         i = close + 1;
     }
 
+    return rubraview_text_view(&buf);
+}
+
+/* ---- RV-194 ---- */
+
+int64_t rubraview_batch_taken_from_text(proven_u8str_view_t text) {
+    /* yyyy?mm?dd?hh?mi?ss: 19 characters, digits where digits go */
+    if (text.size < 19) return 0;
+    static const int AT[14] = { 0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18 };
+    int64_t v = 0;
+    for (int i = 0; i < 14; ++i) {
+        char c = (char)text.ptr[AT[i]];
+        if (c < '0' || c > '9') return 0;
+        v = v * 10 + (c - '0');
+    }
+    return v / 10000000000LL >= 1 ? v : 0;   /* a year of 0000 is "not set" */
+}
+
+proven_u8str_view_t rubraview_batch_compose_pattern(proven_arena_t *arena, const rubraview_batch_name_parts_t *parts) {
+    if (!arena || !parts) return PROVEN_LIT("");
+    static const char *const TAKEN[4] = { "{taken:yyyy-mm-dd}", "{taken:yyyymmdd}", "{taken:yyyy-mm-dd_hhmiss}", "{taken:yymmdd}" };
+    proven_u8str_t buf = {0};
+    rubraview_text_append(arena, &buf, (const char *)parts->before.ptr, parts->before.size);
+    bool any = false;
+    char counter[8];
+    snprintf(counter, sizeof(counter), parts->digits > 1 && parts->digits <= 9 ? "{n:%d}" : "{n}", (int)parts->digits);
+    const char *middle[5] = { parts->parent ? "{parent}" : NULL, parts->name ? "{name}" : NULL, parts->counter ? counter : NULL,
+                              parts->size ? "{w}x{h}" : NULL, parts->taken ? TAKEN[(unsigned)parts->taken_form % 4u] : NULL };
+    for (int i = 0; i < 5; ++i) {
+        if (!middle[i]) continue;
+        if (any) rubraview_text_append(arena, &buf, (const char *)parts->sep.ptr, parts->sep.size);
+        rubraview_text_append(arena, &buf, middle[i], strlen(middle[i]));
+        any = true;
+    }
+    rubraview_text_append(arena, &buf, (const char *)parts->after.ptr, parts->after.size);
+    if (!any && parts->before.size == 0 && parts->after.size == 0) return PROVEN_LIT("{name}.{ext}");
+    rubraview_text_append(arena, &buf, ".{ext}", 6);
     return rubraview_text_view(&buf);
 }
 

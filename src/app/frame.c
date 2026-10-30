@@ -36,6 +36,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     handled += files_pump(app);
     handled += fontpick_pump(app);
     handled += edit_pump(app);
+    handled += batch_pump(app);   /* RV-194 */
     handled += subs_pump(app);
 
     if (app->needs_relayout) {
@@ -168,6 +169,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     draw_files_window(app);
     draw_fontpick_window(app);
     draw_edit_window(app);
+    draw_batch_window(app);   /* RV-194 */
     takeout_step(app);
     putin_step(app);
     draw_subs_window(app);

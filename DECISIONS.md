@@ -2670,3 +2670,29 @@ Do not store credentials, private infrastructure details, personal data, private
     meeting context already holds it. The file writes every action it knows (a cleared one as ""), so a cleared
     action is never given its key back. Saved again, the file holds the new actions.
 - Consequences: T283 (host), T284 (VM).
+
+## 2026-10-30: D-228 Batch in its own window, on the list's pictures, its names in another (RV-194)
+
+- Status: Accepted (owner 2026-10-30: "일괄 처리에서 편집 단계 라는 항목이 사용자가 사용법을 알아차리기가 힘들어요. 그리고
+  어떤 파일들에 적용되는지도 알기 어려워요" — a modeless window; the playlist's pictures said at the top with a button to
+  the list; Edit's effects applied in order said next with a button to Edit; names in a window of their own; plan
+  `2026-10-30-rv194-batch-window.md`, its questions answered "지금 목록의 그림 (추천)" and "계획대로 (추천)").
+- Decision:
+  - The window (`batch_window`) keeps its own panel; while it is handled or drawn the panel stands in `app->panel`
+    (`owned_panel_in` / `_out`), so the panel's code serves it unchanged and Edit's or Export's panel is put back.
+    What a button opens elsewhere (the files window, Edit, the names window, closing) waits until then
+    (`batch_after`). Without a window (none could be made) the panel opens in the viewer as before.
+  - The input is the list now open as it shows (`list_page`: its filter and order), its pictures only; an archive's
+    pages are none. "Folders inside too" leaves the window (the command line keeps `--recursive`). The list button
+    opens the files window (F3), the same list in a window of its own: the floating list (P) is drawn in the viewer,
+    under Batch's window on a small screen.
+  - Names: the names window's parts make the pattern (`rubraview_batch_compose_pattern`); a pattern typed whole is
+    kept until a part changes. New in the run: `{taken}` / `{taken:FORMAT}` (EXIF's DateTimeOriginal, else the
+    file's local time, read only when asked), `--n-step=`, `--case=` (the extension kept), `--no-spaces`, up to
+    eight `--replace=`. `{w}` and `{h}` (written 0 before) are filled once the file is made: written under a name of
+    its own, then renamed under the exists rule.
+  - The preview and the run share `rubraview_batch_output_name`; "Try the names" is gone.
+  - Parts are not saved with the choices (the pattern is): loaded, the pattern shows as typed.
+- Consequences: T285 (host), T286 (VM). Known: with `{w}`/`{h}` in the name, a details `.txt` written beside the file
+  (`keep_details` = or_txt) keeps the temporary name, and a rename that fails (other than "leave it") leaves the
+  file under its temporary name `rubraview-sizing-N` in the output folder.

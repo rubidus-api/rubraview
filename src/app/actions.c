@@ -847,9 +847,9 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("new_window"))) {
         new_window(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_batch"))) {
-        app->batch_list_count = 0;   /* opened by hand: on the folder being read */
-        if (app->panel.open && app->panel_is_batch) panel_close(app);
-        else panel_open_batch(app);
+        /* RV-194: a window of its own, on the list now open; again, it closes */
+        if (app->panel.open && app->panel_is_batch) panel_close(app);   /* the panel of a viewer that could not open the window */
+        else batch_window_toggle(app, false);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("print"))) {
         /* D-86, D-87: the picture on screen; how is chosen first, then the system's print dialog. */
         proven_u8str_view_t path = current_file_path(app);

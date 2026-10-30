@@ -625,10 +625,25 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
             size_t k = 0;
             while (k < value.size && value.ptr[k] != ',') ++k;
             if (k == 0 || k == value.size) { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
-            result.job.replace_from = (proven_u8str_view_t){ .ptr = value.ptr, .size = k };
-            result.job.replace_to = (proven_u8str_view_t){ .ptr = value.ptr + k + 1, .size = value.size - k - 1 };
+            if (result.job.replace_count >= RUBRAVIEW_BATCH_MAX_REPLACES) { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            result.job.replaces[result.job.replace_count++] = (rubraview_batch_replace_t){
+                .from = (proven_u8str_view_t){ .ptr = value.ptr, .size = k },
+                .to = (proven_u8str_view_t){ .ptr = value.ptr + k + 1, .size = value.size - k - 1 } };   /* RV-194: again for more */
             continue;
         }
+        if (starts_with(arg, "--n-step=", &value)) {   /* RV-194 */
+            long n = 0;
+            if (!parse_int(value, &n) || n < 1 || n > 1000000) { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            result.job.counter_step = (int32_t)n;
+            continue;
+        }
+        if (starts_with(arg, "--case=", &value)) {   /* RV-194 */
+            if (proven_u8str_view_eq(value, PROVEN_LIT("lower"))) result.job.name_case = 1;
+            else if (proven_u8str_view_eq(value, PROVEN_LIT("upper"))) result.job.name_case = 2;
+            else { result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return; }
+            continue;
+        }
+        if (proven_u8str_view_eq(arg, PROVEN_LIT("--no-spaces"))) { result.job.spaces_to_underscore = true; continue; }   /* RV-194 */
         if (starts_with(arg, "--exists=", &value)) {
             if (proven_u8str_view_eq(value, PROVEN_LIT("replace"))) result.exists = 0;
             else if (proven_u8str_view_eq(value, PROVEN_LIT("skip"))) result.exists = 1;
@@ -689,6 +704,47 @@ proven_u8str_view_t rubraview_cli_error_text(rubraview_cli_err_t err) {
 
 /* ---- the engine ---- */
 
+proven_u8str_view_t rubraview_batch_output_name(proven_arena_t *arena, const rubraview_batch_job_t *job, const rubraview_batch_input_t *input,
+                                                size_t ordinal, proven_u8str_view_t ext) {
+    if (!arena || !job || !input) return PROVEN_LIT("");
+    proven_u8str_view_t name = rubraview_path_basename(input->path);
+    proven_u8str_view_t stem = rubraview_path_stem(name);
+    if (ext.size == 0) {
+        ext = rubraview_path_ext(name);
+        if (ext.size > 0 && ext.ptr[0] == '.') { ext.ptr++; ext.size--; }
+    }
+    for (size_t r = 0; r < job->replace_count && r < RUBRAVIEW_BATCH_MAX_REPLACES; ++r)
+        stem = rubraview_batch_replace_all(arena, stem, job->replaces[r].from, job->replaces[r].to);
+    int64_t step = job->counter_step > 0 ? job->counter_step : 1;
+    rubraview_batch_name_facts_t facts = {
+        .stem = stem, .ext = ext, .parent = rubraview_path_basename(rubraview_path_dirname(input->path)), .date = PROVEN_LIT(""),
+        .width = -1, .height = -1, .counter = (int64_t)(job->counter_start > 0 ? job->counter_start : 1) + (int64_t)ordinal * step,
+        .taken = input->taken };
+    proven_u8str_view_t pattern = job->naming_pattern.size > 0 ? job->naming_pattern : PROVEN_LIT("{name}.{ext}");
+    proven_u8str_view_t made = rubraview_batch_format_name_facts(arena, pattern, &facts);
+    if (made.size == 0 || (!job->spaces_to_underscore && job->name_case == 0)) return made;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, made.size + 1);
+    if (!proven_is_ok(res.err)) return made;
+    char *p = (char *)res.value.ptr;
+    memcpy(p, made.ptr, made.size);
+    p[made.size] = '\0';
+    size_t body = made.size;   /* the extension (after the last dot) keeps its letters */
+    for (size_t i = made.size; i > 0; --i) if (p[i - 1] == '.') { body = i - 1; break; }
+    for (size_t i = 0; i < made.size; ++i) {
+        if (i + 2 < made.size && p[i] == '{' && (p[i + 1] == 'w' || p[i + 1] == 'h') && p[i + 2] == '}') { i += 2; continue; }   /* for later */
+        if (job->spaces_to_underscore && p[i] == ' ') p[i] = '_';
+        if (i < body && job->name_case == 1 && p[i] >= 'A' && p[i] <= 'Z') p[i] = (char)(p[i] - 'A' + 'a');
+        if (i < body && job->name_case == 2 && p[i] >= 'a' && p[i] <= 'z') p[i] = (char)(p[i] - 'a' + 'A');
+    }
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)p, .size = made.size };
+}
+
+bool rubraview_batch_name_wants_size(proven_u8str_view_t name) {
+    for (size_t i = 0; i + 2 < name.size; ++i)
+        if (name.ptr[i] == '{' && (name.ptr[i + 1] == 'w' || name.ptr[i + 1] == 'h') && name.ptr[i + 2] == '}') return true;
+    return false;
+}
+
 rubraview_batch_report_t rubraview_batch_run(proven_arena_t *arena,
                                              const rubraview_batch_job_t *job,
                                              const rubraview_batch_input_t *inputs, size_t input_count,
@@ -735,11 +791,9 @@ rubraview_batch_report_t rubraview_batch_run(proven_arena_t *arena,
             }
         }
 
-        /* RV-129: the stem's words replaced, the counter, the folder's name */
-        stem = rubraview_batch_replace_all(arena, stem, job->replace_from, job->replace_to);
-        int64_t counter = (int64_t)(job->counter_start > 0 ? job->counter_start : 1) + (int64_t)(report.processed + report.failed);
-        proven_u8str_view_t parent = rubraview_path_basename(rubraview_path_dirname(input->path));
-        item.output_name = rubraview_batch_format_name_ex(arena, job->naming_pattern, stem, ext, 0, 0, date_str, counter, parent);
+        /* RV-129, RV-194: the stem's words replaced, the counter, the folder's name, the date; {w} and {h} later */
+        (void)stem; (void)date_str;
+        item.output_name = rubraview_batch_output_name(arena, job, input, report.processed + report.failed, ext);
 
         bool ok = process ? process(arena, job, input, item.output_name, ctx) : true;
         item.status = ok ? RUBRAVIEW_BATCH_STATUS_OK : RUBRAVIEW_BATCH_STATUS_FAILED;

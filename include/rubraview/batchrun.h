@@ -140,10 +140,24 @@ proven_u8str_view_t rubraview_cli_error_text(rubraview_cli_err_t err);
 
 /* ---- the execution engine ---- */
 
+/* RV-194: names are made by rubraview_batch_output_name; rubraview_batch_run's `date_str` is no longer read ({date}
+   was always given "" by the program; {taken} is each file's own date). */
 typedef struct rubraview_batch_input {
     proven_u8str_view_t  path;
     uint64_t size_bytes;
+    int64_t  taken;      /* RV-194: yyyymmddhhmmss, when it was taken (else its file's time); 0 when not read */
 } rubraview_batch_input_t;
+
+/**
+ * RV-194: the name `job` gives `input`, the `ordinal`-th file written (from 0): its stem with the job's replaces in
+ * order, the pattern's tokens ({w} and {h} kept for later), spaces to '_' and the letters' case as asked — the
+ * extension (`ext`, without its dot; empty: the file's own) untouched by either. The run and the preview both ask this.
+ */
+proven_u8str_view_t rubraview_batch_output_name(proven_arena_t *arena, const rubraview_batch_job_t *job, const rubraview_batch_input_t *input,
+                                                size_t ordinal, proven_u8str_view_t ext);
+
+/** RV-194: whether a name still holds {w} or {h} (the file's size, known once it is made). */
+bool rubraview_batch_name_wants_size(proven_u8str_view_t name);
 
 typedef enum rubraview_batch_status {
     RUBRAVIEW_BATCH_STATUS_OK = 0,

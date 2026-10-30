@@ -157,6 +157,12 @@ typedef struct rubraview_batch_action {
     } params;
 } rubraview_batch_action_t;
 
+/* RV-194: one "from → to" of the names (--replace=FROM,TO, given again for more) */
+#define RUBRAVIEW_BATCH_MAX_REPLACES 8
+typedef struct rubraview_batch_replace {
+    proven_u8str_view_t from, to;
+} rubraview_batch_replace_t;
+
 typedef struct rubraview_batch_job {
     rubraview_batch_action_t *actions;
     size_t action_count;
@@ -166,8 +172,11 @@ typedef struct rubraview_batch_job {
     uint64_t max_size_bytes; /* 0 = no upper bound */
     proven_u8str_view_t naming_pattern;  /* e.g. "{name}_thumb.{ext}"; see rubraview_batch_format_name */
     int32_t counter_start;   /* RV-129: {n} of the first file written; 0 is taken as 1 */
-    proven_u8str_view_t replace_from;    /* RV-129: in each name's stem, every `replace_from` becomes `replace_to` */
-    proven_u8str_view_t replace_to;
+    int32_t counter_step;    /* RV-194: {n} goes up by this from one file to the next; 0 is taken as 1 */
+    rubraview_batch_replace_t replaces[RUBRAVIEW_BATCH_MAX_REPLACES];   /* RV-129, RV-194: in each name's stem, in order */
+    size_t replace_count;
+    int32_t name_case;       /* RV-194: the new name's letters: 0 as they are, 1 lower, 2 upper (A-Z only; the extension kept) */
+    bool spaces_to_underscore;   /* RV-194: a space in the new name becomes '_' */
 } rubraview_batch_job_t;
 
 /** Whether `filename` (with `file_size` bytes) passes the job's include/exclude/size filters. */
@@ -187,6 +196,36 @@ proven_u8str_view_t rubraview_batch_format_name(proven_arena_t *arena, proven_u8
  */
 proven_u8str_view_t rubraview_batch_format_name_ex(proven_arena_t *arena, proven_u8str_view_t pattern, proven_u8str_view_t name_stem, proven_u8str_view_t ext,
                                        int32_t width, int32_t height, proven_u8str_view_t date_str, int64_t counter, proven_u8str_view_t parent);
+
+/**
+ * RV-194: what a name is made of. `width` / `height` below 0 keep `{w}` / `{h}` as they are (the size is known only
+ * once the file is made); `taken` is the picture's date as yyyymmddhhmmss (when it was taken, else its file's
+ * time; 0 when not known), for `{taken}` (yyyy-mm-dd) and `{taken:FORMAT}`, where yyyy, yy, mm, dd, hh, mi and ss
+ * stand for its parts and anything else is copied.
+ */
+typedef struct rubraview_batch_name_facts {
+    proven_u8str_view_t stem, ext, parent, date;
+    int32_t width, height;
+    int64_t counter;
+    int64_t taken;
+} rubraview_batch_name_facts_t;
+
+proven_u8str_view_t rubraview_batch_format_name_facts(proven_arena_t *arena, proven_u8str_view_t pattern, const rubraview_batch_name_facts_t *facts);
+
+/** RV-194: "2024-05-01 13:22:07" (or with ':' between the date's parts, as EXIF writes it) as 20240501132207; 0 when it is not one. */
+int64_t rubraview_batch_taken_from_text(proven_u8str_view_t text);
+
+/* RV-194: the names window's parts, joined into a pattern: text before, the folder's name, the name, the number,
+   the size, the date taken, text after — the chosen ones, `sep` between them (not after "before" or before
+   "after"), then ".{ext}". None chosen is "{name}.{ext}". */
+typedef struct rubraview_batch_name_parts {
+    proven_u8str_view_t before, after, sep;
+    bool name, parent, counter, size, taken;
+    int32_t digits;       /* the number padded to this many (1: as it is) */
+    int32_t taken_form;   /* 0 yyyy-mm-dd, 1 yyyymmdd, 2 yyyy-mm-dd_hhmiss, 3 yymmdd */
+} rubraview_batch_name_parts_t;
+
+proven_u8str_view_t rubraview_batch_compose_pattern(proven_arena_t *arena, const rubraview_batch_name_parts_t *parts);
 
 /** RV-129: every `from` in `text` replaced by `to` (a new string; `text` itself when `from` is empty or absent). */
 proven_u8str_view_t rubraview_batch_replace_all(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t from, proven_u8str_view_t to);

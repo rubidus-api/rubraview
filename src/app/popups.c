@@ -877,7 +877,8 @@ void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
                                        lower, 15.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
     /* RV-137: a value typed, or the copies' name, asked for in the Edit window is drawn there */
-    if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply))) draw_rename_box(app, win_w, win_h, chrome_dpi);
+    if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)) &&
+        !(app->batch_typing && app->batch_window)) draw_rename_box(app, win_w, win_h, chrome_dpi);   /* RV-194: Batch's in its window */
     draw_ab_edit_box(app, win_w, win_h, chrome_dpi);
     if (!(app->edit_window && edit_panel_open(app))) draw_px_edit_box(app, win_w, win_h, chrome_dpi);   /* RV-137: else in the Edit window */
     draw_notice(app, win_w, win_h, chrome_dpi);

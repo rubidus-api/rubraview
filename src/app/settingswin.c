@@ -2639,7 +2639,8 @@ static bool settings_row_has_box(proven_u8str_view_t text) {
 
 static rubraview_window_t *chooser_window(const app_state_t *app, int where) {
     return where == CHOOSE_IN_SETTINGS ? app->settings_window : where == CHOOSE_IN_EDIT ? app->edit_window
-         : where == CHOOSE_IN_FILES ? app->files_window : app->window;
+         : where == CHOOSE_IN_FILES ? app->files_window : where == CHOOSE_IN_BATCH ? app->batch_window
+         : where == CHOOSE_IN_NAMES ? app->names_window : app->window;
 }
 
 static void chooser_word(chooser_t *c, double value, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
@@ -2656,6 +2657,8 @@ static void chooser_dirty(app_state_t *app) {
     if (app->chooser.where == CHOOSE_IN_SETTINGS) app->settings_dirty = true;
     else if (app->chooser.where == CHOOSE_IN_EDIT) app->edit_dirty = true;
     else if (app->chooser.where == CHOOSE_IN_FILES) app->files_dirty = true;
+    else if (app->chooser.where == CHOOSE_IN_BATCH) app->batch_dirty = true;   /* RV-194 */
+    else if (app->chooser.where == CHOOSE_IN_NAMES) app->names_dirty = true;
     app->toolbox_window_drawn = 0.0;
 }
 
@@ -2855,7 +2858,7 @@ bool chooser_wheel_tile(app_state_t *app, proven_u8str_view_t action, double not
 
 /* A panel's choice (print, convert, export, Edit): its words, as the row says them for each value. */
 void chooser_open_panel(app_state_t *app, int32_t which, int32_t row, double x, double y, double above_y) {
-    rubraview_panel_t *panel = which == 2 ? &app->sel_panel : &app->panel;
+    rubraview_panel_t *panel = which == 2 ? &app->sel_panel : &app->panel;   /* 3, 4 (RV-194): Batch's, the names' — standing in */
     if (row < 0 || (size_t)row >= panel->row_count || panel->rows[row].kind != RUBRAVIEW_ROW_CHOICE) return;
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_PANEL, .panel = which, .row = row, .current = (int32_t)lround(panel->rows[row].value) };
@@ -2869,7 +2872,8 @@ void chooser_open_panel(app_state_t *app, int32_t which, int32_t row, double x, 
                                                                                      : adjust_row_text(app, &probe, words, sizeof(words));
         chooser_word(c, (double)i, "%.*s", (int)text.size, text.ptr);
     }
-    chooser_show(app, app->edit_window && edit_panel_open(app) ? CHOOSE_IN_EDIT : CHOOSE_IN_MAIN, x, y, above_y);
+    chooser_show(app, which == 3 ? CHOOSE_IN_BATCH : which == 4 ? CHOOSE_IN_NAMES
+                    : app->edit_window && edit_panel_open(app) ? CHOOSE_IN_EDIT : CHOOSE_IN_MAIN, x, y, above_y);
 }
 
 /* A setting's choice: its words, a line each, under its row. */
@@ -3058,10 +3062,14 @@ static void chooser_pick(app_state_t *app, int32_t index) {
     switch (c->kind) {
         case CHOOSE_TILE: chooser_pick_tile(app, (size_t)index); break;
         case CHOOSE_PANEL: {
+            bool owned = (c->panel == 3 || c->panel == 4) && !owned_panel_active();   /* RV-194: its panel stands in for the change */
+            if (owned) owned_panel_in(app, c->panel == 3 ? 1 : 2);
             rubraview_panel_t *panel = c->panel == 2 ? &app->sel_panel : &app->panel;
-            if ((size_t)c->row >= panel->row_count) break;
-            panel->rows[c->row].value = c->values[index];
-            if (c->panel == 2) edit_sel_apply_row(app, c->row); else panel_apply_row(app, c->row);
+            if ((size_t)c->row < panel->row_count) {
+                panel->rows[c->row].value = c->values[index];
+                if (c->panel == 2) edit_sel_apply_row(app, c->row); else panel_apply_row(app, c->row);
+            }
+            if (owned) { owned_panel_out(app); if (c->panel == 4) batch_refresh(app); }
             app->edit_dirty = true;
             break;
         }

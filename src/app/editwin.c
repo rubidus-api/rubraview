@@ -2246,6 +2246,8 @@ proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_pane
         case PANEL_BATCH_TEXT_COLOUR: word = i == 0 ? T("white") : i == 1 ? T("black") : i == 2 ? T("yellow") : NULL; break;
         case PANEL_BATCH_TEXT_SIZE: case PANEL_BATCH_DPI: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
         case PANEL_BATCH_EXISTS:  word = i == 0 ? T("replace it") : i == 1 ? T("leave it, skip") : i == 2 ? T("a new name (-1, -2...)") : NULL; break;
+        case PANEL_NAMES_SEP: case PANEL_NAMES_CASE: case PANEL_NAMES_TAKEN_FORM: word = names_choice_word(row->id, i); break;   /* RV-194 */
+        case PANEL_NAMES_STEP: case PANEL_NAMES_DIGITS: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
         case PANEL_BATCH_RESIZE:  snprintf(buffer, size, "%g", row->value); return cstr(buffer);
         case PANEL_BATCH_BOX_H: case PANEL_BATCH_SHARPEN: case PANEL_BATCH_BORDER: case PANEL_BATCH_MARK_OPACITY:
         case PANEL_BATCH_QUALITY: case PANEL_BATCH_START: case PANEL_BATCH_EFFECT_AMOUNT:

@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.45.exe              the viewer, as built
-dist/rubraview-v1.39.45/                 the release bundle
-dist/rubraview-v1.39.45.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.46.exe              the viewer, as built
+dist/rubraview-v1.39.46/                 the release bundle
+dist/rubraview-v1.39.46.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -162,7 +162,7 @@ The menu is a **Rubraview** item with these under it:
 | Open these only | pictures, video, music | the selected files are the list, nothing else from the folder |
 | Add to the list | pictures, video, music | all are added to the end of what the open window is showing; it stays on its page |
 | Browse the archive | comics, archives | offered for one file: the archive's entries in the picker |
-| Convert... | pictures | the batch panel, to run on the selected files |
+| Convert... | pictures | the Batch window, to run on the selected files |
 | Print... | pictures | the system's print dialog; each picture on a sheet of its own |
 
 On Windows 11 the menu registered for this user is under **Show more
@@ -803,23 +803,46 @@ rubraview.exe --batch --resize=50% --format=webp "D:\Photos"
 No window opens. It prints how many files it converted, skipped and
 failed.
 
-`Ctrl+B` does the same thing from the viewer, over the folder you are
-reading: the window has every option below. Its first row, **Edit's
-steps**, runs Edit's edits on every picture before anything else: **the
-steps in Edit now** (they are written to `batch-steps.rvsteps` beside the
-settings), or **a file of steps** saved from Edit. Crops, effects,
-plug-ins, G'MIC and FFmpeg filters are done there, as many as you like, so
-the window no longer has rows of its own for them; choices saved before
-that still hold a crop or an effect keep them, and a row says so (press
-it to drop them). On the command line `--steps=FILE` does the same, with
-`--gmic-exe=` and `--plugin-folder=` for what the steps run. **Try the names on the first
-files** shows what the first three would be called. **Save these
-choices...** writes them to a `.rvbatch` file (an option a line) and
-**Load choices...** reads one back; the last ones used come back by
-themselves. Then **Run on this folder**. The results go into a
-`rubraview-out` folder beside those pictures unless you type another in
-**Into**; into the pictures' own folder a name already there is never
-replaced.
+`Ctrl+B` does the same thing from the viewer, in a window of its own
+beside it: the viewer goes on working while it is open, Edit can be open
+next to it, and `Ctrl+B` again or `Esc` closes it. It reads from the top:
+
+1. **The files**: the pictures of the list now open — a folder, a
+   playlist, a list you filtered or sorted — in its order; films, music
+   and text in it are left out, and the line says how many of each.
+   Press it to see the list in its own window (`F3`). After Explorer's
+   **Convert...** it is the files chosen there.
+2. **Edit's steps, first**: every step in Edit's list is applied, in that
+   order, to every picture before anything else. The line says how many
+   there are; press it to open Edit (`E`) and make or change them. **Edit's
+   steps** chooses none, **the steps in Edit now** (written to
+   `batch-steps.rvsteps` beside the settings), or **a file of steps** saved
+   from Edit. Crops, effects, plug-ins, G'MIC and FFmpeg filters are done
+   there; choices saved before that still hold a crop or an effect keep
+   them, and a row says so (press it to drop them). On the command line
+   `--steps=FILE` does the same, with `--gmic-exe=` and `--plugin-folder=`
+   for what the steps run.
+3. **Then, on each picture**: size, sharpening, turning, colour, frame,
+   watermark and text.
+4. **Written as**: format and its options, and **Names**, which opens the
+   names window (below).
+5. **Go**: **Save these choices...** writes them to a `.rvbatch` file (an
+   option a line) and **Load choices...** reads one back; the last ones
+   used come back by themselves. **Run on the N pictures** starts it and
+   closes the window. The results go into a `rubraview-out` folder beside
+   those pictures unless you type another in **Into**; into the pictures'
+   own folder a name already there is never replaced.
+
+The names window builds each new name from parts you turn on — text
+before, the folder's name, the file's own name, a number (from, going up
+by, how many digits), the picture's size, the date it was taken (else the
+file's date, written as 2024-05-01, 20240501, 2024-05-01_132207 or
+240501), text after — joined by `_`, `-`, a space or nothing; then the
+letters as they are, lower or upper case, spaces made `_`, any number of
+"replace this with that", and what to do with a name already there. At
+its right the first twelve files are listed with their new names as you
+choose, and a name met twice or already in the output folder is marked.
+**Pattern** shows the result and can be typed whole.
 
 The run gets a window of its own and is a separate program: you can go on
 reading, close the viewer, or have it hang, and the conversion carries on.
@@ -861,7 +884,8 @@ waits for a key before it closes.
 | `--plugin=posterise:6,1`, `--plugin-folder=D:\plug` | A plug-in by its file's name, its parameters in order (the rest at their defaults); the folder, else the default one |
 | `--canvas=1920x1080,000000`, `--border=8,FFFFFF` | Centred on a canvas; a frame round it |
 | `--watermark=FILE,br,50` | A picture laid over each, at a corner (`br` `bl` `tr` `tl` `c`), at an opacity |
-| `{n}` `{n:3}` `{parent}` in `--name=`, `--start=7`, `--replace=IMG_,photo-` | A counter, padded; the folder's name; where it starts; words replaced in each name |
+| `{n}` `{n:3}` `{parent}` in `--name=`, `--start=7`, `--replace=IMG_,photo-` | A counter, padded; the folder's name; where it starts; words replaced in each name (`--replace=` again for more, in order) |
+| `{taken}` `{taken:yyyymmdd-hhmiss}` `{w}x{h}` in `--name=`, `--n-step=5`, `--case=lower\|upper`, `--no-spaces` | The date taken (else the file's), its parts yyyy yy mm dd hh mi ss; the size each file comes out at; the counter's step; the letters' case (not the extension's); spaces made `_` |
 | `--exists=replace\|skip\|number` | A name already there: replaced (as before), left, or the next free `name-1` |
 | `--keep-dates`, `--subfolders` | The results take their pictures' dates; with `--recursive`, the same folders under `--out` |
 | `--text="{name} {n:3},br,4,FFFFFF"`, `--text-font=` | Words on each, last of all: where, the letters' height as a percent of the shorter side, the colour; a soft shadow under them |

@@ -383,7 +383,7 @@ typedef struct apply_all_job {
 /* 1.24.0 (owner, 2026-10-19): the list a one-of-many choice opens, in the window where it was pressed. */
 enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_ORDER, CHOOSE_LISTEXT, CHOOSE_LISTSORT, CHOOSE_SHAPE };
 enum { SHAPE_FOR_PICKER = 1, SHAPE_FOR_LIST };   /* RV-192 */
-enum { CHOOSE_IN_MAIN = 0, CHOOSE_IN_SETTINGS, CHOOSE_IN_EDIT, CHOOSE_IN_FILES };
+enum { CHOOSE_IN_MAIN = 0, CHOOSE_IN_SETTINGS, CHOOSE_IN_EDIT, CHOOSE_IN_FILES, CHOOSE_IN_BATCH, CHOOSE_IN_NAMES };   /* RV-194: the last two */
 #define CHOOSE_MAX 48
 typedef struct chooser {
     bool    open;
@@ -411,7 +411,8 @@ typedef struct app_state {
     rubraview_mem_t *mem;
     /* RFC-0006: a window that opens and closes is made, with its renderer, in a block of the
        windows pool, given back when it closes. */
-    struct window_block { void *block; proven_arena_t arena; } mini_block, toolbox_block, info_block, help_block, files_block, fontpick_block, subs_block, edit_block;
+    struct window_block { void *block; proven_arena_t arena; } mini_block, toolbox_block, info_block, help_block, files_block, fontpick_block, subs_block, edit_block,
+                                                               batch_block, names_block;
     rubraview_window_t *window;
     rubraview_renderer_t *renderer;
     rubraview_keymap_t keymap;
@@ -783,6 +784,19 @@ typedef struct app_state {
     size_t                     fontpick_find_len;
     double                     fontpick_px, fontpick_py;
     void                      *fontpick_mem;
+    /* RV-194: Batch, and its names, in windows of their own, each with its own panel (swapped into `panel` while
+       they are handled, so the panel code serves them as it serves the viewer's) */
+    rubraview_window_t        *batch_window, *names_window;
+    rubraview_renderer_t      *batch_renderer, *names_renderer;
+    rubraview_panel_t          batch_panel, names_panel;
+    int32_t                    batch_frame[4], names_frame[4];
+    double                     batch_px, batch_py, names_px, names_py;
+    bool                       batch_dirty, names_dirty, batch_text_on, names_text_on;
+    int32_t                    batch_after;        /* a button's action, run once the panel is put back */
+    bool                       panel_is_names;
+    int64_t                    names_taken[12];    /* the preview's files' dates, read when it opens */
+    proven_u8str_view_t        names_files[12];
+    size_t                     names_file_count;
     /* RV-137: Edit in a window of its own (owner, 2026-10-18) */
     rubraview_window_t        *edit_window;
     rubraview_renderer_t      *edit_renderer;
@@ -957,8 +971,16 @@ typedef struct app_state {
         rubraview_export_options_t more;   /* the format's own choices and the details kept (RV-140, 1.17.0), as Export has them */
         char    name[256];
         double  start;
-        char    replace[256];
+        char    replace[RUBRAVIEW_BATCH_MAX_REPLACES][160];   /* RV-194: "from,to", in order; "" unused */
         int32_t exists;               /* 0 replace, 1 skip, 2 number */
+        /* RV-194: the names window — the parts the pattern is made of, and what is done to the name after */
+        double  n_step, digits;
+        int32_t name_case;            /* 0 as they are, 1 lower, 2 upper */
+        bool    no_spaces;
+        bool    p_name, p_parent, p_counter, p_size, p_taken;
+        int32_t taken_form, sep;      /* sep: 0 '_', 1 '-', 2 ' ', 3 none */
+        char    before[64], after[64];
+        bool    own_pattern;          /* typed as a whole: the parts left as they were until one is changed */
         bool    keep_dates, recursive, subfolders;
         char    out[1024];
         /* RV-134 */
@@ -1380,6 +1402,12 @@ enum {
     PANEL_BATCH_RECURSIVE, PANEL_BATCH_SUBFOLDERS, PANEL_BATCH_OUT, PANEL_BATCH_TEST, PANEL_BATCH_SAVE, PANEL_BATCH_LOAD,
     PANEL_BATCH_TEXT, PANEL_BATCH_TEXT_CORNER, PANEL_BATCH_TEXT_SIZE, PANEL_BATCH_TEXT_COLOUR, PANEL_BATCH_DPI,   /* RV-134 */
     PANEL_BATCH_STEPS, PANEL_BATCH_STEPS_FILE, PANEL_STEPS_SAVE, PANEL_STEPS_LOAD,   /* RV-187 */
+    /* RV-194: Batch's window and its names window */
+    PANEL_BATCH_SHOW_LIST, PANEL_BATCH_OPEN_EDIT, PANEL_BATCH_NAMES, PANEL_BATCH_CLOSE,
+    PANEL_NAMES_NAME, PANEL_NAMES_PARENT, PANEL_NAMES_COUNTER, PANEL_NAMES_SIZE, PANEL_NAMES_TAKEN, PANEL_NAMES_TAKEN_FORM,
+    PANEL_NAMES_SEP, PANEL_NAMES_BEFORE, PANEL_NAMES_AFTER, PANEL_NAMES_STEP, PANEL_NAMES_DIGITS, PANEL_NAMES_CASE,
+    PANEL_NAMES_SPACES, PANEL_NAMES_ADD_REPLACE, PANEL_NAMES_PATTERN, PANEL_NAMES_PREVIEW, PANEL_NAMES_DONE,
+    PANEL_NAMES_REPLACE0, PANEL_NAMES_REPLACE7 = PANEL_NAMES_REPLACE0 + 7,
     PANEL_PRINT_TURN, PANEL_PRINT_SIZE, PANEL_PRINT_SCALE, PANEL_PRINT_PLACE, PANEL_PRINT_MARGIN,
     PANEL_PRINT_PER_SHEET, PANEL_PRINT_NOW,
     PANEL_PRINT_PRINTER, PANEL_PRINT_PAPER, PANEL_PRINT_ORIENT, PANEL_PRINT_COPIES, PANEL_PRINT_SHEET, PANEL_PRINT_DIALOG,   /* 1.19.0 */
@@ -1660,7 +1688,29 @@ proven_u8str_view_t batch_steps_path(app_state_t *app);
 /* RV-187: Edit's steps saved to a .rvsteps file, or loaded from one (each G'MIC, plug-in and FFmpeg step named) */
 void edit_steps_save_or_load(app_state_t *app, bool saving);
 void edit_steps_say_programs(app_state_t *app, const rubraview_edit_steps_t *steps);
-void batch_try_names(app_state_t *app);
+/* RV-194: Batch and its names in windows of their own */
+void batch_window_toggle(app_state_t *app, bool from_explorer);
+void panel_button(app_state_t *app, int32_t index);
+void batch_window_close(app_state_t *app);
+void batch_refresh(app_state_t *app);
+size_t batch_pump(app_state_t *app);
+void draw_batch_window(app_state_t *app);
+void batch_after(app_state_t *app, int32_t what);
+void owned_panel_in(app_state_t *app, int which);
+void owned_panel_out(app_state_t *app);
+bool owned_panel_active(void);
+bool owned_panel_relayout(app_state_t *app);
+void names_window_open(app_state_t *app);
+void names_window_close(app_state_t *app);
+void names_panel_build(app_state_t *app);
+const char *names_choice_word(int32_t id, int32_t index);
+void draw_names_preview(app_state_t *app, double win_w, double win_h, double dpi);
+void batch_compose_name(app_state_t *app);
+void batch_replaces_pack(struct batch_ui *b);
+size_t batch_list_pictures(app_state_t *app, proven_u8str_view_t *out, size_t cap, size_t *total);
+int64_t batch_taken_of(proven_arena_t *arena, proven_u8str_view_t path);
+void batch_preview_files(app_state_t *app);
+proven_u8str_view_t batch_preview_name(app_state_t *app, size_t i, proven_arena_t *arena);
 void batch_type_begin(app_state_t *app, int32_t id);
 void batch_typed(app_state_t *app);
 void bgm_close(app_state_t *app);

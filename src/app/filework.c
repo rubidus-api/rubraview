@@ -989,8 +989,7 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
             app->batch_list = (proven_u8str_view_t*)(void*)res.value.ptr;
             for (size_t i = 0; i < count; ++i) app->batch_list[i] = paths[i];
             app->batch_list_count = count;
-            if (app->panel.open) panel_close(app);
-            panel_open_batch(app);
+            batch_window_toggle(app, true);   /* RV-194: these files, in Batch's window */
             break;
         }
         case RUBRAVIEW_SHELL_VERB_PRINT:
@@ -1246,6 +1245,7 @@ bool classify_press(app_state_t *app, double px, double py) {
    the window changes size. */
 void panel_relayout(app_state_t *app) {
     if (!app->panel.open) return;
+    if (owned_panel_relayout(app)) return;   /* RV-194: Batch's or its names' window */
     if (app->edit_window && edit_panel_open(app)) { edit_window_layout(app); return; }   /* RV-137: laid out in its own window */
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->window, &w, &h);

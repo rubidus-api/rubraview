@@ -17,6 +17,7 @@ void app_end(app_state_t *app) {
     settings_close(app);
     files_close(app);
     subs_close(app);
+    batch_window_close(app);   /* RV-194: and its names window */
     if (app->panel.open || app->edit_window) panel_close(app);
     info_close(app);
     help_close(app);

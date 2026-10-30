@@ -97,7 +97,8 @@ bool crop_point_to_image(app_state_t *app, double px, double py, int32_t *out_x,
 }
 
 bool edit_panel_open(const app_state_t *app) {
-    return app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print && !app->panel_is_convert;
+    return app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print && !app->panel_is_convert &&
+           !app->panel_is_names;   /* RV-194 */
 }
 
 /* The boxes' size from settings.ini (owner, 2026-09-29), each frame so the
