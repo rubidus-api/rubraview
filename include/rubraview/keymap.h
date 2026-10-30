@@ -146,6 +146,14 @@ proven_u8str_view_t rubraview_keymap_resolve(const rubraview_keymap_t *keymap, r
  */
 void rubraview_keymap_place_by_action(rubraview_keymap_t *keymap, const rubraview_keymap_t *defaults);
 
+/**
+ * RV-196: an action `defaults` binds that `keymap` has nowhere (a keymap.ini saved before the action was made)
+ * is added with its default keys, in its default context — each key only where no binding of a context that
+ * meets that one holds it already. A file names every action it knew, a cleared one as "", so one it lacks is
+ * one it never had. Returns how many actions were added; `keymap` is rebuilt in `arena`.
+ */
+size_t rubraview_keymap_add_missing(proven_arena_t *arena, rubraview_keymap_t *keymap, const rubraview_keymap_t *defaults);
+
 /** A copy that shares nothing mutable with `source` — what Revert goes back to. */
 rubraview_keymap_t rubraview_keymap_copy(proven_arena_t *arena, const rubraview_keymap_t *source);
 

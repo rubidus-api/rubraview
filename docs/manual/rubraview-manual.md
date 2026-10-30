@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.44.exe              the viewer, as built
-dist/rubraview-v1.39.44/                 the release bundle
-dist/rubraview-v1.39.44.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.45.exe              the viewer, as built
+dist/rubraview-v1.39.45/                 the release bundle
+dist/rubraview-v1.39.45.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1102,7 +1102,8 @@ title bar, Align the Floating Widget, New window, Open file, Recent
 files, Batch, Print, Playlist, Settings and Help. After it comes the
 name of the file on screen (the folder's, in the open-file screen); a
 click on it opens the open-file screen. At the right are **Set**
-(Settings, `F10`), **P** (the title bar stays shown), **H** (the title
+(Settings, `F10`), **P** (the title bar stays shown, and the picture or
+the film is shown below it instead of under it), **H** (the title
 bar and the Floating Widget hidden until the picture is clicked), **T**
 (always on top), **F** (full screen), **_**, **[]** (maximise), **R**
 (drag it to size the window) and **X**. What is on is lit and bold;
@@ -1680,7 +1681,8 @@ or a like one, wherever it is pressed: `]` / `[` the folder or archive,
 `Ctrl+]` / `Ctrl+[` faster and slower (a film's speed, the slide show's
 delay, a text's auto-scroll), `+` / `-` bigger and smaller, `Shift+N` the
 next code page. A `keymap.ini` written by an earlier version is read into
-these headings by what each key does. **Export keys
+these headings by what each key does, and what came after it gets its
+built-in keys, unless that key is already yours for something else. **Export keys
 to a file** saves them to share or keep; **Import keys from a file** puts a
 saved set on the page, and Revert takes it back off.
 

@@ -1541,6 +1541,11 @@ void render_frame(app_state_t *app) {
 
     draw_music_words(app, win_w, win_h);
     draw_music_extras(app, win_w, win_h);
+    {   /* RV-195: under a pinned title bar nothing of the page shows through (a strip scrolled up, a transition);
+           a text page keeps its own margin there, in its paper */
+        double top = content_top(app);
+        if (top > 0.0 && !app->picker_open && !text_active(app)) rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, 0.0, (double)win_w, top }, COLOR_CANVAS, 0.0);
+    }
 
     list_filter_follow(app);         /* 1.25.0: the list's rows follow its filter as it is typed */
     if (app->picker_open) {

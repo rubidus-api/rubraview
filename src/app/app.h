@@ -1696,6 +1696,7 @@ void classify_build(app_state_t *app);
 void classify_mark(app_state_t *app, int32_t digit);
 bool classify_press(app_state_t *app, double px, double py);
 void classify_toggle(app_state_t *app);
+double content_top(const app_state_t *app);   /* RV-195: the pinned title bar's height, else 0 */
 rubraview_composition_t compose_view(app_state_t *app, const rubraview_spread_t *spread,
                                             const rubraview_page_size_t *left, const rubraview_page_size_t *right,
                                             double win_w, double win_h);

@@ -322,6 +322,47 @@ bool rubraview_keymap_contexts_meet(proven_u8str_view_t a, proven_u8str_view_t b
     return in_base_layer(a) && in_base_layer(b);
 }
 
+size_t rubraview_keymap_add_missing(proven_arena_t *arena, rubraview_keymap_t *keymap, const rubraview_keymap_t *defaults) {
+    if (!arena || !keymap || !defaults || defaults->count == 0) return 0;
+    size_t missing = 0;
+    for (size_t d = 0; d < defaults->count; ++d) {
+        bool have = false;
+        for (size_t i = 0; i < keymap->count && !have; ++i) have = proven_u8str_view_eq(keymap->bindings[i].action, defaults->bindings[d].action);
+        if (!have) missing++;
+    }
+    if (missing == 0) return 0;
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, keymap->count + missing, sizeof(rubraview_key_binding_t));
+    if (!proven_is_ok(res.err)) return 0;
+    rubraview_key_binding_t *all = (rubraview_key_binding_t*)(void*)res.value.ptr;
+    if (keymap->count > 0) memcpy(all, keymap->bindings, keymap->count * sizeof(rubraview_key_binding_t));
+    size_t count = keymap->count, added = 0;
+    for (size_t d = 0; d < defaults->count; ++d) {
+        const rubraview_key_binding_t *want = &defaults->bindings[d];
+        bool have = false;
+        for (size_t i = 0; i < keymap->count && !have; ++i) have = proven_u8str_view_eq(keymap->bindings[i].action, want->action);
+        if (have) continue;
+        rubraview_key_binding_t b = { .context = want->context, .action = want->action, .combos = NULL, .combo_count = 0 };
+        if (want->combo_count > 0) {
+            proven_result_mem_mut_t c = rubraview_arena_alloc_array(arena, want->combo_count, sizeof(rubraview_key_combo_t));
+            if (!proven_is_ok(c.err)) break;
+            b.combos = (rubraview_key_combo_t*)(void*)c.value.ptr;
+            for (size_t k = 0; k < want->combo_count; ++k) {
+                bool taken = false;   /* the user's own key stays theirs */
+                for (size_t i = 0; i < count && !taken; ++i) {
+                    if (!rubraview_keymap_contexts_meet(all[i].context, want->context)) continue;
+                    for (size_t j = 0; j < all[i].combo_count && !taken; ++j) taken = combo_matches(all[i].combos[j], want->combos[k]);
+                }
+                if (!taken) b.combos[b.combo_count++] = want->combos[k];
+            }
+        }
+        all[count++] = b;
+        added++;
+    }
+    keymap->bindings = all;
+    keymap->count = count;
+    return added;
+}
+
 rubraview_keymap_t rubraview_keymap_copy(proven_arena_t *arena, const rubraview_keymap_t *source) {
     rubraview_keymap_t copy = {0};
     if (!arena || !source || source->count == 0) return copy;

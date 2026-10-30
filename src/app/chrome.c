@@ -541,7 +541,7 @@ void draw_strip(app_state_t *app, int32_t win_w, int32_t win_h) {
     if (app->pan_x > slack) app->pan_x = slack;
     if (app->pan_x < -slack) app->pan_x = -slack;
     double x0 = ((double)win_w - width) / 2.0 + app->pan_x;
-    double y = -app->strip_offset;
+    double y = content_top(app) - app->strip_offset;   /* RV-195: from under a pinned title bar */
     rubraview_interpolation_t interp = page_interpolation(app);
 
     for (size_t i = app->spread_index; i < page_count(app) && y < (double)win_h; ++i) {
@@ -578,17 +578,32 @@ void draw_strip(app_state_t *app, int32_t win_w, int32_t win_h) {
    next one down from what the fit and the zoom ask — so no row or column
    of a small drawing comes out wider than its neighbour. A film is left
    as it is. */
+/* RV-195 (owner, 2026-10-30: "제목 표시줄이 고정일 때는 ... 그 아래 영역에만 보이게"): with our own title bar pinned, what
+   is shown has the window below it; the bar is not laid over the picture or the film. */
+double content_top(const app_state_t *app) {
+    if (!app->frameless || app->chrome_hidden) return 0.0;
+    return rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5 ? app->titlebar.height : 0.0;
+}
+
+static rubraview_composition_t compose_below(rubraview_composition_t comp, double top) {
+    for (size_t i = 0; i < comp.count; ++i) comp.commands[i].transform.f += top;
+    return comp;
+}
+
 rubraview_composition_t compose_view(app_state_t *app, const rubraview_spread_t *spread,
                                             const rubraview_page_size_t *left, const rubraview_page_size_t *right,
                                             double win_w, double win_h) {
+    double top = content_top(app);
+    if (top >= win_h) top = 0.0;
+    win_h -= top;
     rubraview_composition_t comp = rubraview_compose_spread(spread, left, right, win_w, win_h,
                                                             app->fit_mode, GUTTER, app->zoom, app->pan_x, app->pan_y);
-    if (!g_whole_zoom || comp.count == 0 || app->media) return comp;
+    if (!g_whole_zoom || comp.count == 0 || app->media) return compose_below(comp, top);
     double scale = comp.commands[0].scale;
     double whole = floor(scale + 1e-6);
-    if (scale <= 1.0 || whole < 1.0 || scale - whole < 1e-6) return comp;
-    return rubraview_compose_spread(spread, left, right, win_w, win_h,
-                                    app->fit_mode, GUTTER, app->zoom * whole / scale, app->pan_x, app->pan_y);
+    if (scale <= 1.0 || whole < 1.0 || scale - whole < 1e-6) return compose_below(comp, top);
+    return compose_below(rubraview_compose_spread(spread, left, right, win_w, win_h,
+                                                  app->fit_mode, GUTTER, app->zoom * whole / scale, app->pan_x, app->pan_y), top);
 }
 
 void draw_spread(app_state_t *app, size_t spread_index, double opacity,

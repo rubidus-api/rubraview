@@ -2643,3 +2643,30 @@ Do not store credentials, private infrastructure details, personal data, private
     rows say the key, the context and what it does, the context's column measured in the grid's cells
     (`rubraview_settings_text_cells`), so Korean headings keep the column.
 - Consequences: T281 (host), T282 (VM). F1's own list by key is unchanged.
+
+## 2026-10-30: D-226 Nothing under a pinned title bar (RV-195)
+
+- Status: Accepted (owner 2026-10-30: "제목 표시줄이 고정일 때는 영상이나 기타 보여지는 내용들이 제목 표시줄 밑에 투명으로
+  보이는 것이 아니라 그 아래 영역에만 보이게 하도록 합시다").
+- Decision:
+  - `content_top(app)`: the bar's height while our own title bar is pinned (frameless, not hidden), else 0.
+  - `compose_view` fits the spread in the window less that band and moves it down by it, so the picture, the film,
+    Edit's preview and the crop's overlay (all through `spread_composition`) sit below the bar; a strip starts there.
+  - After the page is drawn the band is filled with the canvas colour, so nothing scrolled or sliding (a strip, a
+    transition) shows under the bar's translucent background. A text page keeps its own top margin and paper there.
+  - Unpinned, the bar comes and goes over the picture as before.
+- Consequences: T284 (VM).
+
+## 2026-10-30: D-227 Actions made after a saved keymap.ini get their keys (RV-196)
+
+- Status: Accepted (owner 2026-10-30: "툴바 아이콘의 목록 과 파일 은 왜 툴팁에 단축키 설정이 나오지 않나요? ... 현재의
+  설정에 따라 무슨 단축키인지 안내하게"; on the VM the tooltips said "(P)" and "(F3)" with the built-in keys, so the
+  missing keys were the file's).
+- Decision:
+  - The tooltips already name the keys of the keymap in use. A keymap.ini is the whole keymap: one saved before an
+    action existed gives it no key, and its key does nothing either.
+  - `rubraview_keymap_add_missing` at start, after `place_by_action`: each action the built-in keymap has and the
+    file names nowhere is added in its built-in context with its built-in keys, a key left out where a binding of a
+    meeting context already holds it. The file writes every action it knows (a cleared one as ""), so a cleared
+    action is never given its key back. Saved again, the file holds the new actions.
+- Consequences: T283 (host), T284 (VM).
