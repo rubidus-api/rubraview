@@ -44,6 +44,10 @@ typedef struct rubraview_mp4_track {
     uint32_t stts_count, stsc_count, stsz_count, stco_count;
     uint32_t stsz_size;           /* one size for every sample, or 0: the table has them */
     bool     co64;
+    /* RV-202: `tkhd`'s size as shown (16.16 fixed point, before its matrix), and whether the matrix turns it a
+       quarter (a phone's upright film is stored wide, turned by its matrix) */
+    double   shown_width, shown_height;
+    bool     quarter_turn;
 } rubraview_mp4_track_t;
 
 typedef struct rubraview_mp4 {
@@ -52,6 +56,8 @@ typedef struct rubraview_mp4 {
     rubraview_mp4_track_t tracks[RUBRAVIEW_MP4_MAX_TRACKS];
     size_t                track_count;
     uint64_t              moov_at, moov_end;
+    uint32_t              movie_timescale;   /* RV-202: `mvhd`'s clock and the film's length in it; 0 when not said */
+    uint64_t              movie_duration;
 } rubraview_mp4_t;
 
 /**
@@ -59,6 +65,13 @@ typedef struct rubraview_mp4 {
  * when it is not one, is fragmented, or its `moov` cannot be read.
  */
 bool rubraview_mp4_open(rubraview_mp4_t *mp4, const uint8_t *data, uint64_t size, const char **out_why);
+
+/**
+ * RV-202: the first video track's size as it is shown (its matrix's quarter turn applied) and the
+ * film's length in seconds. False when there is no video track with a size; `*out_seconds` is
+ * set whenever `mvhd` says it (0 otherwise), a song's too.
+ */
+bool rubraview_mp4_frame(const rubraview_mp4_t *mp4, int32_t *out_width, int32_t *out_height, double *out_seconds);
 
 /* One sample of a track: where its bytes are, when it starts and for how long (in the track's ticks). */
 typedef struct rubraview_mp4_sample {

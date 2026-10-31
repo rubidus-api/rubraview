@@ -2761,3 +2761,58 @@ Do not store credentials, private infrastructure details, personal data, private
   Favourites and the list with Edit open maximized and back; the Store's copy (an unsigned test package of 1.39.42)
   starting its `--media-host` child from the package.
 - Consequences: T293 (VM).
+
+## 2026-10-31: D-235 Hide at the Toolbar's end (RV-203)
+
+- Status: Accepted (owner 2026-10-31: "툴바 맨 마지막에 플로팅 박스 숨기는 아이콘 넣어주세요").
+- Decision: read as the title bar's H (`hide_boxes`: the title bar and the boxes away until the picture is clicked);
+  every profile but `slideshow` (put in front, not at the end) ends with `tile hide_boxes "Hide"`, icon E-D1A as H's.
+- Consequences: T294, T299.
+
+## 2026-10-31: D-236 The title bar's ☰ in two columns with the right click's items (RV-205)
+
+- Status: Accepted (owner 2026-10-31: "화면 우클릭 컨텍스트 메뉴의 모든 항목들이 타이틀바 좌측의 메뉴에도 ... 2열로").
+- Decision: "all" taken as the whole `context` list of the screen's profile, the items the right click leaves out for
+  being on the Toolbar included; TMENU's own rows first, and an item whose action TMENU has is not repeated. Groups
+  start lines of their own (`rubraview_gridmenu_*` in core, host-tested); the grid is made narrower and lower to stay in
+  the window. The rows keep the right click's marks, grey and Delete-twice.
+- Consequences: T295, T299.
+
+## 2026-10-31: D-237 Films' sizes and lengths from their own heads; sort by length (RV-202)
+
+- Status: Accepted (owner 2026-10-31: "목록에서 가로로 긴파일 세로로 긴 파일 정사각형 고르는게 안되어요. 동영상들에
+  대해서도 똑같이 적용되게 해 주세요. 그리고 각종 파일 목록이나 브라우저에서 재생길이 순으로 정렬").
+- Decision: seen on the VM with 1.39.49: Shape worked for pictures, but Windows' shell gives no size for MKV / WebM and
+  the stored size for a phone's upright MP4 (its matrix turns it). The size reader and the thumbnails map the file and
+  ask our MP4 and Matroska readers first (`rubraview_mp4_frame`, `rubraview_mkv_frame`), the shell after. The reader
+  returns lengths too; the cache keeps them beside the shape; the lists' Sort gains Length, and Length in the lists
+  and the open-file screen waits for the lengths to be read. The P list's maximize button the owner did not see is
+  drawn by 1.39.47 and later (seen on the VM with 1.39.49: maximize, R, X); no change.
+- Consequences: T296, T297, T299.
+
+## 2026-10-31: D-238 Pick by extension in the open-file screen (RV-204)
+
+- Status: Accepted (owner 2026-10-31: "파일 브라우저 창에서 확장자별로 선택하는 기능 ... 맨 왼쪽 열에").
+- Decision: "as the list has it" taken as the list's `.ext ▾` look, picking rather than hiding (the open-file screen
+  picks, it has Filter for hiding): `.ext ▾` first in the tool row, picked / total per extension, a choice taking or
+  letting go them all, as Shape does.
+- Consequences: T299.
+
+## 2026-10-31: D-239 The edge buttons as a tall column after a stay (RV-206)
+
+- Status: Accepted (owner 2026-10-31: "세로로 길게 호버링되어 나열 ... 호버링 뜨기 전에 클릭하면 그냥 이전/다음";
+  the owner chose first / last for the third and 0.4 s).
+- Decision: the column (seven tenths of the height, four buttons) shows 0.4 s after the pointer reaches a side; a press
+  before is `prev_page` / `next_page`. A film's 30 s button becomes 5 % (`media_seek_*_percent`, 5 s when the length is
+  not known); 30 s stays on `Shift+Left/Right`.
+- Consequences: T298, T299.
+
+## 2026-10-31: D-240 The Sources Of Truth map (W-20261031-0955)
+
+- Status: Accepted (owner 2026-10-31: "SoT 지도 만들고 그에 기반해서 프로젝트 전체를 잘 다듬어주세요").
+- Decision: `docs/agents/state.md` gets the map the rules already pointed to (Sources Of Truth: each kind of fact, its
+  source, its copies, what keeps them), Registered Values for `sot-check.sh` (the vendored snapshots), and the request
+  blocks' format. Aligned by it: `CONTEXT.md` no longer copies the release history (the release step replaces its
+  line instead of growing it), its stale FultaArc snapshot, test count and next step; `check-actions.py`'s names of
+  files that moved.
+- Consequences: `sot-check.sh` reports 0; the context is about half its budget.

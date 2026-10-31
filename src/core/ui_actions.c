@@ -203,6 +203,7 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
         { "copy_to_folder", 0xE8C8 },        /* Copy */
         { "toggle_classify", 0xE8EC },       /* Tag */
         { "move_to_folder", 0xE8DE },        /* MoveToFolder */
+        { "hide_boxes", RUBRAVIEW_ICON_HIDE },   /* RV-203: the Toolbar's last tile, as the title bar's H */
     };
     if (!f) return 0;
     /* D-123: while the slide show runs its tile is the way to stop it. */

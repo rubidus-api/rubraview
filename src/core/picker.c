@@ -583,6 +583,7 @@ struct rubraview_shape_slot {
     int64_t mtime;
     uint64_t hash;
     uint8_t shape;
+    double seconds;      /* RV-202: below 0 not known */
 };
 
 static uint64_t shape_hash(proven_u8str_view_t path, int64_t mtime) {
@@ -616,6 +617,21 @@ bool rubraview_shape_cache_get(const rubraview_shape_cache_t *cache, proven_u8st
 
 bool rubraview_shape_cache_put(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
                                rubraview_shape_t shape) {
+    double seconds = -1.0;
+    (void)rubraview_shape_cache_length(cache, path, mtime, &seconds);   /* a length kept stays */
+    return rubraview_shape_cache_put_length(cache, path, mtime, shape, seconds);
+}
+
+bool rubraview_shape_cache_length(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime, double *out_seconds) {
+    if (!cache || path.size == 0) return false;
+    struct rubraview_shape_slot *s = shape_find(cache, path, mtime, shape_hash(path, mtime));
+    if (!s || !s->path || !(s->seconds >= 0.0)) return false;
+    if (out_seconds) *out_seconds = s->seconds;
+    return true;
+}
+
+bool rubraview_shape_cache_put_length(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
+                                      rubraview_shape_t shape, double seconds) {
     if (!cache || path.size == 0) return false;
     if (cache->count >= RUBRAVIEW_SHAPE_CACHE_MAX) rubraview_shape_cache_free(cache);   /* starts over */
     if (!cache->slots || (cache->count + 1) * 10 > cache->capacity * 7) {
@@ -644,6 +660,7 @@ bool rubraview_shape_cache_put(rubraview_shape_cache_t *cache, proven_u8str_view
         cache->count++;
     }
     s->shape = (uint8_t)shape;
+    s->seconds = seconds >= 0.0 ? seconds : -1.0;
     return true;
 }
 

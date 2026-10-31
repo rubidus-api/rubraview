@@ -283,6 +283,11 @@ bool rubraview_shape_cache_get(const rubraview_shape_cache_t *cache, proven_u8st
                                rubraview_shape_t *out);
 bool rubraview_shape_cache_put(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
                                rubraview_shape_t shape);
+/* RV-202: a shape and a length (seconds; below 0 not known) kept together, the reader giving both at once. */
+bool rubraview_shape_cache_put_length(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
+                                      rubraview_shape_t shape, double seconds);
+/* The length kept for the file: false when it was never read or its length is not known. */
+bool rubraview_shape_cache_length(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime, double *out_seconds);
 void rubraview_shape_cache_free(rubraview_shape_cache_t *cache);
 
 #ifdef __cplusplus

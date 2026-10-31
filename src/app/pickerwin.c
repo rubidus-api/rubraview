@@ -214,6 +214,7 @@ proven_u8str_view_t picker_tool_label(const app_state_t *app, int which, char *b
     bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
     int n = 0;
     switch (which) {
+        case PICKER_TOOL_EXT:        n = snprintf(buf, cap, ".ext \xE2\x96\xBE"); break;   /* RV-204 */
         case PICKER_TOOL_ALL:        n = snprintf(buf, cap, "%s", T("All")); break;
         case PICKER_TOOL_INDIVIDUAL: n = snprintf(buf, cap, "%s", T("Individual")); break;
         case PICKER_TOOL_RANGE:      n = snprintf(buf, cap, "%s", T("Range")); break;
@@ -239,7 +240,7 @@ rubraview_pal_rect_t picker_tool_rect(const app_state_t *app, double dpi, int wh
         char buf[96];
         double w = picker_chip_width(picker_tool_label(app, i, buf, sizeof(buf)), dpi) + (i == PICKER_TOOL_ALL ? 26.0 * dpi : 0.0);
         if (i == which) return (rubraview_pal_rect_t){ x, y + 4.0 * dpi, w, h - 8.0 * dpi };
-        x += w + (i == PICKER_TOOL_ALL || i == PICKER_TOOL_SHAPE || i == PICKER_TOOL_ORDER ? 14.0 : 4.0) * dpi;   /* gaps between the kinds */
+        x += w + (i == PICKER_TOOL_EXT || i == PICKER_TOOL_ALL || i == PICKER_TOOL_SHAPE || i == PICKER_TOOL_ORDER ? 14.0 : 4.0) * dpi;   /* gaps between the kinds */
     }
     return (rubraview_pal_rect_t){ 0 };
 }

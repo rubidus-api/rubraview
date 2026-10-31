@@ -14,6 +14,20 @@ static bool shape_kind(proven_u8str_view_t path) {
     return rubraview_glob_match_list(name, PROVEN_LIT(IMAGE_FILTER)) || rubraview_glob_match_list(name, PROVEN_LIT(VIDEO_FILTER));
 }
 
+/* RV-202: a film or a song: what has a length */
+bool facts_has_length(proven_u8str_view_t path) {
+    if (path.size == 0 || rubraview_stream_is_address(path)) return false;
+    proven_u8str_view_t name = rubraview_path_basename(path);
+    return rubraview_glob_match_list(name, PROVEN_LIT(VIDEO_FILTER)) || rubraview_glob_match_list(name, PROVEN_LIT(AUDIO_FILTER));
+}
+
+/* What a reading for `then` reads: the pictures and films for a shape or a resolution, the films and songs for a length. */
+static bool facts_kind(const app_state_t *app, proven_u8str_view_t path) {
+    if (app->shape_then == FACTS_THEN_SHAPE) return shape_kind(path);
+    if (app->shape_then == FACTS_THEN_PICKER_SORT && app->shape_sort_key == RUBRAVIEW_PICKER_SORT_RESOLUTION) return shape_kind(path);
+    return facts_has_length(path);
+}
+
 /* What a target holds: n items, the i-th's path and modified time (0 for a list's page). */
 static size_t shape_items(app_state_t *app, int32_t target) {
     if (target == SHAPE_FOR_PICKER) return app->picker_in_book ? 0 : app->picker_listing.count;
@@ -77,11 +91,44 @@ bool shape_table(app_state_t *app, int32_t target, uint8_t **out_shapes, size_t 
     return true;
 }
 
-void shape_begin(app_state_t *app, int32_t target, int where, double x, double y, double above_y) {
+static void facts_begin(app_state_t *app, int32_t target, int where, double x, double y, double above_y);
+
+/* What a reading ends in: the shape's choice opened, or the sort it waited for made. */
+static void facts_then(app_state_t *app) {
+    if (app->shape_then == FACTS_THEN_LIST_SORT) list_sort(app, app->shape_sort_key, app->shape_sort_desc);
+    else if (app->shape_then == FACTS_THEN_PICKER_SORT) picker_sort_set(app, app->shape_sort_key, app->shape_sort_desc);
+    else chooser_open_shape(app, app->shape_where, app->shape_x, app->shape_y, app->shape_above);
+}
+
+/* RV-202: the files of `target` a sort by length (or the open-file screen's by resolution) needs read first: true
+   when a reading started for them (the sort is made when it ends), false when all are known and it can be made now. */
+bool facts_read_for_sort(app_state_t *app, int32_t target, int32_t then, int key, bool desc) {
+    if (app->shape_reader && app->shape_then == then && app->shape_for == target) return true;   /* already reading for it */
+    size_t count = shape_items(app, target);
+    int32_t was = app->shape_then, was_key = app->shape_sort_key;
+    app->shape_then = then;
+    app->shape_sort_key = key;
+    size_t missing = 0;
+    for (size_t i = 0; i < count; ++i) {
+        int64_t mtime = 0;
+        proven_u8str_view_t path = shape_item(app, target, i, &mtime);
+        if (!facts_kind(app, path)) continue;
+        if (then == FACTS_THEN_PICKER_SORT && key == RUBRAVIEW_PICKER_SORT_RESOLUTION ? rubraview_shape_cache_get(&app->shape_cache, path, mtime, NULL)
+                                                                                    : rubraview_shape_cache_length(&app->shape_cache, path, mtime, NULL)) continue;
+        missing++;
+    }
+    if (missing == 0) { app->shape_then = was; app->shape_sort_key = was_key; return false; }
+    app->shape_sort_desc = desc;
+    facts_begin(app, target, CHOOSE_IN_MAIN, 0.0, 0.0, 0.0);
+    return app->shape_reader != NULL;
+}
+
+static void facts_begin(app_state_t *app, int32_t target, int where, double x, double y, double above_y) {
     shape_reader_end(app);
     size_t count = shape_items(app, target);
     if (count == 0) { osd_say(app, target == SHAPE_FOR_PICKER && app->picker_in_book ? TU8("inside a book: tap a page to go to it")
                                                                                      : TU8("no pictures or films here")); return; }
+    if (target == SHAPE_FOR_LIST && !list_editable(app)) { osd_say(app, TU8("a book's pages are not picked by shape")); return; }
     app->shape_for = target;
     app->shape_generation = app->picker_generation;
     app->shape_pages = app->source.pages;
@@ -96,12 +143,15 @@ void shape_begin(app_state_t *app, int32_t target, int where, double x, double y
     for (size_t i = 0; i < count; ++i) {
         int64_t mtime = 0;
         proven_u8str_view_t path = shape_item(app, target, i, &mtime);
-        if (!shape_kind(path) || rubraview_shape_cache_get(&app->shape_cache, path, mtime, NULL)) continue;
+        bool known = app->shape_then == FACTS_THEN_SHAPE || (app->shape_then == FACTS_THEN_PICKER_SORT && app->shape_sort_key == RUBRAVIEW_PICKER_SORT_RESOLUTION)
+                   ? rubraview_shape_cache_get(&app->shape_cache, path, mtime, NULL) : rubraview_shape_cache_length(&app->shape_cache, path, mtime, NULL);
+        if (!facts_kind(app, path) || known) continue;
         paths[missing] = path; mtimes[missing] = mtime;
         missing++;
     }
     if (missing == 0) {
         free(paths); free(mtimes);
+        if (app->shape_then != FACTS_THEN_SHAPE) { facts_then(app); return; }
         bool any = false;
         for (size_t i = 0; i < count && !any; ++i) { int64_t m = 0; any = shape_kind(shape_item(app, target, i, &m)); }
         if (!any) { osd_say(app, TU8("no pictures or films here")); return; }
@@ -115,6 +165,11 @@ void shape_begin(app_state_t *app, int32_t target, int where, double x, double y
     app->shape_said = 0.0;
 }
 
+void shape_begin(app_state_t *app, int32_t target, int where, double x, double y, double above_y) {
+    app->shape_then = FACTS_THEN_SHAPE;
+    facts_begin(app, target, where, x, y, above_y);
+}
+
 /* Each pass: how far the reading is; when it is done, the sizes kept and the choice opened. */
 void shape_step(app_state_t *app) {
     if (!app->shape_reader) return;
@@ -125,19 +180,23 @@ void shape_step(app_state_t *app) {
         if (now - app->shape_said > 0.25) {
             app->shape_said = now;
             char line[96];
-            int k = snprintf(line, sizeof(line), T("reading the sizes: %zu of %zu"), done, count);
+            int k = snprintf(line, sizeof(line), app->shape_then == FACTS_THEN_SHAPE || (app->shape_then == FACTS_THEN_PICKER_SORT &&
+                                                     app->shape_sort_key == RUBRAVIEW_PICKER_SORT_RESOLUTION)
+                                                     ? T("reading the sizes: %zu of %zu") : T("reading the lengths: %zu of %zu"), done, count);
             if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
         }
         return;
     }
     for (size_t n = 0; n < count; ++n) {
         int32_t w = 0, h = 0;
-        rubraview_pal_sizes_get(app->shape_reader, n, &w, &h);
-        (void)rubraview_shape_cache_put(&app->shape_cache, rubraview_pal_sizes_path(app->shape_reader, n),
-                                        app->shape_reader_mtime[n], rubraview_shape_of(w, h));
+        double seconds = 0.0;
+        rubraview_pal_sizes_get(app->shape_reader, n, &w, &h, &seconds);
+        (void)rubraview_shape_cache_put_length(&app->shape_cache, rubraview_pal_sizes_path(app->shape_reader, n),
+                                               app->shape_reader_mtime[n], rubraview_shape_of(w, h), seconds);
     }
     shape_reader_end(app);
-    chooser_open_shape(app, app->shape_where, app->shape_x, app->shape_y, app->shape_above);
+    facts_then(app);
+    app->shape_then = FACTS_THEN_SHAPE;
 }
 
 static const char *shape_word(rubraview_shape_t s) {

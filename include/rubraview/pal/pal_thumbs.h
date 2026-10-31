@@ -63,9 +63,10 @@ bool rubraview_pal_thumbs_busy(rubraview_thumbs_t *thumbs);
 uint8_t *rubraview_pal_shell_thumbnail_bgra(proven_u8str_view_t path, int32_t side, int32_t *out_w, int32_t *out_h);
 
 /*
- * RV-192: the sizes of many files, read on a thread of their own from what
- * Windows' shell knows of each (a photo's or a film's header; a photo turned
- * as its EXIF says), else WIC's frame size — so the open-file screen and the
+ * RV-192: the sizes of many files, read on a thread of their own: a picture's
+ * from WIC (turned as its EXIF says), a film's from its own MP4 or Matroska
+ * head (RV-202: turned as its matrix says; its length too), else from what
+ * Windows' shell knows of it (a song's length) — so the open-file screen and the
  * lists can pick by shape without stopping. The paths are copied; an empty
  * one is skipped. 0x0 for what could not be read.
  */
@@ -76,7 +77,8 @@ rubraview_sizes_t *rubraview_pal_sizes_start(const proven_u8str_view_t *paths, s
 /* How many are read so far, in order: sizes of indices below it may be asked for. */
 size_t rubraview_pal_sizes_done(rubraview_sizes_t *sizes);
 size_t rubraview_pal_sizes_count(const rubraview_sizes_t *sizes);
-void rubraview_pal_sizes_get(const rubraview_sizes_t *sizes, size_t index, int32_t *out_width, int32_t *out_height);
+/* RV-202: and its length in seconds (a film's or a song's; 0 for a picture or when not known) */
+void rubraview_pal_sizes_get(const rubraview_sizes_t *sizes, size_t index, int32_t *out_width, int32_t *out_height, double *out_seconds);
 /* The index-th path as it was given (its own copy). */
 proven_u8str_view_t rubraview_pal_sizes_path(const rubraview_sizes_t *sizes, size_t index);
 /* Stops the thread where it is and lets everything go. */

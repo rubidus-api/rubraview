@@ -292,6 +292,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                         rubraview_pal_rect_t t = picker_tool_rect(app, dpi, k);
                         if (!pal_rect_has(t, event->mouse.x, event->mouse.y)) continue;
                         switch (k) {
+                            case PICKER_TOOL_EXT:        chooser_open_pickext(app, t.x, t.y + t.height, t.y); break;   /* RV-204 */
                             case PICKER_TOOL_ALL:        picker_select_everything(app); break;
                             case PICKER_TOOL_INDIVIDUAL: picker_button(app, PICKER_BTN_INDIVIDUAL); break;
                             case PICKER_TOOL_RANGE:      picker_button(app, PICKER_BTN_RANGE); break;

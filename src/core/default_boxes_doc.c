@@ -16,7 +16,8 @@
  * toggles (Play/Pause, Mute/Sound) are replaced by the viewer to say what
  * a tap will do. Every profile's groups come in one order (RV-116): going
  * and playing, how it plays, sound, subtitles, view, turning, the file,
- * the window. `context` lists are what a right click offers; 1.23.0 took
+ * the window, then Hide (RV-203: the title bar and the boxes hidden until the picture is clicked, the
+ * title bar's H). `context` lists are what a right click offers; 1.23.0 took
  * the menu's tree out of it (owner, 2026-10-19: everything in it has another
  * way in), keeping Open, Recent files, Batch and Print in the lists.
  */
@@ -58,6 +59,7 @@ static const char *const PARTS[] = {
 "  group\n"
 "  tile open_settings            \"Settings\"\n"
 "  tile toggle_osd               \"Info bar\"\n"
+"  tile hide_boxes               \"Hide\"\n"
 "\n",
 "toolbox music\n"
 "  tile media_play_pause         \"Pause\"\n"
@@ -89,6 +91,7 @@ static const char *const PARTS[] = {
 "  group\n"
 "  tile open_settings            \"Settings\"\n"
 "  tile toggle_osd               \"Info bar\"\n"
+"  tile hide_boxes               \"Hide\"\n"
 "\n",
 "toolbox animation\n"
 "  tile media_play_pause         \"Pause\"\n"
@@ -122,6 +125,7 @@ static const char *const PARTS[] = {
 "  group\n"
 "  tile open_settings            \"Settings\"\n"
 "  tile toggle_osd               \"Info bar\"\n"
+"  tile hide_boxes               \"Hide\"\n"
 "\n",
 "toolbox multipage\n"
 "  tile prev_page                \"Prev\"\n"
@@ -149,6 +153,7 @@ static const char *const PARTS[] = {
 "  tile toggle_wheel_strip       \"Wheel strip\"\n"
 "  tile open_settings            \"Settings\"\n"
 "  tile toggle_osd               \"Info bar\"\n"
+"  tile hide_boxes               \"Hide\"\n"
 "\n",
 "toolbox archive\n"
 "  tile prev_page                \"Prev\"\n"
@@ -175,6 +180,7 @@ static const char *const PARTS[] = {
 "  tile toggle_wheel_strip       \"Wheel strip\"\n"
 "  tile open_settings            \"Settings\"\n"
 "  tile toggle_osd               \"Info bar\"\n"
+"  tile hide_boxes               \"Hide\"\n"
 "\n",
 "toolbox image\n"
 "  tile prev_page                \"Prev\"\n"
@@ -204,6 +210,7 @@ static const char *const PARTS[] = {
 "  tile toggle_wheel_strip       \"Wheel strip\"\n"
 "  tile open_settings            \"Settings\"\n"
 "  tile toggle_osd               \"Info bar\"\n"
+"  tile hide_boxes               \"Hide\"\n"
 "\n",
 "# RFC-0005: a text file on screen\n"
 "toolbox text\n"
@@ -235,6 +242,7 @@ static const char *const PARTS[] = {
 "  group\n"
 "  tile open_settings            \"Settings\"\n"
 "  tile toggle_osd               \"Info bar\"\n"
+"  tile hide_boxes               \"Hide\"\n"
 "\n",
 "# put in front of the profile while a slide show runs\n"
 "toolbox slideshow\n"

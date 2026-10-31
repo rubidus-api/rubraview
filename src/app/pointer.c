@@ -75,6 +75,13 @@ rubraview_edge_side_t edge_nav_side(app_state_t *app, double x, double y) {
     return rubraview_edgenav_revealed(&nav, x, y, (double)w, (double)h);
 }
 
+/* RV-206: the side's column, once the pointer has stayed there long enough. */
+bool edge_column_shown(app_state_t *app) {
+    rubraview_edge_side_t side = edge_nav_side(app, app->pointer_x, app->pointer_y);
+    return side != RUBRAVIEW_EDGE_NONE && (int32_t)side == app->edge_side &&
+           rubraview_pal_time_now_seconds() - app->edge_since >= RUBRAVIEW_EDGE_COLUMN_DELAY;
+}
+
 static rubraview_edge_hit_t edge_nav_hit(app_state_t *app, double x, double y) {
     rubraview_edge_hit_t none = { RUBRAVIEW_EDGE_NONE, -1 };
     if (edge_nav_side(app, x, y) == RUBRAVIEW_EDGE_NONE) return none;
@@ -286,6 +293,12 @@ bool handle_chrome_click(app_state_t *app, double x, double y) {
     }
 
     /* The edge buttons (owner, 2026-09-29), under everything above. */
+    rubraview_edge_side_t at_side = edge_nav_side(app, x, y);
+    if (at_side != RUBRAVIEW_EDGE_NONE && !edge_column_shown(app)) {
+        /* RV-206: before the column shows, a press at a side is previous or next */
+        handle_action(app, cstr(rubraview_edgenav_plain_action(at_side)));
+        return true;
+    }
     rubraview_edge_hit_t edge = edge_nav_hit(app, x, y);
     if (edge.side != RUBRAVIEW_EDGE_NONE) {
         handle_action(app, cstr(rubraview_edgenav_action(edge.side, edge.slot, app->media != NULL)));

@@ -6,6 +6,10 @@
 /* ---- per-frame timers ---- */
 
 void tick_timers(app_state_t *app, double dt) {
+    {   /* RV-206: the side the pointer is at, and since when: its column shows after RUBRAVIEW_EDGE_COLUMN_DELAY */
+        int32_t side = (int32_t)edge_nav_side(app, app->pointer_x, app->pointer_y);
+        if (side != app->edge_side) { app->edge_side = side; app->edge_since = rubraview_pal_time_now_seconds(); }
+    }
     rubraview_osd_tick(&app->osd, dt);
     hdr_screen_tick(app, dt);   /* RV-153 */
     media_stopped_tick(app);    /* RV-176 */

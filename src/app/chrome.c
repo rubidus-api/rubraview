@@ -20,15 +20,81 @@ static const struct { const char *words, *action; } TMENU[] = {
 };
 #define TMENU_COUNT ((int32_t)(sizeof(TMENU) / sizeof(TMENU[0])))
 
-static rubraview_pal_rect_t tmenu_row(const app_state_t *app, int32_t i) {
-    double dpi = rubraview_pal_window_dpi_scale(app->window), rh = 38.0 * dpi;
-    return (rubraview_pal_rect_t){ 4.0 * dpi, app->titlebar.height + 4.0 * dpi + (double)i * rh, 280.0 * dpi, rh };
+/* RV-205 (owner, 2026-10-31: "화면 우클릭 컨텍스트 메뉴의 모든 항목들이 타이틀바 좌측의 메뉴에도 들어가게 ... 2열로 각 항목들
+   가로로 길쭉한 버튼으로"): its own rows, then the right click's list for what is on screen, all of it (the
+   right click leaves out what the Toolbar has; this does not), less what its own rows already do; in two
+   columns of wide buttons, each group on lines of its own (rubraview_gridmenu_*). */
+#define TMENU_MAX (TMENU_COUNT + RUBRAVIEW_CONTEXT_MAX_ITEMS)
+typedef struct tmenu_row { proven_u8str_view_t words, action; int32_t group; } tmenu_row_t;
+
+static size_t tmenu_rows(const app_state_t *app, tmenu_row_t *rows) {
+    size_t n = 0;
+    for (int32_t i = 0; i < TMENU_COUNT; ++i)
+        rows[n++] = (tmenu_row_t){ rubraview_tr_u8(cstr(TMENU[i].words)), cstr(TMENU[i].action), 0 };
+    const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
+    const rubraview_toolbox_profile_t *list = rubraview_boxes_context(doc, cstr(toolbox_profile_name(app)));
+    for (int32_t i = 0; list && i < list->tile_count && n < TMENU_MAX; ++i) {
+        const rubraview_box_tile_t *item = &doc->context_items[list->first_tile + i];
+        bool own = false;
+        for (int32_t k = 0; k < TMENU_COUNT && !own; ++k) own = proven_u8str_view_eq(item->action, cstr(TMENU[k].action));
+        if (own) continue;
+        rows[n++] = (tmenu_row_t){ rubraview_tr_ctx_u8("menu", item->caption), item->action, item->group + 1 };
+    }
+    return n;
 }
 
-static rubraview_pal_rect_t tmenu_frame(const app_state_t *app) {
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
-    rubraview_pal_rect_t first = tmenu_row(app, 0);
-    return (rubraview_pal_rect_t){ 0.0, app->titlebar.height, first.width + 8.0 * dpi, first.height * (double)TMENU_COUNT + 8.0 * dpi };
+typedef struct tmenu_layout {
+    size_t n;
+    tmenu_row_t rows[TMENU_MAX];
+    int32_t groups[TMENU_MAX];
+    bool enabled[TMENU_MAX];
+    rubraview_gridmenu_metrics_t m;
+    rubraview_rect_t frame;
+} tmenu_layout_t;
+
+/* The grid under the title bar at the left, made smaller to stay in the window. */
+static void tmenu_layout(app_state_t *app, tmenu_layout_t *L) {
+    double dpi = rubraview_pal_window_dpi_scale(app->window), k = place_size(app, PF_MENU);
+    L->n = tmenu_rows(app, L->rows);
+    rubraview_action_facts_t facts = action_facts(app);
+    for (size_t i = 0; i < L->n; ++i) {
+        L->groups[i] = L->rows[i].group;
+        L->enabled[i] = rubraview_action_state(L->rows[i].action, &facts).enabled;
+    }
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    L->m = (rubraview_gridmenu_metrics_t){ .cell_width = 250.0 * dpi * k, .cell_height = 34.0 * dpi * k, .gap = 8.0 * dpi,
+                                           .pad = 6.0 * dpi, .columns = 2 };
+    double top = app->titlebar.height;
+    L->frame = rubraview_gridmenu_frame(0.0, top, &L->m, L->groups, L->n);
+    if (L->frame.width > (double)w && w > 0) {
+        L->m.cell_width = fmax(120.0 * dpi, ((double)w - L->m.pad * 2.0 - L->m.gap) / 2.0);
+        L->frame = rubraview_gridmenu_frame(0.0, top, &L->m, L->groups, L->n);
+    }
+    double room = (double)h - top;
+    if (L->frame.height > room && room > 0.0) {
+        double lines = 0.0, gaps = 0.0;   /* the lines kept, each made lower */
+        for (size_t i = 1; i < L->n; ++i) if (L->groups[i] != L->groups[i - 1]) gaps += 1.0;
+        lines = (L->frame.height - L->m.pad * 2.0 - L->m.gap * gaps) / L->m.cell_height;
+        if (lines > 0.0) L->m.cell_height = fmax(20.0 * dpi, (room - L->m.pad * 2.0 - L->m.gap * gaps) / lines);
+        L->frame = rubraview_gridmenu_frame(0.0, top, &L->m, L->groups, L->n);
+    }
+}
+
+/* A cell chosen, by a click or Enter. Delete asks a second time, as the right click's does. */
+static bool tmenu_choose(app_state_t *app, const tmenu_layout_t *L, int32_t i) {
+    if (i < 0 || (size_t)i >= L->n || !L->enabled[i]) return false;
+    proven_u8str_view_t action = L->rows[i].action;
+    bool clears = proven_u8str_view_eq(action, PROVEN_LIT("recent_clear"));
+    if ((clears || proven_u8str_view_eq(action, PROVEN_LIT("delete_file")) || proven_u8str_view_eq(action, PROVEN_LIT("picker_recycle"))) &&
+        !rubraview_confirm_press(&app->ctx_confirm, i, rubraview_pal_time_now_seconds())) {
+        osd_say(app, clears ? TU8("click Clear again to empty the recent list") : TU8("click Delete again to move it to the recycle bin"));
+        return true;
+    }
+    app->tmenu_open = false;
+    rubraview_confirm_clear(&app->ctx_confirm);
+    handle_action(app, action);
+    return true;
 }
 
 static void draw_tmenu_in(app_state_t *app);
@@ -42,44 +108,63 @@ static void draw_tmenu(app_state_t *app, double win_w) {
 
 static void draw_tmenu_in(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
-    rubraview_pal_rect_t f = tmenu_frame(app);
+    static tmenu_layout_t L;
+    tmenu_layout(app, &L);
+    rubraview_pal_rect_t f = { L.frame.x, L.frame.y, L.frame.width, L.frame.height };
     rubraview_pal_render_fill_rect(app->renderer, f, 0xF6202020u, 4.0 * dpi);
     rubraview_pal_render_stroke_rect(app->renderer, f, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
     bool pinned = rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5;
-    for (int32_t i = 0; i < TMENU_COUNT; ++i) {
-        rubraview_pal_rect_t r = tmenu_row(app, i);
-        bool on = i == 0 && pinned;
-        if (on) rubraview_pal_render_fill_rect(app->renderer, r, TITLEBAR_ON, 3.0 * dpi);
-        if (pal_rect_has(r, app->pointer_x, app->pointer_y) || i == app->tmenu_focus) rubraview_pal_render_fill_rect(app->renderer, r, 0x40FFFFFFu, 3.0 * dpi);
-        char line[96];
-        snprintf(line, sizeof(line), "%s%s", rubraview_tr(TMENU[i].words), on ? "  \xE2\x9C\x93" : "");
-        rubraview_pal_rect_t words = { r.x + 14.0 * dpi, r.y, r.width - 20.0 * dpi, r.height };
-        rubraview_pal_render_draw_text(app->renderer, cstr(line), words, 15.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-        if (on) rubraview_pal_render_draw_text(app->renderer, cstr(line), (rubraview_pal_rect_t){ words.x + 0.9, words.y, words.width, words.height },
-                                               15.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    rubraview_action_facts_t facts = action_facts(app);
+    double now = rubraview_pal_time_now_seconds();
+    int32_t hover = rubraview_gridmenu_at(L.frame, &L.m, L.groups, L.n, app->pointer_x, app->pointer_y);
+    double size = fmin(15.0 * dpi * place_size(app, PF_MENU), L.m.cell_height * 0.46);
+    for (size_t i = 0; i < L.n; ++i) {
+        rubraview_rect_t c = rubraview_gridmenu_cell(L.frame, &L.m, L.groups, i);
+        rubraview_pal_rect_t r = { c.x, c.y + 1.0 * dpi, c.width, c.height - 2.0 * dpi };
+        bool on = pinned && proven_u8str_view_eq(L.rows[i].action, PROVEN_LIT("toggle_titlebar_pin"));
+        rubraview_pal_render_fill_rect(app->renderer, r, on ? TITLEBAR_ON : 0x18FFFFFFu, 3.0 * dpi);   /* a button */
+        if (L.enabled[i] && ((int32_t)i == hover || (int32_t)i == app->tmenu_focus))
+            rubraview_pal_render_fill_rect(app->renderer, r, 0x40FFFFFFu, 3.0 * dpi);
+        rubraview_action_state_t st = rubraview_action_state(L.rows[i].action, &facts);
+        char scratch[160], line[200];
+        proven_u8str_view_t text = rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now)
+            ? (proven_u8str_view_eq(L.rows[i].action, PROVEN_LIT("recent_clear")) ? TU8("Clear?") : TU8("Delete?"))
+            : rubraview_tile_caption(L.rows[i].words, false, st.mark, st.value, scratch, sizeof(scratch));
+        int k = snprintf(line, sizeof(line), "%.*s%s", (int)text.size, (const char *)text.ptr, on ? "  \xE2\x9C\x93" : "");
+        proven_u8str_view_t shown = k > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k < sizeof(line) ? (size_t)k : sizeof(line) - 1 } : text;
+        rubraview_pal_rect_t words = { r.x + 12.0 * dpi, r.y, r.width - 16.0 * dpi, r.height };
+        rubraview_pal_render_draw_text(app->renderer, shown, words, size, L.enabled[i] ? COLOR_TEXT : 0x60F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+        if (on) rubraview_pal_render_draw_text(app->renderer, shown, (rubraview_pal_rect_t){ words.x + 0.9, words.y, words.width, words.height },
+                                               size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
 }
 
-/* A press while it is open: a row does its action; anywhere else closes it (the title bar's ☰ toggles it). */
+/* A press while it is open: a button does its action; anywhere else closes it (the title bar's ☰ toggles it). */
 bool tmenu_press(app_state_t *app, double x, double y) {
     if (!app->tmenu_open) return false;
     if (rubraview_titlebar_hit(&app->titlebar, x, y, (double)tmenu_win_w(app)) == RUBRAVIEW_TITLEBAR_MENU) return false;
-    for (int32_t i = 0; i < TMENU_COUNT; ++i) {
-        if (!pal_rect_has(tmenu_row(app, i), x, y)) continue;
-        app->tmenu_open = false;
-        handle_action(app, cstr(TMENU[i].action));
-        return true;
-    }
-    app->tmenu_open = false;
-    return pal_rect_has(tmenu_frame(app), x, y);
+    static tmenu_layout_t L;
+    tmenu_layout(app, &L);
+    int32_t at = rubraview_gridmenu_at(L.frame, &L.m, L.groups, L.n, x, y);
+    if (at >= 0) { (void)tmenu_choose(app, &L, at); return true; }
+    bool inside = rubraview_rect_contains(L.frame, x, y);
+    if (!inside) { app->tmenu_open = false; rubraview_confirm_clear(&app->ctx_confirm); }
+    return inside;
 }
 
 bool tmenu_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (!app->tmenu_open) return false;
+    static tmenu_layout_t L;
+    tmenu_layout(app, &L);
+    if (app->tmenu_focus >= (int32_t)L.n) app->tmenu_focus = -1;   /* a shorter list since */
     if (key_is(combo, "Escape")) { app->tmenu_open = false; return true; }
-    if (key_is(combo, "Down")) { app->tmenu_focus = (app->tmenu_focus + 1) % TMENU_COUNT; return true; }
-    if (key_is(combo, "Up")) { app->tmenu_focus = (app->tmenu_focus + TMENU_COUNT - 1) % TMENU_COUNT; return true; }
-    if (key_is(combo, "Enter") && app->tmenu_focus >= 0) { app->tmenu_open = false; handle_action(app, cstr(TMENU[app->tmenu_focus].action)); return true; }
+    if (key_is(combo, "Right")) { app->tmenu_focus = rubraview_ctxmenu_step(L.enabled, L.n, app->tmenu_focus, +1); return true; }
+    if (key_is(combo, "Left")) { app->tmenu_focus = rubraview_ctxmenu_step(L.enabled, L.n, app->tmenu_focus, -1); return true; }
+    if (key_is(combo, "Down") || key_is(combo, "Up")) {
+        app->tmenu_focus = rubraview_gridmenu_step_vertical(L.frame, &L.m, L.groups, L.enabled, L.n, app->tmenu_focus, key_is(combo, "Down") ? +1 : -1);
+        return true;
+    }
+    if (key_is(combo, "Enter") && app->tmenu_focus >= 0) { (void)tmenu_choose(app, &L, app->tmenu_focus); return true; }
     app->tmenu_open = false;
     return false;
 }

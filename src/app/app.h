@@ -381,8 +381,12 @@ typedef struct apply_all_job {
 } apply_all_job_t;
 
 /* 1.24.0 (owner, 2026-10-19): the list a one-of-many choice opens, in the window where it was pressed. */
-enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_ORDER, CHOOSE_LISTEXT, CHOOSE_LISTSORT, CHOOSE_SHAPE };
+enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_ORDER, CHOOSE_LISTEXT, CHOOSE_LISTSORT, CHOOSE_SHAPE,
+       CHOOSE_PICKEXT /* RV-204 */ };
 enum { SHAPE_FOR_PICKER = 1, SHAPE_FOR_LIST };   /* RV-192 */
+/* RV-202: what a reading of sizes and lengths is for: the shape's choice, the list sorted by length, the open-file
+   screen sorted by length or by resolution */
+enum { FACTS_THEN_SHAPE = 0, FACTS_THEN_LIST_SORT, FACTS_THEN_PICKER_SORT };
 enum { CHOOSE_IN_MAIN = 0, CHOOSE_IN_SETTINGS, CHOOSE_IN_EDIT, CHOOSE_IN_FILES, CHOOSE_IN_BATCH, CHOOSE_IN_NAMES };   /* RV-194: the last two */
 #define CHOOSE_MAX 48
 typedef struct chooser {
@@ -524,6 +528,7 @@ typedef struct app_state {
     bool                   list_filter_in_files;   /* the file window's filter being typed (its own keys) */
     char                   list_ext_off[32][16];   /* ".jpg": extensions not shown */
     char                   list_ext_seen[48][16];  /* the .ext list's rows, as last opened */
+    char                   picker_ext_seen[48][16];  /* RV-204: the open-file screen's .ext rows, as last opened */
     size_t                 list_ext_off_n;
     size_t                *list_map, list_map_n, list_map_cap;
     const void            *list_map_pages;
@@ -940,6 +945,8 @@ typedef struct app_state {
     double last_frame_seconds;
     double pointer_x, pointer_y;
     bool   pointer_inside;   /* false after the pointer left the window (the edge buttons go with it) */
+    int32_t edge_side;        /* RV-206: the side the pointer is at (rubraview_edge_side_t), and since when */
+    double  edge_since;
 
     /* §3.13 / §3.10 / §3.11: the workbench and the two dialogs. All
        three are the same panel model with different rows. */
@@ -1331,6 +1338,9 @@ typedef struct app_state {
     const void            *shape_pages;            /* the list's pages it was read for */
     int32_t                shape_where;            /* where its choice opens, and at what */
     double                 shape_x, shape_y, shape_above, shape_said;
+    int32_t                shape_then;             /* RV-202: FACTS_THEN_* */
+    int32_t                shape_sort_key;         /* the sort it waits to make, and its way */
+    bool                   shape_sort_desc;
     /* Move and Copy wait for the digit that names a curation folder;
        Recycle waits to be pressed a second time (§3.18.1's rule). */
     int32_t                picker_pending;     /* a picker_button_t, waiting for its digit */
@@ -1515,7 +1525,8 @@ static const picker_button_t PICKER_BOTTOM[] = { PICKER_BTN_PLAYLIST, PICKER_BTN
                                                  PICKER_BTN_CANCEL, PICKER_BTN_OPEN };
 #define PICKER_BOTTOM_COUNT ((int32_t)(sizeof(PICKER_BOTTOM) / sizeof(PICKER_BOTTOM[0])))
 #define PICKER_CRUMB_START (8.0 + 3.0 * (PICKER_NAV_W + 4.0) + 6.0)
-enum { PICKER_TOOL_ALL = 0, PICKER_TOOL_INDIVIDUAL, PICKER_TOOL_RANGE, PICKER_TOOL_SAME, PICKER_TOOL_MEDIA,
+enum { PICKER_TOOL_EXT = 0,   /* RV-204: the files picked by extension, leftmost */
+       PICKER_TOOL_ALL, PICKER_TOOL_INDIVIDUAL, PICKER_TOOL_RANGE, PICKER_TOOL_SAME, PICKER_TOOL_MEDIA,
        PICKER_TOOL_SHAPE,   /* RV-192 */
        PICKER_TOOL_SORT, PICKER_TOOL_ORDER, PICKER_TOOL_VIEW, PICKER_TOOL_COUNT };
 enum {
@@ -1738,6 +1749,7 @@ void chooser_open_listsort(app_state_t *app, int where, double x, double y, doub
 void chooser_open_panel(app_state_t *app, int32_t which, int32_t row, double x, double y, double above_y);
 void chooser_open_setting(app_state_t *app);
 void chooser_open_shape(app_state_t *app, int where, double x, double y, double above_y);
+void chooser_open_pickext(app_state_t *app, double x, double y, double above_y);   /* RV-204 */
 void chooser_open_sort(app_state_t *app, bool order, double x, double y, double above_y);
 bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, double y, double above_y);
 bool chooser_press(app_state_t *app, int where, double x, double y);
@@ -1838,6 +1850,7 @@ void draw_text_weight(app_state_t *app, proven_u8str_view_t text, rubraview_pal_
 void draw_titlebar(app_state_t *app, double win_w);
 void draw_toolbox_window(app_state_t *app);
 rubraview_edge_side_t edge_nav_side(app_state_t *app, double x, double y);
+bool edge_column_shown(app_state_t *app);   /* RV-206 */
 bool edit_apply_pending(app_state_t *app, bool say);
 void edit_auto_colour(app_state_t *app);
 void edit_copy_area(app_state_t *app);
@@ -2105,6 +2118,8 @@ void picker_recycle(app_state_t *app);
 void picker_select_everything(app_state_t *app);
 /* RV-192 (shapes.c) */
 void shape_begin(app_state_t *app, int32_t target, int where, double x, double y, double above_y);
+bool facts_read_for_sort(app_state_t *app, int32_t target, int32_t then, int key, bool desc);   /* RV-202 */
+bool facts_has_length(proven_u8str_view_t path);
 void shape_step(app_state_t *app);
 void shape_free(app_state_t *app);
 void shape_pick(app_state_t *app, int32_t which);

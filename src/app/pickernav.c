@@ -78,6 +78,14 @@ static void picker_apply_sort(app_state_t *app) {
     if (order && media && entries && thumbs && picked) {
         bool have_thumbs = app->picker_thumbs && app->picker_thumb_count == n;
         for (size_t i = 0; i < n && have_thumbs; ++i) media[i] = app->picker_thumbs[i].media;
+        /* RV-202: what the size reader read for this sort stands in where no thumbnail has said it yet */
+        for (size_t i = 0; i < n; ++i) {
+            const rubraview_fs_entry_t *e = &app->picker_listing.entries[i];
+            if (e->is_directory) continue;
+            double seconds = 0.0;
+            if (media[i].seconds <= 0.0 && rubraview_shape_cache_length(&app->shape_cache, e->path, e->mtime, &seconds) && seconds > 0.0)
+                media[i].seconds = seconds;
+        }
         rubraview_picker_sort_order(&app->picker_listing, media, (rubraview_picker_sort_key_t)(choice - 1), desc, order);
         size_t focus = app->picker.focus;
         for (size_t i = 0; i < n; ++i) {
@@ -117,6 +125,9 @@ size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out);
 
 /* 1.24.0: by a column, rising or falling, chosen outright. */
 void picker_sort_set(app_state_t *app, int key, bool desc) {
+    /* RV-202: by length, every film's and song's length read first, not only the ones whose thumbnails came */
+    if (key == RUBRAVIEW_PICKER_SORT_LENGTH && !app->picker_in_book &&
+        facts_read_for_sort(app, SHAPE_FOR_PICKER, FACTS_THEN_PICKER_SORT, key, desc)) return;
     rubraview_settings_set(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"), (double)(key + 1));
     rubraview_settings_set(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc"), desc ? 1.0 : 0.0);
     settings_write_if_changed(app, false);
@@ -342,6 +353,11 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
     }
     picker_apply_sort(app);   /* the column chosen in the details view, kept (owner, 2026-10-16) */
     picker_filter_forget(app);   /* 1.22.0: the folder is what a filter is taken from */
+    /* RV-202: kept by length: the lengths not known yet are read, and the folder sorted again when they are */
+    int32_t kept = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
+    if (kept == RUBRAVIEW_PICKER_SORT_LENGTH && !app->picker_in_book && !rubraview_picker_is_places(app->picker_dir))
+        (void)facts_read_for_sort(app, SHAPE_FOR_PICKER, FACTS_THEN_PICKER_SORT, kept,
+                                  rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5);
 }
 
 /* The extension of the item the focus is on, ".jpg" and such. */

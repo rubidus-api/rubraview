@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.49.exe              the viewer, as built
-dist/rubraview-v1.39.49/                 the release bundle
-dist/rubraview-v1.39.49.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.50.exe              the viewer, as built
+dist/rubraview-v1.39.50/                 the release bundle
+dist/rubraview-v1.39.50.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1125,7 +1125,10 @@ encoding and how far through the file you are.
 
 The title bar starts with **☰**, a list of what the window does: Pin the
 title bar, Align the Floating Widget, New window, Open file, Recent
-files, Batch, Print, Playlist, Settings and Help. After it comes the
+files, Batch, Print, Playlist, Settings and Help, and under them everything
+a right click on the picture, the film or the text would offer (also what
+the Toolbar has), as two columns of wide buttons. The arrow keys move
+between them and `Enter` presses one. After it comes the
 name of the file on screen (the folder's, in the open-file screen); a
 click on it opens the open-file screen. At the right are **Set**
 (Settings, `F10`), **P** (the title bar stays shown, and the picture or
@@ -1147,7 +1150,9 @@ folder is asked for. The buttons do not show their keys; their tooltips
 do. What the Toolbar has no button for is in the right click, on a key
 (the help, `F1`, lists them) or in Settings; the keys are changed on the
 Settings window's **Keys** page. The Toolbar's last group has
-**Settings**, **Bar pin** and **Info bar** (`Shift+I`); a picture's
+**Settings**, **Bar pin**, **Info bar** (`Shift+I`) and **Hide** (the
+struck-through eye: the title bar and the boxes go until you click the
+picture, as the title bar's H does); a picture's
 Toolbar also has **Centre** (the picture's middle on the window's, as a
 double click does) and **Wheel strip**: off, turning pages with the wheel
 brings up no thumbnails.
@@ -1255,11 +1260,13 @@ open box before it closes anything else. While a box is open, a second square be
 three dots, sizes it: drag it sideways for more or fewer buttons a row, and away from the box or back for bigger or smaller ones; the
 size is kept, and Settings › Display has the same four numbers.
 
-At the middle of each side of the window, pointing near the edge shows
-four buttons. For pictures the left ones go to the previous file, ten back
-and the first, the right ones to the next, ten on and the last; for a film
-or a song they go 5 s and 30 s back or on, and to the previous or next file
-(`Shift` + `Left`/`Right` also go 30 s). The fourth, |◁ or ▷|, opens the
+At each side of the window, rest the pointer near the edge for a moment
+and a tall column of four buttons shows; a click at the edge before it
+shows simply goes to the previous or next page or file. For pictures the
+left ones go to the previous file, ten back and the first, the right ones
+to the next, ten on and the last; for a film or a song they go 5 s and 5 %
+of its length back or on, and to the previous or next file (`Shift` +
+`Left`/`Right` go 30 s). The fourth, |◁ or ▷|, opens the
 archive before or after this one in its folder — or, for files in a
 folder, the folder before or after — as `[` / `]` do, and the
 Toolbar's |◁ ▷|, which stand beside its page buttons (◁◁ ▷▷) for every
@@ -1317,7 +1324,9 @@ Both lists have a row of tools under their buttons. **.ext** lists the
 extensions in the list, each with a box: untick one and its files are
 not shown (the list keeps them; **All** shows every one again). **Shape**
 ticks or unticks the rows of wide, tall or square pictures and films, as
-in the open-file screen; it acts on the rows shown. **Filter**
+in the open-file screen; it acts on the rows shown. **Sort** has **Length**
+too: the films' and songs' lengths are read first (how far is shown), and
+what has none (a picture) goes last. **Filter**
 shows only the names holding what is typed — in the floating list the
 typing box opens over the picture and the rows follow each letter; in
 the window it is typed in place; `Esc` or the **×** shows them all.
@@ -1636,10 +1645,12 @@ everything here but `..` (a dash when some are), **Individual** makes
 every tap turn one file on or off (a tap only picks; nothing opens),
 **Range** takes two taps and turns over everything between them, **Same type** takes every file with the same
 extension as the one in focus, **Media** the pictures, films, music and
-text. **Shape ▾** lists **Wide**, **Tall** and **Square**, each with how
+text. **.ext ▾**, first in the row, lists the folder's extensions, each
+with how many of its files are picked of how many; a choice picks them all,
+the same choice again lets them go. **Shape ▾** lists **Wide**, **Tall** and **Square**, each with how
 many are picked of how many: a choice picks every picture and film of that
 shape, and the same choice again lets them go; the list stays open for
-another. A photo turned by its camera counts as it is shown, and square
+another. A photo turned by its camera, or a phone's film stored on its side, counts as it is shown, and square
 means width and height exactly equal. The first time, the sizes are read
 (how far it has got is shown), then kept. **Sort by ▾** and **Rising ▾** each open a list to choose from, and
 **Details** (or **Tiles**) at its end changes the view. The bottom row
@@ -1935,6 +1946,7 @@ listed under a later heading only means that while that is on screen.
 | Toolbar `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
 | Toolbar `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
 | Toolbar `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
+| Toolbar `Hide` | Hide the title bar and the Floating Widget until the picture is clicked |
 | Toolbar `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
 | Toolbar `Centre` | The picture's middle on the window's, its size as it is (a double click does it too) |
 | Toolbar `Wheel strip` | Thumbnails while the wheel turns pages |

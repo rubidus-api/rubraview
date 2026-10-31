@@ -888,7 +888,7 @@ void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
    icon or a short sign each, and the hovered one's caption beside it. */
 void draw_edge_nav(app_state_t *app, double win_w, double win_h) {
     rubraview_edge_side_t side = edge_nav_side(app, app->pointer_x, app->pointer_y);
-    if (side == RUBRAVIEW_EDGE_NONE) return;
+    if (side == RUBRAVIEW_EDGE_NONE || !edge_column_shown(app)) return;   /* RV-206: after the pointer stayed */
     bool media = app->media != NULL;
     /* [media][side][slot]: an icon of Segoe MDL2 Assets, or 0 and the sign. */
     static const uint32_t ICON[2][2][RUBRAVIEW_EDGE_SLOTS] = {   /* RV-179: the fourth, the folder or archive beside */
@@ -897,7 +897,7 @@ void draw_edge_nav(app_state_t *app, double win_w, double win_h) {
     };
     static const char *const SIGN[2][2][RUBRAVIEW_EDGE_SLOTS] = {
         { { "<", "-10", "<<", "|<" }, { ">", "+10", ">>", ">|" } },
-        { { "-5s", "-30s", "<<", "|<" }, { "+5s", "+30s", ">>", ">|" } },
+        { { "-5s", "-5%", "<<", "|<" }, { "+5s", "+5%", ">>", ">|" } },   /* RV-206: 5 % */
     };
     rubraview_edgenav_t nav = rubraview_edgenav_create(rubraview_pal_window_dpi_scale(app->window));
     rubraview_edge_hit_t hit = rubraview_edgenav_hit(&nav, app->pointer_x, app->pointer_y, win_w, win_h);
@@ -908,18 +908,21 @@ void draw_edge_nav(app_state_t *app, double win_w, double win_h) {
         bool hovered = hit.side == side && hit.slot == slot;
         rubraview_pal_render_fill_rect(app->renderer, br, rubraview_box_fade(hovered ? COLOR_TILE_FILL : COLOR_BOX_FILL, opacity), 4.0);
         rubraview_pal_render_stroke_rect(app->renderer, br, COLOR_BOX_BORDER, 1.0, 4.0);
+        /* RV-206: a tall button: its sign in the upper part, its words under it */
         uint32_t icon = ICON[media][side][slot];
-        if (!icon || !rubraview_pal_render_draw_icon(app->renderer, icon, br, r.height * 0.45, COLOR_TEXT)) {
-            rubraview_pal_render_draw_text(app->renderer, cstr(SIGN[media][side][slot]), br, r.height * 0.32,
+        rubraview_pal_rect_t sign = { br.x, br.y + br.height * 0.5 - r.width * 0.55, br.width, r.width * 0.6 };
+        if (!icon || !rubraview_pal_render_draw_icon(app->renderer, icon, sign, r.width * 0.32, COLOR_TEXT)) {
+            rubraview_pal_render_draw_text(app->renderer, cstr(SIGN[media][side][slot]), sign, r.width * 0.24,
                                            COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
         if (hovered) {
-            double cw = r.height * (slot == 3 ? 5.5 : 4.0);   /* RV-179: the longer caption */
+            /* RV-206: sized by the button's width, the buttons being tall now; RV-179: the longer caption */
+            double ch = r.width * 0.6, cw = r.width * (slot == 3 ? 4.6 : 3.2);
             rubraview_pal_rect_t cap = { side == RUBRAVIEW_EDGE_LEFT ? r.x + r.width + nav.gap : r.x - nav.gap - cw,
-                                         r.y + r.height * 0.2, cw, r.height * 0.6 };
+                                         r.y + (r.height - ch) * 0.5, cw, ch };
             rubraview_pal_render_fill_rect(app->renderer, cap, rubraview_box_fade(COLOR_BOX_FILL, opacity), 3.0);
             rubraview_pal_render_draw_text(app->renderer, cstr(rubraview_edgenav_caption(side, slot, media)), cap,
-                                           r.height * 0.3, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+                                           ch * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
     }
 }

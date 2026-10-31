@@ -13,7 +13,9 @@ enum {
     ID_SEGMENT = 0x18538067u,
     ID_SEEKHEAD = 0x114D9B74u, ID_INFO = 0x1549A966u, ID_TRACKS = 0x1654AE6Bu, ID_CLUSTER = 0x1F43B675u,
     ID_CUES = 0x1C53BB6Bu, ID_ATTACHMENTS = 0x1941A469u, ID_CHAPTERS = 0x1043A770u, ID_TAGS = 0x1254C367u,
-    ID_TIMESTAMP_SCALE = 0x2AD7B1u,
+    ID_TIMESTAMP_SCALE = 0x2AD7B1u, ID_DURATION = 0x4489u,
+    ID_VIDEO = 0xE0u, ID_PIXEL_WIDTH = 0xB0u, ID_PIXEL_HEIGHT = 0xBAu, ID_DISPLAY_WIDTH = 0x54B0u, ID_DISPLAY_HEIGHT = 0x54BAu,
+    ID_DISPLAY_UNIT = 0x54B2u,
     ID_TRACK_ENTRY = 0xAEu, ID_TRACK_NUMBER = 0xD7u, ID_TRACK_TYPE = 0x83u, ID_CODEC_ID = 0x86u,
     ID_CODEC_PRIVATE = 0x63A2u, ID_LANGUAGE = 0x22B59Cu, ID_LANGUAGE_BCP47 = 0x22B59Du, ID_NAME = 0x536Eu,
     ID_CONTENT_ENCODINGS = 0x6D80u,
@@ -80,6 +82,25 @@ static uint64_t read_uint(const rubraview_mkv_t *mkv, const elem_t *e) {
     return value;
 }
 
+/* RV-202: a float element: 4 or 8 bytes, big-endian IEEE 754; 0 for any other size */
+static double read_float(const rubraview_mkv_t *mkv, const elem_t *e) {
+    const uint8_t *p = mkv->data + e->body;
+    if (e->size == 4) {
+        uint32_t bits = ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+        float f;
+        memcpy(&f, &bits, sizeof(f));
+        return (double)f;
+    }
+    if (e->size == 8) {
+        uint64_t bits = 0;
+        for (int i = 0; i < 8; ++i) bits = (bits << 8) | p[i];
+        double d;
+        memcpy(&d, &bits, sizeof(d));
+        return d;
+    }
+    return 0.0;
+}
+
 /* A string element: as long as it says, less the zeros it may be padded with. */
 static proven_u8str_view_t read_text(const rubraview_mkv_t *mkv, const elem_t *e) {
     size_t len = e->size > 4096 ? 4096 : (size_t)e->size;
@@ -127,6 +148,21 @@ static void read_track(rubraview_mkv_t *mkv, const elem_t *entry) {
                 t.private_size = e.size > SIZE_MAX ? SIZE_MAX : (size_t)e.size;
                 break;
             case ID_CONTENT_ENCODINGS: t.encoded = true; break;
+            case ID_VIDEO: {   /* RV-202 */
+                elem_t v;
+                for (uint64_t p = e.body; p < e.next && elem_at(mkv, p, e.next, &v); p = v.next) {
+                    switch (v.id) {
+                        case ID_PIXEL_WIDTH: t.pixel_width = read_uint(mkv, &v); break;
+                        case ID_PIXEL_HEIGHT: t.pixel_height = read_uint(mkv, &v); break;
+                        case ID_DISPLAY_WIDTH: t.display_width = read_uint(mkv, &v); break;
+                        case ID_DISPLAY_HEIGHT: t.display_height = read_uint(mkv, &v); break;
+                        case ID_DISPLAY_UNIT: t.display_unit = read_uint(mkv, &v); break;
+                        default: break;
+                    }
+                    if (v.next <= p) break;
+                }
+                break;
+            }
             default: break;
         }
         if (e.next <= at) break;
@@ -185,6 +221,10 @@ bool rubraview_mkv_open(rubraview_mkv_t *mkv, const uint8_t *data, uint64_t size
                     uint64_t scale = read_uint(mkv, &in);
                     if (scale > 0) mkv->timestamp_scale = scale;
                 }
+                if (in.id == ID_DURATION) {
+                    double ticks = read_float(mkv, &in);
+                    if (ticks > 0.0 && ticks < 1e18) mkv->duration_ticks = ticks;
+                }
                 if (in.next <= p) break;
             }
             have_info = true;
@@ -204,6 +244,26 @@ bool rubraview_mkv_open(rubraview_mkv_t *mkv, const uint8_t *data, uint64_t size
     }
     if (!have_tracks) { *out_why = N_("the Matroska file's tracks could not be read"); return false; }
     return true;
+}
+
+bool rubraview_mkv_frame(const rubraview_mkv_t *mkv, int32_t *out_width, int32_t *out_height, double *out_seconds) {
+    if (out_width) *out_width = 0;
+    if (out_height) *out_height = 0;
+    if (out_seconds) *out_seconds = 0.0;
+    if (!mkv) return false;
+    if (out_seconds && mkv->duration_ticks > 0.0) *out_seconds = mkv->duration_ticks * (double)mkv->timestamp_scale / 1e9;
+    for (size_t i = 0; i < mkv->track_count; ++i) {
+        const rubraview_mkv_track_t *t = &mkv->tracks[i];
+        if (t->type != 1 || t->pixel_width == 0 || t->pixel_height == 0 || t->pixel_width > 1000000u || t->pixel_height > 1000000u) continue;
+        double w = (double)t->pixel_width, h = (double)t->pixel_height;
+        bool shown = t->display_width > 0 && t->display_height > 0 && t->display_width <= 1000000u && t->display_height <= 1000000u;
+        if (shown && t->display_unit == 0) { w = (double)t->display_width; h = (double)t->display_height; }
+        else if (shown && t->display_unit == 3) w = h * (double)t->display_width / (double)t->display_height;   /* the ratio, the pixels' height */
+        if (out_width) *out_width = (int32_t)(w + 0.5);
+        if (out_height) *out_height = (int32_t)(h + 0.5);
+        return true;
+    }
+    return false;
 }
 
 int32_t rubraview_mkv_track_index(const rubraview_mkv_t *mkv, uint64_t number) {

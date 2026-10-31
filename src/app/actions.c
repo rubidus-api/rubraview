@@ -1000,6 +1000,12 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         media_seek_to(app, app->media_position + MEDIA_SEEK_STEP);
     } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_back"))) {
         media_seek_to(app, app->media_position - MEDIA_SEEK_STEP);
+    } else if ((app->media || anim_plays(app)) && (proven_u8str_view_eq(action, PROVEN_LIT("media_seek_forward_percent")) ||
+                                                   proven_u8str_view_eq(action, PROVEN_LIT("media_seek_back_percent")))) {
+        /* RV-206: the edge column's 5 % of the length (5 s when the length is not known) */
+        double step = play_duration(app) > 0.0 ? play_duration(app) * 0.05 : MEDIA_SEEK_STEP;
+        bool on = proven_u8str_view_eq(action, PROVEN_LIT("media_seek_forward_percent"));
+        play_seek(app, play_position(app) + (on ? step : -step));
     } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_forward_long"))) {
         media_seek_to(app, app->media_position + MEDIA_SEEK_LONG);
     } else if (app->media && proven_u8str_view_eq(action, PROVEN_LIT("media_seek_back_long"))) {

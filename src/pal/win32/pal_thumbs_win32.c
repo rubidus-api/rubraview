@@ -29,6 +29,8 @@
 #include "rubraview/pal/pal_image_wic_internal.h"
 #include "rubraview/pal/pal_image.h"
 #include "rubraview/textenc.h"
+#include "rubraview/mp4.h"
+#include "rubraview/matroska.h"
 
 #define TEXT_TILE_W 192   /* RV-135: a text file's tile, a page */
 #define TEXT_TILE_H 256
@@ -134,6 +136,8 @@ uint8_t *rubraview_pal_shell_thumbnail_bgra(proven_u8str_view_t path, int32_t si
 /* ---- what the file is: its size in pixels, its length (owner, 2026-10-16) ----
    From the shell's property store, which reads them from the file's header
    for every type it has a handler for; 0 for what it does not know. */
+static bool film_head(proven_u8str_view_t path, int32_t *out_w, int32_t *out_h, double *out_seconds);   /* RV-202 */
+
 static void shell_meta(proven_u8str_view_t path, int32_t *out_w, int32_t *out_h, double *out_seconds) {
     char narrow[MAX_PATH * 4];
     WCHAR wide[MAX_PATH * 2];
@@ -295,7 +299,13 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
         raw = text_page_small(scratch, path, job->aspect, &w, &h);   /* RV-135 */
         is_text = raw != NULL;
     } else {
+        /* RV-202: a film's own head first (MKV and WebM, a phone's turned film), then the shell's */
+        int32_t fw = 0, fh = 0;
+        double fs = 0.0;
+        bool film = film_head(path, &fw, &fh, &fs);
         shell_meta(path, &meta->source_width, &meta->source_height, &meta->seconds);
+        if (film) { meta->source_width = fw; meta->source_height = fh; }
+        if (fs > 0.0) meta->seconds = fs;
         raw = rubraview_pal_shell_thumbnail_bgra(path, 192, &w, &h);
         if (!raw) {
             raw = own_file_small(factory, path, &w, &h);
@@ -536,22 +546,65 @@ struct rubraview_sizes {
     char **paths;
     size_t *lens;
     int32_t *w, *h;
+    double *seconds;
     rubraview_thumbs_wake_fn wake;
     void *context;
 };
 
+/* RV-202: a film's own head, read by our MP4 and Matroska readers from the file mapped: its size as shown (a
+   phone's upright film turned by its matrix) and its length, where the shell knows neither (MKV, WebM) or
+   gives the stored size. False when it is neither or has no video track. */
+static bool film_head(proven_u8str_view_t path, int32_t *out_w, int32_t *out_h, double *out_seconds) {
+    char narrow[MAX_PATH * 4];
+    WCHAR wide[MAX_PATH * 2];
+    if (path.size == 0 || path.size >= sizeof(narrow)) return false;
+    memcpy(narrow, path.ptr, path.size);
+    narrow[path.size] = '\0';
+    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, MAX_PATH * 2) <= 0) return false;
+    HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
+    if (file == INVALID_HANDLE_VALUE) return false;
+    LARGE_INTEGER size;
+    bool ok = false;
+    if (GetFileSizeEx(file, &size) && size.QuadPart >= 16) {
+        HANDLE map = CreateFileMappingW(file, NULL, PAGE_READONLY, 0, 0, NULL);
+        const uint8_t *data = map ? (const uint8_t *)MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0) : NULL;
+        if (data) {
+            static _Thread_local rubraview_mp4_t mp4;   /* large: kept off the stack */
+            static _Thread_local rubraview_mkv_t mkv;
+            double seconds = 0.0;
+            if (rubraview_mp4_open(&mp4, data, (uint64_t)size.QuadPart, NULL)) {
+                ok = rubraview_mp4_frame(&mp4, out_w, out_h, &seconds);
+            } else if (rubraview_mkv_open(&mkv, data, (uint64_t)size.QuadPart, NULL)) {
+                ok = rubraview_mkv_frame(&mkv, out_w, out_h, &seconds);
+            }
+            if (seconds > 0.0) *out_seconds = seconds;
+            UnmapViewOfFile(data);
+        }
+        if (map) CloseHandle(map);
+    }
+    CloseHandle(file);
+    return ok;
+}
+
 /* A picture's size from WIC, turned as its EXIF says; a film's (and a picture WIC has no codec
    for) from the shell's property store. (The shell's System.Photo.Orientation was not given on
    the VM for a JPEG turned by EXIF, 2026-10-30.) */
-static void shown_size(proven_u8str_view_t path, int32_t *out_w, int32_t *out_h) {
+static void shown_size(proven_u8str_view_t path, int32_t *out_w, int32_t *out_h, double *out_seconds) {
     int32_t w = 0, h = 0;
+    double seconds = 0.0;
     if (!rubraview_pal_image_shown_size(path, &w, &h)) {
-        double seconds = 0.0;
         w = h = 0;
-        shell_meta(path, &w, &h, &seconds);
+        if (!film_head(path, &w, &h, &seconds)) {   /* RV-202: a film's own head first; the shell for the rest */
+            int32_t sw = 0, sh = 0;
+            double ss = 0.0;
+            shell_meta(path, &sw, &sh, &ss);
+            if (w == 0 || h == 0) { w = sw; h = sh; }
+            if (seconds <= 0.0) seconds = ss;
+        }
     }
     *out_w = w;
     *out_h = h;
+    *out_seconds = seconds;
 }
 
 static DWORD WINAPI sizes_thread(LPVOID param) {
@@ -560,9 +613,11 @@ static DWORD WINAPI sizes_thread(LPVOID param) {
     double told = rubraview_pal_time_now_seconds();
     for (size_t i = 0; i < s->count && !InterlockedCompareExchange(&s->stop, 0, 0); ++i) {
         int32_t w = 0, h = 0;
-        if (com && s->lens[i] > 0) shown_size((proven_u8str_view_t){ .ptr = (const proven_byte_t *)s->paths[i], .size = s->lens[i] }, &w, &h);
+        double seconds = 0.0;
+        if (com && s->lens[i] > 0) shown_size((proven_u8str_view_t){ .ptr = (const proven_byte_t *)s->paths[i], .size = s->lens[i] }, &w, &h, &seconds);
         s->w[i] = w;
         s->h[i] = h;
+        s->seconds[i] = seconds;
         InterlockedExchange(&s->done, (LONG)(i + 1));   /* a full barrier: the size is written before it is counted */
         double now = rubraview_pal_time_now_seconds();
         if (s->wake && (i + 1 == s->count || now - told > 0.2)) { told = now; s->wake(s->context); }
@@ -575,7 +630,7 @@ static DWORD WINAPI sizes_thread(LPVOID param) {
 
 static void sizes_free(rubraview_sizes_t *s) {
     for (size_t i = 0; i < s->count; ++i) free(s->paths[i]);
-    free(s->paths); free(s->lens); free(s->w); free(s->h);
+    free(s->paths); free(s->lens); free(s->w); free(s->h); free(s->seconds);
     free(s);
 }
 
@@ -589,8 +644,9 @@ rubraview_sizes_t *rubraview_pal_sizes_start(const proven_u8str_view_t *paths, s
     s->lens = (size_t*)calloc(n, sizeof(size_t));
     s->w = (int32_t*)calloc(n, sizeof(int32_t));
     s->h = (int32_t*)calloc(n, sizeof(int32_t));
+    s->seconds = (double*)calloc(n, sizeof(double));
     s->count = count;
-    bool ok = s->paths && s->lens && s->w && s->h;
+    bool ok = s->paths && s->lens && s->w && s->h && s->seconds;
     for (size_t i = 0; ok && i < count; ++i) {
         if (paths[i].size == 0) continue;
         s->paths[i] = (char*)malloc(paths[i].size);
@@ -615,11 +671,15 @@ size_t rubraview_pal_sizes_count(const rubraview_sizes_t *s) {
     return s ? s->count : 0;
 }
 
-void rubraview_pal_sizes_get(const rubraview_sizes_t *s, size_t index, int32_t *out_width, int32_t *out_height) {
+void rubraview_pal_sizes_get(const rubraview_sizes_t *s, size_t index, int32_t *out_width, int32_t *out_height, double *out_seconds) {
     int32_t w = 0, h = 0;
-    if (s && index < s->count && index < (size_t)InterlockedCompareExchange((volatile LONG*)&s->done, 0, 0)) { w = s->w[index]; h = s->h[index]; }
+    double seconds = 0.0;
+    if (s && index < s->count && index < (size_t)InterlockedCompareExchange((volatile LONG*)&s->done, 0, 0)) {
+        w = s->w[index]; h = s->h[index]; seconds = s->seconds[index];
+    }
     if (out_width) *out_width = w;
     if (out_height) *out_height = h;
+    if (out_seconds) *out_seconds = seconds;
 }
 
 proven_u8str_view_t rubraview_pal_sizes_path(const rubraview_sizes_t *s, size_t index) {

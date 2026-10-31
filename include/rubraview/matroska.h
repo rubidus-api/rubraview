@@ -45,6 +45,9 @@ typedef struct rubraview_mkv_track {
     size_t              private_size;
     bool                encoded;       /* compressed or encrypted (ContentEncodings): its blocks are not text as they stand */
     rubraview_mkv_sub_t subtitle;
+    /* RV-202: a video track's Video element: its pixels and, when given, the size to show them at */
+    uint64_t            pixel_width, pixel_height, display_width, display_height;
+    uint64_t            display_unit;   /* 0 pixels, 3 a ratio only (the two numbers are its terms) */
 } rubraview_mkv_track_t;
 
 typedef struct rubraview_mkv {
@@ -56,6 +59,7 @@ typedef struct rubraview_mkv {
     bool                  webm;                /* DocType "webm": it holds only what WebM allows */
     rubraview_mkv_track_t tracks[RUBRAVIEW_MKV_MAX_TRACKS];
     size_t                track_count;
+    double                duration_ticks;      /* RV-202: Info's Duration, in ticks of timestamp_scale; 0 when not said */
 } rubraview_mkv_t;
 
 /**
@@ -64,6 +68,13 @@ typedef struct rubraview_mkv {
  * its head cannot be read. A file cut short opens if its tracks are whole.
  */
 bool rubraview_mkv_open(rubraview_mkv_t *mkv, const uint8_t *data, uint64_t size, const char **out_why);
+
+/**
+ * RV-202: the first video track's size as it is shown (its display size when that is in pixels,
+ * its pixels set to the display ratio when that is a ratio) and the file's length in seconds.
+ * False when there is no video track with a size; `*out_seconds` is set whenever Info says it.
+ */
+bool rubraview_mkv_frame(const rubraview_mkv_t *mkv, int32_t *out_width, int32_t *out_height, double *out_seconds);
 
 /** The track's place in `tracks` for a block's track number, or -1. */
 int32_t rubraview_mkv_track_index(const rubraview_mkv_t *mkv, uint64_t number);

@@ -2948,6 +2948,67 @@ void chooser_open_listext(app_state_t *app, int where, double x, double y, doubl
     if (first > 0 && first < c->count) c->layout.first = first;
 }
 
+/* RV-204 (owner, 2026-10-31: "파일 브라우저 창에서 확장자별로 선택하는 기능 ... 맨 왼쪽 열에"): the open-file
+   screen's extensions, each with how many of its files are picked of how many; a pick takes them all, or lets
+   them go when all already were, and the list stays open. Folders are not counted. */
+void chooser_open_pickext(app_state_t *app, double x, double y, double above_y) {
+    chooser_t *c = &app->chooser;
+    size_t first = c->open && c->kind == CHOOSE_PICKEXT ? c->layout.first : 0;
+    *c = (chooser_t){ .kind = CHOOSE_PICKEXT, .current = -1 };
+    snprintf(c->title, sizeof(c->title), "%s", T("Pick by extension"));
+    char seen[CHOOSE_MAX][16];
+    size_t counts[CHOOSE_MAX] = {0}, picked[CHOOSE_MAX] = {0}, kinds = 0;
+    for (size_t i = 0; i < app->picker_listing.count; ++i) {
+        const rubraview_fs_entry_t *entry = &app->picker_listing.entries[i];
+        if (entry->is_directory) continue;
+        proven_u8str_view_t e = rubraview_path_ext(entry->name);
+        if (e.size == 0 || e.size >= sizeof(seen[0])) e = PROVEN_LIT(".");
+        size_t k = 0;
+        for (; k < kinds; ++k) if (proven_u8str_view_eq_ascii_ci(cstr(seen[k]), e)) break;
+        if (k == kinds) {
+            if (kinds >= CHOOSE_MAX) continue;
+            for (size_t j = 0; j < e.size; ++j) seen[kinds][j] = rubraview_ascii_lower(e.ptr[j]);
+            seen[kinds][e.size] = '\0';
+            kinds++;
+        }
+        counts[k]++;
+        if (app->picker_selected && app->picker_selected[i]) picked[k]++;
+    }
+    if (kinds == 0) { osd_say(app, TU8("no files here")); return; }
+    for (size_t k = 0; k < kinds; ++k)
+        chooser_word(c, (double)k, "%s  %s  %d / %d", picked[k] == counts[k] ? "\xE2\x98\x91" : "\xE2\x98\x90",
+                     seen[k][1] ? seen[k] : T("(none)"), (int)picked[k], (int)counts[k]);
+    memcpy(app->picker_ext_seen, seen, sizeof(seen));
+    chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
+    if (first > 0 && first < c->count) c->layout.first = first;
+}
+
+/* The files of extension row `k` all picked, or all let go when they all were. */
+static void picker_ext_pick(app_state_t *app, size_t k) {
+    if (k >= CHOOSE_MAX || !app->picker_selected) return;
+    proven_u8str_view_t want = cstr(app->picker_ext_seen[k]);
+    size_t total = 0, on = 0;
+    for (int pass = 0; pass < 2; ++pass) {
+        bool pick = on < total;
+        for (size_t i = 0; i < app->picker_listing.count; ++i) {
+            const rubraview_fs_entry_t *entry = &app->picker_listing.entries[i];
+            if (entry->is_directory) continue;
+            proven_u8str_view_t e = rubraview_path_ext(entry->name);
+            if (e.size == 0 || e.size >= 16) e = PROVEN_LIT(".");
+            if (!proven_u8str_view_eq_ascii_ci(e, want)) continue;
+            if (pass == 0) { total++; if (app->picker_selected[i]) on++; }
+            else app->picker_selected[i] = pick;
+        }
+        if (pass == 0 && total == 0) return;
+        if (pass == 1) {
+            if (app->picker.mode == RUBRAVIEW_PICK_SINGLE) rubraview_picker_set_mode(&app->picker, RUBRAVIEW_PICK_INDIVIDUAL);   /* as Same type does */
+            char line[96];
+            int n = snprintf(line, sizeof(line), pick ? T("%zu %s picked") : T("%zu %s let go"), total, want.size > 1 ? app->picker_ext_seen[k] : T("(none)"));
+            if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
+        }
+    }
+}
+
 /* RV-192: Shape — wide, tall, square, each with how many are picked of how many; a pick takes all
    of that shape, or lets them go when all already were, and the list stays open. */
 void chooser_open_shape(app_state_t *app, int where, double x, double y, double above_y) {
@@ -2995,6 +3056,7 @@ const char *list_sort_word(int key) {
         case 3: return T("Size");
         case 4: return T("Modified");
         case 5: return T("Created");
+        case 6: return T("Length");   /* RV-202: a film's or a song's */
         default: return T("Sort");
     }
 }
@@ -3003,12 +3065,12 @@ void chooser_open_listsort(app_state_t *app, int where, double x, double y, doub
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_LISTSORT, .current = app->list_sort_key - 1 };
     snprintf(c->title, sizeof(c->title), "%s", T("Sort the list by"));
-    for (int k = 1; k <= 5; ++k) chooser_word(c, (double)k, "%s", list_sort_word(k));
+    for (int k = 1; k <= 6; ++k) chooser_word(c, (double)k, "%s", list_sort_word(k));
     chooser_show(app, where, x, y, above_y);
 }
 
 /* The list put in order by `key`, rising or falling; the file on screen stays. */
-static struct list_sort_key { proven_u8str_view_t name, ext; uint64_t size; int64_t mtime, ctime; } *g_list_keys;
+static struct list_sort_key { proven_u8str_view_t name, ext; uint64_t size; int64_t mtime, ctime; double seconds; } *g_list_keys;
 static int g_list_key, g_list_desc;
 static int list_sort_cmp(const void *pa, const void *pb) {
     size_t a = *(const size_t*)pa, b = *(const size_t*)pb;
@@ -3019,6 +3081,12 @@ static int list_sort_cmp(const void *pa, const void *pb) {
         case 3: r = x->size < y->size ? -1 : x->size > y->size ? 1 : 0; break;
         case 4: r = x->mtime < y->mtime ? -1 : x->mtime > y->mtime ? 1 : 0; break;
         case 5: r = x->ctime < y->ctime ? -1 : x->ctime > y->ctime ? 1 : 0; break;
+        case 6: {   /* RV-202: a length not known (a picture, a song not read) after the known ones, either way */
+            bool kx = x->seconds > 0.0, ky = y->seconds > 0.0;
+            if (kx != ky) return kx ? -1 : 1;
+            r = x->seconds < y->seconds ? -1 : x->seconds > y->seconds ? 1 : 0;
+            break;
+        }
         default: break;
     }
     if (r == 0) r = rubraview_str_natcmp(x->name, y->name);
@@ -3029,6 +3097,8 @@ static int list_sort_cmp(const void *pa, const void *pb) {
 void list_sort(app_state_t *app, int key, bool desc) {
     size_t count = page_count(app);
     if (count < 2 || !list_editable(app)) return;
+    /* RV-202: by length, the films' and songs' lengths read first (on the size reader's thread); sorted when they are */
+    if (key == 6 && facts_read_for_sort(app, SHAPE_FOR_LIST, FACTS_THEN_LIST_SORT, key, desc)) return;
     app->list_sort_key = key;
     app->list_sort_desc = desc;
     size_t *order = (size_t*)rubraview_malloc_product(count, sizeof(size_t), 1);
@@ -3040,7 +3110,8 @@ void list_sort(app_state_t *app, int key, bool desc) {
         proven_u8str_view_t path = app->source.pages[i].path;
         keys[i] = (struct list_sort_key){ .name = rubraview_path_basename(path), .ext = rubraview_path_ext(path) };
         rubraview_fs_entry_t st;
-        if (key >= 3 && rubraview_pal_fs_stat(pa, path, &st)) { keys[i].size = st.size_bytes; keys[i].mtime = st.mtime; keys[i].ctime = st.ctime; }
+        if (key >= 3 && key <= 5 && rubraview_pal_fs_stat(pa, path, &st)) { keys[i].size = st.size_bytes; keys[i].mtime = st.mtime; keys[i].ctime = st.ctime; }
+        if (key == 6) (void)rubraview_shape_cache_length(&app->shape_cache, path, 0, &keys[i].seconds);
         order[i] = i;
     }
     scratch_end(app, &sc);
@@ -3098,6 +3169,13 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             break;
         }
         case CHOOSE_LISTSORT: list_sort(app, (int)lround(c->values[index]), app->list_sort_desc); break;
+        case CHOOSE_PICKEXT: {   /* RV-204: stays open, its counts new */
+            rubraview_rect_t f = c->layout.frame;
+            picker_ext_pick(app, (size_t)lround(c->values[index]));
+            c->open = true;
+            chooser_open_pickext(app, f.x, f.y, f.y);
+            break;
+        }
         case CHOOSE_SHAPE: {   /* RV-192: stays open, its counts new */
             int32_t which = (int32_t)lround(c->values[index]);
             if (which == RUBRAVIEW_SHAPE_UNKNOWN) { c->open = true; break; }

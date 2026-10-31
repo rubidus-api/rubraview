@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.39.49** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.49/rubraview-v1.39.49.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.49/rubraview-v1.39.49.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.49/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.39.50** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.50/rubraview-v1.39.50.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.50/rubraview-v1.39.50.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.50/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -241,6 +241,7 @@
 | 툴바 `Sub`, 오른쪽 클릭 `Subtitles on / off` | 자막 켜기/끄기 |
 | 툴바 `100%` | 배율 순환: 실제 크기(0 %), 20 %부터 200 %까지 20 %씩, 다시 실제 크기 (툴바 버튼을 누르면 목록에서 고름) |
 | 툴바 `Fit` | 맞춤 순환: 창, 너비, 높이, 스마트, 늘이기, 다시 창 (툴바 버튼을 누르면 목록에서 고름) |
+| 툴바 `Hide` | 화면을 클릭할 때까지 타이틀바와 플로팅 박스 숨기기 |
 | 툴바 `Viz` | 분석기: 막대 / 파형 / 끔 (툴바 버튼을 누르면 목록에서 고름) |
 | 툴바 `Centre` | 그림의 가운데를 창의 가운데로 (크기는 그대로, 더블클릭으로도) |
 | 툴바 `Wheel strip` | 휠로 넘길 때 썸네일 |

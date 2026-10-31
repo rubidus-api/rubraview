@@ -108,6 +108,16 @@ static void read_track(rubraview_mp4_t *mp4, const box_t *trak) {
         uint8_t version = 0;
         if (b.type == FOURCC('t', 'k', 'h', 'd') && full_body(&b, 20, &p, &version, mp4)) {
             t.id = be32(mp4->data + p + (version == 1 ? 16 : 8));
+            /* RV-202: times, id, a reserved word, the duration, eight reserved bytes, layer, group, volume, two
+               reserved; then the matrix (nine 32-bit numbers) and the width and height */
+            uint64_t matrix = p + (version == 1 ? 48 : 36);
+            if (matrix + 44 <= b.end) {
+                int32_t a = (int32_t)be32(mp4->data + matrix), d = (int32_t)be32(mp4->data + matrix + 16);
+                int32_t bb = (int32_t)be32(mp4->data + matrix + 4), c = (int32_t)be32(mp4->data + matrix + 12);
+                t.quarter_turn = a == 0 && d == 0 && bb != 0 && c != 0;
+                t.shown_width = (double)be32(mp4->data + matrix + 36) / 65536.0;
+                t.shown_height = (double)be32(mp4->data + matrix + 40) / 65536.0;
+            }
         } else if (b.type == FOURCC('m', 'd', 'i', 'a')) {
             for (uint64_t q = b.body; q < b.end && box_at(mp4, q, b.end, &m); q = m.end) {
                 if (m.type == FOURCC('m', 'd', 'h', 'd') && full_body(&m, 20, &p, &version, mp4)) {
@@ -162,9 +172,38 @@ bool rubraview_mp4_open(rubraview_mp4_t *mp4, const uint8_t *data, uint64_t size
     for (uint64_t at = moov.body; at < moov.end && box_at(mp4, at, moov.end, &b); at = b.end) {
         if (b.type == FOURCC('m', 'v', 'e', 'x')) { *out_why = N_("a fragmented MP4 is not read yet"); return false; }
         if (b.type == FOURCC('t', 'r', 'a', 'k')) read_track(mp4, &b);
+        uint64_t p = 0;
+        uint8_t version = 0;
+        if (b.type == FOURCC('m', 'v', 'h', 'd') && full_body(&b, 16, &p, &version, mp4)) {
+            /* RV-202: two times of 32 or 64 bits, the timescale, the duration */
+            uint64_t scale_at = p + (version == 1 ? 16 : 8);
+            if (scale_at + 4 + (version == 1 ? 8 : 4) <= b.end) {
+                mp4->movie_timescale = be32(mp4->data + scale_at);
+                mp4->movie_duration = version == 1 ? be64(mp4->data + scale_at + 4) : be32(mp4->data + scale_at + 4);
+            }
+        }
         if (b.end <= at) break;
     }
     return true;
+}
+
+bool rubraview_mp4_frame(const rubraview_mp4_t *mp4, int32_t *out_width, int32_t *out_height, double *out_seconds) {
+    if (out_width) *out_width = 0;
+    if (out_height) *out_height = 0;
+    if (out_seconds) *out_seconds = 0.0;
+    if (!mp4) return false;
+    if (out_seconds && mp4->movie_timescale > 0 && mp4->movie_duration != UINT64_MAX && mp4->movie_duration != UINT32_MAX)
+        *out_seconds = (double)mp4->movie_duration / (double)mp4->movie_timescale;
+    for (size_t i = 0; i < mp4->track_count; ++i) {
+        const rubraview_mp4_track_t *t = &mp4->tracks[i];
+        if (t->handler != FOURCC('v', 'i', 'd', 'e') || !(t->shown_width >= 1.0) || !(t->shown_height >= 1.0) ||
+            t->shown_width > 1e6 || t->shown_height > 1e6) continue;
+        int32_t w = (int32_t)(t->shown_width + 0.5), h = (int32_t)(t->shown_height + 0.5);
+        if (out_width) *out_width = t->quarter_turn ? h : w;
+        if (out_height) *out_height = t->quarter_turn ? w : h;
+        return true;
+    }
+    return false;
 }
 
 /* How many samples chunk `chunk` (from 0) holds: the last stsc entry whose first chunk is not after it. */
