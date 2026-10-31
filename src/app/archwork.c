@@ -3,6 +3,7 @@
  * picked files and folders packed, on a worker thread of their own while the screen stays usable; a line under the
  * picture says how far it is and Esc stops it. A locked archive asks its password in the password box, once; the
  * Compress box takes the new archive's place and name (its ending says ZIP or 7z) and its level, then a password.
+ * Explorer's Rubraview menu hands its files to the same work (archwork_extract_paths, archwork_compress_paths).
  */
 #include "app.h"
 #include "rubraview/archive_job.h"
@@ -23,6 +24,7 @@ typedef struct archwork {
     size_t source_count;
     rubraview_compress_job_t pk;
     char output[RUBRAVIEW_ARCHIVE_PATH];
+    char dir[RUBRAVIEW_ARCHIVE_PATH];         /* the files' folder: the archive offered there, a name alone put there */
     /* the thread */
     HANDLE thread;
     volatile LONG done;
@@ -84,6 +86,8 @@ static DWORD WINAPI work_main(void *arg) {
 }
 
 static bool work_start(app_state_t *app, archwork_t *w) {
+    /* A password typed for work kept waiting while other work started (Explorer's menu does that): one at a time. */
+    if (app->archwork) { osd_say(app, TU8("an archive is already being worked on (Esc stops it)")); work_free(w); return false; }
     w->wake = app->window;
     w->done = 0;
     w->thread = CreateThread(NULL, 0, work_main, w, 0, NULL);
@@ -119,13 +123,26 @@ static size_t picked_paths(app_state_t *app, char ***out, bool archives_only) {
     return k;
 }
 
+/* Explorer's files: the archives among them, or all of them. */
+static bool is_archive_path(proven_u8str_view_t path) {
+    return rubraview_glob_match_list(rubraview_path_basename(path), PROVEN_LIT(ARCHIVE_FILTER_ALL));
+}
+
+static size_t given_paths(const proven_u8str_view_t *paths, size_t n, char ***out, bool archives_only) {
+    char **list = n ? calloc(n, sizeof *list) : NULL;
+    size_t k = 0;
+    for (size_t i = 0; list && i < n; ++i) {
+        if (paths[i].size == 0 || (archives_only && !is_archive_path(paths[i]))) continue;
+        if ((list[k] = dup_view(paths[i])) != NULL) k++;
+    }
+    if (k == 0) { free(list); list = NULL; }
+    *out = list;
+    return k;
+}
+
 /* ---- extracting ---- */
 
-void archwork_extract(app_state_t *app, int mode, bool choose_folder) {
-    if (app->archwork) { osd_say(app, TU8("an archive is already being worked on (Esc stops it)")); return; }
-    archwork_t *w = calloc(1, sizeof *w);
-    if (!w) return;
-    w->count = picked_paths(app, &w->archives, true);
+static void extract_start(app_state_t *app, archwork_t *w, int mode, bool choose_folder) {
     if (w->count == 0) { work_free(w); osd_say(app, TU8("pick an archive first")); return; }
     w->mode = (rubraview_extract_mode_t)mode;
     if (choose_folder) {
@@ -141,6 +158,22 @@ void archwork_extract(app_state_t *app, int mode, bool choose_folder) {
         snprintf(w->password, sizeof w->password, "%.*s", (int)app->password_lens[app->password_count - 1],
                  app->passwords[app->password_count - 1]);
     work_start(app, w);
+}
+
+void archwork_extract(app_state_t *app, int mode, bool choose_folder) {
+    if (app->archwork) { osd_say(app, TU8("an archive is already being worked on (Esc stops it)")); return; }
+    archwork_t *w = calloc(1, sizeof *w);
+    if (!w) return;
+    w->count = picked_paths(app, &w->archives, true);
+    extract_start(app, w, mode, choose_folder);
+}
+
+void archwork_extract_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, int mode, bool choose_folder) {
+    if (app->archwork) { osd_say(app, TU8("an archive is already being worked on (Esc stops it)")); return; }
+    archwork_t *w = calloc(1, sizeof *w);
+    if (!w) return;
+    w->count = given_paths(paths, count, &w->archives, true);
+    extract_start(app, w, mode, choose_folder);
 }
 
 /* The password box answered for the archive the work stopped at: on from there with it. */
@@ -161,17 +194,23 @@ void archwork_password_typed(app_state_t *app, proven_u8str_view_t password) {
 static const char *const LEVEL_WORD[4] = { N_("store"), N_("fast"), N_("normal"), N_("best") };
 static const int LEVEL_OF[4] = { 0, 1, 6, 9 };
 
+/* "\\" after a folder, none after one that has it ("C:\\"). */
+static const char *dir_sep(const char *dir) {
+    size_t n = strlen(dir);
+    return n && (dir[n - 1] == '\\' || dir[n - 1] == '/') ? "" : "\\";
+}
+
 /* The archive's name offered: the one thing's own name, or the folder's for many, beside them. */
-static void offered_name(app_state_t *app, char **sources, size_t n, const char *ext, char *out, size_t cap) {
-    proven_u8str_view_t dir = app->picker_dir;
+static void offered_name(app_state_t *app, archwork_t *w, const char *ext, char *out, size_t cap) {
+    proven_u8str_view_t dir = proven_u8str_view_from_cstr(w->dir);
+    char **sources = w->sources;
+    size_t n = w->source_count;
     char stem[512];
     if (n == 1) {
         proven_u8str_view_t base = rubraview_path_basename(proven_u8str_view_from_cstr(sources[0]));
         size_t len = base.size;
         rubraview_fs_entry_t st;
-        bool folder = false;
-        for (size_t i = 0; i < app->picker_listing.count; ++i)
-            if (proven_u8str_view_eq(app->picker_listing.entries[i].path, proven_u8str_view_from_cstr(sources[0]))) { st = app->picker_listing.entries[i]; folder = st.is_directory; }
+        bool folder = rubraview_pal_fs_stat(app->arena, proven_u8str_view_from_cstr(sources[0]), &st) && st.is_directory;
         if (!folder) for (size_t i = len; i > 0; --i) if (base.ptr[i - 1] == '.') { len = i - 1; break; }
         snprintf(stem, sizeof stem, "%.*s", (int)(len ? len : base.size), (const char *)base.ptr);
     } else {
@@ -179,8 +218,7 @@ static void offered_name(app_state_t *app, char **sources, size_t n, const char 
         snprintf(stem, sizeof stem, "%.*s", (int)base.size, (const char *)base.ptr);
         if (!stem[0]) snprintf(stem, sizeof stem, "archive");
     }
-    char sep = '\\';
-    snprintf(out, cap, "%.*s%c%s.%s", (int)dir.size, (const char *)dir.ptr, sep, stem, ext);
+    snprintf(out, cap, "%.*s%s%s.%s", (int)dir.size, (const char *)dir.ptr, dir_sep(w->dir), stem, ext);
 }
 
 static archwork_t *g_packing;   /* the work being set up by the Compress box and its password */
@@ -196,26 +234,49 @@ static void pack_start(app_state_t *app, archwork_t *w, rubraview_pack_format_t 
     work_start(app, w);
 }
 
-/* "Compress to <name>.zip": at once, ZIP, normal, no password. */
+/* The files' folder: the first one's. */
+static void sources_dir(archwork_t *w) {
+    proven_u8str_view_t d = rubraview_path_dirname(proven_u8str_view_from_cstr(w->sources[0]));
+    snprintf(w->dir, sizeof w->dir, "%.*s", (int)d.size, (const char *)d.ptr);
+}
+
+static void compress_go(app_state_t *app, archwork_t *w, bool ask);
+
+/* "Compress to <name>.zip": at once, ZIP, normal, no password. "Compress...": the box first. */
 void archwork_compress_quick(app_state_t *app) {
     if (app->archwork) { osd_say(app, TU8("an archive is already being worked on (Esc stops it)")); return; }
     archwork_t *w = calloc(1, sizeof *w);
     if (!w) return;
     w->source_count = picked_paths(app, &w->sources, false);
-    if (w->source_count == 0) { work_free(w); osd_say(app, TU8("pick the files to compress first")); return; }
-    offered_name(app, w->sources, w->source_count, "zip", w->output, sizeof w->output);
-    pack_start(app, w, RUBRAVIEW_PACK_ZIP, 6, NULL);
+    compress_go(app, w, false);
 }
 
-/* "Compress...": the box with the new archive's place, its ending saying ZIP or 7z. */
 void archwork_compress_ask(app_state_t *app) {
     if (app->archwork) { osd_say(app, TU8("an archive is already being worked on (Esc stops it)")); return; }
     archwork_t *w = calloc(1, sizeof *w);
     if (!w) return;
     w->source_count = picked_paths(app, &w->sources, false);
+    compress_go(app, w, true);
+}
+
+void archwork_compress_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, bool ask) {
+    if (app->archwork) { osd_say(app, TU8("an archive is already being worked on (Esc stops it)")); return; }
+    archwork_t *w = calloc(1, sizeof *w);
+    if (!w) return;
+    w->source_count = given_paths(paths, count, &w->sources, false);
+    compress_go(app, w, ask);
+}
+
+static void compress_go(app_state_t *app, archwork_t *w, bool ask) {
     if (w->source_count == 0) { work_free(w); osd_say(app, TU8("pick the files to compress first")); return; }
+    sources_dir(w);
+    if (!ask) {
+        offered_name(app, w, "zip", w->output, sizeof w->output);
+        pack_start(app, w, RUBRAVIEW_PACK_ZIP, 6, NULL);
+        return;
+    }
     char offer[RUBRAVIEW_ARCHIVE_PATH];
-    offered_name(app, w->sources, w->source_count, "zip", offer, sizeof offer);
+    offered_name(app, w, "zip", offer, sizeof offer);
     if (g_packing) work_free(g_packing);
     g_packing = w;
     if (app->rename_active) rename_end(app);
@@ -271,8 +332,7 @@ void archwork_pack_typed(app_state_t *app) {
     bool bare = true;   /* a name alone goes beside the files, not where the program was started */
     for (size_t i = 0; i < t.size; ++i) if (t.ptr[i] == '\\' || t.ptr[i] == '/' || t.ptr[i] == ':') bare = false;
     if (bare) {
-        int n = snprintf(w->output, sizeof w->output, "%.*s\\%.*s", (int)app->picker_dir.size, (const char *)app->picker_dir.ptr,
-                         (int)t.size, (const char *)t.ptr);
+        int n = snprintf(w->output, sizeof w->output, "%s%s%.*s", w->dir, dir_sep(w->dir), (int)t.size, (const char *)t.ptr);
         if (n <= 0 || (size_t)n >= sizeof w->output) { osd_say(app, TU8("not compressed: no name")); work_free(w); g_packing = NULL; return; }
     } else {
         memcpy(w->output, t.ptr, t.size);

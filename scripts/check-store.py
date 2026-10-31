@@ -9,7 +9,7 @@ opened by the installed program and not by the Store's, or the reverse.
 Its [menu.*] tables are Explorer's right-click menu (RV-113 (3)): one for each
 item of MENU_ITEMS in src/core/shellreq.c, with the same flag, texts and
 "single", on the extensions of the item's kinds (SHELL_GROUPS in
-src/core/filemanage.c).
+src/core/filemanage.c); the kinds ANY_FILE and FOLDERS are "*" and "folder".
 
 Each [assoc.*] names its prog-id's logo (RV-190), the same for every table of
 one prog-id; the logo and its .targetsize-16/24/32/48/256 pictures (and their
@@ -32,6 +32,9 @@ def check_menu(code, source):
     groups = {}
     for bit, exts in re.findall(r'\{ RUBRAVIEW_SHELL_(\w+), *"\w+", *"([^"]*)" \}', code):
         groups[bit] = exts.split(";")
+    # RV-207: kinds that are places, not extension lists, written as rubrapack's own words
+    groups["ANY_FILE"] = ["*"]
+    groups["FOLDERS"] = ["folder"]
     shell = (ROOT / "src" / "core" / "shellreq.c").read_text(encoding="utf-8")
     macros = {name: re.findall(r"RUBRAVIEW_SHELL_(\w+)", body)
               for name, body in re.findall(r"^#define (\w+) +\(([^)]*)\)", shell, re.M)}
@@ -56,7 +59,8 @@ def check_menu(code, source):
                      re.search(r'^text = "([^"]*)"$', body, re.M).group(1),
                      re.search(r'^text-ko = "([^"]*)"$', body, re.M).group(1),
                      re.search(r'^multi = "single"$', body, re.M) is not None,
-                     sorted(e[1:] for e in re.findall(r'"(\.[a-z0-9]+)"', body))))
+                     sorted([e[1:] for e in re.findall(r'"(\.[a-z0-9]+)"', body)] +
+                            re.findall(r'"(\*|folder)"', body))))
     problems = []
     for item in want:
         if item not in have:

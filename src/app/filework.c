@@ -3,6 +3,7 @@
  * classifying, and printing (§3.18, D-86, RV-133; RV-163, D-197: moved from main.c as it was).
  */
 #include "app.h"
+#include "rubraview/archive_job.h"
 
 /* ---- triage: delete, rename, curate (§3.18) ---- */
 
@@ -997,6 +998,22 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
         }
         case RUBRAVIEW_SHELL_VERB_PRINT:
             print_paths(app, paths, count);
+            break;
+        /* RV-207 (D-252): Explorer's Rubraview menu, as the open-file screen's right click */
+        case RUBRAVIEW_SHELL_VERB_EXTRACT:
+            archwork_extract_paths(app, paths, count, RUBRAVIEW_EXTRACT_FOLDER, false);
+            break;
+        case RUBRAVIEW_SHELL_VERB_EXTRACT_HERE:
+            archwork_extract_paths(app, paths, count, RUBRAVIEW_EXTRACT_SMART, false);
+            break;
+        case RUBRAVIEW_SHELL_VERB_EXTRACT_TO:
+            archwork_extract_paths(app, paths, count, RUBRAVIEW_EXTRACT_FOLDER, true);
+            break;
+        case RUBRAVIEW_SHELL_VERB_COMPRESS_ZIP:
+            archwork_compress_paths(app, paths, count, false);
+            break;
+        case RUBRAVIEW_SHELL_VERB_COMPRESS:
+            archwork_compress_paths(app, paths, count, true);
             break;
         default:
             break;

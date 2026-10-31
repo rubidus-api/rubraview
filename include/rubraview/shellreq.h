@@ -27,6 +27,12 @@ typedef enum rubraview_shell_verb {
     RUBRAVIEW_SHELL_VERB_CONVERT,    /* --convert    the batch panel, on these files */
     RUBRAVIEW_SHELL_VERB_PRINT,      /* --print      the print dialog, one picture a sheet */
     RUBRAVIEW_SHELL_VERB_NEW_WINDOW, /* --new-window a window of its own, whatever the settings say */
+    /* RV-207 (D-252): the archiver's, run in the window's worker as the open-file screen runs them */
+    RUBRAVIEW_SHELL_VERB_EXTRACT,       /* --extract       each archive into a folder of its name, beside it */
+    RUBRAVIEW_SHELL_VERB_EXTRACT_HERE,  /* --extract-here  each beside itself, smart: one top folder kept as it is */
+    RUBRAVIEW_SHELL_VERB_EXTRACT_TO,    /* --extract-to    a folder asked, each into a folder of its name there */
+    RUBRAVIEW_SHELL_VERB_COMPRESS_ZIP,  /* --compress-zip  the files and folders into one ZIP beside them */
+    RUBRAVIEW_SHELL_VERB_COMPRESS,      /* --compress      the Compress box: place, name, ZIP or 7z, level, password */
     RUBRAVIEW_SHELL_VERB_COUNT
 } rubraview_shell_verb_t;
 

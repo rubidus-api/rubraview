@@ -247,6 +247,9 @@ proven_u8str_view_t rubraview_shell_extensions(void);
 #define RUBRAVIEW_SHELL_ARCHIVES 16u
 /* RV-123 (RFC-0005 §9): .txt .log .nfo .md, offered both columns, off as they come. */
 #define RUBRAVIEW_SHELL_TEXT     32u
+/* RV-207 (D-252): menu items only, no extension list: any file at all, and folders. */
+#define RUBRAVIEW_SHELL_ANY_FILE 64u
+#define RUBRAVIEW_SHELL_FOLDERS  128u
 
 /** The extensions of the kinds in `groups`, `;`-separated; empty for none. */
 proven_u8str_view_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32_t groups);

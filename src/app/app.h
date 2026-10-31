@@ -2019,6 +2019,8 @@ bool archwork_busy(const app_state_t *app);
 bool archwork_stop(app_state_t *app);
 void archwork_poll(app_state_t *app, bool quitting);
 void archwork_extract(app_state_t *app, int mode, bool choose_folder);
+void archwork_extract_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, int mode, bool choose_folder);
+void archwork_compress_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, bool ask);
 void archwork_compress_quick(app_state_t *app);
 void archwork_compress_ask(app_state_t *app);
 void archwork_pack_typed(app_state_t *app);

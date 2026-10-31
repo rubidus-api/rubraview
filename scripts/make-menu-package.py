@@ -5,11 +5,11 @@ Windows 11 shows in its context menu only what a package with identity
 declares. This one holds a manifest and three logos and nothing else: it
 is registered with the folder of rubraview.exe as its external location,
 and names rubraview_menu.dll there as the server of one COM class, shown
-on every extension the viewer knows (the DLL hides it on those the reader
-did not choose). The layout follows Rubrapack's rp_msix_sparse.
+on every file and folder (RV-207: compressing is on anything; the DLL hides
+the other items on the types the reader did not choose). The layout follows Rubrapack's rp_msix_sparse.
 
-The names come from include/rubraview/menu_identity.h and the extensions
-from src/core/filemanage.c, so the viewer and the package cannot disagree.
+The names come from include/rubraview/menu_identity.h, so the viewer and
+the package cannot disagree.
 
 usage: make-menu-package.py <version x.y.z> <output .msix>
 """
@@ -31,12 +31,6 @@ def identity():
     return dict(re.findall(r'#define RUBRAVIEW_MENU_(\w+) "([^"]*)"', text))
 
 
-def extensions():
-    text = (ROOT / "src" / "core" / "filemanage.c").read_text(encoding="utf-8")
-    body = text[text.index("rubraview_shell_extensions_all(void)"):]
-    return re.search(r'PROVEN_LIT\("([^"]*)"\)', body).group(1).split(";")
-
-
 def publisher_id(publisher):
     """The first 8 bytes of SHA-256 over the UTF-16LE text, 13 characters of base 32."""
     value = int.from_bytes(hashlib.sha256(publisher.encode("utf-16le")).digest()[:8], "big")
@@ -50,11 +44,15 @@ def publisher_id(publisher):
 
 def manifest(names, version):
     clsid = names["CLSID"]
-    types = "".join(
-        '            <desktop4:ItemType Type=".%s">\r\n'
+    # RV-207 (D-252): every file and every folder, for compressing; the DLL hides the other
+    # items on what the reader did not choose (their On values).
+    types = (
+        '            <desktop4:ItemType Type="*">\r\n'
         '              <desktop4:Verb Id="Rubraview" Clsid="%s" />\r\n'
-        "            </desktop4:ItemType>\r\n" % (ext, clsid)
-        for ext in extensions()
+        "            </desktop4:ItemType>\r\n"
+        '            <desktop5:ItemType Type="Directory">\r\n'
+        '              <desktop5:Verb Id="Rubraview" Clsid="%s" />\r\n'
+        "            </desktop5:ItemType>\r\n" % (clsid, clsid)
     )
     return (
         '<?xml version="1.0" encoding="utf-8"?>\r\n'
@@ -63,8 +61,9 @@ def manifest(names, version):
         '         xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"\r\n'
         '         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"\r\n'
         '         xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"\r\n'
+        '         xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"\r\n'
         '         xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"\r\n'
-        '         IgnorableNamespaces="uap uap10 rescap desktop4 com">\r\n'
+        '         IgnorableNamespaces="uap uap10 rescap desktop4 desktop5 com">\r\n'
         '  <Identity Name="%s" Publisher="%s" Version="%s.0" ProcessorArchitecture="x64" />\r\n'
         "  <Properties>\r\n"
         "    <DisplayName>Rubraview</DisplayName>\r\n"
@@ -147,7 +146,7 @@ def main():
             entry.compress_type = zipfile.ZIP_STORED
             entry.create_system = 0
             package.writestr(entry, data)
-    print("make-menu-package: %s (%s %s, %d extensions)" % (out, names["PACKAGE_NAME"], version, len(extensions())))
+    print("make-menu-package: %s (%s %s, on every file and folder)" % (out, names["PACKAGE_NAME"], version))
     return 0
 
 

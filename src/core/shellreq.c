@@ -6,6 +6,7 @@
 
 static const char *const VERB_FLAGS[RUBRAVIEW_SHELL_VERB_COUNT] = {
     "", "--open", "--open-only", "--add", "--browse", "--convert", "--print", "--new-window",
+    "--extract", "--extract-here", "--extract-to", "--compress-zip", "--compress",
 };
 
 const char *rubraview_shell_verb_flag(rubraview_shell_verb_t verb) {
@@ -21,6 +22,7 @@ rubraview_shell_verb_t rubraview_shell_verb_for_flag(proven_u8str_view_t arg) {
 
 #define PLAYABLE (RUBRAVIEW_SHELL_PICTURES | RUBRAVIEW_SHELL_VIDEO | RUBRAVIEW_SHELL_MUSIC)
 #define BOOKS    (RUBRAVIEW_SHELL_COMICS | RUBRAVIEW_SHELL_ARCHIVES)
+#define ANYTHING (RUBRAVIEW_SHELL_ANY_FILE | RUBRAVIEW_SHELL_FOLDERS)
 
 /* The ids sort in the menu's order: the classic menu lists a sub-menu's
    verbs by key name. The order is the menu's, not the verbs' numbers. */
@@ -39,6 +41,16 @@ static const rubraview_shell_menu_item_t MENU_ITEMS[] = {
       RUBRAVIEW_SHELL_PICTURES, false },
     { RUBRAVIEW_SHELL_VERB_PRINT,      "7print",   "Print...",             "\xEC\x9D\xB8\xEC\x87\x84...",
       RUBRAVIEW_SHELL_PICTURES, false },
+    { RUBRAVIEW_SHELL_VERB_EXTRACT,      "8a_extract", "Extract into a folder of its name", "\xEA\xB0\x99\xEC\x9D\x80 \xEC\x9D\xB4\xEB\xA6\x84\xEC\x9D\x98 \xED\x8F\xB4\xEB\x8D\x94\xEC\x97\x90 \xED\x92\x80\xEA\xB8\xB0",
+      BOOKS, false },
+    { RUBRAVIEW_SHELL_VERB_EXTRACT_HERE, "8b_here", "Extract here (smart)", "\xEC\x97\xAC\xEA\xB8\xB0\xEC\x97\x90 \xED\x92\x80\xEA\xB8\xB0 (\xEC\x8A\xA4\xEB\xA7\x88\xED\x8A\xB8)",
+      BOOKS, false },
+    { RUBRAVIEW_SHELL_VERB_EXTRACT_TO,   "8c_to", "Extract to...", "\xEB\x8B\xA4\xEB\xA5\xB8 \xEA\xB3\xB3\xEC\x97\x90 \xED\x92\x80\xEA\xB8\xB0...",
+      BOOKS, false },
+    { RUBRAVIEW_SHELL_VERB_COMPRESS_ZIP, "9a_zip", "Compress to a ZIP", "ZIP\xEC\x9C\xBC\xEB\xA1\x9C \xEC\x95\x95\xEC\xB6\x95",
+      ANYTHING, false },
+    { RUBRAVIEW_SHELL_VERB_COMPRESS,     "9b_compress", "Compress...", "\xEC\x95\x95\xEC\xB6\x95...",
+      ANYTHING, false },
 };
 
 const rubraview_shell_menu_item_t *rubraview_shell_menu_items(size_t *out_count) {

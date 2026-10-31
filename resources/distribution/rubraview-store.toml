@@ -450,3 +450,59 @@ args = "--print --whole %*"
 multi = "one"
 list = "--paths-temp --paths-from=%L"
 hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
+
+[menu.M8Extract]
+on = [
+    ".cbz", ".cb7", ".cbr", ".zip", ".7z", ".rar", ".alz", ".egg",
+]
+text = "Extract into a folder of its name"
+text-ko = "같은 이름의 폴더에 풀기"
+target = "file:App"
+args = "--extract --whole %*"
+multi = "one"
+list = "--paths-temp --paths-from=%L"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
+
+[menu.M9ExtractHere]
+on = [
+    ".cbz", ".cb7", ".cbr", ".zip", ".7z", ".rar", ".alz", ".egg",
+]
+text = "Extract here (smart)"
+text-ko = "여기에 풀기 (스마트)"
+target = "file:App"
+args = "--extract-here --whole %*"
+multi = "one"
+list = "--paths-temp --paths-from=%L"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
+
+[menu.MAExtractTo]
+on = [
+    ".cbz", ".cb7", ".cbr", ".zip", ".7z", ".rar", ".alz", ".egg",
+]
+text = "Extract to..."
+text-ko = "다른 곳에 풀기..."
+target = "file:App"
+args = "--extract-to --whole %*"
+multi = "one"
+list = "--paths-temp --paths-from=%L"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
+
+[menu.MBCompressZip]
+on = ["*", "folder"]
+text = "Compress to a ZIP"
+text-ko = "ZIP으로 압축"
+target = "file:App"
+args = "--compress-zip --whole %*"
+multi = "one"
+list = "--paths-temp --paths-from=%L"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"
+
+[menu.MCCompress]
+on = ["*", "folder"]
+text = "Compress..."
+text-ko = "압축..."
+target = "file:App"
+args = "--compress --whole %*"
+multi = "one"
+list = "--paths-temp --paths-from=%L"
+hide-when = "HKLM\\Software\\Rubraview\\Win11Menu\\Registered"

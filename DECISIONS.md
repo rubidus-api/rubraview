@@ -2968,3 +2968,20 @@ Do not store credentials, private infrastructure details, personal data, private
   streamed edit and convert writes. A folder of the archive's name there already is never mixed into: name-1.
 - Consequences: Explorer's "Rubraview" submenu, `--extract` / `--compress` and the archive shown as a tree in the
   screen are the next steps of RV-207.
+
+## 2026-11-01: D-253 Extracting and compressing from Explorer's Rubraview submenu (W-20261031-1120)
+
+- Status: Accepted (owner 2026-10-31, the plan's answers: "탐색기 우클릭 메뉴는 Rubraview 하위 메뉴 하나에 넣어주세요";
+  2026-11-01 "남은 단계 처리").
+- Decision: five verbs join the menu table (`MENU_ITEMS`): `--extract`, `--extract-here`, `--extract-to` on archives
+  and comics, `--compress-zip`, `--compress` on any file and folder (new kinds `RUBRAVIEW_SHELL_ANY_FILE`,
+  `RUBRAVIEW_SHELL_FOLDERS`, no extension list). They reach `archwork.c` as path lists (`archwork_extract_paths`,
+  `archwork_compress_paths`); the new archive is offered beside the first file. The classic menu: measured on the VM
+  (build 26200), a verb named Rubraview under `SystemFileAssociations\.txt` and one under `*` show once, the type's; so
+  a chosen type's submenu holds compressing too, and `*` and `Directory` get a submenu of compressing alone. The
+  Windows 11 package declares the class on `*` and `Directory` instead of each extension; the root loses its `On` and
+  each item keeps its own (none for compressing). Explorer needs a restart to show a re-registered package's class.
+- Rejected: `--files` and a Start-menu "Rubraview Files" (the owner: no separate entry point now); a second
+  "Rubraview" item for compressing (two of one name in one menu).
+- Consequences: the Store's package gains five `[menu.*]` rows and needs a new upload; Rubraview is in the menu of
+  every file and folder once registered.

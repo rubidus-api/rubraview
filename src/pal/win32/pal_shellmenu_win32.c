@@ -131,9 +131,22 @@ static void verb_key_for(const WCHAR *ext, WCHAR *out) {
 
 /* ---- the classic menu ---- */
 
+/* RV-207 (D-252): compressing is on every file and every folder. Explorer shows one verb of a
+   name, the file type's before `*`'s (seen on build 26200), so a type of ours keeps its own
+   menu, compressing in it too, and `*` and Directory hold only what is on anything. */
+#define ANY_FILE_KEY L"Software\\Classes\\*\\shell\\" MENU_VERB_KEY
+#define FOLDER_KEY   L"Software\\Classes\\Directory\\shell\\" MENU_VERB_KEY
+
+static bool classic_add_at(HKEY root, const WCHAR *key, uint32_t kind, const WCHAR *exe);
+
 static bool classic_add(HKEY root, const WCHAR *ext, uint32_t kind, const WCHAR *exe) {
-    WCHAR key[300], sub[400], text[128], command[MAX_PATH * 2 + 64], icon[MAX_PATH * 2 + 8];
+    WCHAR key[300];
     verb_key_for(ext, key);
+    return classic_add_at(root, key, kind | RUBRAVIEW_SHELL_ANY_FILE, exe);
+}
+
+static bool classic_add_at(HKEY root, const WCHAR *key, uint32_t kind, const WCHAR *exe) {
+    WCHAR sub[400], text[128], command[MAX_PATH * 2 + 64], icon[MAX_PATH * 2 + 8];
     RegDeleteTreeW(root, key);   /* what an earlier choice left here */
 
     wcscpy(icon, exe);
@@ -172,6 +185,15 @@ static bool classic_add(HKEY root, const WCHAR *ext, uint32_t kind, const WCHAR 
     return ok;
 }
 
+static void classic_remove_anything(HKEY root) {
+    RegDeleteTreeW(root, ANY_FILE_KEY);
+    RegDeleteTreeW(root, FOLDER_KEY);
+    delete_if_empty(root, L"Software\\Classes\\*\\shell");
+    delete_if_empty(root, L"Software\\Classes\\*");
+    delete_if_empty(root, L"Software\\Classes\\Directory\\shell");
+    delete_if_empty(root, L"Software\\Classes\\Directory");
+}
+
 static void classic_remove(HKEY root, const WCHAR *ext) {
     WCHAR key[300];
     verb_key_for(ext, key);
@@ -207,9 +229,8 @@ static bool config_write(HKEY root, proven_u8str_view_t selection, const WCHAR *
 
     wcscpy(icon, exe);
     wcscat(icon, L",0");
-    on_list(selection, RUBRAVIEW_SHELL_ALL | RUBRAVIEW_SHELL_ARCHIVES, on, 1024);
-    bool ok = set_string(root, MENU_CLASS_KEY, L"Text", L"Rubraview") && set_string(root, MENU_CLASS_KEY, L"Icon", icon) &&
-              set_string(root, MENU_CLASS_KEY, L"On", on);
+    /* No On of its own (RV-207): compressing shows on anything; each item says where it shows. */
+    bool ok = set_string(root, MENU_CLASS_KEY, L"Text", L"Rubraview") && set_string(root, MENU_CLASS_KEY, L"Icon", icon);
 
     size_t count = 0;
     const rubraview_shell_menu_item_t *items = rubraview_shell_menu_items(&count);
@@ -233,9 +254,11 @@ static bool config_write(HKEY root, proven_u8str_view_t selection, const WCHAR *
            says so: nothing more is coming, the viewer need not wait. */
         wcscpy(args, flag);
         wcscat(args, L" --whole %*");
+        bool anything = (items[i].kinds & (RUBRAVIEW_SHELL_ANY_FILE | RUBRAVIEW_SHELL_FOLDERS)) != 0;
         on_list(selection, items[i].kinds, on, 1024);
         ok = ok && set_string(root, sub, L"Command", exe) && set_string(root, sub, L"Args", args) &&
-             set_string(root, sub, L"Multi", items[i].single ? L"single" : L"one") && set_string(root, sub, L"On", on);
+             set_string(root, sub, L"Multi", items[i].single ? L"single" : L"one") &&
+             (anything || set_string(root, sub, L"On", on));   /* none: on anything, folders too */
     }
     if (ok) {
         names[names_len++] = 0;   /* the list's own end */
@@ -324,13 +347,16 @@ rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(proven_u8str_vie
     proven_u8str_view_t narrow;
     if (all_users && !can_write_machine()) return RUBRAVIEW_SHELL_MENU_FAILED;
     if (!program_path(exe, MAX_PATH * 2, NULL)) return RUBRAVIEW_SHELL_MENU_FAILED;
+    /* No type chosen is no menu: compressing on every file is not put there on its own (RV-207). */
+    if (selection.size == 0) return rubraview_pal_shell_menu_unregister(all_users) ? RUBRAVIEW_SHELL_MENU_CLASSIC : RUBRAVIEW_SHELL_MENU_FAILED;
     HKEY root = all_users ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
 
     /* The registry is made to match the choice: ours is taken off every
        extension we know, then put on the chosen ones. */
     proven_u8str_view_t every = rubraview_shell_extensions_all();
     for (size_t at = 0; next_extension(every, &at, ext, NULL);) classic_remove(root, ext);
-    bool ok = true;
+    bool ok = classic_add_at(root, ANY_FILE_KEY, RUBRAVIEW_SHELL_ANY_FILE, exe) &&
+              classic_add_at(root, FOLDER_KEY, RUBRAVIEW_SHELL_FOLDERS, exe);
     for (size_t at = 0; next_extension(selection, &at, ext, &narrow);) {
         uint32_t kind = rubraview_shell_kind_of(narrow);
         if (kind && !classic_add(root, ext, kind, exe)) ok = false;
@@ -356,6 +382,8 @@ rubraview_shell_menu_result_t rubraview_pal_shell_menu_register(proven_u8str_vie
                     classic_remove(HKEY_LOCAL_MACHINE, ext);
                     classic_remove(HKEY_CURRENT_USER, ext);
                 }
+                classic_remove_anything(HKEY_LOCAL_MACHINE);
+                classic_remove_anything(HKEY_CURRENT_USER);
             }
         } else {
             result = RUBRAVIEW_SHELL_MENU_CLASSIC_REFUSED;
@@ -371,6 +399,7 @@ bool rubraview_pal_shell_menu_unregister(bool all_users) {
     HKEY root = all_users ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
     proven_u8str_view_t every = rubraview_shell_extensions_all();
     for (size_t at = 0; next_extension(every, &at, ext, NULL);) classic_remove(root, ext);
+    classic_remove_anything(root);
     if (all_users) package_remove();
     config_remove(root);
     SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, NULL, NULL);

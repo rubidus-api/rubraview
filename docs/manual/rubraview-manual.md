@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.61.exe              the viewer, as built
-dist/rubraview-v1.39.61/                 the release bundle
-dist/rubraview-v1.39.61.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.62.exe              the viewer, as built
+dist/rubraview-v1.39.62/                 the release bundle
+dist/rubraview-v1.39.62.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -228,8 +228,10 @@ some only, `--no-types` or `--no-menu` to leave one of the two as it is
 `--all-users` (from an administrator's prompt) for every user (`--setup`
 is what the installer adds: the run then ends with 0 when all but Windows
 11's menu was registered). The menu's
-items are `--open`, `--new-window`, `--open-only`, `--add`, `--browse`, `--convert` and
-`--print`, each followed by the files.
+items are `--open`, `--new-window`, `--open-only`, `--add`, `--browse`, `--convert`,
+`--print`, `--extract`, `--extract-here`, `--extract-to`, `--compress-zip` and `--compress`,
+each followed by the files. Compressing is in the menu of every file and every folder;
+extracting on archives.
 
 ## Reading
 
