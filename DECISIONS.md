@@ -2948,3 +2948,12 @@ Do not store credentials, private infrastructure details, personal data, private
   dim and never marked. A click on a key says what it does under the page. Keys bound that the keyboard does not show
   are named in a row under it.
 - Consequences: the keys free on a keyboard are seen at a glance; changing a key stays in the view by function.
+
+## 2026-10-31: D-251 Title bar buttons in Windows' order (W-20261031-2230)
+
+- Status: Accepted (owner 2026-10-31: "윈도 기본 창 타이틀바 버튼 순서를 따라서 사용자가 익숙한 느낌으로 쓸 수 있게").
+- Decision: the main title bar's row, left to right: settings, keep shown, hide, always on top, resize, full screen,
+  minimise, maximise / restore, close (was ... full screen, minimise, maximise, resize, close). A floating list's title:
+  resize, maximise, close (was maximise, resize, close). The subtitle box, the equaliser, the panel and the popups
+  already ended with close; windows of their own have Windows' frame.
+- Consequences: the three buttons every Windows user reaches for are where Windows puts them.

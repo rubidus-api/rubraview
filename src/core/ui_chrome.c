@@ -182,16 +182,17 @@ bool rubraview_titlebar_tick(rubraview_titlebar_t *bar, double delta_seconds) {
 /* §3.21.3: the control cluster sits at the right edge, ordered
    minimize, maximize/restore, fullscreen, close. */
 static const rubraview_titlebar_button_t BUTTON_ORDER[] = {
-    /* First in the order is leftmost on screen. 1.25.0 (owner, 2026-10-20): Set, P, then
-       "H, T, F, _, [], R, X" — hide, always on top, full screen, minimise, maximise, resize, close. */
+    /* First in the order is leftmost on screen. RV-218 (owner, 2026-10-31: "오른쪽 끝부터 종료, 최대화/창으로, 최소화,
+       전체화면, 크기조절... 윈도 기본 창 타이틀바 버튼 순서를 따라서"): Windows' three at the right end as Windows has
+       them — close, maximise / restore, minimise — then full screen and resize, then the rest as before. */
     RUBRAVIEW_TITLEBAR_SETTINGS,
     RUBRAVIEW_TITLEBAR_BARPIN,
     RUBRAVIEW_TITLEBAR_HIDE,
     RUBRAVIEW_TITLEBAR_PIN,
+    RUBRAVIEW_TITLEBAR_RESIZE,
     RUBRAVIEW_TITLEBAR_FULLSCREEN,
     RUBRAVIEW_TITLEBAR_MINIMIZE,
     RUBRAVIEW_TITLEBAR_MAXIMIZE,
-    RUBRAVIEW_TITLEBAR_RESIZE,
     RUBRAVIEW_TITLEBAR_CLOSE,
 };
 #define BUTTON_COUNT ((int32_t)(sizeof(BUTTON_ORDER) / sizeof(BUTTON_ORDER[0])))

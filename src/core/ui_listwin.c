@@ -82,18 +82,18 @@ rubraview_rect_t rubraview_listwin_close_rect(const rubraview_listwin_t *lw) {
 rubraview_rect_t rubraview_listwin_resize_rect(const rubraview_listwin_t *lw) {
     if (!lw || lw->own_window) return (rubraview_rect_t){0};   /* RV-198: a book's list is sized too */
     double s = lw->title_height;
-    return (rubraview_rect_t){ lw->x + lw->width - s * 2.0, lw->y, s, s };
+    return (rubraview_rect_t){ lw->x + lw->width - s * 3.0, lw->y, s, s };   /* RV-218: left of maximize */
 }
 
 rubraview_rect_t rubraview_listwin_maximize_rect(const rubraview_listwin_t *lw) {
     if (!lw || lw->own_window) return (rubraview_rect_t){0};
     double s = lw->title_height;
-    return (rubraview_rect_t){ lw->x + lw->width - s * 3.0, lw->y, s, s };
+    return (rubraview_rect_t){ lw->x + lw->width - s * 2.0, lw->y, s, s };   /* RV-218: next to X, as Windows has it */
 }
 
 double rubraview_listwin_title_text_right(const rubraview_listwin_t *lw) {
     if (!lw) return 0.0;
-    return lw->own_window ? lw->x + lw->width : rubraview_listwin_maximize_rect(lw).x;
+    return lw->own_window ? lw->x + lw->width : rubraview_listwin_resize_rect(lw).x;
 }
 
 #define BAR_COUNT 7

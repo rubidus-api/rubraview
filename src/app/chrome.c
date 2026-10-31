@@ -208,7 +208,7 @@ void draw_titlebar(app_state_t *app, double win_w) {
     }
     place_font_end(app, before_font);
 
-    /* The right-hand row: Set, P, H, T, F, _, [], R, X; what is on is lit and bold (owner, 2026-10-20) */
+    /* The right-hand row: Set, P, H, T, R, F, _, [], X (RV-218: Windows' three at the end); what is on is lit and bold (owner, 2026-10-20) */
     static const rubraview_titlebar_button_t BUTTONS[] = {
         RUBRAVIEW_TITLEBAR_SETTINGS, RUBRAVIEW_TITLEBAR_BARPIN, RUBRAVIEW_TITLEBAR_HIDE, RUBRAVIEW_TITLEBAR_PIN,
         RUBRAVIEW_TITLEBAR_FULLSCREEN, RUBRAVIEW_TITLEBAR_MINIMIZE, RUBRAVIEW_TITLEBAR_MAXIMIZE, RUBRAVIEW_TITLEBAR_RESIZE,
