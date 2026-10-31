@@ -1255,7 +1255,7 @@ bool rubraview_edit_steps_parse(proven_arena_t *arena, proven_u8str_view_t text,
             const proven_u8str_view_t *pp = rubraview_ini_get(&doc, sec, PROVEN_LIT("plugin_params"));
             char line[8 * 40];
             size_t n = pp ? (pp->size < sizeof(line) - 1 ? pp->size : sizeof(line) - 1) : 0;
-            if (pp) memcpy(line, pp->ptr, n);
+            if (pp && n > 0) memcpy(line, pp->ptr, n);   /* an empty value has no bytes behind it */
             line[n] = '\0';
             char *at = line;
             while (*at && st.plugin_param_count < 8) {
@@ -1270,7 +1270,7 @@ bool rubraview_edit_steps_parse(proven_arena_t *arena, proven_u8str_view_t text,
         const proven_u8str_view_t *cmd = rubraview_ini_get(&doc, sec, PROVEN_LIT("command"));
         if (cmd) {
             if (cmd->size >= sizeof(st.command)) { *why = N_("a step's command is longer than Edit takes (1 KiB)"); return false; }
-            memcpy(st.command, cmd->ptr, cmd->size);
+            if (cmd->size > 0) memcpy(st.command, cmd->ptr, cmd->size);   /* `command = ""`: no bytes (fuzz, 2026-10-31) */
             st.command[cmd->size] = '\0';
         }
         steps.steps[steps.count++] = st;

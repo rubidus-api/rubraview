@@ -2853,3 +2853,22 @@ Do not store credentials, private infrastructure details, personal data, private
   written whole by the Keys page) would keep the old keys, so a binding equal to an old default
   (`rubraview_default_keymap_retired`) takes the new one at load (`rubraview_keymap_retire`); any other is the reader's.
 - Consequences: nothing needs Fn on a laptop; the function keys are free for the reader's own bindings.
+
+## 2026-10-31: D-243 Delete inside an archive: the page, the whole archive, or neither (W-20261031-1700)
+
+- Status: Accepted (owner 2026-10-31: "압축파일 내에서 del 키를 누르면 해당 파일만 지울지 압축파일 전체를 지울지 묻게 해 주세요.
+  물론 여기엔 취소도 있고요").
+- Decision: one question with three buttons (`arc_delete_ask`, `arc_ask_press`); the page goes as D-88 took it out;
+  the whole archive is let go (the source closed, nothing left open) and recycled, or deleted for good with
+  Shift+Delete, and an edit of it kept for Ctrl+Z (D-89) dropped; then the archive beside it, or its folder and the
+  open-file screen. Every archive delete request goes through the question. A split set's parts are not found from
+  the open source, so the whole set is left to Explorer.
+- Consequences: the earlier Y / N question and its texts are gone; a fault found on the VM (the open-file screen
+  opened with the closed book's spreads still naming a page) is closed by resetting the open state.
+
+## 2026-10-31: D-244 Two quick taps open in the open-file screen (W-20261031-1710)
+
+- Status: Accepted (owner 2026-10-31: "더블클릭하면 해당 파일 열기 또는 폴더 열기 가능하게 해 주세요").
+- Decision: the tap's release (`MOUSE_UP`) counts a second one on the same item, same listing, within 0.45 s as
+  opening it in any mode, the first tap's pick undone; a quick tap right after one that entered a folder is dropped.
+  Folders already have check boxes there (1.22.0; seen on the VM).

@@ -41,7 +41,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "copy_frame", "Copy the frame on screen (a film, an animation), or the picture itself" },
     { "copy_to_folder", "Copy the file on screen to the folder set for it (a page inside an archive too)" },
     { "copy_to_other_folder", "Copy the file on screen to a folder typed or browsed; one not there yet is made" },
-    { "delete_file", "To the recycle bin; a page inside an archive is deleted from it (asks first)" },
+    { "delete_file", "To the recycle bin; inside an archive it asks: this page, or the whole archive" },
     { "extract_subtitles", "Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed" },
     { "first_page", "First page" },
     { "fit_cycle", "Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from" },

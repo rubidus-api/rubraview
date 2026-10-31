@@ -783,8 +783,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         if (path.size == 0) osd_say(app, TU8("there is no file to show"));
         else if (!rubraview_pal_shell_reveal(path)) osd_say(app, TU8("Explorer could not show the file"));
     } else if ((proven_u8str_view_eq(action, PROVEN_LIT("delete_file")) || proven_u8str_view_eq(action, PROVEN_LIT("purge_file"))) && on_archive_page(app)) {
-        /* D-88: a page of an archive; there is no bin inside one, so either key asks. */
-        arc_edit_on_page(app, RUBRAVIEW_ARCEDIT_DELETE, NULL);
+        /* D-88: a page of an archive; there is no bin inside one, so either key asks — RV-212: the page or the whole archive */
+        arc_delete_ask(app, proven_u8str_view_eq(action, PROVEN_LIT("purge_file")));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("delete_file"))) {
         triage_delete(app, false);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("purge_file"))) {

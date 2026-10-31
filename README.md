@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.39.52** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.52/rubraview-v1.39.52.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.52/rubraview-v1.39.52.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.52/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.39.53** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.53/rubraview-v1.39.53.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.53/rubraview-v1.39.53.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.53/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -87,7 +87,7 @@ ships with, so it cannot drift from them.
 | `Ctrl+E` | Export |
 | `Ctrl+Shift+S` | Save a copy as |
 | `Ctrl+B` | Convert many files |
-| `Delete` | To the recycle bin; a page inside an archive is deleted from it (asks first) |
+| `Delete` | To the recycle bin; inside an archive it asks: this page, or the whole archive |
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `Ctrl+M` | Rename, keeping the extension; a page inside an archive too |

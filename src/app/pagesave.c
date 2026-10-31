@@ -167,13 +167,13 @@ fail:
 /* An edit of entry `entry` is asked for. `data` (malloc) becomes this
    function's, whatever happens. */
 void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry, const char *name, uint8_t *data, size_t size) {
+    if (op == RUBRAVIEW_ARCEDIT_DELETE) { free(data); arc_delete_ask(app, false); return; }   /* RV-212: it asks which */
     const char *why = NULL;
     if (app->arc_job) why = T("the archive is still being written");
     else if (!on_archive_page(app)) why = T("not changed: the page is not in an archive");
     rubraview_arcedit_route_t route = why ? RUBRAVIEW_ARCEDIT_NOT_AN_ARCHIVE : rubraview_arcedit_route(&app->source);
     if (!why && route == RUBRAVIEW_ARCEDIT_ENCRYPTED) why = rubraview_arcedit_result_text(RUBRAVIEW_ARCEDIT_REFUSED_ENCRYPTED);
     if (!why && route == RUBRAVIEW_ARCEDIT_NOT_AN_ARCHIVE) why = T("not changed: the page is not in an archive");
-    if (!why && op == RUBRAVIEW_ARCEDIT_DELETE && page_count(app) <= 1) why = T("the last page: delete the archive's file instead");
     if (!why && name && strlen(name) >= sizeof(app->arc_ask_name)) why = T("not changed: that name is too long");
     if (why) {
         free(data);
@@ -192,9 +192,95 @@ void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry,
 
     bool chosen = app->arc_choice != RUBRAVIEW_ARCEDIT_SAME &&
                   rubraview_path_same(cstr(app->arc_choice_path), app->source.archive_path);
-    if (op == RUBRAVIEW_ARCEDIT_DELETE) app->arc_ask = ARC_ASK_DELETE;
-    else if (route == RUBRAVIEW_ARCEDIT_CONVERT && !chosen) panel_open_convert(app);
+    if (route == RUBRAVIEW_ARCEDIT_CONVERT && !chosen) panel_open_convert(app);
     else arc_edit_start(app, route == RUBRAVIEW_ARCEDIT_CONVERT ? app->arc_choice : RUBRAVIEW_ARCEDIT_SAME);
+}
+
+/* RV-212 (owner, 2026-10-31: "압축파일 내에서 del 키를 누르면 해당 파일만 지울지 압축파일 전체를 지울지 묻게 해
+   주세요. 물론 여기엔 취소도 있고요"): Delete on a page inside an archive asks which — the page, taken out of the
+   archive (D-88), or the archive's file itself, to the Recycle Bin (Shift+Delete: for good) — or neither. A choice
+   that cannot be made here is shown, greyed, with why. */
+void arc_delete_ask(app_state_t *app, bool purge) {
+    if (!on_archive_page(app)) return;
+    if (app->arc_job) { osd_say(app, TU8("the archive is still being written")); return; }
+    rubraview_arcedit_route_t route = rubraview_arcedit_route(&app->source);
+    const char *why = NULL;
+    if (route == RUBRAVIEW_ARCEDIT_ENCRYPTED) why = rubraview_arcedit_result_text(RUBRAVIEW_ARCEDIT_REFUSED_ENCRYPTED);
+    else if (route == RUBRAVIEW_ARCEDIT_NOT_AN_ARCHIVE) why = T("not changed: the page is not in an archive");
+    else if (page_count(app) <= 1) why = T("it is the archive's last page");
+    bool whole = rubraview_page_source_volumes(&app->source, NULL) < 2;   /* a split set's parts are not found here */
+    if (why && !whole) { osd_say(app, cstr(why)); return; }
+    arc_ask_clear(app);
+    app->arc_ask_op = RUBRAVIEW_ARCEDIT_DELETE;
+    app->arc_ask_entry = app->source.pages[current_page_index(app)].entry_index;
+    memset(app->arc_ask_name, 0, sizeof(app->arc_ask_name));
+    memset(app->arc_ask_path, 0, sizeof(app->arc_ask_path));
+    if (app->source.archive_path.size < sizeof(app->arc_ask_path)) memcpy(app->arc_ask_path, app->source.archive_path.ptr, app->source.archive_path.size);
+    app->arc_ask_page_ok = why == NULL;
+    app->arc_ask_whole_ok = whole;
+    app->arc_ask_purge = purge;
+    snprintf(app->arc_ask_why, sizeof(app->arc_ask_why), "%s", why ? why : (whole ? "" : T("a split archive: its parts are deleted in Explorer")));
+    app->arc_ask = ARC_ASK_DELETE;
+}
+
+/* The archive's file itself: let go, to the Recycle Bin (or gone), then the archive beside it, or the folder. */
+static void arc_delete_whole(app_state_t *app) {
+    proven_u8str_view_t path = app_keep(app, app->source.archive_path);
+    proven_u8str_view_t dir = app_keep(app, app->source_dir.size ? app->source_dir : rubraview_path_dirname(path));
+    rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(app->arena, dir);
+    proven_u8str_view_t next = rubraview_page_source_sibling_archive(app->arena, &listing, path, true);
+    if (next.size == 0) next = rubraview_page_source_sibling_archive(app->arena, &listing, path, false);
+    /* an edit of this archive kept to be undone (D-89) is for nobody now: Ctrl+Z brings the archive back instead */
+    if (rubraview_path_same(cstr(app->arc_undo_path), path)) arc_undo_drop(app);
+    history_remember(app);
+    unload_all_pages(app);
+    source_close(app);   /* Windows deletes nothing that is mapped */
+    /* nothing open now, as at the start: no book, no page on screen (its spreads would still name one) */
+    app->source.archive_path = PROVEN_LIT("");
+    app->source.kind = RUBRAVIEW_PAGE_SOURCE_FOLDER;
+    app->layout.count = 0;
+    app->spread_index = 0;
+    bool purge = app->arc_ask_purge;
+    bool ok = purge ? rubraview_pal_fs_delete(path) : rubraview_pal_fs_recycle(path);
+    if (!ok) {
+        osd_say(app, TU8("could not delete the archive (is it open elsewhere?)"));
+        open_path(app, path);
+        return;
+    }
+    rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+        .op = purge ? RUBRAVIEW_FILE_OP_PURGE : RUBRAVIEW_FILE_OP_RECYCLE,
+        .source_path = path,
+    });
+    if (next.size > 0) open_path(app, next);
+    else {   /* nothing beside it: its folder, as a file removed leaves it, and the open-file screen there */
+        open_folder(app, dir);
+        picker_open(app);
+        picker_navigate(app, dir);
+    }
+    osd_say(app, purge ? TU8("the archive was deleted for good") : TU8("the archive went to the recycle bin"));
+}
+
+static void arc_delete_choose(app_state_t *app, int32_t which) {
+    if (which == ARC_DEL_PAGE && app->arc_ask_page_ok) {
+        rubraview_arcedit_route_t route = on_archive_page(app) ? rubraview_arcedit_route(&app->source) : RUBRAVIEW_ARCEDIT_NOT_AN_ARCHIVE;
+        bool chosen = app->arc_choice != RUBRAVIEW_ARCEDIT_SAME && rubraview_path_same(cstr(app->arc_choice_path), app->source.archive_path);
+        if (route == RUBRAVIEW_ARCEDIT_CONVERT && !chosen) panel_open_convert(app);
+        else arc_edit_start(app, route == RUBRAVIEW_ARCEDIT_CONVERT ? app->arc_choice : RUBRAVIEW_ARCEDIT_SAME);
+        return;
+    }
+    if (which == ARC_DEL_WHOLE && app->arc_ask_whole_ok) {
+        arc_ask_clear(app);
+        if (rubraview_path_same(cstr(app->arc_ask_path), app->source.archive_path)) arc_delete_whole(app);
+        return;
+    }
+    if (which == ARC_DEL_CANCEL) arc_ask_clear(app);
+}
+
+bool arc_ask_press(app_state_t *app, double x, double y) {
+    if (app->arc_ask != ARC_ASK_DELETE) return false;
+    for (int32_t i = 0; i < app->arc_ask_btn_n; ++i)
+        if (pal_rect_has(app->arc_ask_btn[i], x, y)) { arc_delete_choose(app, app->arc_ask_btn_kind[i]); return true; }
+    return true;   /* the question stands until it is answered */
 }
 
 /* The same, of the page on screen. */
@@ -206,14 +292,14 @@ void arc_edit_on_page(app_state_t *app, rubraview_arcedit_op_t op, const char *n
 bool arc_ask_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (app->arc_ask == ARC_ASK_NONE) return false;
     if (app->arc_ask == ARC_ASK_DELETE) {
-        if (key_is(combo, "Y") || key_is(combo, "Enter")) {
-            rubraview_arcedit_route_t route = on_archive_page(app) ? rubraview_arcedit_route(&app->source) : RUBRAVIEW_ARCEDIT_NOT_AN_ARCHIVE;
-            bool chosen = app->arc_choice != RUBRAVIEW_ARCEDIT_SAME &&
-                          rubraview_path_same(cstr(app->arc_choice_path), app->source.archive_path);
-            if (route == RUBRAVIEW_ARCEDIT_CONVERT && !chosen) panel_open_convert(app);
-            else arc_edit_start(app, route == RUBRAVIEW_ARCEDIT_CONVERT ? app->arc_choice : RUBRAVIEW_ARCEDIT_SAME);
-        } else {
-            arc_ask_clear(app);   /* anything else is "no" */
+        /* RV-212: 1 (or Enter) the page, 2 the whole archive; Esc, N, anything else neither */
+        if (combo.modifiers != RUBRAVIEW_MOD_NONE && combo.modifiers != RUBRAVIEW_MOD_SHIFT) return true;
+        if (key_is(combo, "1") || key_is(combo, "Numpad1") || key_is(combo, "Enter")) {
+            if (app->arc_ask_page_ok) arc_delete_choose(app, ARC_DEL_PAGE);
+        } else if (key_is(combo, "2") || key_is(combo, "Numpad2")) {
+            if (app->arc_ask_whole_ok) arc_delete_choose(app, ARC_DEL_WHOLE);
+        } else if (!key_is(combo, "Shift")) {
+            arc_ask_clear(app);
         }
         return true;
     }

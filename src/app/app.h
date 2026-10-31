@@ -1016,6 +1016,11 @@ typedef struct app_state {
     bool                      rename_is_archive; /* the rename box holds an archive page's name */
     bool                      panel_is_convert;  /* D-89: a fifth panel, what an archive becomes */
     char                      arc_ask_path[1024];      /* the book the question is about */
+    /* RV-212: Delete inside an archive asks: this page, the whole archive, or neither */
+    bool                      arc_ask_page_ok, arc_ask_whole_ok, arc_ask_purge;
+    char                      arc_ask_why[160];        /* why the page cannot go alone, when it cannot */
+    rubraview_pal_rect_t      arc_ask_btn[3];
+    int32_t                   arc_ask_btn_kind[3], arc_ask_btn_n;
     char                      arc_undo_path[1024];     /* D-89: the book last edited in place ... */
     char                      arc_undo_backup[1024];   /* ... and the file it was before, kept beside it */
     char                      print_temp[1024];        /* D-89: an archive page laid out as a file to print */
@@ -1322,6 +1327,9 @@ typedef struct app_state {
     bool                   picker_hold;              /* a left press on a tile, not yet a tap or a long press */
     size_t                 picker_hold_index;
     double                 picker_hold_x, picker_hold_y, picker_hold_at;
+    double                 picker_tap_at;          /* RV-213: the last tap, for a second one that opens */
+    size_t                 picker_tap_index;
+    uint32_t               picker_tap_generation;
     /* D-34: one picture per listed item, made on a thread of its own for
        the tiles on screen and added as each arrives. 0 = not asked for,
        1 = ready, 2 = none to show, 3 = asked for. */
@@ -1509,6 +1517,7 @@ enum { PF_NONE = 0, PF_TITLE, PF_MENU, PF_NAME, PF_LIST, PF_BUTTONS };
 #define PICKER_TILE_WIDE 230.0
 typedef struct picker_bar_item { proven_u8str_view_t label, path; bool favorite; } picker_bar_item_t;
 #define PICKER_ACTION_HEIGHT 76.0   /* two rows: the buttons, then what is picked */
+#define PICKER_DOUBLE_TAP 0.45      /* RV-213: seconds between two taps that open */
 #define PICKER_BUTTON_ROW 48.0
 typedef enum picker_button {
     PICKER_BTN_OPEN = 0,     /* 1.23.0: what is picked, or the one with the focus */
@@ -1687,6 +1696,9 @@ void apply_all_typed(app_state_t *app);
 void apply_intent(app_state_t *app, rubraview_pointer_intent_t intent);
 void arc_ask_clear(app_state_t *app);
 bool arc_ask_key(app_state_t *app, rubraview_key_combo_t combo);
+void arc_delete_ask(app_state_t *app, bool purge);   /* RV-212 */
+bool arc_ask_press(app_state_t *app, double x, double y);
+enum { ARC_DEL_PAGE = 1, ARC_DEL_WHOLE, ARC_DEL_CANCEL };
 rubraview_arcedit_target_t arc_convert_target(const app_state_t *app);
 void arc_edit_on_page(app_state_t *app, rubraview_arcedit_op_t op, const char *name);
 void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry, const char *name, uint8_t *data, size_t size);

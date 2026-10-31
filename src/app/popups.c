@@ -858,23 +858,38 @@ void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
                                        box, 16.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
     if (app->arc_ask == ARC_ASK_DELETE) {
-        /* D-88 */
-        double box_w = 760.0 * chrome_dpi, box_h = 110.0 * chrome_dpi;
+        /* D-88; RV-212: the page, the whole archive, or neither — three buttons, 1 / 2 / Esc */
+        double box_w = 820.0 * chrome_dpi, box_h = 190.0 * chrome_dpi;
         if (box_w > win_w - 16.0) box_w = win_w - 16.0;
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, (win_h - box_h) * 0.5, box_w, box_h };
         rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_CLOSE_HOVER, 2.0, 3.0);
-        rubraview_pal_rect_t upper = { box.x, box.y + box_h * 0.12, box_w, box_h * 0.38 };
-        rubraview_pal_rect_t lower = { box.x, box.y + box_h * 0.5, box_w, box_h * 0.38 };
-        bool deleting = app->arc_ask == ARC_ASK_DELETE;
-        rubraview_pal_render_draw_text(app->renderer,
-                                       deleting ? TU8("Delete this page from the archive? It cannot be undone.")
-                                                : TU8("This archive cannot be changed as it is. It is written again; the old file goes to the Recycle Bin."),
-                                       upper, (deleting ? 16.0 : 13.5) * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        rubraview_pal_render_draw_text(app->renderer,
-                                       deleting ? TU8("Y  delete        N  keep")
-                                                : TU8("Z  as ZIP (CBZ)        7  as 7z (CB7)        Esc  leave it"),
-                                       lower, 15.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_rect_t title = { box.x, box.y + 14.0 * chrome_dpi, box_w, 30.0 * chrome_dpi };
+        rubraview_pal_render_draw_text(app->renderer, TU8("Delete this page from the archive, or the whole archive?"),
+                                       title, 17.0 * chrome_dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        const char *words[3] = { T("1  This page only"),
+                                 app->arc_ask_purge ? T("2  The whole archive, for good") : T("2  The whole archive (Recycle Bin)"),
+                                 T("Esc  Cancel") };
+        int32_t kinds[3] = { ARC_DEL_PAGE, ARC_DEL_WHOLE, ARC_DEL_CANCEL };
+        bool live[3] = { app->arc_ask_page_ok, app->arc_ask_whole_ok, true };
+        double gap = 12.0 * chrome_dpi, bh = 52.0 * chrome_dpi, bw = (box_w - 4.0 * gap) / 3.0;
+        double by = box.y + 56.0 * chrome_dpi;
+        app->arc_ask_btn_n = 3;
+        for (int32_t i = 0; i < 3; ++i) {
+            rubraview_pal_rect_t b = { box.x + gap + (double)i * (bw + gap), by, bw, bh };
+            app->arc_ask_btn[i] = b;
+            app->arc_ask_btn_kind[i] = live[i] ? kinds[i] : 0;
+            bool over = live[i] && pal_rect_has(b, app->pointer_x, app->pointer_y);
+            uint32_t fill = !live[i] ? COLOR_BOX_FILL : i == 1 ? (over ? COLOR_CLOSE_HOVER : 0xC0802030u) : over ? 0x50FFFFFFu : i == 0 ? COLOR_TILE_CURRENT : COLOR_BOX_FILL;
+            rubraview_pal_render_fill_rect(app->renderer, b, fill, 3.0);
+            rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 3.0);
+            rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, 15.0 * chrome_dpi, live[i] ? COLOR_TEXT : 0x70F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        }
+        rubraview_pal_rect_t foot = { box.x, by + bh + 12.0 * chrome_dpi, box_w, 26.0 * chrome_dpi };
+        proven_u8str_view_t note = app->arc_ask_why[0] ? cstr(app->arc_ask_why)
+                                 : app->arc_ask_purge ? TU8("The page is taken out of the archive; the whole archive is deleted from the disk for good.")
+                                                      : TU8("The page is taken out of the archive; the whole archive goes to the Recycle Bin.");
+        rubraview_pal_render_draw_text(app->renderer, note, foot, 13.0 * chrome_dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
     }
     /* RV-137: a value typed, or the copies' name, asked for in the Edit window is drawn there */
     if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)) &&

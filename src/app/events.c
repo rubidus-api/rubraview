@@ -176,6 +176,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
             if (chooser_press(app, CHOOSE_IN_MAIN, event->mouse.x, event->mouse.y)) break;   /* 1.24.0 */
             if (tmenu_press(app, event->mouse.x, event->mouse.y)) break;   /* 1.25.0: the ☰ pull-down */
+            if (arc_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-212: the archive's Delete question */
             if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)) &&
                 rename_box_press(app, event->mouse.x, event->mouse.y)) break;   /* 1.24.0: the box's buttons */
             if (app->picker_open && app->favwin.open && event->mouse.button == RUBRAVIEW_MOUSE_LEFT &&
@@ -510,8 +511,25 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (app->picker_hold && event->mouse.button == RUBRAVIEW_MOUSE_LEFT) {   /* 1.22.0: the tap, now it is one */
                 app->picker_hold = false;
                 size_t index = app->picker_hold_index;
-                if (app->picker_open && index < app->picker_listing.count &&
-                    !rubraview_picker_tap(&app->picker, index)) picker_activate(app, index);
+                if (!app->picker_open || index >= app->picker_listing.count) break;
+                /* RV-213 (owner, 2026-10-31: "더블클릭하면 해당 파일 열기 또는 폴더 열기"): a second tap on the same one,
+                   quickly, opens the file or enters the folder in any mode; what the first tap picked is let go again */
+                double now = rubraview_pal_time_now_seconds();
+                if (app->picker_tap_generation != app->picker_generation && now - app->picker_tap_at < PICKER_DOUBLE_TAP) {
+                    app->picker_tap_at = 0.0;   /* the first tap went into a folder: the second is not for what is there */
+                    break;
+                }
+                bool twice = index == app->picker_tap_index && app->picker_tap_generation == app->picker_generation &&
+                             now - app->picker_tap_at < PICKER_DOUBLE_TAP;
+                app->picker_tap_at = twice ? 0.0 : now;
+                app->picker_tap_index = index;
+                app->picker_tap_generation = app->picker_generation;
+                if (twice) {
+                    if (!app->picker_in_book) (void)rubraview_picker_tap(&app->picker, index);   /* the first tap undone (picking modes) */
+                    picker_activate(app, index);
+                } else if (!rubraview_picker_tap(&app->picker, index)) {
+                    picker_activate(app, index);
+                }
                 break;
             }
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && text_release(app, event->mouse.x, event->mouse.y)) break;

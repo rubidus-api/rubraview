@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.52.exe              the viewer, as built
-dist/rubraview-v1.39.52/                 the release bundle
-dist/rubraview-v1.39.52.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.53.exe              the viewer, as built
+dist/rubraview-v1.39.53/                 the release bundle
+dist/rubraview-v1.39.53.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -733,10 +733,14 @@ in it; `Esc` leaves everything as it was.
 **Inside an archive** the same keys work on the page on screen, and the
 archive is written again with the change in it:
 
-- `Delete` (or `Shift+Delete`) takes the page out. It asks first — `Y`
-  deletes, anything else keeps — because there is no Recycle Bin inside an
-  archive. The last page of a book is not deleted: delete the book's file
-  instead.
+- `Delete` asks what goes: **1 This page only** (taken out of the archive —
+  there is no Recycle Bin inside one), **2 The whole archive** (its file to
+  the Recycle Bin; with `Shift+Delete`, deleted for good), or **Esc Cancel**;
+  the buttons can be clicked too. A choice that cannot be made is grey, with
+  why under it: the last page of a book or an encrypted archive cannot lose a
+  page alone, and a split archive's parts are deleted in Explorer. After the
+  whole archive goes, the archive beside it opens, or the open-file screen in
+  its folder when there is none.
 - `Ctrl+M` renames the page, in the folder it has inside the archive. A name
   another entry already has is refused.
 - In the adjust panel (`E`), **Save a copy** puts the edited picture into
@@ -1642,7 +1646,7 @@ everything from the last one clicked.
 
 The row over the list picks without holding a key: the **All** box picks
 everything here but `..` (a dash when some are), **Individual** makes
-every tap turn one file on or off (a tap only picks; nothing opens),
+every tap turn one file on or off (a tap only picks; two quick taps open the file or enter the folder, in any mode),
 **Range** takes two taps and turns over everything between them, **Same type** takes every file with the same
 extension as the one in focus, **Media** the pictures, films, music and
 text. **.ext ▾**, first in the row, lists the folder's extensions, each
@@ -1797,7 +1801,7 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+E` | Export |
 | `Ctrl+Shift+S` | Save a copy as |
 | `Ctrl+B` | Convert many files |
-| `Delete` | To the recycle bin; a page inside an archive is deleted from it (asks first) |
+| `Delete` | To the recycle bin; inside an archive it asks: this page, or the whole archive |
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
 | `Ctrl+M` | Rename, keeping the extension; a page inside an archive too |
