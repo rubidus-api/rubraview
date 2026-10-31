@@ -2937,3 +2937,14 @@ Do not store credentials, private infrastructure details, personal data, private
   FFmpeg child with each open; its counts come back in the shared block for the Live rows.
 - Consequences: the second play of a network film reads the local disk; a film first played on a slow link plays
   smoothly once enough is fetched (with Fetch the rest on). Files under 16 MB and local files are read as before.
+
+## 2026-10-31: D-250 The keyboard in Settings › Keys: a dot a kind of binding, in a fixed place (W-20261031-2200)
+
+- Status: Accepted (owner 2026-10-31, relayed by another session with the colours: alone red, Shift yellow, Ctrl blue,
+  Alt green, two or more purple; to this session: "다른 세션에서 온 키 배치 보여주는 기능 넣어주세요").
+- Decision: a third way to show the Keys table, "Show the keyboard": a US QWERTY keyboard drawn over the table's rows
+  (sixteen of them), the editing keys, the arrows and the number pad included; each kind of binding a dot in its own
+  place along the key's foot, so a kind is told by place as well as colour; Caps, Shift, Ctrl, Alt, Win and Menu drawn
+  dim and never marked. A click on a key says what it does under the page. Keys bound that the keyboard does not show
+  are named in a row under it.
+- Consequences: the keys free on a keyboard are seen at a glance; changing a key stays in the view by function.

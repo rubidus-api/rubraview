@@ -458,9 +458,12 @@ static const char *const PARTS[] = {
 "  action keys.export              \"Export keys to a file\"\n"
 "  action keys.import              \"Import keys from a file\"\n"
 "  action keys.by_key              \"Show by key / by function\"\n"
+"  action keys.layout              \"Show the keyboard\"\n"
 "  choice keys.key_order           \"By key, in the order of\" keyboard | abc = keyboard wired\n"
 "  note   \"By function: each kind of file's keys under its heading, which says when they are asked. By key: a key's\"\n"
 "  note   \"family together (A, Shift+A, Ctrl+A, ...), a row for each kind of file it does something in.\"\n"
+"  note   \"The keyboard: a dot on each key for each way it does something: alone red, with Shift yellow, Ctrl blue,\"\n"
+"  note   \"Alt green, with two or more of them purple. Click a key for what it does.\"\n"
 "  table  keymap\n",
 /* The owner (2026-10-17): a fuller explanation on each harder setting's name. */
 "help general.single_instance \"On: a file opened from Explorer goes to the window already open instead of starting a second viewer. Off: every file opens its own window.\"\n"

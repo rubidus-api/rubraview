@@ -3,6 +3,7 @@
  * and the one-of-many list (RV-163, D-197: moved from main.c as it was).
  */
 #include "app.h"
+#include "rubraview/keyboard.h"
 
 /* ---- the settings window (§3.22), RV-082, D-13 ---- */
 
@@ -67,6 +68,9 @@ void settings_read_file(app_state_t *app) {
 #define KEY_ROWS_MAX 1024
 typedef struct { size_t binding, combo; } key_combo_row_t;
 static bool g_keys_by_key;
+static bool g_keys_layout;                       /* RV-217: the keyboard drawn, a dot a kind of binding on each key */
+#define KEYS_LAYOUT_ROWS 16                       /* 13 for the keyboard (two rows a key), the dots' key, what is not on it */
+static bool keys_layout_click(app_state_t *app, double px, double py);
 static int32_t g_key_row[KEY_ROWS_MAX];          /* by function: a binding, or -(context + 1) for a heading */
 static key_combo_row_t g_key_combo[KEY_ROWS_MAX];  /* by key: every key of every binding, sorted (RV-193) */
 static size_t g_key_row_count;
@@ -335,6 +339,20 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
         return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
     }
     if (!proven_u8str_view_eq(source, PROVEN_LIT("keymap"))) return 0;
+    if (g_keys_layout) {   /* RV-217: the rows are the keyboard's room; drawn by keys_layout_draw */
+        int n = 0;
+        if (index == 0) n = snprintf(buffer, capacity, "%s", T("the keyboard: a dot for each kind of key that does something (click a key: what it does)"));
+        else if (index == KEYS_LAYOUT_ROWS) {
+            proven_u8str_view_t off[24];
+            size_t k = rubraview_keyboard_off_layout(&app->keymap, off, 24);
+            if (k > 0) {
+                n = snprintf(buffer, capacity, "%s", T("not on this keyboard:"));
+                for (size_t i = 0; i < k && n > 0 && (size_t)n < capacity; ++i)
+                    n += snprintf(buffer + n, capacity - (size_t)n, " %.*s", (int)off[i].size, (const char *)off[i].ptr);
+            }
+        }
+        return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
+    }
     if (index == 0) {
         int32_t pad_key = 20 - rubraview_settings_text_cells(proven_u8str_view_from_cstr(T("key")));
         int32_t pad = 14 - rubraview_settings_text_cells(proven_u8str_view_from_cstr(T("where")));
@@ -431,6 +449,11 @@ static int key_row_compare(const void *pa, const void *pb) {
 
 void keymap_table_refresh(app_state_t *app) {
     g_key_row_count = 0;
+    if (g_keys_layout) {   /* RV-217 */
+        g_key_row_count = KEYS_LAYOUT_ROWS;
+        rubraview_settings_view_set_table_rows(&app->settings_view, KEYS_LAYOUT_ROWS + 1);
+        return;
+    }
     if (g_keys_by_key) {
         /* RV-193 (owner, 2026-10-30): every key of every context, a key's family together (A, Shift+A, Ctrl+A, ...),
            the keys as the keyboard lies or A-Z (Keys › order); one key's contexts in the order of the headings */
@@ -461,7 +484,7 @@ void keymap_table_refresh(app_state_t *app) {
 
 /* The binding a Keys row is, or -1 for a heading or a row of the by-key list. */
 static int32_t keymap_row_binding(int32_t row) {
-    if (g_keys_by_key || row < 1 || (size_t)row > g_key_row_count) return -1;
+    if (g_keys_by_key || g_keys_layout || row < 1 || (size_t)row > g_key_row_count) return -1;
     return g_key_row[row - 1];
 }
 
@@ -1463,7 +1486,14 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 settings_say(app, rubraview_pal_shell_open_web("https://gmic.eu/download.html")
                                       ? T("the G'MIC download page is opening in the browser")
                                       : T("the browser could not be started"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("keys.layout"))) {   /* RV-217 */
+                g_keys_layout = !g_keys_layout;
+                app->key_capture = 0;
+                keymap_table_refresh(app);
+                settings_say(app, g_keys_layout ? T("the keyboard: red alone, yellow Shift, blue Ctrl, green Alt, purple two or more")
+                                                : g_keys_by_key ? T("the keys by key: what each does, and where") : T("the keys by function, a context at a time"));
             } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("keys.by_key"))) {   /* RV-184 */
+                g_keys_layout = false;
                 g_keys_by_key = !g_keys_by_key;
                 app->key_capture = 0;
                 keymap_table_refresh(app);
@@ -1978,6 +2008,7 @@ size_t settings_pump(app_state_t *app) {
                 int32_t col = (int32_t)(event.mouse.x / app->settings_cell_w);
                 int32_t row = (int32_t)(event.mouse.y / app->settings_cell_h);
                 if (app->settings_sel.active) { app->settings_sel.active = false; app->settings_dirty = true; }
+                if (keys_layout_click(app, event.mouse.x, event.mouse.y)) { app->settings_dirty = true; break; }   /* RV-217 */
                 if (col >= view->content_col && row != RUBRAVIEW_SETTINGS_BUTTON_ROW &&
                     ((event.mouse.modifiers & RUBRAVIEW_MOD_SHIFT) || settings_row_is_text(app, row))) {
                     int32_t c = col - view->content_col;
@@ -3321,6 +3352,102 @@ void settings_sb_to(app_state_t *app, size_t first) {
     app->settings_dirty = true;
 }
 
+/* RV-217 (owner, 2026-10-31): the keyboard over the Keys table's rows; a dot a kind of binding, always in the
+   same place on a key: alone red, Shift yellow, Ctrl blue, Alt green, two or more modifiers purple. */
+static const uint32_t KEYMARK_COLOR[RUBRAVIEW_KEYMARK_KINDS] = { 0xFFE5484Du, 0xFFF2C230u, 0xFF3E8BF0u, 0xFF3DBE6Au, 0xFFA66BE8u };
+
+typedef struct { double x, y, unit; bool ok; } keys_layout_box_t;
+
+/* Where the keyboard is on the window: its left top and the size of a key unit. */
+static keys_layout_box_t keys_layout_box(app_state_t *app) {
+    const rubraview_settings_view_t *v = &app->settings_view;
+    keys_layout_box_t b = { 0 };
+    if (!g_keys_layout || v->page != RUBRAVIEW_TAB_KEYS) return b;
+    int32_t first = -1, at = -1;
+    for (int32_t k = 1; k <= KEYS_LAYOUT_ROWS && at < 0; ++k) {
+        int32_t r = rubraview_settings_view_table_screen_row(v, PROVEN_LIT("keymap"), k);
+        if (r >= 0) { at = r; first = k; }
+    }
+    if (at < 0) return b;
+    double cw = app->settings_cell_w, ch = app->settings_cell_h, w = 0, h = 0;
+    rubraview_keyboard_extent(&w, &h);
+    double room = cw * (double)(v->cols - v->content_col - 2);
+    b.unit = room / w < ch * 2.0 ? room / w : ch * 2.0;
+    b.x = cw * v->content_col;
+    b.y = ch * (double)(at - first + 1);   /* table row 1's top, wherever the page is scrolled */
+    b.ok = b.unit > 4.0;
+    return b;
+}
+
+static void keys_layout_draw(app_state_t *app) {
+    keys_layout_box_t b = keys_layout_box(app);
+    if (!b.ok) return;
+    rubraview_renderer_t *r = app->settings_renderer;
+    const rubraview_settings_view_t *v = &app->settings_view;
+    double ch = app->settings_cell_h;
+    double top = ch * RUBRAVIEW_SETTINGS_TOP_ROWS, bottom = ch * (RUBRAVIEW_SETTINGS_TOP_ROWS + rubraview_settings_view_visible_rows(v));
+    size_t count = 0;
+    const rubraview_keycap_t *caps = rubraview_keyboard_caps(&count);
+    double gap = b.unit * 0.08, dot = b.unit * 0.13;
+    for (size_t i = 0; i < count; ++i) {
+        const rubraview_keycap_t *k = &caps[i];
+        rubraview_pal_rect_t cap = { b.x + b.unit * k->x + gap / 2, b.y + b.unit * k->y + gap / 2, b.unit * k->w - gap, b.unit * k->h - gap };
+        if (cap.y < top || cap.y + cap.height > bottom) continue;   /* scrolled off: the buttons stay clear */
+        uint32_t marks = k->name ? rubraview_keyboard_marks(&app->keymap, proven_u8str_view_from_cstr(k->name)) : 0;
+        rubraview_pal_render_fill_rect(r, cap, k->name ? 0xFF2E3640u : 0xFF22282Eu, b.unit * 0.12);
+        rubraview_pal_render_stroke_rect(r, cap, marks ? 0xFF6A7685u : 0xFF3A434Du, 1.0, b.unit * 0.12);
+        rubraview_pal_rect_t words = { cap.x, cap.y + cap.height * 0.06, cap.width, cap.height * 0.55 };
+        rubraview_pal_render_draw_text(r, proven_u8str_view_from_cstr(k->label), words, b.unit * 0.30,
+                                       k->name ? (marks ? SETTINGS_TEXT : SETTINGS_DIM) : 0xFF59626Du, RUBRAVIEW_TEXT_CENTER);
+        double step = dot * 1.6 < cap.width * 0.9 / RUBRAVIEW_KEYMARK_KINDS ? dot * 1.6 : cap.width * 0.9 / RUBRAVIEW_KEYMARK_KINDS;
+        for (int m = 0; m < RUBRAVIEW_KEYMARK_KINDS; ++m) {   /* five places along the foot, each kind its own */
+            if (!(marks & (1u << m))) continue;
+            double cx = cap.x + cap.width / 2 + (m - 2) * step, cy = cap.y + cap.height - dot * 1.2;
+            rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cx - dot / 2, cy - dot / 2, dot, dot }, KEYMARK_COLOR[m], dot / 2);
+        }
+    }
+    /* the dots' key, on the row under the keyboard */
+    double w = 0, h = 0;
+    rubraview_keyboard_extent(&w, &h);
+    double y = b.y + b.unit * h + ch * 0.3;
+    if (y < top || y + ch > bottom) return;
+    const char *const WORDS[RUBRAVIEW_KEYMARK_KINDS] = { T("alone"), "Shift", "Ctrl", "Alt", T("two or more") };
+    double x = b.x;
+    for (int m = 0; m < RUBRAVIEW_KEYMARK_KINDS; ++m) {
+        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x, y + ch * 0.3, ch * 0.4, ch * 0.4 }, KEYMARK_COLOR[m], ch * 0.2);
+        proven_u8str_view_t said = proven_u8str_view_from_cstr(WORDS[m]);
+        rubraview_pal_render_draw_text_mono(r, said, x + ch * 0.6, y, app->settings_font, SETTINGS_TEXT);
+        x += ch * 0.6 + app->settings_cell_w * (double)(rubraview_settings_text_cells(said) + 3);
+    }
+}
+
+/* A click on a key: what it does, everywhere it does something, under the page. True when it was on a key. */
+static bool keys_layout_click(app_state_t *app, double px, double py) {
+    keys_layout_box_t b = keys_layout_box(app);
+    if (!b.ok) return false;
+    int32_t at = rubraview_keyboard_cap_at((px - b.x) / b.unit, (py - b.y) / b.unit);
+    if (at < 0) return false;
+    size_t count = 0;
+    const rubraview_keycap_t *k = &rubraview_keyboard_caps(&count)[at];
+    char said[sizeof(app->settings_message)];
+    int n = snprintf(said, sizeof said, "%s:", k->label);
+    bool any = false;
+    for (size_t i = 0; k->name && i < app->keymap.count && n > 0 && (size_t)n < sizeof said; ++i) {
+        const rubraview_key_binding_t *bd = &app->keymap.bindings[i];
+        for (size_t c = 0; c < bd->combo_count && (size_t)n < sizeof said; ++c) {
+            if (!proven_u8str_view_eq_ascii_ci(bd->combos[c].key_name, proven_u8str_view_from_cstr(k->name))) continue;
+            char combo[64];
+            proven_u8str_view_t keys = rubraview_key_combo_format(combo, sizeof combo, bd->combos[c]);
+            n += snprintf(said + n, sizeof said - (size_t)n, "%s %.*s %.*s", any ? ";" : "", (int)keys.size, (const char *)keys.ptr,
+                          (int)bd->action.size, (const char *)bd->action.ptr);
+            any = true;
+        }
+    }
+    if (!any) snprintf(said, sizeof said, k->name ? T("%s: nothing") : T("%s: a modifier, held with other keys"), k->label);
+    settings_say(app, said);
+    return true;
+}
+
 void draw_settings_window(app_state_t *app) {
     if (!app->settings_open || !app->settings_dirty) return;
     app->settings_dirty = false;
@@ -3411,6 +3538,7 @@ void draw_settings_window(app_state_t *app) {
 
     skip_dirs_draw_x(app);
     settings_path_draw(app);
+    keys_layout_draw(app);   /* RV-217 */
 
     /* Under the page: the last action's result (the buttons are at the top). */
     if (app->settings_message[0]) {
