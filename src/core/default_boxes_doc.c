@@ -50,6 +50,7 @@ static const char *const PARTS[] = {
 "  tile toggle_subtitles         \"Sub\"\n"
 "  tile toggle_subtitle_window   \"Subs\"\n"
 "  group\n"
+"  tile center_picture           \"Centre\"\n"   /* RV-214 (owner, 2026-10-31): a film's too */
 "  tile zoom_cycle               \"100%\"\n"
 "  tile fit_cycle                \"Fit\"\n"
 "  group\n"

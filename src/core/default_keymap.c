@@ -42,6 +42,10 @@ const char *rubraview_default_keymap(void) {
     "window_move_right = \"Alt+Right\"\n"
     "window_move_up = \"Alt+Up\"\n"
     "window_move_down = \"Alt+Down\"\n"
+    /* RV-214 (owner, 2026-10-31: "위아래는 동영상과 이미지 둘 다 볼륨조절로"): Up and Down the volume wherever, a text's own
+       lines first; with a picture it is the music behind it. */
+    "media_volume_up = \"Up\"\n"
+    "media_volume_down = \"Down\"\n"
     "\n"
 
     /* What is done to files: opening, saving, changing, keeping (RV-184: once in [ui]). */
@@ -85,12 +89,14 @@ const char *rubraview_default_keymap(void) {
        moves between files is a short, deliberate list. */
     /* . and , as well (owner, 2026-10-14); in a multi-page file they step its pages first ([multipage]),
        and in an animation or a film its frames ([playback]). */
-    "next_page = \"PageDown, Space, Enter, Period\"\n"
-    "prev_page = \"PageUp, Backspace, Shift+Space, Comma\"\n"
+    /* RV-214 (owner, 2026-10-31: "좌우키는 시간 이동이나 다음이전 페이지로 넘기는 기능으로"): Right and Left turn the page
+       again; a film's own (seek) are asked first. */
+    "next_page = \"PageDown, Space, Enter, Period, Right\"\n"
+    "prev_page = \"PageUp, Backspace, Shift+Space, Comma, Left\"\n"
     "first_page = \"Home, Ctrl+Home\"\n"
     "last_page = \"End, Ctrl+End\"\n"
-    "skip_forward = \"Shift+Right, Ctrl+PageDown\"\n"
-    "skip_backward = \"Shift+Left, Ctrl+PageUp\"\n"
+    "skip_forward = \"Ctrl+PageDown\"\n"   /* RV-214: Shift+arrows move the picture now */
+    "skip_backward = \"Ctrl+PageUp\"\n"
     /* §3.7.2 gives "up to folder" Backspace and Alt+Up; Backspace turns a
        page (owner, 2026-09-09), Alt+Up moves the window and Ctrl+Up sizes
        it (D-16). Ctrl+Backspace: back, one step wider. */
@@ -121,11 +127,12 @@ const char *rubraview_default_keymap(void) {
     "toggle_fit_lock = \"L\"\n"
     "zoom_in = \"Plus\"\n"
     "zoom_out = \"Minus\"\n"
-    /* The arrows move a picture larger than the window (owner, 2026-10-14); a film's are its own (seek, volume). */
-    "pan_left = \"Left\"\n"
-    "pan_right = \"Right\"\n"
-    "pan_up = \"Up\"\n"
-    "pan_down = \"Down\"\n"
+    /* RV-214 (owner, 2026-10-31: "쉬프트 화살표키를 동영상, 이미지 둘 다에서 화면 위에서 이동하는 키로"): Shift and an
+       arrow move a picture or a film larger than the window (the arrows alone did, 2026-10-14). */
+    "pan_left = \"Shift+Left\"\n"
+    "pan_right = \"Shift+Right\"\n"
+    "pan_up = \"Shift+Up\"\n"
+    "pan_down = \"Shift+Down\"\n"
     "rotate_cw = \"R\"\n"
     "rotate_ccw = \"Shift+R\"\n"
     "flip_horizontal = \"H\"\n"
@@ -167,14 +174,11 @@ const char *rubraview_default_keymap(void) {
        (owner, 2026-09-09), so nothing else is lost. */
     "media_seek_forward = \"Right\"\n"
     "media_seek_back = \"Left\"\n"
-    /* 30 s, as the edge buttons' second step (owner, 2026-09-29). Shift +
-       an arrow skips ten files elsewhere; Ctrl+PageDown/PageUp still do. */
-    "media_seek_forward_long = \"Shift+Right\"\n"
+    /* 30 s (owner, 2026-09-29); RV-214: on Shift+PageDown / PageUp, Shift+arrows moving the picture. */
+    "media_seek_forward_long = \"Shift+PageDown\"\n"
     "media_seek_forward_fine = \"Ctrl+Shift+Right\"\n"
     "media_seek_back_fine = \"Ctrl+Shift+Left\"\n"
-    "media_seek_back_long = \"Shift+Left\"\n"
-    "media_volume_up = \"Up\"\n"
-    "media_volume_down = \"Down\"\n"
+    "media_seek_back_long = \"Shift+PageUp\"\n"
     "media_mute = \"Shift+M\"\n"
     /* D-15 A-B repeat: the brackets with Shift (RV-184), the two ends marked. */
     "media_ab_a = \"Shift+BracketLeft\"\n"
@@ -248,5 +252,21 @@ const char *rubraview_default_keymap_retired(void) {
     "toggle_file_list = \"F3\"\n"
     "toggle_filmstrip = \"F4\"\n"
     "[slideshow]\n"
-    "toggle_slideshow = \"S, F5\"\n";
+    "toggle_slideshow = \"S, F5\"\n"
+    /* RV-214: the arrows' defaults before Shift moved the picture */
+    "[image]\n"
+    "pan_left = \"Left\"\n"
+    "pan_right = \"Right\"\n"
+    "pan_up = \"Up\"\n"
+    "pan_down = \"Down\"\n"
+    "[navigation]\n"
+    "next_page = \"PageDown, Space, Enter, Period\"\n"
+    "prev_page = \"PageUp, Backspace, Shift+Space, Comma\"\n"
+    "skip_forward = \"Shift+Right, Ctrl+PageDown\"\n"
+    "skip_backward = \"Shift+Left, Ctrl+PageUp\"\n"
+    "[playback]\n"
+    "media_seek_forward_long = \"Shift+Right\"\n"
+    "media_seek_back_long = \"Shift+Left\"\n"
+    "media_volume_up = \"Up\"\n"
+    "media_volume_down = \"Down\"\n";
 }

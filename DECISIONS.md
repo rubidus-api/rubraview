@@ -2872,3 +2872,14 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: the tap's release (`MOUSE_UP`) counts a second one on the same item, same listing, within 0.45 s as
   opening it in any mode, the first tap's pick undone; a quick tap right after one that entered a folder is dropped.
   Folders already have check boxes there (1.22.0; seen on the VM).
+
+## 2026-10-31: D-245 The arrows: page and volume; Shift moves the picture (W-20261031-1800)
+
+- Status: Accepted (owner 2026-10-31: "쉬프트 화살표키를 동영상, 이미지 둘 다에서 화면 위에서 이동하는 키로 하지요. 그리고 좌우키는
+  시간 이동이나 다음이전 페이지로 넘기는 기능으로 하고, 위아래는 동영상과 이미지 둘 다 볼륨조절로 하지요").
+- Decision: `pan_*` on Shift + the arrows in `[image]` (asked for a film too); `next_page` / `prev_page` take
+  `Right` / `Left` (undoing 2026-09-09's choice, on the owner's word), a film's seek asked first; the volume moves to
+  `[common]` on Up / Down, a text's lines asked first; what Shift + the arrows did moves: ten files to Ctrl+PageDown /
+  PageUp alone, a film's 30 s to Shift+PageDown / PageUp. The old arrows join `rubraview_default_keymap_retired`. The
+  film's Toolbar gets Centre (`center_picture`), which only the pictures' had since 1.25.0.
+- Consequences: T269's like pairs name seek over paging and a text's lines over the volume.

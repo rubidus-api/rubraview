@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.39.53** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.53/rubraview-v1.39.53.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.53/rubraview-v1.39.53.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.53/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.39.54** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.54/rubraview-v1.39.54.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.54/rubraview-v1.39.54.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.54/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -74,6 +74,8 @@
 | `Alt+Right` | 창 오른쪽으로 |
 | `Alt+Up` | 창 위로 |
 | `Alt+Down` | 창 아래로 |
+| `Up` | 소리 5% 크게 |
+| `Down` | 소리 5% 작게 |
 
 **파일 (어디서나)**
 
@@ -104,12 +106,12 @@
 
 | 키 | 하는 일 |
 |---|---|
-| `PageDown`, `Space`, `Enter`, `.` | 다음 장 |
-| `PageUp`, `Backspace`, `Shift+Space`, `,` | 이전 장 |
+| `PageDown`, `Space`, `Enter`, `.`, `Right` | 다음 장 |
+| `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | 이전 장 |
 | `Home`, `Ctrl+Home` | 첫 장 |
 | `End`, `Ctrl+End` | 마지막 장 |
-| `Shift+Right`, `Ctrl+PageDown` | 열 장 뒤로 |
-| `Shift+Left`, `Ctrl+PageUp` | 열 장 앞으로 |
+| `Ctrl+PageDown` | 열 장 뒤로 |
+| `Ctrl+PageUp` | 열 장 앞으로 |
 | `Ctrl+Backspace` | 상위 폴더로 |
 | `]` | 다음 폴더 또는 압축 |
 | `[` | 이전 폴더 또는 압축 |
@@ -133,10 +135,10 @@
 | `L` | 다음 파일에도 이 맞춤 유지 |
 | `+` | 확대 |
 | `-` | 축소 |
-| `Left` | 확대한 그림: 왼쪽 보기 |
-| `Right` | 확대한 그림: 오른쪽 보기 |
-| `Up` | 확대한 그림: 위쪽 보기 (웹툰은 스크롤) |
-| `Down` | 확대한 그림: 아래쪽 보기 (웹툰은 스크롤) |
+| `Shift+Left` | 확대한 그림: 왼쪽 보기 |
+| `Shift+Right` | 확대한 그림: 오른쪽 보기 |
+| `Shift+Up` | 확대한 그림: 위쪽 보기 (웹툰은 스크롤) |
+| `Shift+Down` | 확대한 그림: 아래쪽 보기 (웹툰은 스크롤) |
 | `R` | 시계 방향 회전 |
 | `Shift+R` | 반시계 방향 회전 |
 | `H` | 좌우 뒤집기 |
@@ -175,12 +177,10 @@
 | `Ctrl+\` | 보통 속도 |
 | `Right` | 5초 뒤로; 툴바 버튼을 길게 누르면 5초·10초·30초·1분·5분이 떠서 끌어다 놓아 고름 |
 | `Left` | 5초 앞으로; 툴바 버튼을 길게 누르면 같은 방식으로 5초~5분 |
-| `Shift+Right` | 30초 뒤로 |
+| `Shift+PageDown` | 30초 뒤로 |
 | `Ctrl+Shift+Right` | 1초 뒤로 |
 | `Ctrl+Shift+Left` | 1초 앞으로 |
-| `Shift+Left` | 30초 앞으로 |
-| `Up` | 소리 5% 크게 |
-| `Down` | 소리 5% 작게 |
+| `Shift+PageUp` | 30초 앞으로 |
 | `Shift+M` | 음소거/해제 |
 | `Shift+[` | 여기서부터 반복(A) |
 | `Shift+]` | 여기까지 반복(B) |
@@ -239,11 +239,11 @@
 | 툴바 `EQ bands`, 오른쪽 클릭 `Equaliser window` | 이퀄라이저 10밴드 창 |
 | 툴바 `Night` | 야간 모드: 큰 소리를 줄임 |
 | 툴바 `Sub`, 오른쪽 클릭 `Subtitles on / off` | 자막 켜기/끄기 |
+| 툴바 `Centre` | 그림의 가운데를 창의 가운데로 (크기는 그대로, 더블클릭으로도) |
 | 툴바 `100%` | 배율 순환: 실제 크기(0 %), 20 %부터 200 %까지 20 %씩, 다시 실제 크기 (툴바 버튼을 누르면 목록에서 고름) |
 | 툴바 `Fit` | 맞춤 순환: 창, 너비, 높이, 스마트, 늘이기, 다시 창 (툴바 버튼을 누르면 목록에서 고름) |
 | 툴바 `Hide` | 화면을 클릭할 때까지 타이틀바와 플로팅 박스 숨기기 |
 | 툴바 `Viz` | 분석기: 막대 / 파형 / 끔 (툴바 버튼을 누르면 목록에서 고름) |
-| 툴바 `Centre` | 그림의 가운데를 창의 가운데로 (크기는 그대로, 더블클릭으로도) |
 | 툴바 `Wheel strip` | 휠로 넘길 때 썸네일 |
 | 툴바 `Edit` | 텍스트: 설정 > 텍스트의 편집기로 파일 열기 (없으면 메모장) |
 | 툴바 `Reload` | 텍스트: 파일을 다시 읽기 (보던 곳 그대로) |

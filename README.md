@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.39.53** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.53/rubraview-v1.39.53.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.53/rubraview-v1.39.53.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.53/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.39.54** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.54/rubraview-v1.39.54.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.54/rubraview-v1.39.54.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.54/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -75,6 +75,8 @@ ships with, so it cannot drift from them.
 | `Alt+Right` | Move the window right |
 | `Alt+Up` | Move the window up |
 | `Alt+Down` | Move the window down |
+| `Up` | Volume up 5% |
+| `Down` | Volume down 5% |
 
 **Files (always)**
 
@@ -105,12 +107,12 @@ ships with, so it cannot drift from them.
 
 | Keys | What it does |
 |---|---|
-| `PageDown`, `Space`, `Enter`, `.` | Next page |
-| `PageUp`, `Backspace`, `Shift+Space`, `,` | Previous page |
+| `PageDown`, `Space`, `Enter`, `.`, `Right` | Next page |
+| `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | Previous page |
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |
-| `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
-| `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
+| `Ctrl+PageDown` | Ten pages on |
+| `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
 | `]` | Next folder or archive |
 | `[` | Previous folder or archive |
@@ -134,10 +136,10 @@ ships with, so it cannot drift from them.
 | `L` | Keep the fit for the next files |
 | `+` | Zoom in |
 | `-` | Zoom out |
-| `Left` | A zoomed picture: see further left |
-| `Right` | A zoomed picture: see further right |
-| `Up` | A zoomed picture: see further up (the webtoon strip scrolls) |
-| `Down` | A zoomed picture: see further down (the webtoon strip scrolls) |
+| `Shift+Left` | A zoomed picture: see further left |
+| `Shift+Right` | A zoomed picture: see further right |
+| `Shift+Up` | A zoomed picture: see further up (the webtoon strip scrolls) |
+| `Shift+Down` | A zoomed picture: see further down (the webtoon strip scrolls) |
 | `R` | Rotate clockwise |
 | `Shift+R` | Rotate anticlockwise |
 | `H` | Flip left-right |
@@ -176,12 +178,10 @@ ships with, so it cannot drift from them.
 | `Ctrl+\` | Normal speed |
 | `Right` | 5 seconds on; its Toolbar button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
 | `Left` | 5 seconds back; its Toolbar button, held, offers 5 s to 5 min the same way |
-| `Shift+Right` | 30 seconds on |
+| `Shift+PageDown` | 30 seconds on |
 | `Ctrl+Shift+Right` | 1 second on |
 | `Ctrl+Shift+Left` | 1 second back |
-| `Shift+Left` | 30 seconds back |
-| `Up` | Volume up 5% |
-| `Down` | Volume down 5% |
+| `Shift+PageUp` | 30 seconds back |
 | `Shift+M` | Mute / sound |
 | `Shift+[` | Repeat from here (A) |
 | `Shift+]` | Repeat to here (B) |
@@ -240,11 +240,11 @@ ships with, so it cannot drift from them.
 | Toolbar `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbar `Night` | Night mode: loud passages brought down |
 | Toolbar `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
+| Toolbar `Centre` | The picture's middle on the window's, its size as it is (a double click does it too) |
 | Toolbar `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
 | Toolbar `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
 | Toolbar `Hide` | Hide the title bar and the Floating Widget until the picture is clicked |
 | Toolbar `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
-| Toolbar `Centre` | The picture's middle on the window's, its size as it is (a double click does it too) |
 | Toolbar `Wheel strip` | Thumbnails while the wheel turns pages |
 | Toolbar `Edit` | Text: open the file in the editor Settings > Text names (Notepad without one) |
 | Toolbar `Reload` | Text: read the file again, at the same place |

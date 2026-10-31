@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.53.exe              the viewer, as built
-dist/rubraview-v1.39.53/                 the release bundle
-dist/rubraview-v1.39.53.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.54.exe              the viewer, as built
+dist/rubraview-v1.39.54/                 the release bundle
+dist/rubraview-v1.39.54.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1242,10 +1242,12 @@ step) — to the next round figure: 100 %, 110 %, 120 %. `0` puts 100 %
 back with the picture in the middle; `4` shows real size.
 
 The picture follows the pointer when it is dragged, at any zoom. When it
-is larger than the window the arrow keys move it too: a seventh of the
-window a press toward the side the arrow points to, stopping at the
-picture's edge (a picture that fits stays; a film keeps its arrows for
-seeking and the volume; in the webtoon strip Up and Down scroll). A click
+is larger than the window `Shift` and an arrow move it too — a picture's
+or a film's: a seventh of the window a press toward the side the arrow
+points to, stopping at the picture's edge (a picture that fits stays). The
+arrows alone turn the page (`Left` / `Right`; a film seeks with them) and
+set the volume (`Up` / `Down`, for a film, a song or the music behind the
+pictures; in the webtoon strip and a text Up and Down scroll). A click
 without a drag is what it was: a page turned at the window's sides, the
 boxes shown in its middle.
 
@@ -1269,8 +1271,8 @@ and a tall column of four buttons shows; a click at the edge before it
 shows simply goes to the previous or next page or file. For pictures the
 left ones go to the previous file, ten back and the first, the right ones
 to the next, ten on and the last; for a film or a song they go 5 s and 5 %
-of its length back or on, and to the previous or next file (`Shift` +
-`Left`/`Right` go 30 s). The fourth, |◁ or ▷|, opens the
+of its length back or on, and to the previous or next file
+(`Shift+PageDown` / `Shift+PageUp` go 30 s). The fourth, |◁ or ▷|, opens the
 archive before or after this one in its folder — or, for files in a
 folder, the folder before or after — as `[` / `]` do, and the
 Toolbar's |◁ ▷|, which stand beside its page buttons (◁◁ ▷▷) for every
@@ -1789,6 +1791,8 @@ listed under a later heading only means that while that is on screen.
 | `Alt+Right` | Move the window right |
 | `Alt+Up` | Move the window up |
 | `Alt+Down` | Move the window down |
+| `Up` | Volume up 5% |
+| `Down` | Volume down 5% |
 
 **Files (always)**
 
@@ -1819,12 +1823,12 @@ listed under a later heading only means that while that is on screen.
 
 | Keys | What it does |
 |---|---|
-| `PageDown`, `Space`, `Enter`, `.` | Next page |
-| `PageUp`, `Backspace`, `Shift+Space`, `,` | Previous page |
+| `PageDown`, `Space`, `Enter`, `.`, `Right` | Next page |
+| `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | Previous page |
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |
-| `Shift+Right`, `Ctrl+PageDown` | Ten pages on |
-| `Shift+Left`, `Ctrl+PageUp` | Ten pages back |
+| `Ctrl+PageDown` | Ten pages on |
+| `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
 | `]` | Next folder or archive |
 | `[` | Previous folder or archive |
@@ -1848,10 +1852,10 @@ listed under a later heading only means that while that is on screen.
 | `L` | Keep the fit for the next files |
 | `+` | Zoom in |
 | `-` | Zoom out |
-| `Left` | A zoomed picture: see further left |
-| `Right` | A zoomed picture: see further right |
-| `Up` | A zoomed picture: see further up (the webtoon strip scrolls) |
-| `Down` | A zoomed picture: see further down (the webtoon strip scrolls) |
+| `Shift+Left` | A zoomed picture: see further left |
+| `Shift+Right` | A zoomed picture: see further right |
+| `Shift+Up` | A zoomed picture: see further up (the webtoon strip scrolls) |
+| `Shift+Down` | A zoomed picture: see further down (the webtoon strip scrolls) |
 | `R` | Rotate clockwise |
 | `Shift+R` | Rotate anticlockwise |
 | `H` | Flip left-right |
@@ -1890,12 +1894,10 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+\` | Normal speed |
 | `Right` | 5 seconds on; its Toolbar button, held, offers 5 s, 10 s, 30 s, 1 min and 5 min to drag onto |
 | `Left` | 5 seconds back; its Toolbar button, held, offers 5 s to 5 min the same way |
-| `Shift+Right` | 30 seconds on |
+| `Shift+PageDown` | 30 seconds on |
 | `Ctrl+Shift+Right` | 1 second on |
 | `Ctrl+Shift+Left` | 1 second back |
-| `Shift+Left` | 30 seconds back |
-| `Up` | Volume up 5% |
-| `Down` | Volume down 5% |
+| `Shift+PageUp` | 30 seconds back |
 | `Shift+M` | Mute / sound |
 | `Shift+[` | Repeat from here (A) |
 | `Shift+]` | Repeat to here (B) |
@@ -1954,11 +1956,11 @@ listed under a later heading only means that while that is on screen.
 | Toolbar `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a window over the picture |
 | Toolbar `Night` | Night mode: loud passages brought down |
 | Toolbar `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
+| Toolbar `Centre` | The picture's middle on the window's, its size as it is (a double click does it too) |
 | Toolbar `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
 | Toolbar `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
 | Toolbar `Hide` | Hide the title bar and the Floating Widget until the picture is clicked |
 | Toolbar `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
-| Toolbar `Centre` | The picture's middle on the window's, its size as it is (a double click does it too) |
 | Toolbar `Wheel strip` | Thumbnails while the wheel turns pages |
 | Toolbar `Edit` | Text: open the file in the editor Settings > Text names (Notepad without one) |
 | Toolbar `Reload` | Text: read the file again, at the same place |
