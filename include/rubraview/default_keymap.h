@@ -17,6 +17,12 @@ extern "C" {
  * check that coverage mechanically (T032) instead of by eye on Windows.
  */
 const char *rubraview_default_keymap(void);
+/**
+ * RV-211: defaults given up, as the keys they were (the function keys, owner 2026-10-31). A keymap.ini still
+ * holding one of these for its action exactly (the reader never changed it) takes today's instead
+ * (rubraview_keymap_retire).
+ */
+const char *rubraview_default_keymap_retired(void);
 
 #ifdef __cplusplus
 }

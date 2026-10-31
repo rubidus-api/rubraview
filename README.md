@@ -1,10 +1,10 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.39.51** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.51/rubraview-v1.39.51.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.51/rubraview-v1.39.51.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.51/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.39.52** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.52/rubraview-v1.39.52.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.52/rubraview-v1.39.52.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.52/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
 Lightweight, high-performance Windows desktop multimedia viewer, video player, and batch image processor built with pure C23 and WinAPI.
 
-Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: nothing needs installing. Or get it from the [Microsoft Store](https://apps.microsoft.com/detail/9n99b2x63k7x), which installs it and keeps it up to date. The MSI is for those who want it installed: Program Files, the Start menu, and Explorer's right-click menus (Windows 11's own among them) registered for every user. FFmpeg's DLLs are optional, beside it, only for the formats Media Foundation cannot open. Comic archives — CBZ / ZIP, CB7 / 7z and CBR / RAR (RAR 2.0 to 7.0), solid, split or password-protected — are read by FultaArc (MIT, no UnRAR code), which Rubraview carries in its source. A page inside an archive can be deleted (`Delete`), renamed (`F2`) or saved after an edit: a ZIP / CBZ or a 7z / CB7 keeps its format, anything else (a solid 7z, RAR / CBR, ALZ, EGG, a split set) is written again as a ZIP or a 7z of your choice and the old file goes to the Recycle Bin. Encrypted archives are not changed.
+Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: nothing needs installing. Or get it from the [Microsoft Store](https://apps.microsoft.com/detail/9n99b2x63k7x), which installs it and keeps it up to date. The MSI is for those who want it installed: Program Files, the Start menu, and Explorer's right-click menus (Windows 11's own among them) registered for every user. FFmpeg's DLLs are optional, beside it, only for the formats Media Foundation cannot open. Comic archives — CBZ / ZIP, CB7 / 7z and CBR / RAR (RAR 2.0 to 7.0), solid, split or password-protected — are read by FultaArc (MIT, no UnRAR code), which Rubraview carries in its source. A page inside an archive can be deleted (`Delete`), renamed (`Ctrl+M`) or saved after an edit: a ZIP / CBZ or a 7z / CB7 keeps its format, anything else (a solid 7z, RAR / CBR, ALZ, EGG, a split set) is written again as a ZIP or a 7z of your choice and the old file goes to the Recycle Bin. Encrypted archives are not changed.
 
 > This English README is the canonical version; the Korean one is its translation.
 
@@ -44,9 +44,9 @@ Rubraview is designed as a fast, bloat-free desktop tool that combines responsiv
 
 ## Keyboard shortcuts
 
-`F1` opens this same list in a window of its own, which stays open while
+`?` opens this same list in a window of its own, which stays open while
 you read. Every key here can be changed on the settings window's Keys
-page (`F10`), and the table below is generated from the keys the viewer
+page (`Ctrl+,`), and the table below is generated from the keys the viewer
 ships with, so it cannot drift from them.
 
 <!-- keys:begin — generated from src/core/default_keymap.c by scripts/check-actions.py --write; do not edit -->
@@ -55,15 +55,15 @@ ships with, so it cannot drift from them.
 
 | Keys | What it does |
 |---|---|
-| `F`, `F11`, `Alt+Enter` | Full screen |
+| `F`, `Alt+Enter` | Full screen |
 | `T` | Open or close the Toolbar |
 | `Shift+T` | Pin the Toolbar open |
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |
 | `Ctrl+Shift+T` | Always on top of other windows |
 | `Shift+I` | Information bar |
 | `Ctrl+N` | A new window: the viewer once more, nothing open |
-| `F10`, `Ctrl+,` | Settings |
-| `F1` | This help, in a window of its own |
+| `Ctrl+,` | Settings |
+| `Shift+/` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `Shift+P` | Mini player |
 | `Esc` | Quit |
@@ -90,13 +90,13 @@ ships with, so it cannot drift from them.
 | `Delete` | To the recycle bin; a page inside an archive is deleted from it (asks first) |
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
-| `F2` | Rename, keeping the extension; a page inside an archive too |
+| `Ctrl+M` | Rename, keeping the extension; a page inside an archive too |
 | `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
 | `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
-| `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
-| `F7` | Move the file on screen to the folder set for it |
-| `Shift+F6` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
-| `Shift+F7` | Move the file on screen to a folder typed or browsed; one not there yet is made |
+| `Ctrl+Shift+C` | Copy the file on screen to the folder set for it (a page inside an archive too) |
+| `Ctrl+Shift+M` | Move the file on screen to the folder set for it |
+| `Alt+C` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
+| `Alt+M` | Move the file on screen to a folder typed or browsed; one not there yet is made |
 | `K` | Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once |
 | `Ctrl+C` | Copy the frame on screen (a film, an animation), or the picture itself |
 | `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
@@ -114,8 +114,8 @@ ships with, so it cannot drift from them.
 | `Ctrl+Backspace` | Up to the folder |
 | `]` | Next folder or archive |
 | `[` | Previous folder or archive |
-| `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
-| `F4` | Filmstrip |
+| `Ctrl+L` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
+| `Shift+F` | Filmstrip |
 | `P` | The playlist, or this folder's files, floating over the picture |
 | `Shift+N` | Read the open archive's file names in the next code page (Shift-JIS, GBK, Big5, ...), for that archive only |
 
@@ -158,7 +158,7 @@ ships with, so it cannot drift from them.
 
 | Keys | What it does |
 |---|---|
-| `S`, `F5` | Start or stop the slide show |
+| `S` | Start or stop the slide show |
 | `Ctrl+]` | Faster slides (0.5 s) |
 | `Ctrl+[` | Slower slides (0.5 s) |
 | `Ctrl+Shift+]` | Faster slides (0.1 s) |
@@ -318,11 +318,11 @@ These belong to their window and are not on the Keys page.
 | Where | Keys |
 |---|---|
 | The file picker (`O`) | Arrows move; `Enter` opens (`Shift+Enter` shows an archive's pages as tiles); `Backspace` goes up a folder; a letter or a digit jumps to the next name starting with it; `Ctrl+L` types a path; `Ctrl+D` stars the folder; `Esc` closes. Right-click an archive for its pages, a starred folder to rename it |
-| The file list window (`F3`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End` choose a file and preview it; `Enter` or a click turns the viewer to it; `Esc` closes; every other key does what it does in the viewer |
-| Settings (`F10`) | `Up` / `Down` move; `Left` / `Right` change a value (`PageUp` / `PageDown` by ten steps); `Enter` or `Space` switches or presses; `Tab` / `Shift+Tab` change the page; `Esc` closes |
-| Help (`F1`), information (`I`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End` scroll; `Esc` closes |
+| The file list window (`Ctrl+L`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End` choose a file and preview it; `Enter` or a click turns the viewer to it; `Esc` closes; every other key does what it does in the viewer |
+| Settings (`Ctrl+,`) | `Up` / `Down` move; `Left` / `Right` change a value (`PageUp` / `PageDown` by ten steps); `Enter` or `Space` switches or presses; `Tab` / `Shift+Tab` change the page; `Esc` closes |
+| Help (`?`), information (`I`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End` scroll; `Esc` closes |
 | The playlist (`P`) | A click goes to a file, the wheel scrolls, `Esc` closes |
-| Rename (`F2`), a typed path, a password | `Enter` accepts, `Esc` gives up |
+| Rename (`Ctrl+M`), a typed path, a password | `Enter` accepts, `Esc` gives up |
 
 ## Layouts
 
@@ -376,7 +376,7 @@ the file named `ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip`. It must be
 **9.0** and the name must say **shared**: a build without `shared` holds
 only the programs, and another version names its DLLs differently, so
 Rubraview will not use them. Unpack the zip where you like, then name its
-`bin` folder in Settings (`F10`) › External › **FFmpeg folder**; it is
+`bin` folder in Settings (`Ctrl+,`) › External › **FFmpeg folder**; it is
 used at once. (Beside `rubraview.exe` works too, after a restart.) The
 `lib` folder's `.dll.a` and `.lib` files are for building against FFmpeg,
 not for running it — leave them.

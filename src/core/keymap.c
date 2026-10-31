@@ -307,6 +307,36 @@ void rubraview_keymap_place_by_action(rubraview_keymap_t *keymap, const rubravie
     }
 }
 
+static bool same_keys(const rubraview_key_binding_t *a, const rubraview_key_binding_t *b) {
+    if (a->combo_count != b->combo_count) return false;
+    for (size_t i = 0; i < a->combo_count; ++i) {
+        bool found = false;
+        for (size_t j = 0; j < b->combo_count && !found; ++j) found = rubraview_key_combo_equal(a->combos[i], b->combos[j]);
+        if (!found) return false;
+    }
+    return true;
+}
+
+size_t rubraview_keymap_retire(rubraview_keymap_t *keymap, const rubraview_keymap_t *retired, const rubraview_keymap_t *defaults) {
+    if (!keymap || !retired || !defaults) return 0;
+    size_t changed = 0;
+    for (size_t i = 0; i < keymap->count; ++i) {
+        rubraview_key_binding_t *b = &keymap->bindings[i];
+        for (size_t r = 0; r < retired->count; ++r) {
+            if (!proven_u8str_view_eq(b->action, retired->bindings[r].action) || !same_keys(b, &retired->bindings[r])) continue;
+            for (size_t d = 0; d < defaults->count; ++d) {
+                if (!proven_u8str_view_eq(b->action, defaults->bindings[d].action)) continue;
+                b->combos = defaults->bindings[d].combos;
+                b->combo_count = defaults->bindings[d].combo_count;
+                changed++;
+                break;
+            }
+            break;
+        }
+    }
+    return changed;
+}
+
 /* The layer under the kinds of file (D-219): common, file and navigation, asked in every mode, and image, asked
    with them wherever a picture is shown. A key in two of these reaches only one of them; the slide show's,
    a multi-page file's, playing's, a film's, music's and a text's own keys are asked first on purpose. */

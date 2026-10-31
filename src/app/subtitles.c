@@ -1392,9 +1392,9 @@ size_t subs_pump(app_state_t *app) {
                 }
                 if (key_is(combo, "Escape")) { subs_close(app); return handled; }
                 if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "S")) { subs_save(app); break; }
-                /* F2 or Enter: the text of the row last clicked. (Enter is not the viewer's
+                /* Enter: the text of the row last clicked (F2 too until RV-211). (Enter is not the viewer's
                    here: there it turns to the next file, and what was changed would be gone.) */
-                if (key_is(combo, "F2") || key_is(combo, "Enter")) {
+                if (key_is(combo, "Enter")) {
                     if (app->subs_anchor < count) subs_edit_begin(app, app->subs_anchor);
                     break;
                 }

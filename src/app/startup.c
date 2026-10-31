@@ -48,6 +48,9 @@ void load_keymap(app_state_t *app) {
     if (own) {
         rubraview_keymap_t defaults = rubraview_keymap_parse(app->arena, cstr(rubraview_default_keymap()));
         rubraview_keymap_place_by_action(&app->keymap, &defaults);
+        /* RV-211: the function keys given up, where the file still has them as they came */
+        rubraview_keymap_t retired = rubraview_keymap_parse(app->arena, cstr(rubraview_default_keymap_retired()));
+        rubraview_keymap_retire(&app->keymap, &retired, &defaults);
         rubraview_keymap_add_missing(app->arena, &app->keymap, &defaults);   /* RV-196: actions made after the file was saved */
     }
 }

@@ -94,7 +94,7 @@ size_t rubraview_help_build(proven_arena_t *arena,
     size_t count = 0;
 
     proven_u8str_view_t empty = PROVEN_LIT("");
-    if (!push(out, max, &count, RUBRAVIEW_HELP_NOTE, empty, lit_text(T("F1 opens and closes this window. It stays open while you read.")))) return count;
+    if (!push(out, max, &count, RUBRAVIEW_HELP_NOTE, empty, lit_text(T("? (Shift+/) opens and closes this window. It stays open while you read.")))) return count;
     if (!push(out, max, &count, RUBRAVIEW_HELP_NOTE, empty, lit_text(T("Every key below can be changed on the settings window's Keys page.")))) return count;
 
     /* RV-184 (D-219): the keymap's contexts in their order, each named with when it is asked; then anything

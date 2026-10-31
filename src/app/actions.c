@@ -1458,7 +1458,7 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
        screen took its Enter, and the typed path went nowhere (VM,
        2026-09-28). */
     if (app->rename_active) {
-        if (app->rename_is_find && (key_is(combo, "F3") || ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && key_is(combo, "Enter")) ||
+        if (app->rename_is_find && (((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && key_is(combo, "Enter")) ||
                                     ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "G")))) {   /* RV-184: Ctrl+G as with the box closed */
             text_find_step(app, !(combo.modifiers & RUBRAVIEW_MOD_SHIFT));   /* RFC-0005: back with Shift */
             return true;

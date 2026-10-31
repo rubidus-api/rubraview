@@ -154,6 +154,13 @@ void rubraview_keymap_place_by_action(rubraview_keymap_t *keymap, const rubravie
  */
 size_t rubraview_keymap_add_missing(proven_arena_t *arena, rubraview_keymap_t *keymap, const rubraview_keymap_t *defaults);
 
+/**
+ * RV-211: a binding whose keys are exactly (in any order) those `retired` gave its action — a default since
+ * changed, which the reader left as it was — takes the keys `defaults` gives that action now. Any other binding
+ * is the reader's and stays. Returns how many changed; `keymap` changes in place (the new keys are `defaults`').
+ */
+size_t rubraview_keymap_retire(rubraview_keymap_t *keymap, const rubraview_keymap_t *retired, const rubraview_keymap_t *defaults);
+
 /** A copy that shares nothing mutable with `source` — what Revert goes back to. */
 rubraview_keymap_t rubraview_keymap_copy(proven_arena_t *arena, const rubraview_keymap_t *source);
 

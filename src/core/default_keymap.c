@@ -12,7 +12,7 @@ const char *rubraview_default_keymap(void) {
     /* Windows, bars and the program's own (§3.7.2). D-13: every binding sits in a section (INI refuses a key
        before the first one) and every value is a quoted string (TOML needs quotes). */
     "[common]\n"
-    "toggle_fullscreen = \"F, F11, Alt+Enter\"\n"
+    "toggle_fullscreen = \"F, Alt+Enter\"\n"
     "toggle_toolbox = \"T\"\n"
     /* RFC-0002 Q6: pin it open, or give it a window of its own. */
     "toggle_toolbox_pin = \"Shift+T\"\n"
@@ -23,9 +23,10 @@ const char *rubraview_default_keymap(void) {
     "toggle_osd = \"Shift+I\"\n"
     /* Owner, 2026-10-16: the viewer once more, in a window of its own. */
     "new_window = \"Ctrl+N\"\n"
-    /* §3.22.1 */
-    "open_settings = \"F10, Ctrl+Comma\"\n"
-    "toggle_help = \"F1\"\n"
+    /* §3.22.1. RV-211 (owner, 2026-10-31: "펑션키 F1~F12 쓰는 단축키는 다른 키로 옮겨주세요"): no function keys —
+       the help on ? (Shift+/), as many programs have it. */
+    "open_settings = \"Ctrl+Comma\"\n"
+    "toggle_help = \"Shift+Slash\"\n"
     /* Owner, 2026-09-29: the file's size, pixels, codec, EXIF — in a window whose text can be copied. */
     "toggle_info = \"I, Ctrl+I\"\n"
     /* §3.14.6 (owner, 2026-09-24): the music in a window of its own — a song's, or the one behind the pictures. */
@@ -58,20 +59,19 @@ const char *rubraview_default_keymap(void) {
     "delete_file = \"Delete\"\n"
     "purge_file = \"Shift+Delete\"\n"
     "undo = \"Ctrl+Z\"\n"
-    "rename_file = \"F2\"\n"
+    "rename_file = \"Ctrl+M\"\n"   /* RV-211: was F2 */
     /* Owner, 2026-10-09: an Explorer window with the file on screen picked
        out — the archive itself for a page inside one. */
     "reveal_in_explorer = \"Ctrl+Enter\"\n"
     /* D-86: the picture on screen through the system's print dialog. */
     "print = \"Ctrl+P\"\n"
     /* Owner, 2026-10-08: the file on screen copied to its folder, or moved
-       to its own (Settings > Files); beside F5, which has nothing to do
-       with files here. */
-    "copy_to_folder = \"F6\"\n"
-    "move_to_folder = \"F7\"\n"
-    /* Owner, 2026-10-16: any folder, typed or browsed, made when it is not there. */
-    "copy_to_other_folder = \"Shift+F6\"\n"
-    "move_to_other_folder = \"Shift+F7\"\n"
+       to its own (Settings > Files). RV-211: C and M with Ctrl+Shift (were F6 and F7). */
+    "copy_to_folder = \"Ctrl+Shift+C\"\n"
+    "move_to_folder = \"Ctrl+Shift+M\"\n"
+    /* Owner, 2026-10-16: any folder, typed or browsed, made when it is not there. RV-211: with Alt (were Shift+F6, F7). */
+    "copy_to_other_folder = \"Alt+C\"\n"
+    "move_to_other_folder = \"Alt+M\"\n"
     "toggle_classify = \"K\"\n"   /* RV-133: set files aside for the nine folders */
     /* RV-108: the frame on screen of a film or an animation, or the picture itself; a text's selection is its own Ctrl+C. */
     "copy_frame = \"Ctrl+C\"\n"
@@ -101,8 +101,8 @@ const char *rubraview_default_keymap(void) {
     "prev_archive = \"BracketLeft\"\n"
     /* Owner, 2026-10-08: the list of what the archive (or the folder) holds,
        with a preview, in a window of its own. */
-    "toggle_file_list = \"F3\"\n"
-    "toggle_filmstrip = \"F4\"\n"
+    "toggle_file_list = \"Ctrl+L\"\n"   /* RV-211: was F3 */
+    "toggle_filmstrip = \"Shift+F\"\n"  /* RV-211: was F4; F is the whole screen */
     /* Owner, 2026-09-29: the playlist (or this folder's files), floating over the picture. */
     "toggle_playlist = \"P\"\n"
     /* The open archive's names, read in the next code page (owner, 2026-10-01); a text's own is the same key. */
@@ -143,10 +143,10 @@ const char *rubraview_default_keymap(void) {
     "subpage_prev = \"Comma\"\n"
     "\n"
 
-    /* Asked first while one runs; S and F5 start one from anywhere (asked last otherwise). Ctrl+] is faster —
+    /* Asked first while one runs; S starts one from anywhere (asked last otherwise; F5 too until RV-211). Ctrl+] is faster —
        a shorter wait — as it is a film's speed and a text's scrolling (RV-184). */
     "[slideshow]\n"
-    "toggle_slideshow = \"S, F5\"\n"
+    "toggle_slideshow = \"S\"\n"
     "interval_down = \"Ctrl+BracketRight\"\n"
     "interval_up = \"Ctrl+BracketLeft\"\n"
     "interval_down_fine = \"Ctrl+Shift+BracketRight\"\n"
@@ -206,7 +206,7 @@ const char *rubraview_default_keymap(void) {
        auto-scroll first, its speed changed while it runs; the size and the
        line spacing easy to change). While auto-scroll runs, Up and Down are
        its speed too. RV-184: faster and slower on Ctrl+] and Ctrl+[, bigger and smaller on Plus and Minus,
-       the spacing with Alt (as Alt+wheel), the encoding on Shift+N; E is Edit and F3 the file list here too. */
+       the spacing with Alt (as Alt+wheel), the encoding on Shift+N; E is Edit and Ctrl+L the file list here too. */
     "[text]\n"
     "text_autoscroll = \"S, Space\"\n"   /* S, akin to the slide show (owner, 2026-10-20); Space too (2026-10-18) */
     "text_faster = \"Ctrl+BracketRight, Shift+Up\"\n"
@@ -230,4 +230,23 @@ const char *rubraview_default_keymap(void) {
     "text_encoding = \"Shift+N\"\n"
     "text_copy = \"Ctrl+C\"\n"
     "text_select_all = \"Ctrl+A\"\n";
+}
+
+const char *rubraview_default_keymap_retired(void) {
+    return
+    "[common]\n"
+    "toggle_fullscreen = \"F, F11, Alt+Enter\"\n"
+    "open_settings = \"F10, Ctrl+Comma\"\n"
+    "toggle_help = \"F1\"\n"
+    "[file]\n"
+    "rename_file = \"F2\"\n"
+    "copy_to_folder = \"F6\"\n"
+    "move_to_folder = \"F7\"\n"
+    "copy_to_other_folder = \"Shift+F6\"\n"
+    "move_to_other_folder = \"Shift+F7\"\n"
+    "[navigation]\n"
+    "toggle_file_list = \"F3\"\n"
+    "toggle_filmstrip = \"F4\"\n"
+    "[slideshow]\n"
+    "toggle_slideshow = \"S, F5\"\n";
 }

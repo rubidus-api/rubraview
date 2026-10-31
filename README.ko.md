@@ -1,10 +1,10 @@
-**한국어** | [English](README.md) — **Rubraview v1.39.51** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.51/rubraview-v1.39.51.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.51/rubraview-v1.39.51.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.51/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.39.52** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.52/rubraview-v1.39.52.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.52/rubraview-v1.39.52.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.52/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
 순수 C23 과 WinAPI 로 지은, 가볍고 빠른 윈도우 멀티미디어 뷰어이자 동영상 재생기이며 일괄 이미지 처리기입니다.
 
-압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치는 필요 없습니다. [Microsoft Store](https://apps.microsoft.com/detail/9n99b2x63k7x) 에서 받으면 설치와 업데이트가 저절로 됩니다. 설치해 두고 싶다면 MSI 를 쓰세요: Program Files 와 시작 메뉴에 넣고, 탐색기 우클릭 메뉴(윈도 11 기본 메뉴 포함)를 모든 사용자용으로 등록합니다. FFmpeg 의 DLL 은 선택 사항으로, Media Foundation 이 못 여는 형식에만 옆에 두면 됩니다. 만화 압축 파일(CBZ/ZIP, CB7/7z, CBR/RAR 2.0~7.0, 솔리드·분할·암호 포함)은 소스에 함께 들어 있는 FultaArc(MIT, UnRAR 코드 없음)로 읽습니다. 압축 파일 안의 페이지는 삭제(`Delete`), 이름 바꾸기(`F2`), 편집 후 저장이 됩니다. ZIP/CBZ 와 7z/CB7 은 형식을 유지하고, 그 밖의 것(솔리드 7z, RAR/CBR, ALZ, EGG, 분할 압축)은 ZIP 과 7z 중 고른 형식으로 새로 쓰며 원본은 휴지통으로 갑니다. 암호가 걸린 압축 파일은 바꾸지 않습니다.
+압축을 풀고 `rubraview.exe` 를 실행하거나, `rubraview.exe` 만 받아서 바로 실행하면 됩니다. 설치는 필요 없습니다. [Microsoft Store](https://apps.microsoft.com/detail/9n99b2x63k7x) 에서 받으면 설치와 업데이트가 저절로 됩니다. 설치해 두고 싶다면 MSI 를 쓰세요: Program Files 와 시작 메뉴에 넣고, 탐색기 우클릭 메뉴(윈도 11 기본 메뉴 포함)를 모든 사용자용으로 등록합니다. FFmpeg 의 DLL 은 선택 사항으로, Media Foundation 이 못 여는 형식에만 옆에 두면 됩니다. 만화 압축 파일(CBZ/ZIP, CB7/7z, CBR/RAR 2.0~7.0, 솔리드·분할·암호 포함)은 소스에 함께 들어 있는 FultaArc(MIT, UnRAR 코드 없음)로 읽습니다. 압축 파일 안의 페이지는 삭제(`Delete`), 이름 바꾸기(`Ctrl+M`), 편집 후 저장이 됩니다. ZIP/CBZ 와 7z/CB7 은 형식을 유지하고, 그 밖의 것(솔리드 7z, RAR/CBR, ALZ, EGG, 분할 압축)은 ZIP 과 7z 중 고른 형식으로 새로 쓰며 원본은 휴지통으로 갑니다. 암호가 걸린 압축 파일은 바꾸지 않습니다.
 
 > 정본은 영문 README 이고, 이 문서는 그 번역입니다.
 
@@ -44,8 +44,8 @@
 
 ## 단축키
 
-`F1` 을 누르면 같은 목록이 따로 창으로 뜨고, 보는 동안 열어 둘 수 있습니다.
-여기 있는 키는 모두 설정 창(`F10`)의 Keys 쪽에서 바꿀 수 있습니다. 아래 표는
+`?` 을 누르면 같은 목록이 따로 창으로 뜨고, 보는 동안 열어 둘 수 있습니다.
+여기 있는 키는 모두 설정 창(`Ctrl+,`)의 Keys 쪽에서 바꿀 수 있습니다. 아래 표는
 프로그램에 들어 있는 키 설정에서 그대로 만들어지므로 실제와 어긋나지 않습니다.
 
 <!-- keys:begin — generated from src/core/default_keymap.c by scripts/check-actions.py --write; do not edit -->
@@ -54,15 +54,15 @@
 
 | 키 | 하는 일 |
 |---|---|
-| `F`, `F11`, `Alt+Enter` | 전체 화면 |
+| `F`, `Alt+Enter` | 전체 화면 |
 | `T` | 툴바 열기/닫기 |
 | `Shift+T` | 툴바 고정 |
 | `Ctrl+T` | 툴바를 따로 창으로/되돌리기 |
 | `Ctrl+Shift+T` | 항상 맨 위 |
 | `Shift+I` | 정보 막대 |
 | `Ctrl+N` | 새 창: 뷰어를 하나 더, 빈 채로 |
-| `F10`, `Ctrl+,` | 설정 |
-| `F1` | 이 도움말(별도 창) |
+| `Ctrl+,` | 설정 |
+| `Shift+/` | 이 도움말(별도 창) |
 | `I`, `Ctrl+I` | 파일 정보(용량, 픽셀 크기, 코덱, EXIF) — 드래그해서 복사 |
 | `Shift+P` | 미니 플레이어 |
 | `Esc` | 끝내기 |
@@ -89,13 +89,13 @@
 | `Delete` | 휴지통으로; 압축 파일 안의 페이지는 압축 파일에서 삭제(확인함) |
 | `Shift+Delete` | 완전 삭제(확인함) |
 | `Ctrl+Z` | 이동·복사·이름 바꾸기 되돌리기 |
-| `F2` | 이름 바꾸기(압축 파일 안의 페이지도 가능) |
+| `Ctrl+M` | 이름 바꾸기(압축 파일 안의 페이지도 가능) |
 | `Ctrl+Enter` | 이 파일을 선택한 탐색기 창 열기(압축 파일 안이면 압축 파일) |
 | `Ctrl+P` | 화면의 그림 인쇄: 회전·크기·배율·위치·여백·한 면의 장수를 고르는 패널, 이어서 시스템 인쇄 창 |
-| `F6` | 보고 있는 파일을 지정한 폴더로 복사(압축 파일 안의 페이지도 가능) |
-| `F7` | 보고 있는 파일을 지정한 폴더로 이동 |
-| `Shift+F6` | 보고 있는 파일을 입력하거나 찾아 고른 폴더로 복사(없는 폴더는 새로 만듦) |
-| `Shift+F7` | 보고 있는 파일을 입력하거나 찾아 고른 폴더로 이동(없는 폴더는 새로 만듦) |
+| `Ctrl+Shift+C` | 보고 있는 파일을 지정한 폴더로 복사(압축 파일 안의 페이지도 가능) |
+| `Ctrl+Shift+M` | 보고 있는 파일을 지정한 폴더로 이동 |
+| `Alt+C` | 보고 있는 파일을 입력하거나 찾아 고른 폴더로 복사(없는 폴더는 새로 만듦) |
+| `Alt+M` | 보고 있는 파일을 입력하거나 찾아 고른 폴더로 이동(없는 폴더는 새로 만듦) |
 | `K` | 분류: 아홉 폴더를 창에 띄우고 그림을 폴더별로 예약한 뒤 한꺼번에 복사하거나 옮기기 |
 | `Ctrl+C` | 화면의 프레임 복사 (영상, 애니메이션), 사진이면 그림 자체 |
 | `Ctrl+Shift+E` | 화면의 프레임을 파일 옆에 PNG로 저장 |
@@ -113,8 +113,8 @@
 | `Ctrl+Backspace` | 상위 폴더로 |
 | `]` | 다음 폴더 또는 압축 |
 | `[` | 이전 폴더 또는 압축 |
-| `F3` | 압축 파일(또는 폴더) 안의 파일 목록을 미리보기와 함께 별도 창으로 — 클릭이나 Enter 로 이동 |
-| `F4` | 필름스트립 |
+| `Ctrl+L` | 압축 파일(또는 폴더) 안의 파일 목록을 미리보기와 함께 별도 창으로 — 클릭이나 Enter 로 이동 |
+| `Shift+F` | 필름스트립 |
 | `P` | 재생목록(없으면 이 폴더의 파일) — 화면 위에 떠 있는 창 |
 | `Shift+N` | 열린 압축파일의 파일 이름을 다음 인코딩(Shift-JIS, GBK, Big5 …)으로 다시 읽기 — 그 파일에만 |
 
@@ -157,7 +157,7 @@
 
 | 키 | 하는 일 |
 |---|---|
-| `S`, `F5` | 슬라이드 쇼 시작/정지 |
+| `S` | 슬라이드 쇼 시작/정지 |
 | `Ctrl+]` | 빠르게(0.5초) |
 | `Ctrl+[` | 느리게(0.5초) |
 | `Ctrl+Shift+]` | 빠르게(0.1초) |
@@ -316,11 +316,11 @@
 | 어디서 | 키 |
 |---|---|
 | 파일 열기 화면 (`O`) | 방향키로 이동, `Enter`로 열기 (`Shift+Enter`는 압축 파일의 쪽들을 타일로), `Backspace`는 위 폴더, 글자·숫자는 그 글자로 시작하는 다음 이름으로, `Ctrl+L`은 경로 입력, `Ctrl+D`는 폴더 즐겨찾기, `Esc`는 닫기. 압축 파일을 오른쪽 클릭하면 그 안의 쪽들, 즐겨찾기를 오른쪽 클릭하면 이름 바꾸기 |
-| 파일 목록 창 (`F3`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End`로 파일을 골라 미리보기, `Enter`나 클릭으로 그 파일로 이동, `Esc`로 닫기. 그 밖의 키는 뷰어에서와 같이 동작 |
-| 설정 (`F10`) | `Up` / `Down` 이동, `Left` / `Right` 값 바꾸기 (`PageUp` / `PageDown`은 열 단계씩), `Enter`나 `Space`로 켜고 끄거나 누르기, `Tab` / `Shift+Tab` 쪽 바꾸기, `Esc` 닫기 |
-| 도움말 (`F1`), 파일 정보 (`I`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End`로 스크롤, `Esc`로 닫기 |
+| 파일 목록 창 (`Ctrl+L`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End`로 파일을 골라 미리보기, `Enter`나 클릭으로 그 파일로 이동, `Esc`로 닫기. 그 밖의 키는 뷰어에서와 같이 동작 |
+| 설정 (`Ctrl+,`) | `Up` / `Down` 이동, `Left` / `Right` 값 바꾸기 (`PageUp` / `PageDown`은 열 단계씩), `Enter`나 `Space`로 켜고 끄거나 누르기, `Tab` / `Shift+Tab` 쪽 바꾸기, `Esc` 닫기 |
+| 도움말 (`?`), 파일 정보 (`I`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End`로 스크롤, `Esc`로 닫기 |
 | 재생 목록 (`P`) | 클릭하면 그 파일로, 휠로 스크롤, `Esc`로 닫기 |
-| 이름 바꾸기 (`F2`), 경로 입력, 암호 | `Enter` 확인, `Esc` 취소 |
+| 이름 바꾸기 (`Ctrl+M`), 경로 입력, 암호 | `Enter` 확인, `Esc` 취소 |
 
 ## 보기 방식
 
@@ -372,7 +372,7 @@ avcodec-63.dll  avformat-63.dll  avutil-61.dll  swscale-10.dll  swresample-7.dll
 `ffmpeg-n9.0-latest-win64-lgpl-shared-9.0.zip` 을 받으세요. 반드시 **9.0**
 이어야 하고 이름에 **shared** 가 있어야 합니다. `shared` 가 없는 판에는 실행
 파일만 있고 DLL 이 없으며, 다른 판은 DLL 이름의 번호가 달라 루브라뷰가 쓰지
-않습니다. 압축을 원하는 곳에 푼 다음, 설정(`F10`) › External(외부 도구) ›
+않습니다. 압축을 원하는 곳에 푼 다음, 설정(`Ctrl+,`) › External(외부 도구) ›
 **FFmpeg folder** 에 그 `bin` 폴더를 지정하면 바로 쓰입니다. (`rubraview.exe`
 옆에 두어도 되며, 이때는 다시 실행해야 합니다.) `lib` 폴더의 `.dll.a`, `.lib`
 는 FFmpeg 을 링크해 빌드할 때 쓰는 것이라 실행에는 쓰지 않습니다 — 그냥 두세요.

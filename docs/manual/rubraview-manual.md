@@ -7,15 +7,15 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.51.exe              the viewer, as built
-dist/rubraview-v1.39.51/                 the release bundle
-dist/rubraview-v1.39.51.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.52.exe              the viewer, as built
+dist/rubraview-v1.39.52/                 the release bundle
+dist/rubraview-v1.39.52.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
 The bundle holds `rubraview.exe`, this manual, the changelog and the
 licences of the libraries it borrows. The same licences are also inside
-the program, at the end of the F1 help window, so the executable can be
+the program, at the end of the help window (`?`), so the executable can be
 downloaded on its own.
 
 ## Getting it running
@@ -120,7 +120,7 @@ size and its folder. A click opens one; its box and **Remove**, or its
 
 ### In Explorer: double click and the right-click menu
 
-**Settings (`F10`) › Explorer** decides what Windows is given. Two
+**Settings (`Ctrl+,`) › Explorer** decides what Windows is given. Two
 switches say what — **Open by double click (file types)** and
 **Right-click menu** — and under them every extension has two boxes of
 its own, **Open with** (double click) and **Right-click menu**, by kind:
@@ -356,7 +356,7 @@ the wheel turns the page on a picture that fits the window (away from
 you the one before, towards you the next) and brings up the filmstrip
 along the bottom for a moment — it slides to keep the page in the
 middle, stays while the pointer is on it, and a click on a thumbnail
-goes to that page (`F4` keeps it up) — `Shift` and the wheel go ten
+goes to that page (`Shift+F` keeps it up) — `Shift` and the wheel go ten
 pages; on a touch screen two fingers move
 the picture and a pinch zooms it. (README has the whole table, under
 Mouse and touch.)
@@ -691,7 +691,7 @@ code (`frei0r`, `ladspa`, `lv2`) are refused wherever they appear in a graph.
 ## Sorting your files
 
 `Delete` sends the file to the recycle bin (`Shift+Delete` deletes for good,
-after asking), `F2` renames it (the box edits like any text field: arrows
+after asking), `Ctrl+M` renames it (the box edits like any text field: arrows
 and `Shift` select, `Ctrl+A`, `Ctrl+C` / `Ctrl+X` / `Ctrl+V`), `Ctrl+Z` undoes a move,
 a copy or a rename, and `1`–`9` send it to a folder you chose.
 
@@ -713,17 +713,17 @@ A number key sorts only when you have given it a folder; the ones you
 have not keep their usual meaning.
 
 Two more keys do the same with a folder each, whatever the number keys are
-set to: `F6` **copies** the file on screen to one folder and `F7` **moves**
+set to: `Ctrl+Shift+C` **copies** the file on screen to one folder and `Ctrl+Shift+M` **moves**
 it to another (Settings › Files › The file on screen, to a folder; or
 `copy_dir` and `move_dir` under `[curation]`). They are in the Toolbar too
 (Copy to, Move to) and in the right click. A page inside an archive can be
-copied out with `F6` — it is written as a file of its own — but not moved
+copied out with `Ctrl+Shift+C` — it is written as a file of its own — but not moved
 (to take it out of the archive as well, delete it there afterwards). Nothing in the folder is ever replaced: when
 the name is taken the file goes in as `name-1.jpg`, then `name-2.jpg`, and
 so on. `Ctrl+Z` takes a copy away again or brings a moved file back.
 
-To send it somewhere else, `Shift+F6` (copy) and `Shift+F7` (move) — also
-Copy to another folder... / Move to another folder... in the right click, and `F6` / `F7` themselves while no folder is set for them —
+To send it somewhere else, `Alt+C` (copy) and `Alt+M` (move) — also
+Copy to another folder... / Move to another folder... in the right click, and `Ctrl+Shift+C` / `Ctrl+Shift+M` themselves while no folder is set for them —
 open a box in the middle of the window holding the last folder you used.
 Type or paste a folder, or press `Ctrl+O` to browse to one, and press
 `Enter`. A folder that is not there yet is not made by accident: the
@@ -737,7 +737,7 @@ archive is written again with the change in it:
   deletes, anything else keeps — because there is no Recycle Bin inside an
   archive. The last page of a book is not deleted: delete the book's file
   instead.
-- `F2` renames the page, in the folder it has inside the archive. A name
+- `Ctrl+M` renames the page, in the folder it has inside the archive. A name
   another entry already has is refused.
 - In the adjust panel (`E`), **Save a copy** puts the edited picture into
   the archive beside the page as `name_edit.ext`, and **Save over the
@@ -770,7 +770,7 @@ with what it should hold before it takes the old one's place; `Esc` stops
 the writing. Stopped, failed or not matching, the new file is removed and
 the book is as it was. Nothing else can be opened or changed while it is
 being written. An **encrypted archive is not changed**, with its password
-or without: its pages can be read and copied out (`F6`), no more.
+or without: its pages can be read and copied out (`Ctrl+Shift+C`), no more.
 
 `Ctrl+Z` takes back the last change to a book that kept its format: the
 file it was before is kept beside it as `name.cbz.rvold` until the next
@@ -812,7 +812,7 @@ next to it, and `Ctrl+B` again or `Esc` closes it. It reads from the top:
 1. **The files**: the pictures of the list now open — a folder, a
    playlist, a list you filtered or sorted — in its order; films, music
    and text in it are left out, and the line says how many of each.
-   Press it to see the list in its own window (`F3`). After Explorer's
+   Press it to see the list in its own window (`Ctrl+L`). After Explorer's
    **Convert...** it is the files chosen there.
 2. **Edit's steps, first**: every step in Edit's list is applied, in that
    order, to every picture before anything else. The line says how many
@@ -993,7 +993,7 @@ While it does:
   click one). **< Earlier** and **Later >** above the list move the ticked
   subtitles by the seconds written between them — click the number to
   type another (`0.1` as it comes), `Enter` to finish. A second click on a
-  row soon after the first (or `F2`, or `Enter`, for the row last clicked)
+  row soon after the first (or `Enter`, for the row last clicked)
   lets you type its text over: it is shown as the file holds it, its tags
   and all, with `\N` where a line breaks; `Enter` keeps it, `Esc` gives it
   up. `Insert` puts a new subtitle where the film is, two seconds long,
@@ -1103,9 +1103,9 @@ of your own for the text, the background, links and what Find found
 by screens, `Home` / `End` to the start and the end. The place read to is
 kept for each file, and the file opens there the next time.
 
-**Finding and copying.** `Ctrl+F` opens a box above the text: `Enter`, `F3` or `Ctrl+G`
-the next, `Shift+Enter`, `Shift+F3` or `Ctrl+Shift+G` the one before (with the box closed,
-`Ctrl+G` / `Ctrl+Shift+G`; `F3` is the file list there, as everywhere); letters' case and
+**Finding and copying.** `Ctrl+F` opens a box above the text: `Enter` or `Ctrl+G`
+the next, `Shift+Enter` or `Ctrl+Shift+G` the one before (with the box closed,
+`Ctrl+G` / `Ctrl+Shift+G`; `Ctrl+L` is the file list there, as everywhere); letters' case and
 full-width forms are ignored, and the bar says which match of how many it
 is. Drag over the text to select it, `Ctrl+A` for all, `Ctrl+C` copies what
 is selected, as it is shown.
@@ -1131,7 +1131,7 @@ the Toolbar has), as two columns of wide buttons. The arrow keys move
 between them and `Enter` presses one. After it comes the
 name of the file on screen (the folder's, in the open-file screen); a
 click on it opens the open-file screen. At the right are **Set**
-(Settings, `F10`), **P** (the title bar stays shown, and the picture or
+(Settings, `Ctrl+,`), **P** (the title bar stays shown, and the picture or
 the film is shown below it instead of under it), **H** (the title
 bar and the Floating Widget hidden until the picture is clicked), **T**
 (always on top), **F** (full screen), **_**, **[]** (maximise), **R**
@@ -1148,7 +1148,7 @@ number: press its number (or its name). Every box that takes typing has
 its buttons under it — **OK**, **Cancel**, and **Browse...** where a
 folder is asked for. The buttons do not show their keys; their tooltips
 do. What the Toolbar has no button for is in the right click, on a key
-(the help, `F1`, lists them) or in Settings; the keys are changed on the
+(the help, `?`, lists them) or in Settings; the keys are changed on the
 Settings window's **Keys** page. The Toolbar's last group has
 **Settings**, **Bar pin**, **Info bar** (`Shift+I`) and **Hide** (the
 struck-through eye: the title bar and the boxes go until you click the
@@ -1250,7 +1250,7 @@ turning, the layout and the slide show, opening, the lists and the
 information, editing and exporting; for a film, playing, 5 s back and on
 (held, those two offer steps up to 5 min), the sound and the subtitles.
 Ten on and back, zooming by steps, the single fits, the filmstrip and
-flipping are on keys (the help, `F1`, lists them); renaming, copying and
+flipping are on keys (the help, `?`, lists them); renaming, copying and
 moving are in the right click; always on top and full screen are the title
 bar's, and Settings is its last group's. Its buttons come in the same
 order of groups for every kind of page: going and playing, how it plays,
@@ -1302,7 +1302,7 @@ sizes the window: press it and drag, and it stays under the pointer — the
 top and the right edge follow it, the bottom and the left stay. A folder whose list you change is from then on
 a playlist: it keeps your order.
 
-`F3` (the Files button) opens the same list in
+`Ctrl+L` (the Files button) opens the same list in
 **a window of its own**, with a preview. The viewer goes on showing its
 page; the other window lists what the archive holds — or the folder, or
 the playlist — each file with its size, the one on screen marked. Point at
@@ -1310,7 +1310,7 @@ a row, or move to it with `Up` and `Down` (`PageUp`, `PageDown`, `Home`,
 `End` go further), and its picture is shown on the right with its name,
 its pixels and its size. A click, or `Enter`, turns the viewer to that
 file. Any other key pressed there does what it does in the viewer, so
-`F3` or `Esc` closes it. A film or a sound has no preview, and a page far
+`Ctrl+L` or `Esc` closes it. A film or a sound has no preview, and a page far
 inside a solid archive is not decoded for a glance: both say so, and open
 with `Enter`. For a folder's files or a playlist it is changed exactly as
 the floating list is — the boxes, `x`, the arrows, a row dragged by its
@@ -1451,7 +1451,7 @@ so does every other panel taller than the window (Export, Print, Batch,
 Classify), and a text file's page, where the bar also says where in the
 file you are.
 
-`F10` opens the settings. A click on a choice's word goes to the next one;
+`Ctrl+,` opens the settings. A click on a choice's word goes to the next one;
 the `<` before it goes back. On **Keys**, resting the pointer on a row says
 what its action does. Every setting there now does what it says; most
 take effect at once, a few the next time something is opened (the archive
@@ -1665,7 +1665,7 @@ it twice), **Move to**, **Copy to**, **Cancel** and **Open** (**OK** when
 files are being picked for the list) — send them to one of the numbered
 folders: press the number after the button, or `0` for another folder,
 typed or browsed (**Browse...** under the box, or `Ctrl+O`) in the same
-box as `Shift+F6`, a new one made on a second `Enter` (with no numbered
+box as `Alt+C`, a new one made on a second `Enter` (with no numbered
 folder set, the button opens that box at once). A playlist file of them
 and **Change extensions...** are on the right click: the latter lists each
 extension the picked files have, a new one beside each (`.txt → .text`,
@@ -1699,18 +1699,18 @@ file in the viewer — ▲ and ▼ move it up or down, its X or the ticked ones'
 (**Add to favourites** on a right click does the same). All is kept in
 `favorites.ini`.
 
-`F2` renames the file, the extension included — correcting `.jgp` to
+`Ctrl+M` renames the file, the extension included — correcting `.jgp` to
 `.jpg` is a rename like any other, and nothing is asked.
 
-`F1` opens the help in a window of its own. Its first lines say the
+`?` opens the help in a window of its own. Its first lines say the
 version and the day it was released, and give the project's page on
 GitHub as a link a click opens. It lists every key that is
 bound, grouped by where it works, and it stays open while you use the
 viewer, so you can try a key with the list in front of you. The wheel or
-`PageUp` / `PageDown` scrolls it, `F1` or `Esc` closes it. The keys it
+`PageUp` / `PageDown` scrolls it, `?` or `Esc` closes it. The keys it
 shows are the ones in force, so a key you change appears changed.
 
-`F10` or `Ctrl+,` opens the settings window, a window of its own. A change
+`Ctrl+,` opens the settings window, a window of its own. A change
 takes effect at once; **Revert** goes back to what was there when it
 opened, **Reset: all** to the defaults, and the file is written when the
 window closes. The **Keys** page lists every key, under a heading for each kind of file
@@ -1724,7 +1724,7 @@ key's family together (`A`, `Shift+A`, `Ctrl+A`, ...), with a row for each
 kind of file it does something in (`Space`: next page, play or pause,
 auto-scroll). **By key, in the order of** puts the keys as they lie on the
 keyboard (Esc, F1 to F12, the number row, Q W E R T Y ...) or A to Z, then
-0 to 9 and F1 to F12. F1's help ends with a list by key too. One key does one thing,
+0 to 9 and F1 to F12. The help (`?`) ends with a list by key too. One key does one thing,
 or a like one, wherever it is pressed: `]` / `[` the folder or archive,
 `Ctrl+]` / `Ctrl+[` faster and slower (a film's speed, the slide show's
 delay, a text's auto-scroll), `+` / `-` bigger and smaller, `Shift+N` the
@@ -1765,15 +1765,15 @@ listed under a later heading only means that while that is on screen.
 
 | Keys | What it does |
 |---|---|
-| `F`, `F11`, `Alt+Enter` | Full screen |
+| `F`, `Alt+Enter` | Full screen |
 | `T` | Open or close the Toolbar |
 | `Shift+T` | Pin the Toolbar open |
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |
 | `Ctrl+Shift+T` | Always on top of other windows |
 | `Shift+I` | Information bar |
 | `Ctrl+N` | A new window: the viewer once more, nothing open |
-| `F10`, `Ctrl+,` | Settings |
-| `F1` | This help, in a window of its own |
+| `Ctrl+,` | Settings |
+| `Shift+/` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `Shift+P` | Mini player |
 | `Esc` | Quit |
@@ -1800,13 +1800,13 @@ listed under a later heading only means that while that is on screen.
 | `Delete` | To the recycle bin; a page inside an archive is deleted from it (asks first) |
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
-| `F2` | Rename, keeping the extension; a page inside an archive too |
+| `Ctrl+M` | Rename, keeping the extension; a page inside an archive too |
 | `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
 | `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
-| `F6` | Copy the file on screen to the folder set for it (a page inside an archive too) |
-| `F7` | Move the file on screen to the folder set for it |
-| `Shift+F6` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
-| `Shift+F7` | Move the file on screen to a folder typed or browsed; one not there yet is made |
+| `Ctrl+Shift+C` | Copy the file on screen to the folder set for it (a page inside an archive too) |
+| `Ctrl+Shift+M` | Move the file on screen to the folder set for it |
+| `Alt+C` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
+| `Alt+M` | Move the file on screen to a folder typed or browsed; one not there yet is made |
 | `K` | Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once |
 | `Ctrl+C` | Copy the frame on screen (a film, an animation), or the picture itself |
 | `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
@@ -1824,8 +1824,8 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+Backspace` | Up to the folder |
 | `]` | Next folder or archive |
 | `[` | Previous folder or archive |
-| `F3` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
-| `F4` | Filmstrip |
+| `Ctrl+L` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
+| `Shift+F` | Filmstrip |
 | `P` | The playlist, or this folder's files, floating over the picture |
 | `Shift+N` | Read the open archive's file names in the next code page (Shift-JIS, GBK, Big5, ...), for that archive only |
 
@@ -1868,7 +1868,7 @@ listed under a later heading only means that while that is on screen.
 
 | Keys | What it does |
 |---|---|
-| `S`, `F5` | Start or stop the slide show |
+| `S` | Start or stop the slide show |
 | `Ctrl+]` | Faster slides (0.5 s) |
 | `Ctrl+[` | Slower slides (0.5 s) |
 | `Ctrl+Shift+]` | Faster slides (0.1 s) |

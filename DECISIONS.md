@@ -2840,3 +2840,16 @@ Do not store credentials, private infrastructure details, personal data, private
 - Consequences: on the VM the facts of 388 films take 0.45 s to read and 0.02 s from the file; the release before took
   10.8 s and read 4 GB for the same sort. A kind not parsed is not known (RK-11). Pictures' resolution in the
   open-file screen is now as shown (EXIF turned), where the shell's was as stored.
+
+## 2026-10-31: D-242 No function keys by default (W-20261031-1600)
+
+- Status: Accepted (owner 2026-10-31: "그리고 펑션키 F1~F12 쓰는 단축키는 다른 키로 옮겨주세요").
+- Decision: every default on a function key moves: those with another key already lose the function key (settings
+  `Ctrl+,`, the whole screen `F` / `Alt+Enter`, the slide show `S`); the rest go where the like programs and this
+  one's families put them — help `?` (Shift+/), rename `Ctrl+M` (a modifier: it changes a file), the file list `Ctrl+L`,
+  the filmstrip `Shift+F` (beside `F`), copy / move to the set folder `Ctrl+Shift+C` / `Ctrl+Shift+M`, to another
+  `Alt+C` / `Alt+M`; the find box's next `Ctrl+G` as in a text. Keys typed in code follow (the help window, the
+  subtitle window, the find box) and the nine texts naming a key, in every language. A keymap.ini (on by default,
+  written whole by the Keys page) would keep the old keys, so a binding equal to an old default
+  (`rubraview_default_keymap_retired`) takes the new one at load (`rubraview_keymap_retire`); any other is the reader's.
+- Consequences: nothing needs Fn on a laptop; the function keys are free for the reader's own bindings.

@@ -282,7 +282,7 @@ void panel_open_batch(app_state_t *app) {
     else if (total == 0)
         snprintf(labels[8], sizeof(labels[8]), "%s", T("Nothing is open: open pictures or a playlist first (press: the list)"));
     else
-        snprintf(labels[8], sizeof(labels[8]), T("The %zu pictures of the list now open, in its order (of %zu: films, music and text left out). Press: show the list (F3)"),
+        snprintf(labels[8], sizeof(labels[8]), T("The %zu pictures of the list now open, in its order (of %zu: films, music and text left out). Press: show the list (Ctrl+L)"),
                  pictures, total);
     rubraview_panel_add_button(pn, PANEL_BATCH_SHOW_LIST, cstr(labels[8]));
 

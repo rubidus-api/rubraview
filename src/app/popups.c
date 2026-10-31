@@ -584,7 +584,7 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             box.y = 128.0 * dpi;   /* under the messages line */
             rubraview_pal_rect_t label = { box.x - 40.0 * dpi, box.y - 26.0 * dpi, box.width + 80.0 * dpi, 22.0 * dpi };
             rubraview_pal_render_fill_rect(app->renderer, label, COLOR_BOX_FILL, 3.0);
-            rubraview_pal_render_draw_text(app->renderer, TU8("Find:  Enter / F3 the next  ·  Shift+Enter back  ·  Esc"),
+            rubraview_pal_render_draw_text(app->renderer, TU8("Find:  Enter / Ctrl+G the next  ·  Shift+Enter back  ·  Esc"),
                                            label, 13.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
         if (app->rename_is_listfilter) {   /* 1.25.0 */

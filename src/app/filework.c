@@ -143,7 +143,7 @@ void filing_put_to(app_state_t *app, proven_u8str_view_t dir, bool moving) {
     if (page < 0) return;
     bool in_archive = app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER;
     if (in_archive && moving) {
-        osd_say(app, TU8("a page inside an archive can be copied (F6), not moved"));
+        osd_say(app, TU8("a page inside an archive can be copied (Ctrl+Shift+C), not moved"));
         return;
     }
     proven_u8str_view_t path = in_archive ? PROVEN_LIT("") : app->source.pages[page].path;
@@ -364,7 +364,7 @@ void target_begin(app_state_t *app, bool moving, bool from_picker) {
     } else {
         if (current_page_index(app) < 0) return;
         if (moving && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) {
-            osd_say(app, TU8("a page inside an archive can be copied (F6), not moved"));
+            osd_say(app, TU8("a page inside an archive can be copied (Ctrl+Shift+C), not moved"));
             return;
         }
     }
