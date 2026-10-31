@@ -2923,3 +2923,17 @@ Do not store credentials, private infrastructure details, personal data, private
   a second against the film's own rate, the timer. `toggle_frame_stats` (Ctrl+Shift+F) and the bar's row are gone.
 - Consequences: a stutter from a slow drive reads as "Reading" below "the film needs"; a cache for films on network
   drives is planned (RV-216, `docs/plans/active/2026-10-31-RV-216-film-cache.md`).
+
+## 2026-10-31: D-249 Network films read through a local copy that fills as they play (W-20261031-2050)
+
+- Status: Accepted (owner 2026-10-31: "승인합니다 진행 바랍니다", on `docs/plans/archive/2026-10-31-RV-216-film-cache.md`
+  with its defaults: 20 GB, fetching ahead off, `%LOCALAPPDATA%\rubraview\film-cache`).
+- Context: a 200 Mbit/s film on a 100 Mbit/s network drive stutters every time; Windows' cache keeps little of a file
+  that size and may not cache a network file at all.
+- Decision: the backends read a network film through Rubraview: Media Foundation an `IStream` wrapped by
+  `MFCreateMFByteStreamOnStream`, FFmpeg its own I/O callbacks; a read is served from a sparse copy where its 256 KB
+  blocks are there, else the block is fetched, written and marked in a text map. The copy is the source's while its
+  size and modified time are; one process writes it. A thread fetches the rest when asked. The settings go to the
+  FFmpeg child with each open; its counts come back in the shared block for the Live rows.
+- Consequences: the second play of a network film reads the local disk; a film first played on a slow link plays
+  smoothly once enough is fetched (with Fetch the rest on). Files under 16 MB and local files are read as before.

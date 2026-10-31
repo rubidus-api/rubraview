@@ -16,6 +16,7 @@
 #include "rubraview/lang.h"
 #include "rubraview/stream.h"
 #include "rubraview/pal/pal_audio.h"
+#include "rubraview/pal/pal_filmcache.h"
 
 /*
  * RV-176 (D-208, owner 2026-10-26: "FFmpeg를 별도 프로세스로", every use at once, on as it comes, Windows'
@@ -225,20 +226,47 @@ static void child_kill(mh_child_t *c, const char *why) {
 #define MH_LIVE_MAX 16
 static SRWLOCK g_live_lock = SRWLOCK_INIT;
 static HANDLE g_live[MH_LIVE_MAX];
+static rubraview_mhost_block_t *g_live_block[MH_LIVE_MAX];
 static uint64_t g_live_gone;   /* what children that ended had read */
+static uint64_t g_cache_gone_copy, g_cache_gone_source;   /* RV-216: and served from their caches */
 
-static void live_note(HANDLE process, bool add) {
+static void live_note(HANDLE process, rubraview_mhost_block_t *block, bool add) {
     AcquireSRWLockExclusive(&g_live_lock);
     for (size_t i = 0; i < MH_LIVE_MAX; ++i) {
-        if (add && !g_live[i]) { g_live[i] = process; break; }
+        if (add && !g_live[i]) { g_live[i] = process; g_live_block[i] = block; break; }
         if (!add && g_live[i] == process) {
             IO_COUNTERS io;
             if (GetProcessIoCounters(process, &io)) g_live_gone += io.ReadTransferCount;
+            if (g_live_block[i]) {
+                g_cache_gone_copy += atomic_load(&g_live_block[i]->cache_from_copy);
+                g_cache_gone_source += atomic_load(&g_live_block[i]->cache_from_source);
+            }
             g_live[i] = NULL;
+            g_live_block[i] = NULL;
             break;
         }
     }
     ReleaseSRWLockExclusive(&g_live_lock);
+}
+
+/* RV-216: the children's network film caches, added to `add`; the last open copy's fill for one with none of its own. */
+void rubraview_mhost_children_cache(rubraview_filmcache_stats_t *add) {
+    AcquireSRWLockShared(&g_live_lock);
+    add->from_copy += g_cache_gone_copy;
+    add->from_source += g_cache_gone_source;
+    for (size_t i = 0; i < MH_LIVE_MAX; ++i) {
+        rubraview_mhost_block_t *b = g_live_block[i];
+        if (!g_live[i] || !b) continue;
+        add->from_copy += atomic_load(&b->cache_from_copy);
+        add->from_source += atomic_load(&b->cache_from_source);
+        uint64_t blocks = atomic_load(&b->cache_blocks), filled = atomic_load(&b->cache_filled);
+        if (atomic_load(&b->cache_open) && blocks > 0) {
+            add->open = true;
+            add->blocks = blocks;
+            add->filled = filled < blocks ? filled : blocks;
+        }
+    }
+    ReleaseSRWLockShared(&g_live_lock);
 }
 
 uint64_t rubraview_mhost_children_read_bytes(void) {
@@ -254,7 +282,7 @@ uint64_t rubraview_mhost_children_read_bytes(void) {
 
 static void child_free(mh_child_t *c) {
     if (c->process && !c->dead) child_kill(c, NULL);
-    if (c->process) { WaitForSingleObject(c->process, 2000); live_note(c->process, false); CloseHandle(c->process); }
+    if (c->process) { WaitForSingleObject(c->process, 2000); live_note(c->process, NULL, false); CloseHandle(c->process); }
     if (c->job) CloseHandle(c->job);
     if (c->block) UnmapViewOfFile(c->block);
     if (c->mapping) CloseHandle(c->mapping);
@@ -342,7 +370,7 @@ static bool child_start(mh_child_t *c, rubraview_mhost_mode_t mode, const rubrav
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
     c->process = pi.hProcess;
-    live_note(c->process, true);
+    live_note(c->process, c->block, true);
     c->beat_at = now_seconds();
     return true;
 }
@@ -567,6 +595,16 @@ static void *remote_open(proven_u8str_view_t path, rubraview_media_failure_t *ou
     memcpy(b->inline_data, path.ptr, path.size);
     b->inline_data[path.size] = 0;
     b->request_inline_bytes = path.size;
+    char folder[1024];   /* RV-216: the cache's settings, for the child to read through the same copies */
+    uint64_t limit = 0;
+    bool ahead = false;
+    rubraview_pal_filmcache_settings(folder, sizeof folder, &limit, &ahead);
+    size_t folder_n = strlen(folder);
+    if (path.size + 1 + folder_n > RUBRAVIEW_MHOST_INLINE - 1) folder_n = 0;
+    memcpy(b->inline_data + path.size + 1, folder, folder_n);
+    b->request_args[0] = (int64_t)folder_n;
+    b->request_args[1] = (int64_t)(limit > (uint64_t)INT64_MAX ? (uint64_t)INT64_MAX : limit);
+    b->request_args[2] = ahead ? 1 : 0;
     int32_t status = child_call(&p->child, RUBRAVIEW_MHOST_REQ_OPEN, OPEN_WAIT_MS);
     bool ok = status == RUBRAVIEW_MHOST_OK && rubraview_mhost_opened_take(b, &p->opened);
     if (!ok) {
@@ -1225,6 +1263,11 @@ static int32_t child_open(child_play_t *cp) {
     rubraview_mhost_block_t *b = g_child_block;
     size_t n = b->request_inline_bytes < RUBRAVIEW_MHOST_INLINE - 1 ? (size_t)b->request_inline_bytes : RUBRAVIEW_MHOST_INLINE - 1;
     proven_u8str_view_t path = { .ptr = b->inline_data, .size = n };
+    /* RV-216: the viewer's cache settings after the path's NUL: the folder's bytes in args[0], the limit, ahead */
+    uint64_t folder_n = (uint64_t)b->request_args[0];
+    if (b->request_args[0] >= 0 && n + 1 + folder_n <= RUBRAVIEW_MHOST_INLINE - 1)
+        rubraview_pal_filmcache_configure((proven_u8str_view_t){ .ptr = b->inline_data + n + 1, .size = (size_t)folder_n },
+                                          b->request_args[1] > 0 ? (uint64_t)b->request_args[1] : 0, b->request_args[2] != 0);
     rubraview_media_gpu_t gpu = { .mode = b->gpu_mode, .tone_mapping = b->tone_mapping,
                                   .hdr_screen_peak = b->hdr_screen_peak, .hdr_sdr_white = b->hdr_sdr_white };   /* RV-177 */
     if ((b->gpu_mode > 0 || b->tone_mapping > 0) && !cp->device) cp->device = child_device(b->adapter_luid, &cp->profiles);
@@ -1521,6 +1564,16 @@ int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *re
                 size_t n = rubraview_pal_audio_tap_read(samples, RUBRAVIEW_MHOST_TAP);
                 rubraview_mhost_tap_put(&b->tap, samples, n);
             }
+        }
+        {   /* RV-216: the cache's counts for the viewer's Live rows, every pass: a film closed and the
+               child kept for the next says so at once */
+            rubraview_filmcache_stats_t cs;
+            rubraview_pal_filmcache_own_stats(&cs);
+            atomic_store(&b->cache_from_copy, cs.from_copy);
+            atomic_store(&b->cache_from_source, cs.from_source);
+            atomic_store(&b->cache_filled, cs.open ? cs.filled : 0);
+            atomic_store(&b->cache_blocks, cs.open ? cs.blocks : 0);
+            atomic_store(&b->cache_open, cs.open ? 1u : 0u);
         }
         if (cp.media) {
             rubraview_ffmpeg_host_apply(cp.media, &b->wanted, &cp.applied);

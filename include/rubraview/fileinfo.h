@@ -75,6 +75,9 @@ typedef struct rubraview_live {
     uint64_t read_bytes;
     double   film_bits;          /* the film's own rate (its size over its length), bits a second; 0 unknown */
     bool     fine_timer;         /* Windows' timer at 1 ms */
+    bool     cached;             /* RV-216: a network film read through its local copy */
+    uint64_t from_copy, from_network;   /* bytes in the span, served from the copy and fetched */
+    uint64_t copy_filled, copy_blocks;  /* the copy's blocks filled, of how many */
 } rubraview_live_t;
 void rubraview_info_add_live(proven_arena_t *arena, rubraview_info_t *info, const rubraview_live_t *live);
 

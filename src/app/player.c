@@ -485,6 +485,7 @@ static void mini_go_to(app_state_t *app, int32_t index) {
                                                  rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
                                                  order);
     for (size_t i = 0; i < count; ++i) {
+        filmcache_for(app, path);
         rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i], NULL);
         if (!opened.media) continue;
         bool was_paused = app->bgm_paused;

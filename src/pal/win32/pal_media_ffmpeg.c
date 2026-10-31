@@ -27,6 +27,7 @@
 #include "rubraview/export.h"
 #include "rubraview/stream.h"
 #include "rubraview/pal/pal_media_host.h"
+#include "rubraview/pal/pal_filmcache.h"
 
 /*
  * The FFmpeg backend (D-8, RV-016). The DLLs are loaded at run time and
@@ -666,7 +667,66 @@ typedef struct ff_decode {
        target), and whether its first sound has come since. */
     double audio_base;
     bool audio_begun;
+    /* RV-216 (D-249): a film on a network drive read through its local copy */
+    rubraview_filmcache_stream_t *cache;
+    AVIOContext *cache_io;
+    uint64_t cache_at;
 } ff_decode_t;
+
+static int ff_cache_read(void *opaque, uint8_t *buf, int size) {
+    ff_decode_t *d = (ff_decode_t *)opaque;
+    uint32_t got = 0;
+    if (size <= 0) return 0;
+    if (!rubraview_pal_filmcache_read(d->cache, d->cache_at, buf, (uint32_t)size, &got)) return AVERROR(EIO);
+    if (got == 0) return AVERROR_EOF;
+    d->cache_at += got;
+    return (int)got;
+}
+
+static int64_t ff_cache_seek(void *opaque, int64_t offset, int whence) {
+    ff_decode_t *d = (ff_decode_t *)opaque;
+    int64_t size = (int64_t)rubraview_pal_filmcache_size(d->cache);
+    if (whence & AVSEEK_SIZE) return size;
+    whence &= ~AVSEEK_FORCE;
+    int64_t to = offset;
+    if (whence == SEEK_CUR) to += (int64_t)d->cache_at;
+    else if (whence == SEEK_END) to += size;
+    else if (whence != SEEK_SET) return AVERROR(EINVAL);
+    if (to < 0) return AVERROR(EINVAL);
+    d->cache_at = (uint64_t)to;
+    return to;
+}
+
+static void cache_let_go(ff_decode_t *d) {
+    if (d->cache_io) {
+        if (d->cache_io->buffer) g_ff.av_free(d->cache_io->buffer);   /* FFmpeg may have put another there */
+        d->cache_io->buffer = NULL;
+        g_ff.avio_context_free(&d->cache_io);
+    }
+    if (d->cache) rubraview_pal_filmcache_close(d->cache);
+    d->cache = NULL;
+}
+
+/* The format opened on the copy's stream; false (nothing kept) to open the path as before. */
+static bool open_cached(ff_media_t *m, ff_decode_t *d) {
+    enum { IO_BYTES = 256 * 1024 };
+    if (!g_ff.avformat_alloc_context || !g_ff.avio_alloc_context || !g_ff.avio_context_free || !g_ff.av_malloc || !g_ff.av_free) return false;
+    WCHAR wide[MAX_PATH * 4];
+    if (MultiByteToWideChar(CP_UTF8, 0, m->path, -1, wide, MAX_PATH * 4) <= 0) return false;
+    d->cache = rubraview_pal_filmcache_open(wide);
+    if (!d->cache) return false;
+    d->cache_at = 0;
+    unsigned char *buffer = (unsigned char *)g_ff.av_malloc(IO_BYTES + AV_INPUT_BUFFER_PADDING_SIZE);
+    d->cache_io = buffer ? g_ff.avio_alloc_context(buffer, IO_BYTES, 0, d, ff_cache_read, NULL, ff_cache_seek) : NULL;
+    if (!d->cache_io) { if (buffer) g_ff.av_free(buffer); cache_let_go(d); return false; }
+    d->format = g_ff.avformat_alloc_context();
+    if (!d->format) { cache_let_go(d); return false; }
+    d->format->pb = d->cache_io;
+    d->format->flags |= AVFMT_FLAG_CUSTOM_IO;
+    /* the path still given: its ending helps the probe; the bytes come from the stream */
+    if (g_ff.avformat_open_input(&d->format, m->path, NULL, NULL) < 0 || !d->format) { d->format = NULL; cache_let_go(d); return false; }
+    return true;
+}
 
 static double stream_seconds(AVFormatContext *format, int index, int64_t pts) {
     if (pts == AV_NOPTS_VALUE || index < 0) return 0.0;
@@ -1031,7 +1091,7 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
     if (m->station) {
         if (!open_station(m, d)) return false;
     } else {
-        if (g_ff.avformat_open_input(&d->format, m->path, NULL, NULL) < 0 || !d->format) {
+        if (!open_cached(m, d) && (g_ff.avformat_open_input(&d->format, m->path, NULL, NULL) < 0 || !d->format)) {
             m->failure = GetFileAttributesA(m->path) != INVALID_FILE_ATTRIBUTES
                 ? RUBRAVIEW_MEDIA_FAIL_CONTAINER : RUBRAVIEW_MEDIA_FAIL_FILE;
             return false;
@@ -1201,6 +1261,7 @@ static void free_decode(ff_decode_t *d) {
     if (d->swframe) g_ff.av_frame_free(&d->swframe);
     if (d->packet) g_ff.av_packet_free(&d->packet);
     if (d->format) g_ff.avformat_close_input(&d->format);
+    cache_let_go(d);   /* RV-216: after the format, which reads through it to the end */
 }
 
 /* Puts one decoded picture in the ring, waiting for room while playing

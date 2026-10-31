@@ -31,6 +31,10 @@ void live_start(app_state_t *app) {
     app->stats_frames = app->stats_dropped = app->stats_taken = app->stats_shown = 0;
     app->stats_worst = app->stats_draw = app->stats_present = app->stats_media = app->stats_late = 0.0;
     app->stats_read_known = rubraview_pal_process_read_bytes(&app->stats_read_from);
+    rubraview_filmcache_stats_t cs;
+    rubraview_pal_filmcache_stats(&cs);
+    app->stats_copy_from = cs.from_copy;
+    app->stats_network_from = cs.from_source;
     app->live = (rubraview_live_t){ .fine_timer = app->stats_fine };
 }
 
@@ -62,6 +66,13 @@ static void live_second(app_state_t *app, double now) {
         .read_known = known, .read_bytes = known ? read - app->stats_read_from : 0,
         .film_bits = film ? live_film_bits(app) : 0.0, .fine_timer = app->stats_fine,
     };
+    rubraview_filmcache_stats_t cs;   /* RV-216 */
+    rubraview_pal_filmcache_stats(&cs);
+    app->live.cached = cs.open && cs.blocks > 0;
+    app->live.from_copy = cs.from_copy >= app->stats_copy_from ? cs.from_copy - app->stats_copy_from : 0;
+    app->live.from_network = cs.from_source >= app->stats_network_from ? cs.from_source - app->stats_network_from : 0;
+    app->live.copy_filled = cs.filled;
+    app->live.copy_blocks = cs.blocks;
     rubraview_live_t keep = app->live;
     live_start(app);
     app->live = keep;

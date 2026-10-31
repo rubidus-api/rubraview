@@ -4,6 +4,17 @@
  */
 #include "app.h"
 
+/* RV-216 (D-249): the network film cache's settings, given again before each film opens (the FFmpeg child takes
+   them with the open): nothing copied of a folder kept out of Recent, nor anything when Recent keeps nothing. */
+void filmcache_for(app_state_t *app, proven_u8str_view_t path) {
+    double gb = rubraview_settings_get(&app->settings, PROVEN_LIT("cache"), PROVEN_LIT("film_gb"));
+    bool keep = rubraview_settings_get(&app->settings, PROVEN_LIT("recent"), PROVEN_LIT("keep")) >= 0.5 &&
+                (path.size == 0 || !recent_kept_out(app, path));
+    uint64_t limit = keep && gb > 0.0 ? (uint64_t)(gb * 1073741824.0) : 0;
+    rubraview_pal_filmcache_configure(rubraview_settings_get_text(&app->settings, PROVEN_LIT("cache"), PROVEN_LIT("film_folder")),
+                                      limit, rubraview_settings_get(&app->settings, PROVEN_LIT("cache"), PROVEN_LIT("film_ahead")) >= 0.5);
+}
+
 /* ---- video pages (M5 slice 1: D-8, D-9) ---- */
 
 void osd_say(app_state_t *app, proven_u8str_view_t text);
@@ -1073,6 +1084,7 @@ void media_prepare(app_state_t *app) {
         gpu.hdr_sdr_white = app->media_hdr_screen.sdr_white_nits;
     }
     for (size_t i = 0; i < count; ++i) {
+        filmcache_for(app, path);
         opened = rubraview_pal_media_open(path, order[i], &gpu);
         if (opened.media) break;
         why = i == 0 ? opened.failure : rubraview_media_failure_pick(why, opened.failure);
@@ -1082,6 +1094,7 @@ void media_prepare(app_state_t *app) {
     if (opened.media && opened.info.backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION &&
         rubraview_media_hdr_ask_ffmpeg(opened.info.hdr_transfer, opened.info.video_fourcc) &&
         gpu.tone_mapping > 0 && !no_ffmpeg && rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)) {
+        filmcache_for(app, path);
         rubraview_media_open_result_t other = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_FFMPEG, &gpu);
         /* not when FFmpeg would lose the sound Windows plays */
         if (other.media && other.info.hdr_tone_mapped && (other.info.audio_output || !opened.info.audio_output)) {
@@ -1516,6 +1529,7 @@ static void music_transition_tick(app_state_t *app) {
                                                      order);
         for (size_t i = 0; i < count; ++i) {
             /* No graphics card for a track: there are no pictures in it. */
+            filmcache_for(app, path);
             rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i], NULL);
             if (opened.media) {
                 app->next_media = opened.media;

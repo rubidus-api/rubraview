@@ -252,7 +252,10 @@ void recent_forget(app_state_t *app, const proven_u8str_view_t *paths, size_t co
     rubraview_recent_t all = rubraview_recent_parse(ra, before);
     rubraview_recent_merge(ra, &all, &app->recent, RECENT_KEPT);
     int64_t now = (int64_t)time(NULL);
-    for (size_t i = 0; i < count; ++i) rubraview_recent_remove(ra, &all, paths[i], now);
+    for (size_t i = 0; i < count; ++i) {
+        rubraview_recent_remove(ra, &all, paths[i], now);
+        rubraview_pal_filmcache_forget(paths[i]);   /* RV-216: and its copy, a network film's */
+    }
     (void)rubraview_pal_fs_write_file_atomic(app->recent_path, rubraview_recent_serialize(ra, &all));
     if (locked) rubraview_pal_config_unlock();
     recent_settle(app, ra, &all);

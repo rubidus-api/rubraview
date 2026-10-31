@@ -418,5 +418,9 @@ void rubraview_info_add_live(proven_arena_t *arena, rubraview_info_t *info, cons
         else
             rubraview_info_addf(arena, info, T("Reading files"), T("%.1f MB/s (%.0f Mbit/s)"), bytes / 1e6, bytes * 8.0 / 1e6);
     }
+    if (live->cached)   /* RV-216 (D-249) */
+        rubraview_info_addf(arena, info, T("Network film"), T("%.1f MB/s from the copy, %.1f MB/s from the network; the copy %.0f %% here"),
+                            (double)live->from_copy / span / 1e6, (double)live->from_network / span / 1e6,
+                            live->copy_blocks ? 100.0 * (double)live->copy_filled / (double)live->copy_blocks : 0.0);
     rubraview_info_addf(arena, info, T("Timer"), "%s", live->fine_timer ? T("1 ms") : T("Windows' default (15.6 ms)"));
 }

@@ -127,6 +127,7 @@
 #include "rubraview/pal/pal_gmic.h"
 #include "rubraview/gmic.h"
 #include "rubraview/pal/pal_ffilter.h"
+#include "rubraview/pal/pal_filmcache.h"
 #include "rubraview/ffilter.h"
 #include "rubraview/playback.h"
 #include "rubraview/textenc.h"
@@ -1345,6 +1346,7 @@ typedef struct app_state {
     uint64_t               stats_read_from;        /* bytes read when the second began */
     int32_t                stats_size_page;        /* the page whose size is in stats_size_bytes, -1 none */
     uint64_t               stats_size_bytes;
+    uint64_t               stats_copy_from, stats_network_from;   /* RV-216: the cache's counts when the second began */
     rubraview_live_t       live;                   /* the last second's */
     size_t                 picker_tap_index;
     uint32_t               picker_tap_generation;
@@ -2005,6 +2007,7 @@ void info_local_time(char *buf, size_t cap, int64_t unix_seconds);
 size_t info_pump(app_state_t *app);
 void info_show(app_state_t *app);
 void info_live(app_state_t *app);   /* RV-215 (D-248): the Live rows again */
+void filmcache_for(app_state_t *app, proven_u8str_view_t path);   /* RV-216 (D-249): the cache's settings for a film about to open */
 void live_start(app_state_t *app);  /* RV-215: a fresh second's measuring */
 void interval_set(app_state_t *app, double seconds);
 bool is_media_path(proven_u8str_view_t path);

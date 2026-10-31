@@ -15,6 +15,7 @@
 #include "rubraview/pal/pal_media_backend.h"
 #include "rubraview/lang.h"
 #include "rubraview/mediaclock.h"
+#include "rubraview/pal/pal_filmcache.h"
 #include <stdio.h>
 
 /*
@@ -127,6 +128,7 @@ typedef HRESULT (WINAPI *mf_create_reader_fn)(LPCWSTR, IMFAttributes*, IMFSource
 typedef HRESULT (WINAPI *mf_create_file_fn)(int, int, int, LPCWSTR, IMFByteStream**);
 typedef HRESULT (WINAPI *mf_create_reader_stream_fn)(IMFByteStream*, IMFAttributes*, IMFSourceReader**);
 typedef HRESULT (WINAPI *mf_create_dxgi_manager_fn)(UINT*, IMFDXGIDeviceManager**);
+typedef HRESULT (WINAPI *mf_stream_on_istream_fn)(IStream*, IMFByteStream**);   /* RV-216 */
 
 /* RV-062. Spelled out here: the import libraries do not carry all of them. */
 static const GUID RV_IID_IMFDXGIBuffer = { 0xe7174cfa, 0x1c9e, 0x48b1, { 0x88, 0x66, 0x62, 0x62, 0x26, 0xbf, 0xc2, 0x58 } };
@@ -143,6 +145,7 @@ static struct {
     mf_create_file_fn create_file;                   /* optional: see open_reader */
     mf_create_reader_stream_fn create_reader_stream;
     mf_create_dxgi_manager_fn create_dxgi_manager;   /* optional: without it, no GPU decode */
+    mf_stream_on_istream_fn stream_on_istream;       /* RV-216, optional: a network film read through its copy */
 } g_mf;
 
 /* Called on the caller's thread before any decode thread exists, so the
@@ -161,6 +164,7 @@ static bool mf_load(void) {
     g_mf.create_file = (mf_create_file_fn)(void*)GetProcAddress(plat, "MFCreateFile");
     g_mf.create_reader_stream = (mf_create_reader_stream_fn)(void*)GetProcAddress(rw, "MFCreateSourceReaderFromByteStream");
     g_mf.create_dxgi_manager = (mf_create_dxgi_manager_fn)(void*)GetProcAddress(plat, "MFCreateDXGIDeviceManager");
+    g_mf.stream_on_istream = (mf_stream_on_istream_fn)(void*)GetProcAddress(plat, "MFCreateMFByteStreamOnStream");
     g_mf.ok = g_mf.startup && g_mf.shutdown && g_mf.create_attributes &&
               g_mf.create_media_type && g_mf.create_reader;
     return g_mf.ok;
@@ -524,7 +528,27 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
     }
 
     IMFSourceReader *reader = NULL;
-    HRESULT hr = g_mf.create_reader(m->path, attrs, &reader);
+    HRESULT hr = E_FAIL;
+    /* RV-216 (D-249): a film on a network drive is read through its local copy, which fills as it is read. */
+    rubraview_filmcache_stream_t *cached = g_mf.stream_on_istream && g_mf.create_reader_stream ? rubraview_pal_filmcache_open(m->path) : NULL;
+    if (cached) {
+        IStream *is = (IStream *)rubraview_pal_filmcache_istream(cached);
+        rubraview_pal_filmcache_close(cached);   /* the IStream holds it now */
+        IMFByteStream *stream = NULL;
+        if (is && SUCCEEDED(g_mf.stream_on_istream(is, &stream)) && stream) {
+            static const GUID ORIGIN_NAME = { 0xfc358288, 0x3cb6, 0x460c, { 0xa4, 0x24, 0xb6, 0x68, 0x12, 0x60, 0x37, 0x5a } };   /* MF_BYTESTREAM_ORIGIN_NAME */
+            IMFAttributes *named = NULL;
+            if (SUCCEEDED(IMFByteStream_QueryInterface(stream, &IID_IMFAttributes, (void **)&named)) && named) {
+                IMFAttributes_SetString(named, &ORIGIN_NAME, m->path);   /* its ending names the kind */
+                IMFAttributes_Release(named);
+            }
+            hr = g_mf.create_reader_stream(stream, attrs, &reader);
+            IMFByteStream_Release(stream);
+        }
+        if (is) IStream_Release(is);
+        if (FAILED(hr)) reader = NULL;
+    }
+    if (!reader) hr = g_mf.create_reader(m->path, attrs, &reader);
     if ((FAILED(hr) || !reader) && g_mf.create_file && g_mf.create_reader_stream) {
         /* A path Media Foundation does not take as a URL — `\\server\share\film.avi`
            was "cannot play this kind of file" (2026-10-11) — is opened as a

@@ -183,6 +183,13 @@ static size_t settings_info(void *user, proven_u8str_view_t source, char *buffer
         n = snprintf(buffer, capacity, T("session %zu MB (most %zu), a track %zu MB, %zu window(s), %zu MB for the moment; %zu MB held"),
                      st.persist_used >> 20, st.persist_peak >> 20, st.media_used >> 20, st.windows_live, st.scratch_live >> 20,
                      st.total_held >> 20);
+    } else if (proven_u8str_view_eq(source, PROVEN_LIT("cache.films"))) {
+        /* RV-216: the network films' copies, how much room they take, where */
+        uint64_t bytes = 0;
+        size_t copies = rubraview_pal_filmcache_usage(&bytes);
+        char folder[1024];
+        rubraview_pal_filmcache_folder(folder, sizeof folder);
+        n = snprintf(buffer, capacity, T("%zu, %.1f GB, in %s"), copies, (double)bytes / 1073741824.0, folder[0] ? folder : "-");
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("cache.used"))) {
         size_t loaded = 0;
         uint64_t bytes = 0;
@@ -922,6 +929,8 @@ static void settings_apply_rest(app_state_t *app) {
     double details = rubraview_settings_get(st, PROVEN_LIT("cache"), PROVEN_LIT("keep_details"));   /* 1.17.0 */
     if (details != last_details) { app->export_options.keep_details = (int32_t)lround(details); last_details = details; }
 
+    filmcache_for(app, (proven_u8str_view_t){ 0 });   /* RV-216: the cache's settings, till a film is opened */
+
     /* Keys */
     double keymap = rubraview_settings_get(st, PROVEN_LIT("keys"), PROVEN_LIT("use_keymap_file"));
     if (keymap != last_keymap) {
@@ -1506,6 +1515,12 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                     app->picker_thumb_count = app->picker_thumbs ? app->picker_listing.count : 0;
                 }
                 settings_say(app, T("the picker's thumbnails were let go"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("cache.clear_films"))) {
+                /* RV-216: every copy not playing now */
+                uint64_t freed = rubraview_pal_filmcache_clear();
+                char said[96];
+                snprintf(said, sizeof said, T("the network films' copies were deleted: %.1f GB"), (double)freed / 1073741824.0);
+                settings_say(app, said);
             } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("cache.reset_history"))) {
                 /* Every place read to, here and in the file. Another viewer that is open still has its own. */
                 app->history = (rubraview_history_t){0};
