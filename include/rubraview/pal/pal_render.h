@@ -107,6 +107,8 @@ void rubraview_pal_render_begin(rubraview_renderer_t *renderer, uint32_t clear_a
  * and reloads); true on a normal present.
  */
 bool rubraview_pal_render_end(rubraview_renderer_t *renderer);
+/** RV-215: how long the last end's Present took, the wait for the screen's refresh included (0 when none). */
+double rubraview_pal_render_present_seconds(const rubraview_renderer_t *renderer);
 
 /**
  * Draw a whole texture under `transform` (typically from

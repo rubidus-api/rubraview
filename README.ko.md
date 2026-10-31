@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.39.56** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.56/rubraview-v1.39.56.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.56/rubraview-v1.39.56.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.56/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.39.57** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.57/rubraview-v1.39.57.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.57/rubraview-v1.39.57.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.57/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -60,7 +60,6 @@
 | `Ctrl+T` | 툴바를 따로 창으로/되돌리기 |
 | `Ctrl+Shift+T` | 항상 맨 위 |
 | `Shift+I` | 정보 막대 |
-| `Ctrl+Shift+F` | 프레임 측정값을 하단 상태줄에: 초당 프레임, 가장 느린 간격, 버린 프레임, 그리는 시간 |
 | `Ctrl+N` | 새 창: 뷰어를 하나 더, 빈 채로 |
 | `Ctrl+,` | 설정 |
 | `Shift+/` | 이 도움말(별도 창) |

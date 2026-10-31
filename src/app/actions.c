@@ -662,19 +662,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         rubraview_box_snap_home(&app->toolbox, &m, (double)ww, (double)wh);
         if (app->osd.always_on) app->toolbox.anchor_y -= 28.0 * dpi;
         osd_say(app, TU8("the Floating Widget is back in its corner"));
-    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_frame_stats"))) {
-        /* RV-215: how the frames come, said once a second in a row of the
-           status bar (Shift+I), which comes up with it (owner, 2026-10-31) */
-        app->frame_stats = !app->frame_stats;
-        if (app->frame_stats) app->osd.always_on = true;
-        app->stats_since = rubraview_pal_time_now_seconds();
-        app->stats_frames = app->stats_dropped = 0;
-        app->stats_worst = app->stats_draw = 0.0;
-        app->stats_text[0] = '\0';
-        osd_say(app, app->frame_stats ? TU8("frame timings in the status bar, once a second") : TU8("frame timings off"));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_osd"))) {
         app->osd.always_on = !app->osd.always_on;
-        if (!app->osd.always_on) app->frame_stats = false;   /* RV-215: the timings live in the bar */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_filmstrip"))) {
         app->filmstrip.visible = !app->filmstrip.visible;
         int32_t page = current_page_index(app);

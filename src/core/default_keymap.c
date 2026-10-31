@@ -21,7 +21,6 @@ const char *rubraview_default_keymap(void) {
     "toggle_always_on_top = \"Ctrl+Shift+T\"\n"
     /* Owner, 2026-09-29: I is the file's information; the status line moves to Shift+I. */
     "toggle_osd = \"Shift+I\"\n"
-    "toggle_frame_stats = \"Ctrl+Shift+F\"\n"   /* RV-215: frames a second, the slowest, dropped, drawing time */
     /* Owner, 2026-10-16: the viewer once more, in a window of its own. */
     "new_window = \"Ctrl+N\"\n"
     /* §3.22.1. RV-211 (owner, 2026-10-31: "펑션키 F1~F12 쓰는 단축키는 다른 키로 옮겨주세요"): no function keys —

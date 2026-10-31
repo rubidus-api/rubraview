@@ -58,6 +58,26 @@ size_t rubraview_info_print_size(char *buf, size_t cap, int32_t width, int32_t h
    picture holds: a 2 MB bit set from `arena`. 0 when it cannot count. */
 uint32_t rubraview_info_unique_colours(proven_arena_t *arena, const rubraview_pixbuf_t *pixels);
 
+/* RV-215 (D-248): the information window's Live rows — a second of the
+   loop's measurements, summed as they come and listed at the window's top. */
+typedef struct rubraview_live {
+    double   seconds;            /* the span measured; 0 while the first second runs */
+    uint32_t frames;             /* frames drawn */
+    double   slowest;            /* the longest gap between two, seconds */
+    double   draw, present;      /* summed over the frames: drawing, then waiting for the screen */
+    bool     film;               /* a film is playing */
+    uint32_t shown, dropped;     /* its pictures shown and dropped */
+    uint32_t taken;              /* pictures taken in, and the time it took, summed */
+    double   taking;
+    double   late;               /* summed over the pictures shown: how far behind the clock */
+    uint32_t ready;              /* pictures decoded and waiting, at the end of the span */
+    bool     read_known;         /* bytes read by the viewer and its FFmpeg child in the span */
+    uint64_t read_bytes;
+    double   film_bits;          /* the film's own rate (its size over its length), bits a second; 0 unknown */
+    bool     fine_timer;         /* Windows' timer at 1 ms */
+} rubraview_live_t;
+void rubraview_info_add_live(proven_arena_t *arena, rubraview_info_t *info, const rubraview_live_t *live);
+
 /* A container that gives no four-letter code for a stream (Matroska gives
    0), or one that is not letters: the code is made of the codec's name,
    its first four letters in capitals, blanks after a shorter one ("h264"

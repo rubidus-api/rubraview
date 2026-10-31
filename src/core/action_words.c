@@ -181,7 +181,6 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "toggle_file_list", "The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one" },
     { "toggle_filmstrip", "Filmstrip" },
     { "toggle_fit_lock", "Keep the fit for the next files" },
-    { "toggle_frame_stats", "Frame timings in the status bar: frames a second, the slowest, frames dropped, time drawing" },
     { "toggle_fullscreen", "Full screen" },
     { "toggle_help", "This help, in a window of its own" },
     { "toggle_info", "The file's information (size, pixels, codec, EXIF), text you can mark and copy" },

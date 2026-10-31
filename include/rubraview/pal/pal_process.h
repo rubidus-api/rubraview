@@ -43,6 +43,13 @@ bool rubraview_pal_process_start_console(proven_u8str_view_t command_line);
  */
 bool rubraview_pal_process_start(proven_u8str_view_t command_line);
 
+/**
+ * RV-215 (D-248): bytes this program has read since it started, its FFmpeg
+ * children's included (those ended counted as they were at the end), from
+ * any file or drive, the system's cache included. False when it cannot be had.
+ */
+bool rubraview_pal_process_read_bytes(uint64_t *bytes);
+
 #ifdef __cplusplus
 }
 #endif

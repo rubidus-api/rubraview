@@ -388,3 +388,35 @@ size_t rubraview_info_rows(proven_arena_t *arena, const rubraview_info_t *info, 
     }
     return n;
 }
+
+void rubraview_info_add_live(proven_arena_t *arena, rubraview_info_t *info, const rubraview_live_t *live) {
+    if (!arena || !info || !live) return;
+    rubraview_info_heading(arena, info, T("Live, once a second"));
+    if (!(live->seconds > 0.0)) {
+        rubraview_info_addf(arena, info, T("Frames drawn"), "%s", T("measuring"));
+        return;
+    }
+    double span = live->seconds;
+    rubraview_info_addf(arena, info, T("Frames drawn"), T("%.0f a second, the slowest gap %.0f ms"),
+                        live->frames / span, live->slowest * 1000.0);
+    if (live->frames > 0)
+        rubraview_info_addf(arena, info, T("Drawing"), T("%.1f ms a frame, waiting for the screen %.1f ms"),
+                            live->draw * 1000.0 / live->frames, live->present * 1000.0 / live->frames);
+    if (live->film) {
+        rubraview_info_addf(arena, info, T("Film pictures"), T("%.0f shown, %.0f dropped a second, %u decoded ahead"),
+                            live->shown / span, live->dropped / span, (unsigned)live->ready);
+        if (live->shown > 0)
+            rubraview_info_addf(arena, info, T("Picture late"), T("%.1f ms behind the clock on average"), live->late * 1000.0 / live->shown);
+        if (live->taken > 0)
+            rubraview_info_addf(arena, info, T("Taking a picture in"), T("%.1f ms"), live->taking * 1000.0 / live->taken);
+    }
+    if (live->read_known) {
+        double bytes = (double)live->read_bytes / span;
+        if (live->film && live->film_bits > 0.0)
+            rubraview_info_addf(arena, info, T("Reading files"), T("%.1f MB/s (%.0f Mbit/s); the film needs %.0f Mbit/s"),
+                                bytes / 1e6, bytes * 8.0 / 1e6, live->film_bits / 1e6);
+        else
+            rubraview_info_addf(arena, info, T("Reading files"), T("%.1f MB/s (%.0f Mbit/s)"), bytes / 1e6, bytes * 8.0 / 1e6);
+    }
+    rubraview_info_addf(arena, info, T("Timer"), "%s", live->fine_timer ? T("1 ms") : T("Windows' default (15.6 ms)"));
+}

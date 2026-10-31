@@ -29,3 +29,8 @@ bool rubraview_pal_process_start(proven_u8str_view_t command_line) {
     return false;
 }
 #endif
+
+bool rubraview_pal_process_read_bytes(uint64_t *bytes) {
+    if (bytes) *bytes = 0;
+    return false;   /* the viewer's live rows are Windows' */
+}

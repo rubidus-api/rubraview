@@ -17,6 +17,8 @@
 #define INFO_ARENA_BYTES (4u * 1024u * 1024u)
 #define INFO_MAX_ROWS 512
 #define INFO_LABEL_COLS 20
+#define INFO_LIVE_BYTES (16u * 1024u)
+#define INFO_LIVE_ROWS 16
 
 void info_local_time(char *buf, size_t cap, int64_t unix_seconds) {
     buf[0] = '\0';
@@ -365,11 +367,44 @@ static void info_gather(app_state_t *app) {
 
     proven_result_mem_mut_t rr = rubraview_arena_alloc_array(a, INFO_MAX_ROWS, sizeof(proven_u8str_view_t));
     proven_result_mem_mut_t hr = rubraview_arena_alloc_array(a, INFO_MAX_ROWS, sizeof(bool));
-    if (!proven_is_ok(rr.err) || !proven_is_ok(hr.err)) { app->info_count = 0; return; }
-    app->info_rows = (proven_u8str_view_t*)(void*)rr.value.ptr;
-    app->info_heading = (bool*)(void*)hr.value.ptr;
-    app->info_count = rubraview_info_rows(a, &info, INFO_LABEL_COLS, app->info_rows, INFO_MAX_ROWS);
-    for (size_t i = 0, r = 0; i < info.count && r < app->info_count; ++i, ++r) app->info_heading[r] = info.lines[i].heading;
+    app->info_static_count = 0;
+    if (proven_is_ok(rr.err) && proven_is_ok(hr.err)) {
+        app->info_static_rows = (proven_u8str_view_t*)(void*)rr.value.ptr;
+        app->info_static_heading = (bool*)(void*)hr.value.ptr;
+        app->info_static_count = rubraview_info_rows(a, &info, INFO_LABEL_COLS, app->info_static_rows, INFO_MAX_ROWS);
+        for (size_t i = 0, r = 0; i < info.count && r < app->info_static_count; ++i, ++r) app->info_static_heading[r] = info.lines[i].heading;
+    }
+    info_live(app);
+}
+
+/* RV-215 (D-248): the Live rows at the top, then the file's; made again
+   once a second without gathering the file's again or losing a mark. */
+void info_live(app_state_t *app) {
+    if (!app->info_open) return;
+    if (!app->info_live_mem) {
+        app->info_live_mem = malloc(INFO_LIVE_BYTES);
+        app->info_all_rows = malloc((INFO_MAX_ROWS + INFO_LIVE_ROWS) * sizeof(proven_u8str_view_t));
+        app->info_all_heading = malloc((INFO_MAX_ROWS + INFO_LIVE_ROWS) * sizeof(bool));
+        if (!app->info_live_mem || !app->info_all_rows || !app->info_all_heading) {
+            free(app->info_live_mem); free(app->info_all_rows); free(app->info_all_heading);
+            app->info_live_mem = NULL; app->info_all_rows = NULL; app->info_all_heading = NULL;
+            app->info_count = 0;
+            return;
+        }
+        app->info_live_arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)app->info_live_mem, .size = INFO_LIVE_BYTES });
+    }
+    proven_arena_reset(&app->info_live_arena);
+    rubraview_info_t live = {0};
+    rubraview_info_add_live(&app->info_live_arena, &live, &app->live);
+    size_t n = rubraview_info_rows(&app->info_live_arena, &live, INFO_LABEL_COLS, app->info_all_rows, INFO_LIVE_ROWS);
+    for (size_t i = 0; i < n; ++i) app->info_all_heading[i] = live.lines[i].heading;
+    for (size_t i = 0; i < app->info_static_count; ++i) {
+        app->info_all_rows[n + i] = app->info_static_rows[i];
+        app->info_all_heading[n + i] = app->info_static_heading[i];
+    }
+    app->info_rows = app->info_all_rows;
+    app->info_heading = app->info_all_heading;
+    app->info_count = n + app->info_static_count;
     if (app->info_scroll > (int32_t)app->info_count) app->info_scroll = 0;
     app->info_dirty = true;
 }
@@ -469,6 +504,7 @@ void info_show(app_state_t *app) {
         app->info_cell_h = 17.6 * dpi;
     }
     app->info_open = true;
+    live_start(app);
     app->info_scroll = 0;
     app->info_message[0] = '\0';
     app->info_key = info_key_now(app);

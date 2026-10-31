@@ -2908,3 +2908,18 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: a row above the information bar's name; `Ctrl+Shift+F` brings the bar up, `Shift+I` closing the bar ends
   the timings. The settled screen is drawn again when the row changes, once a second. The title no longer carries them.
 - Consequences: the owner reads the numbers on the picture itself, in full screen too.
+
+## 2026-10-31: D-248 Live measurements at the information window's top, always; no key of their own (W-20261031-1810)
+
+- Status: Accepted (owner 2026-10-31: "측정값은 I 누르면 나오는 정보창 맨 상단에 실시간 데이터 항목을 넣고 거기에 실시간
+  데이터들(지연시간이나 실시간 bps 뭐 그런거) 몰아넣으면 복사하기도 쉽고 보기도 쉽고"; "Ctrl Shift F 말고 그냥 I 정보창에
+  공식으로 통합하죠"; "항상 나오는 것으로"). Replaces D-247's row in the information bar.
+- Context: the owner's first numbers (a 2160 x 2180 H.264 film by Media Foundation on a network drive): 60 frames a
+  second, the slowest gap 100–200 ms, 17 dropped, taking a picture 0.2 ms, "drawing" 15 ms. The drawing time held
+  Present's wait for the screen, and nothing said how fast the file came; the film needs about 200 Mbit/s and the
+  drive gives about 100.
+- Decision: the information window's first rows, made each second while it is open: frames and the slowest gap,
+  drawing apart from the wait for the screen, a film's pictures shown, dropped, decoded ahead and late, the bytes read
+  a second against the film's own rate, the timer. `toggle_frame_stats` (Ctrl+Shift+F) and the bar's row are gone.
+- Consequences: a stutter from a slow drive reads as "Reading" below "the film needs"; a cache for films on network
+  drives is planned (RV-216, `docs/plans/active/2026-10-31-RV-216-film-cache.md`).

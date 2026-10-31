@@ -11,8 +11,9 @@ double rubraview_pal_time_now_seconds(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
-void rubraview_pal_time_fine(bool fine) {
+bool rubraview_pal_time_fine(bool fine) {
     (void)fine;   /* a POSIX sleep is as fine as asked */
+    return true;
 }
 
 void rubraview_pal_time_sleep_ms(uint32_t milliseconds) {

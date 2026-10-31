@@ -17,23 +17,24 @@ double rubraview_pal_time_now_seconds(void) {
     return (double)counter.QuadPart / (double)frequency.QuadPart;
 }
 
-void rubraview_pal_time_fine(bool fine) {
+bool rubraview_pal_time_fine(bool fine) {
     static bool on, tried;
     static UINT (WINAPI *begin)(UINT), (WINAPI *end)(UINT);
-    if (fine == on) return;
+    if (fine == on) return on;
     if (!tried) {   /* winmm loaded when first wanted: nothing else of it is used */
         tried = true;
         WCHAR keep[4];
-        if (GetEnvironmentVariableW(L"RUBRAVIEW_TIMER_DEFAULT", keep, 4) > 0) return;   /* to compare with Windows' tick left as it is */
+        if (GetEnvironmentVariableW(L"RUBRAVIEW_TIMER_DEFAULT", keep, 4) > 0) return false;   /* to compare with Windows' tick left as it is */
         HMODULE winmm = LoadLibraryW(L"winmm.dll");
         if (winmm) {
             begin = (UINT (WINAPI *)(UINT))(void (*)(void))GetProcAddress(winmm, "timeBeginPeriod");
             end = (UINT (WINAPI *)(UINT))(void (*)(void))GetProcAddress(winmm, "timeEndPeriod");
         }
     }
-    if (!begin || !end) return;
+    if (!begin || !end) return false;
     if (fine) begin(1); else end(1);
     on = fine;
+    return on;
 }
 
 void rubraview_pal_time_sleep_ms(uint32_t milliseconds) {

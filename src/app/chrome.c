@@ -392,14 +392,6 @@ void draw_chrome(app_state_t *app, double win_w, double win_h) {
             rubraview_pal_rect_t back = { 0.0, bottom, win_w, bar_h };
             rubraview_pal_render_fill_rect(app->renderer, back, (alpha / 2u) << 24, 0.0);
             uint32_t ink = (alpha << 24) | (COLOR_TEXT & 0x00FFFFFFu);
-            size_t said = app->frame_stats ? strnlen(app->stats_text, sizeof(app->stats_text)) : 0;
-            if (said > 0) {   /* RV-215: the frame timings, a row above the name (owner, 2026-10-31) */
-                rubraview_pal_rect_t row = { 0.0, bottom - bar_h, win_w, bar_h };
-                rubraview_pal_render_fill_rect(app->renderer, row, (alpha / 2u) << 24, 0.0);
-                row.x = pad; row.width = win_w - 2.0 * pad;
-                rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->stats_text, .size = said },
-                                               row, font, ink, RUBRAVIEW_TEXT_LEFT);
-            }
 
             double right_w = 0.0;
             if (!rubraview_pal_render_measure_text(app->renderer, right, font, &right_w)) right_w = (double)right.size * font * 0.55;

@@ -1265,6 +1265,7 @@ void media_tick(app_state_t *app) {
                 continue;
             }
             bool first = !app->media_has_frame;
+            if (app->info_open && !first) { app->stats_shown++; app->stats_late += clock - frame.pts; }   /* RV-215 (D-248) */
             media_show(app, page, &frame);
             rubraview_pal_media_pop_frame(m);
             /* Only a wall clock may be moved to the picture. The sound is

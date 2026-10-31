@@ -24,9 +24,10 @@ void rubraview_pal_time_sleep_ms(uint32_t milliseconds);
 /**
  * RV-215: the system's timer at 1 ms while `fine` (a film or an animation playing, the screen moving), its
  * default otherwise. Windows' default tick is 15.6 ms: a sleep of 4 ms, or a wait of 2, lasted a whole tick, and a
- * film's frames and a picture's movement came a tick late now and then. Cheap to call every pass.
+ * film's frames and a picture's movement came a tick late now and then. Cheap to call every pass. Returns whether
+ * waits are now as fine as 1 ms (D-248: the information window's Timer row).
  */
-void rubraview_pal_time_fine(bool fine);
+bool rubraview_pal_time_fine(bool fine);
 
 #ifdef __cplusplus
 }

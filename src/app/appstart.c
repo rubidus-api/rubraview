@@ -62,6 +62,7 @@ bool app_start(app_state_t *app, rubraview_mem_t *mem) {
     settings_took_effect(app);
     app->osd = rubraview_osd_create(2.0, 0.5);            /* §3.1 */
     app->osd_size_page = -1;
+    app->stats_size_page = -1;
     app->titlebar = rubraview_titlebar_create(dpi);       /* §3.21.2 */
     app->titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_trigger_px"))) * dpi;
     app->titlebar.hide_delay = rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_hide_ms")) / 1000.0;

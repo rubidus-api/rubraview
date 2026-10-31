@@ -221,9 +221,40 @@ static void child_kill(mh_child_t *c, const char *why) {
     c->dead = true;
 }
 
+/* RV-215 (D-248): the children's reads, for the information window's Reading row. */
+#define MH_LIVE_MAX 16
+static SRWLOCK g_live_lock = SRWLOCK_INIT;
+static HANDLE g_live[MH_LIVE_MAX];
+static uint64_t g_live_gone;   /* what children that ended had read */
+
+static void live_note(HANDLE process, bool add) {
+    AcquireSRWLockExclusive(&g_live_lock);
+    for (size_t i = 0; i < MH_LIVE_MAX; ++i) {
+        if (add && !g_live[i]) { g_live[i] = process; break; }
+        if (!add && g_live[i] == process) {
+            IO_COUNTERS io;
+            if (GetProcessIoCounters(process, &io)) g_live_gone += io.ReadTransferCount;
+            g_live[i] = NULL;
+            break;
+        }
+    }
+    ReleaseSRWLockExclusive(&g_live_lock);
+}
+
+uint64_t rubraview_mhost_children_read_bytes(void) {
+    AcquireSRWLockShared(&g_live_lock);
+    uint64_t sum = g_live_gone;
+    for (size_t i = 0; i < MH_LIVE_MAX; ++i) {
+        IO_COUNTERS io;
+        if (g_live[i] && GetProcessIoCounters(g_live[i], &io)) sum += io.ReadTransferCount;
+    }
+    ReleaseSRWLockShared(&g_live_lock);
+    return sum;
+}
+
 static void child_free(mh_child_t *c) {
     if (c->process && !c->dead) child_kill(c, NULL);
-    if (c->process) { WaitForSingleObject(c->process, 2000); CloseHandle(c->process); }
+    if (c->process) { WaitForSingleObject(c->process, 2000); live_note(c->process, false); CloseHandle(c->process); }
     if (c->job) CloseHandle(c->job);
     if (c->block) UnmapViewOfFile(c->block);
     if (c->mapping) CloseHandle(c->mapping);
@@ -311,6 +342,7 @@ static bool child_start(mh_child_t *c, rubraview_mhost_mode_t mode, const rubrav
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
     c->process = pi.hProcess;
+    live_note(c->process, true);
     c->beat_at = now_seconds();
     return true;
 }

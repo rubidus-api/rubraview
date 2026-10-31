@@ -1241,6 +1241,13 @@ typedef struct app_state {
     size_t                     info_count;
     int64_t                    info_key;         /* which page and film the rows are of */
     rubraview_grid_selection_t info_sel;
+    proven_u8str_view_t       *info_static_rows;  /* the file's rows, below the Live ones (D-248) */
+    bool                      *info_static_heading;
+    size_t                     info_static_count;
+    void                      *info_live_mem;     /* the Live rows, made again once a second */
+    proven_arena_t             info_live_arena;
+    proven_u8str_view_t       *info_all_rows;     /* Live rows then the file's: what is drawn and copied */
+    bool                      *info_all_heading;
     bool                       info_selecting;
     char                       info_message[64];
     /* the folder's summary, kept while the folder stays the same */
@@ -1328,12 +1335,17 @@ typedef struct app_state {
     size_t                 picker_hold_index;
     double                 picker_hold_x, picker_hold_y, picker_hold_at;
     double                 picker_tap_at;          /* RV-213: the last tap, for a second one that opens */
-    /* RV-215: frame timings, said in the title once a second while asked for (Ctrl+Shift+F) */
-    bool                   frame_stats;
-    double                 stats_since, stats_worst, stats_draw;
-    uint32_t               stats_frames, stats_dropped, stats_taken;
+    /* RV-215 (D-248): measured while the information window is open, listed at its top once a second */
+    double                 stats_since, stats_worst, stats_draw, stats_present;
+    uint32_t               stats_frames, stats_dropped, stats_taken, stats_shown;
     double                 stats_media;            /* time taking a film's picture in (its copy or upload) */
-    char                   stats_text[160];
+    double                 stats_late;             /* summed: how far behind the clock a picture was shown */
+    bool                   stats_fine;             /* Windows' timer at 1 ms in the last pass */
+    bool                   stats_read_known;
+    uint64_t               stats_read_from;        /* bytes read when the second began */
+    int32_t                stats_size_page;        /* the page whose size is in stats_size_bytes, -1 none */
+    uint64_t               stats_size_bytes;
+    rubraview_live_t       live;                   /* the last second's */
     size_t                 picker_tap_index;
     uint32_t               picker_tap_generation;
     /* D-34: one picture per listed item, made on a thread of its own for
@@ -1992,6 +2004,8 @@ void info_close(app_state_t *app);
 void info_local_time(char *buf, size_t cap, int64_t unix_seconds);
 size_t info_pump(app_state_t *app);
 void info_show(app_state_t *app);
+void info_live(app_state_t *app);   /* RV-215 (D-248): the Live rows again */
+void live_start(app_state_t *app);  /* RV-215: a fresh second's measuring */
 void interval_set(app_state_t *app, double seconds);
 bool is_media_path(proven_u8str_view_t path);
 bool is_station_path(proven_u8str_view_t path);

@@ -25,6 +25,48 @@ void frame_fit_boxes(app_state_t *app) {
     aspect_refresh(app);   /* the orientation, the edit panel or the custom pair may have changed */
 }
 
+/* RV-215 (D-248): the information window's Live rows, a second at a time. */
+void live_start(app_state_t *app) {
+    app->stats_since = rubraview_pal_time_now_seconds();
+    app->stats_frames = app->stats_dropped = app->stats_taken = app->stats_shown = 0;
+    app->stats_worst = app->stats_draw = app->stats_present = app->stats_media = app->stats_late = 0.0;
+    app->stats_read_known = rubraview_pal_process_read_bytes(&app->stats_read_from);
+    app->live = (rubraview_live_t){ .fine_timer = app->stats_fine };
+}
+
+/* The film's own rate: its size over its length, the size read once a film. */
+static double live_film_bits(app_state_t *app) {
+    int32_t page = app->media_page;
+    if (!app->media || page < 0 || (size_t)page >= page_count(app) || !(app->media_info.duration_seconds > 0.0)) return 0.0;
+    if (app->stats_size_page != page) {
+        app->stats_size_page = page;
+        app->stats_size_bytes = 0;
+        proven_u8str_view_t path = app->source.pages[page].path;
+        rubraview_fs_entry_t entry;
+        if (path.size == 0) app->stats_size_bytes = rubraview_page_source_entry_size(&app->source, (size_t)page);
+        else if (rubraview_pal_fs_stat(app->arena, path, &entry)) app->stats_size_bytes = entry.size_bytes;
+    }
+    return (double)app->stats_size_bytes * 8.0 / app->media_info.duration_seconds;
+}
+
+static void live_second(app_state_t *app, double now) {
+    uint64_t read = 0;
+    bool known = app->stats_read_known && rubraview_pal_process_read_bytes(&read) && read >= app->stats_read_from;
+    bool film = app->media && app->media_info.has_video && !app->media_paused;
+    app->live = (rubraview_live_t){
+        .seconds = now - app->stats_since, .frames = app->stats_frames, .slowest = app->stats_worst,
+        .draw = app->stats_draw > 0.0 ? app->stats_draw : 0.0, .present = app->stats_present,
+        .film = film, .shown = app->stats_shown, .dropped = app->stats_dropped,
+        .taken = app->stats_taken, .taking = app->stats_media, .late = app->stats_late,
+        .ready = film ? (uint32_t)rubraview_pal_media_frames_ready(app->media) : 0,
+        .read_known = known, .read_bytes = known ? read - app->stats_read_from : 0,
+        .film_bits = film ? live_film_bits(app) : 0.0, .fine_timer = app->stats_fine,
+    };
+    rubraview_live_t keep = app->live;
+    live_start(app);
+    app->live = keep;
+}
+
 void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     /* §3.22 / D-13: the settings window's own queue. Polling the main
        window pumped the thread's messages into it. */
@@ -101,7 +143,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     double media_from = rubraview_pal_time_now_seconds();
     bool had_new = app->media_new_picture;
     media_tick(app);
-    if (app->frame_stats && app->media_new_picture && !had_new) {   /* RV-215: a picture taken in this pass */
+    if (app->info_open && app->media_new_picture && !had_new) {   /* RV-215: a picture taken in this pass */
         app->stats_media += rubraview_pal_time_now_seconds() - media_from;
         app->stats_taken++;
     }
@@ -138,7 +180,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     if (handled > 0) fc->last_input_seconds = now;
     if (handled > 0 || media_playing || others_moving) fc->last_busy_seconds = now;
     bool settled = now - fc->last_busy_seconds > IDLE_REDRAW_GRACE;
-    rubraview_pal_time_fine(!settled || media_playing);   /* RV-215: 1 ms waits while anything moves, the default when still */
+    app->stats_fine = rubraview_pal_time_fine(!settled || media_playing);   /* RV-215: 1 ms waits while anything moves, the default when still */
     /* Only the film or the sound moves: draw a new picture when one
        is up and the seek bar four times a second, not on every pass
        (T058 on the VM: every pass kept 1.75 of 2 cores busy on a
@@ -155,27 +197,23 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
                          scene_signature(app) != fc->last_scene_signature);
     if (draw) {
         double drawn_at = rubraview_pal_time_now_seconds();
-        if (app->frame_stats && fc->last_render_seconds > 0.0 && now - fc->last_render_seconds > app->stats_worst)
+        if (app->info_open && fc->last_render_seconds > 0.0 && now - fc->last_render_seconds > app->stats_worst)
             app->stats_worst = now - fc->last_render_seconds;
         render_frame(app);
-        if (app->frame_stats) {   /* RV-215 */
+        if (app->info_open) {   /* RV-215 (D-248): drawing, and the wait for the screen apart */
+            double present = rubraview_pal_render_present_seconds(app->renderer);
             app->stats_frames++;
-            app->stats_draw += rubraview_pal_time_now_seconds() - drawn_at;
+            app->stats_present += present;
+            app->stats_draw += rubraview_pal_time_now_seconds() - drawn_at - present;
         }
         fc->last_scene_signature = scene_signature(app);
         fc->last_render_seconds = now;
         app->media_new_picture = false;
         if (settled) fc->last_idle_frame_seconds = now;
     }
-    if (app->frame_stats && now - app->stats_since >= 1.0) {   /* RV-215: once a second, into the status bar */
-        double span = now - app->stats_since;
-        snprintf(app->stats_text, sizeof(app->stats_text), T("%.0f frames/s, slowest %.0f ms, %u dropped, taking a picture %.1f ms, drawing %.1f ms"),
-                 app->stats_frames / span, app->stats_worst * 1000.0, (unsigned)app->stats_dropped,
-                 app->stats_taken ? app->stats_media * 1000.0 / app->stats_taken : 0.0,
-                 app->stats_frames ? app->stats_draw * 1000.0 / app->stats_frames : 0.0);
-        app->stats_since = now;
-        app->stats_frames = app->stats_dropped = app->stats_taken = 0;
-        app->stats_worst = app->stats_draw = app->stats_media = 0.0;
+    if (app->info_open && now - app->stats_since >= 1.0) {   /* RV-215 (D-248): once a second, to the information window */
+        live_second(app, now);
+        info_live(app);
     }
     if (app->settings_open && now - app->settings_info_seconds >= 1.0) {
         /* `info` lines (cache in use, the adapter) are live data: once a second. */

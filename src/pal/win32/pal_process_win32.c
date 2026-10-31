@@ -60,6 +60,17 @@ bool rubraview_pal_process_start_console(proven_u8str_view_t command_line) {
 bool rubraview_pal_process_start(proven_u8str_view_t command_line) {
     return start_process(command_line, 0);
 }
+
+uint64_t rubraview_mhost_children_read_bytes(void);   /* pal_media_host.c */
+
+bool rubraview_pal_process_read_bytes(uint64_t *bytes) {
+    if (!bytes) return false;
+    IO_COUNTERS io;
+    if (!GetProcessIoCounters(GetCurrentProcess(), &io)) return false;
+    *bytes = io.ReadTransferCount + rubraview_mhost_children_read_bytes();
+    return true;
+}
+
 #endif /* _WIN32 */
 
 /* GetCurrentPackageFamilyName is in kernel32 from Windows 8; looked up by

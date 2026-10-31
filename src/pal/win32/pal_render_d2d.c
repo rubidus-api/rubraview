@@ -92,6 +92,7 @@ uint32_t rubraview_pal_render_last_hresult(void) {
 
 struct rubraview_renderer {
     proven_arena_t *arena;
+    double present_seconds;        /* RV-215: the last Present, waiting for the screen included */
     WCHAR text_family[64];         /* RV-107: "" for the program's own face */
     DWRITE_FONT_WEIGHT text_weight;
     DWRITE_FONT_STYLE  text_style;
@@ -513,6 +514,10 @@ void rubraview_pal_render_begin(rubraview_renderer_t *renderer, uint32_t clear_a
     ID2D1RenderTarget_Clear(rt, &color);
 }
 
+double rubraview_pal_render_present_seconds(const rubraview_renderer_t *renderer) {
+    return renderer ? renderer->present_seconds : 0.0;
+}
+
 bool rubraview_pal_render_end(rubraview_renderer_t *renderer) {
     if (!renderer || !renderer->target || !renderer->drawing) return true;
 
@@ -526,8 +531,14 @@ bool rubraview_pal_render_end(rubraview_renderer_t *renderer) {
         /* decoded: Direct2D does not linearise on a float target (seen on the VM, 2026-10-21), so the scene
            holds sRGB-encoded values, the film's too */
     }
+    renderer->present_seconds = 0.0;
     if (SUCCEEDED(hr) && renderer->swap_chain) {
+        LARGE_INTEGER f, a, b;
+        QueryPerformanceFrequency(&f);
+        QueryPerformanceCounter(&a);
         hr = IDXGISwapChain1_Present(renderer->swap_chain, 1, 0);
+        QueryPerformanceCounter(&b);
+        renderer->present_seconds = (double)(b.QuadPart - a.QuadPart) / (double)f.QuadPart;
     }
 
     if (renderer->force_lost) {
