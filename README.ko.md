@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.39.62** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.62/rubraview-v1.39.62.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.62/rubraview-v1.39.62.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.62/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.39.63** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview-v1.39.63.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview-v1.39.63.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -249,7 +249,7 @@
 | 툴바 `Reload` | 텍스트: 파일을 다시 읽기 (보던 곳 그대로) |
 | 툴바 `Delay` | 슬라이드 쇼 딜레이: 탭하면 1, 2, 3, 5, 10초 목록, 위에서 휠을 돌리거나 위아래로 끌면 0.5초씩 |
 | 오른쪽 클릭 `Open` | 탐색기에서 우클릭한 것 열기 |
-| 오른쪽 클릭 `Look inside (a book)` | 우클릭한 책 안 보기 |
+| 오른쪽 클릭 `Look inside (an archive)` | 우클릭한 압축 파일 안 보기: 폴더와 파일 |
 | 오른쪽 클릭 `Add to the list`, 오른쪽 클릭 `Add them to the list` | 고른 것을 목록에 추가 |
 | 오른쪽 클릭 `Extract into a folder of its name`, 오른쪽 클릭 `Extract each into a folder of its name` | 고른 압축 파일을 각각 같은 이름의 폴더에 풀기 |
 | 오른쪽 클릭 `Extract here (smart)`, 오른쪽 클릭 `Extract each here (smart)` | 고른 압축 파일을 여기에 풀기: 최상위 폴더가 하나면 그대로, 아니면 같은 이름의 폴더에 |

@@ -260,6 +260,117 @@ int rubraview_archive_wants_password(const char *archive, rubraview_codepage_t c
     return wants;
 }
 
+/* ---- the tree ---- */
+
+typedef struct { const char *password; } ix_ctx_t;
+
+static fulta_arc_err_t ix_password(void *ctx, uint32_t attempt, const char **utf8_out) {
+    ix_ctx_t *x = ctx;
+    if (attempt > 0 || !x->password || !x->password[0]) return FULTA_ARC_ERR_PASSWORD_NEEDED;
+    *utf8_out = x->password;
+    return FULTA_ARC_OK;
+}
+
+rubraview_archive_result_t rubraview_archive_index_read(const char *archive, rubraview_codepage_t codepage,
+                                                        const char *password, rubraview_archive_index_t *out) {
+    if (!out) return RUBRAVIEW_ARCHIVE_CANNOT_READ;
+    *out = (rubraview_archive_index_t){ 0 };
+    fulta_arc_source_t src;
+    fulta_arc_err_t err = fulta_arc_source_file(archive, &src);
+    if (err != FULTA_ARC_OK) return RUBRAVIEW_ARCHIVE_CANNOT_READ;
+    ix_ctx_t x = { password };
+    fulta_arc_options_t opt = { .name = archive, .volume = ex_volume, .password = ix_password, .password_ctx = &x,
+                                .codepage = rubraview_page_source_fulta_codepage(codepage) };
+    fulta_arc_t *arc = NULL;
+    err = fulta_arc_open(&src, &opt, &arc);
+    if (err != FULTA_ARC_OK) return result_of(err);
+    size_t n = fulta_arc_count(arc);
+    out->items = n ? calloc(n, sizeof *out->items) : NULL;
+    if (n && !out->items) { fulta_arc_close(arc); return RUBRAVIEW_ARCHIVE_CANNOT_READ; }
+    for (size_t i = 0; i < n; ++i) {
+        const fulta_arc_entry_t *e = fulta_arc_entry(arc, i);
+        const char *name = e->name ? e->name : "";
+        while (*name == '/') name++;
+        size_t len = strlen(name);
+        while (len > 0 && name[len - 1] == '/') len--;
+        rubraview_archive_item_t *it = &out->items[out->count++];
+        it->name = malloc(len + 1);
+        if (!it->name) { rubraview_archive_index_free(out); fulta_arc_close(arc); return RUBRAVIEW_ARCHIVE_CANNOT_READ; }
+        memcpy(it->name, name, len);
+        it->name[len] = '\0';
+        it->size = e->size;
+        it->mtime = (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? e->mtime / 1000000000 : 0;
+        it->is_dir = (e->flags & FULTA_ARC_ENTRY_DIR) != 0;
+        it->encrypted = (e->flags & FULTA_ARC_ENTRY_ENCRYPTED) != 0;
+    }
+    fulta_arc_close(arc);
+    return RUBRAVIEW_ARCHIVE_DONE;
+}
+
+void rubraview_archive_index_free(rubraview_archive_index_t *index) {
+    if (!index) return;
+    for (size_t i = 0; i < index->count; ++i) free(index->items[i].name);
+    free(index->items);
+    *index = (rubraview_archive_index_t){ 0 };
+}
+
+/* The part of `name` after the folder `inner` and its '/', when it is in it. */
+static bool in_folder(const char *name, proven_u8str_view_t inner, const char **rest) {
+    if (inner.size == 0) { *rest = name; return name[0] != '\0'; }
+    if (strncmp(name, (const char *)inner.ptr, inner.size) != 0 || name[inner.size] != '/' || !name[inner.size + 1]) return false;
+    *rest = name + inner.size + 1;
+    return true;
+}
+
+size_t rubraview_archive_index_level(const rubraview_archive_index_t *index, proven_u8str_view_t inner,
+                                     rubraview_archive_child_t *out, size_t cap) {
+    if (!index) return 0;
+    while (inner.size > 0 && inner.ptr[inner.size - 1] == '/') inner.size--;
+    size_t n = 0;
+    /* the folders: named by an entry of their own or by what is in them */
+    for (size_t i = 0; i < index->count; ++i) {
+        const rubraview_archive_item_t *it = &index->items[i];
+        const char *rest;
+        if (!in_folder(it->name, inner, &rest)) continue;
+        const char *slash = strchr(rest, '/');
+        if (!slash && !it->is_dir) continue;
+        size_t len = slash ? (size_t)(slash - rest) : strlen(rest);
+        size_t k = 0;
+        while (k < n && !(out[k].name.size == len && memcmp(out[k].name.ptr, rest, len) == 0)) k++;
+        if (k == n) {   /* a new one */
+            if (n == cap) continue;
+            out[n++] = (rubraview_archive_child_t){ .name = { .ptr = (const proven_byte_t *)rest, .size = len },
+                                                    .is_dir = true, .item = RUBRAVIEW_ARCHIVE_NO_ITEM };
+        }
+        if (!slash) { out[k].item = i; if (it->mtime) out[k].mtime = it->mtime; }
+        else if (!it->is_dir) out[k].size += it->size;
+    }
+    for (size_t i = 0; i < index->count; ++i) {
+        const rubraview_archive_item_t *it = &index->items[i];
+        const char *rest;
+        if (it->is_dir || !in_folder(it->name, inner, &rest) || strchr(rest, '/')) continue;
+        if (n == cap) break;
+        out[n++] = (rubraview_archive_child_t){ .name = { .ptr = (const proven_byte_t *)rest, .size = strlen(rest) },
+                                                .is_dir = false, .item = i, .size = it->size, .mtime = it->mtime };
+    }
+    return n;
+}
+
+size_t rubraview_archive_index_under(const rubraview_archive_index_t *index, proven_u8str_view_t path, size_t *out, size_t cap) {
+    if (!index) return 0;
+    while (path.size > 0 && path.ptr[path.size - 1] == '/') path.size--;
+    size_t n = 0;
+    for (size_t i = 0; i < index->count; ++i) {
+        const char *name = index->items[i].name;
+        bool here = path.size == 0 ||
+                    (strncmp(name, (const char *)path.ptr, path.size) == 0 && (name[path.size] == '\0' || name[path.size] == '/'));
+        if (!here) continue;
+        if (n < cap && out) out[n] = i;
+        n++;
+    }
+    return n;
+}
+
 void rubraview_extract_run(rubraview_extract_job_t *job) {
     if (!job) return;
     job->result = RUBRAVIEW_ARCHIVE_DONE;

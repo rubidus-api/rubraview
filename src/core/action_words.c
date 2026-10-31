@@ -126,7 +126,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "picker_extract_smart", "The picked archives written out here: as they are when all is in one top folder, else into a folder of the name" },
     { "picker_extract_to", "The picked archives written out into a folder chosen" },
     { "picker_favorite", "Make the file or folder that was right-clicked a favourite, or no longer one" },
-    { "picker_look_inside", "Look inside the book right-clicked" },
+    { "picker_look_inside", "Look inside the archive right-clicked: its folders and files" },
     { "picker_make_playlist", "Make a playlist of what is picked" },
     { "picker_move_to", "Move what is picked to a folder" },
     { "picker_open_item", "Open what was right-clicked in the open-file screen" },

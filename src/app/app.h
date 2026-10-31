@@ -1323,6 +1323,10 @@ typedef struct app_state {
     bool                   picker_in_book;  /* the picker is inside the archive being read */
     size_t                *picker_page_of;  /* then: each tile's page, NOT_A_PAGE for a folder */
     size_t                 picker_page_skip;/* tiles before the book's own (`..`) */
+    char                  *picker_arc_path; /* RV-207: the archive whose whole tree is listed (malloc'd), or NULL */
+    struct rubraview_archive_index *picker_arc_index;   /* its entries (malloc'd) */
+    char                  *open_wanted_archive; /* RV-207: a book to open at the page named below (malloc'd), */
+    char                  *open_wanted_entry;   /* once it opens, after its password too */
     rubraview_favorites_t  favorites;       /* D-43: the reader's own, first on the places bar */
     proven_u8str_view_t                favorites_path;
     rubraview_fs_listing_t picker_listing;
@@ -1560,15 +1564,19 @@ typedef enum picker_button {
     PICKER_BTN_CLEAR,
     PICKER_BTN_VIEW,         /* D-110: tiles or details */
     PICKER_BTN_CANCEL,       /* 1.25.0: back to what was on screen before */
+    PICKER_BTN_EXTRACT,      /* RV-207: the picked archives, or what is picked inside one, the way Settings says */
+    PICKER_BTN_COMPRESS,     /* RV-207: the picked files and folders, through the Compress box */
     PICKER_BTN_COUNT,
 } picker_button_t;
 
 static const char *const PICKER_BUTTON_LABEL[PICKER_BTN_COUNT] = {
     N_("Open"), N_("Individual"), N_("Range"), N_("Same type"), N_("Media"), N_("Change ext"),
     N_("Playlist"), N_("Recycle"), N_("Move to"), N_("Copy to"), N_("Deselect all"), N_("Details"), N_("Cancel"),
+    N_("Extract"), N_("Compress"),
 };
-static const picker_button_t PICKER_BOTTOM[] = { PICKER_BTN_PLAYLIST, PICKER_BTN_RECYCLE, PICKER_BTN_MOVE, PICKER_BTN_COPY,
-                                                 PICKER_BTN_CANCEL, PICKER_BTN_OPEN };
+/* RV-207 (owner: "파일 관리자를 더 중심적인 기능으로"): the list, the archiver, the file moves, then Cancel and Open */
+static const picker_button_t PICKER_BOTTOM[] = { PICKER_BTN_PLAYLIST, PICKER_BTN_EXTRACT, PICKER_BTN_COMPRESS, PICKER_BTN_RECYCLE,
+                                                 PICKER_BTN_MOVE, PICKER_BTN_COPY, PICKER_BTN_CANCEL, PICKER_BTN_OPEN };
 #define PICKER_BOTTOM_COUNT ((int32_t)(sizeof(PICKER_BOTTOM) / sizeof(PICKER_BOTTOM[0])))
 #define PICKER_CRUMB_START (8.0 + 3.0 * (PICKER_NAV_W + 4.0) + 6.0)
 enum { PICKER_TOOL_EXT = 0,   /* RV-204: the files picked by extension, leftmost */
@@ -2021,6 +2029,11 @@ void archwork_poll(app_state_t *app, bool quitting);
 void archwork_extract(app_state_t *app, int mode, bool choose_folder);
 void archwork_extract_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, int mode, bool choose_folder);
 void archwork_compress_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, bool ask);
+void archwork_extract_inside(app_state_t *app, int mode, bool choose_folder);
+bool picker_in_archive(const app_state_t *app);
+bool picker_enter_archive(app_state_t *app, proven_u8str_view_t path);
+void picker_leave_archive(app_state_t *app);
+bool picker_archive_rel(const app_state_t *app, proven_u8str_view_t path, char *out, size_t cap);
 void archwork_compress_quick(app_state_t *app);
 void archwork_compress_ask(app_state_t *app);
 void archwork_pack_typed(app_state_t *app);

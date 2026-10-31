@@ -14,6 +14,9 @@ typedef struct archwork {
     char **archives;
     size_t count, at;
     rubraview_extract_mode_t mode;
+    size_t *only;                             /* picked inside the archive: its entries (malloc'd); NULL: all */
+    size_t only_count;
+    char inner[RUBRAVIEW_ARCHIVE_PATH];       /* and the folder they were picked in, "a/b/" */
     char dest[RUBRAVIEW_ARCHIVE_PATH];        /* "" : each beside itself */
     char password[256];
     rubraview_extract_job_t ex;
@@ -46,6 +49,7 @@ static void work_free(archwork_t *w) {
     if (!w) return;
     free_list(w->archives, w->count);
     free_list(w->sources, w->source_count);
+    free(w->only);
     secure_wipe(w->password, sizeof w->password);
     free(w);
 }
@@ -73,6 +77,9 @@ static DWORD WINAPI work_main(void *arg) {
             ex->mode = w->mode;
             ex->exists = RUBRAVIEW_EXISTS_NUMBER;
             ex->password = w->password[0] ? w->password : NULL;
+            ex->only = w->only;
+            ex->only_count = w->only_count;
+            ex->inner = w->only ? w->inner : NULL;
             rubraview_extract_run(ex);
             w->written += ex->written; w->skipped += ex->skipped; w->failed += ex->failed;
             if (ex->root[0]) snprintf(w->last_root, sizeof w->last_root, "%s", ex->root);
@@ -173,6 +180,44 @@ void archwork_extract_paths(app_state_t *app, const proven_u8str_view_t *paths, 
     archwork_t *w = calloc(1, sizeof *w);
     if (!w) return;
     w->count = given_paths(paths, count, &w->archives, true);
+    extract_start(app, w, mode, choose_folder);
+}
+
+/* RV-207: what is picked in the archive looked into (all of it when nothing is), named from the folder it was picked
+   in: a folder by everything in it. */
+void archwork_extract_inside(app_state_t *app, int mode, bool choose_folder) {
+    if (app->archwork) { osd_say(app, TU8("an archive is already being worked on (Esc stops it)")); return; }
+    const rubraview_archive_index_t *ix = app->picker_arc_index;
+    if (!ix || !app->picker_arc_path) return;
+    archwork_t *w = calloc(1, sizeof *w);
+    if (!w) return;
+    w->archives = calloc(1, sizeof *w->archives);
+    if (!w->archives || !(w->archives[0] = dup_view(proven_u8str_view_from_cstr(app->picker_arc_path)))) { work_free(w); return; }
+    w->count = 1;
+    char rel[RUBRAVIEW_ARCHIVE_PATH];
+    if (picker_archive_rel(app, app->picker_dir, rel, sizeof rel - 1) && rel[0]) {
+        size_t n = strlen(rel);   /* below RUBRAVIEW_ARCHIVE_PATH - 1: room for the '/' */
+        memcpy(w->inner, rel, n);
+        w->inner[n] = '/';
+        w->inner[n + 1] = '\0';
+    }
+    size_t picked = 0;
+    for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i)
+        if (app->picker_selected[i] && !picker_is_up(app, i)) picked++;
+    if (picked > 0) {
+        w->only = malloc(ix->count * sizeof *w->only);
+        if (!w->only) { work_free(w); return; }
+        for (size_t i = 0; i < app->picker_listing.count; ++i) {
+            if (!app->picker_selected[i] || picker_is_up(app, i)) continue;
+            if (!picker_archive_rel(app, app->picker_listing.entries[i].path, rel, sizeof rel)) continue;
+            size_t room = ix->count - w->only_count;
+            size_t k = rubraview_archive_index_under(ix, proven_u8str_view_from_cstr(rel), w->only + w->only_count, room);
+            w->only_count += k < room ? k : room;   /* siblings share nothing; never past the room */
+        }
+        if (w->only_count == 0) { work_free(w); osd_say(app, TU8("nothing picked")); return; }
+    } else {
+        w->inner[0] = '\0';   /* the whole archive, as it is named */
+    }
     extract_start(app, w, mode, choose_folder);
 }
 

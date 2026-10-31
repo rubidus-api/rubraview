@@ -89,6 +89,43 @@ void rubraview_extract_run(rubraview_extract_job_t *job);
 /* Whether the archive asks a password before its files can be read: 1 yes, 0 no, -1 it cannot be read. */
 int rubraview_archive_wants_password(const char *archive, rubraview_codepage_t codepage);
 
+/* ---- an archive's tree, for the open-file screen (RV-207) ---- */
+
+typedef struct rubraview_archive_item {
+    char *name;                        /* '/' between folders, none at either end */
+    uint64_t size;
+    int64_t mtime;                     /* seconds since 1970 (as the archive keeps it) */
+    bool is_dir, encrypted;
+} rubraview_archive_item_t;
+
+typedef struct rubraview_archive_index {
+    rubraview_archive_item_t *items;   /* one per entry, in the archive's order: an item's place is its entry's index */
+    size_t count;
+} rubraview_archive_index_t;
+
+/* Its entries listed (`password` only for an archive whose names are locked). DONE, or why not. */
+rubraview_archive_result_t rubraview_archive_index_read(const char *archive, rubraview_codepage_t codepage,
+                                                        const char *password, rubraview_archive_index_t *out);
+void rubraview_archive_index_free(rubraview_archive_index_t *index);
+
+#define RUBRAVIEW_ARCHIVE_NO_ITEM ((size_t)-1)
+
+typedef struct rubraview_archive_child {
+    proven_u8str_view_t name;          /* its own name, a view into an item's */
+    bool is_dir;
+    size_t item;                       /* its entry; NO_ITEM for a folder only its files name */
+    uint64_t size;                     /* a folder: what is in it, all the way down */
+    int64_t mtime;
+} rubraview_archive_child_t;
+
+/* What is directly in the folder `inner` ("" the top; "a/b"): its folders first, each once, then its files, each in
+   the archive's order. Returns how many were stored; a `cap` of the index's count always holds them all. */
+size_t rubraview_archive_index_level(const rubraview_archive_index_t *index, proven_u8str_view_t inner,
+                                     rubraview_archive_child_t *out, size_t cap);
+
+/* The entries at `path` and under it ("a/b": a/b itself and a/b/...). Returns how many; stored up to `cap`. */
+size_t rubraview_archive_index_under(const rubraview_archive_index_t *index, proven_u8str_view_t path, size_t *out, size_t cap);
+
 typedef enum rubraview_pack_format { RUBRAVIEW_PACK_ZIP = 0, RUBRAVIEW_PACK_7Z } rubraview_pack_format_t;
 
 typedef struct rubraview_compress_job {

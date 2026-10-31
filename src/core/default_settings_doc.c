@@ -216,7 +216,9 @@ static const char *const PARTS[] = {
 "  table  skip_dirs\n"
 "  section \"Folders shown without thumbnails (and the folders in them)\"\n"
 "  path   thumbs.skip_dirs         \"Folders without thumbnails\" hidden wired\n"
-"  table  thumb_dirs\n"
+"  table  thumb_dirs\n",
+"  section \"Extracting\"\n"
+"  choice archive.extract_mode     \"Extract (the open-file screen's button)\" folder | smart = folder wired\n"
 "  section \"An archive written again\"\n"
 "  choice archive.convert_format   \"Becomes\"                 zip | 7z = zip wired\n"
 "  choice archive.convert_method   \"Method\"                  compress | store = compress wired\n"
@@ -512,6 +514,7 @@ static const char *const PARTS[] = {
 "help display.color_management \"On: a picture's embedded colour profile (ICC) is used, so photos from cameras and phones show their true colours.\"\n"
 "help display.gpu_resize \"On: pictures are scaled on the graphics card, faster for very large photos. Off if a picture looks wrong on this computer.\"\n"
 "help cache.memory_cap_mb \"How much memory the pages kept ready may take. More makes turning back and forth instant; less leaves room for other programs.\"\n"
+"help archive.extract_mode \"What the Extract button at the open-file screen's foot does: each archive into a folder of its name beside it, or smart: as it is when everything in it is in one top folder or it is one file, else into a folder of its name. The right click and Explorer's menu offer both.\"\n"
 "help cache.film_gb \"How much room the copies of films and songs on network drives may take; the least recently played go first. Nothing of a folder kept out of Recent is copied, nor anything when Recent keeps nothing.\"\n"
 "help cache.film_ahead \"On: while a network film plays, the rest of it is fetched as fast as the link allows, so a film the link is too slow for plays smoothly once enough is here.\"\n"
 "help cache.lookahead \"How many pages after the one on screen are read ahead, so the next page appears at once.\"\n"

@@ -3,6 +3,7 @@
  * and sorted, back and forward, the focus, picks made a playlist, recycled or curated (RV-163, D-197: moved from main.c as it was).
  */
 #include "app.h"
+#include "rubraview/archive_job.h"
 
 #define PICKER_ARENA_BYTES (32u * 1024u * 1024u)
 #define APP_ARENA_LOW (16u * 1024u * 1024u)
@@ -197,6 +198,67 @@ void picker_go_up(app_state_t *app) {
     app->picker.focus = 0;
 }
 
+/* ---- RV-207: an archive's whole tree, a level at a time ---- */
+
+bool picker_in_archive(const app_state_t *app) {
+    return app->picker_arc_path && app->picker_dir.size > 0 &&
+           rubraview_picker_inside_archive(app->picker_dir, proven_u8str_view_from_cstr(app->picker_arc_path), NULL);
+}
+
+void picker_leave_archive(app_state_t *app) {
+    if (app->picker_arc_index) { rubraview_archive_index_free(app->picker_arc_index); free(app->picker_arc_index); }
+    free(app->picker_arc_path);
+    app->picker_arc_index = NULL;
+    app->picker_arc_path = NULL;
+}
+
+/* A path listed inside the archive as the archive's own name for it ("a/b.jpg"); false for one outside it. */
+bool picker_archive_rel(const app_state_t *app, proven_u8str_view_t path, char *out, size_t cap) {
+    proven_u8str_view_t rel;
+    if (!app->picker_arc_path || !rubraview_picker_inside_archive(path, proven_u8str_view_from_cstr(app->picker_arc_path), &rel) ||
+        rel.size >= cap) return false;
+    for (size_t i = 0; i < rel.size; ++i) out[i] = rel.ptr[i] == '\\' ? '/' : (char)rel.ptr[i];
+    out[rel.size] = '\0';
+    return true;
+}
+
+static proven_u8str_view_t arena_text(proven_arena_t *pa, const char *a, size_t an, const char *b, size_t bn) {
+    proven_result_mem_mut_t res = proven_arena_alloc(pa, an + bn + 1);
+    if (!proven_is_ok(res.err)) return PROVEN_LIT("");
+    char *s = (char *)(void *)res.value.ptr;
+    if (an) memcpy(s, a, an);
+    if (bn) memcpy(s + an, b, bn);
+    s[an + bn] = '\0';
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = an + bn };
+}
+
+static rubraview_fs_listing_t archive_listing(app_state_t *app, proven_arena_t *pa, proven_u8str_view_t dir) {
+    rubraview_fs_listing_t listing = { 0 };
+    const rubraview_archive_index_t *ix = app->picker_arc_index;
+    char inner[RUBRAVIEW_ARCHIVE_PATH];
+    if (!ix || ix->count == 0 || !picker_archive_rel(app, dir, inner, sizeof inner)) return listing;
+    rubraview_archive_child_t *kids = malloc(ix->count * sizeof *kids);
+    if (!kids) return listing;
+    size_t n = rubraview_archive_index_level(ix, proven_u8str_view_from_cstr(inner), kids, ix->count);
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(pa, n ? n : 1, sizeof(rubraview_fs_entry_t));
+    if (proven_is_ok(res.err)) {
+        rubraview_fs_entry_t *e = (rubraview_fs_entry_t *)(void *)res.value.ptr;
+        size_t dn = dir.size;
+        while (dn > 0 && rubraview_path_is_sep(dir.ptr[dn - 1])) dn--;
+        proven_u8str_view_t base = arena_text(pa, (const char *)dir.ptr, dn, "\\", 1);
+        for (size_t i = 0; i < n; ++i) {
+            proven_u8str_view_t path = arena_text(pa, (const char *)base.ptr, base.size, (const char *)kids[i].name.ptr, kids[i].name.size);
+            e[i] = (rubraview_fs_entry_t){ .name = { .ptr = path.ptr + base.size, .size = kids[i].name.size }, .path = path,
+                                           .size_bytes = kids[i].size, .mtime = kids[i].mtime, .ctime = kids[i].mtime,
+                                           .is_directory = kids[i].is_dir };
+        }
+        listing.entries = e;
+        listing.count = n;
+    }
+    free(kids);
+    return listing;
+}
+
 static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool from_history) {
     /* Where it was, kept before the listing's memory turns over; another folder goes on the way back. */
     char was[PICKER_HIST_PATH];
@@ -214,8 +276,12 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
     bool recent = rubraview_picker_is_recent(dir);
     /* Inside the book being read (owner, 2026-09-28): its own folders and
        pages, a level at a time, in the order they are read. */
+    /* RV-207: inside the archive looked into, its whole tree; out of it, it is let go */
+    bool in_arc = !places && !recent && app->picker_arc_path &&
+                  rubraview_picker_inside_archive(dir, proven_u8str_view_from_cstr(app->picker_arc_path), NULL);
+    if (!in_arc && app->picker_arc_path) picker_leave_archive(app);
     proven_u8str_view_t inner = PROVEN_LIT("");
-    bool in_book = !places && !recent && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER &&
+    bool in_book = !in_arc && !places && !recent && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER &&
                    rubraview_picker_inside_archive(dir, app->source.archive_path, &inner);
     rubraview_archive_level_t level = {0};
     if (in_book) {
@@ -224,8 +290,9 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
     }
     /* "." has no parent by name, which kept the reader below the folder the
        viewer was run from (owner, 2026-09-28): every folder is made whole. */
-    if (!places && !in_book && !recent) dir = rubraview_pal_fs_absolute(pa, dir);
-    rubraview_fs_listing_t listing = in_book ? level.listing
+    if (!places && !in_book && !recent && !in_arc) dir = rubraview_pal_fs_absolute(pa, dir);
+    rubraview_fs_listing_t listing = in_arc ? archive_listing(app, pa, dir)
+                                   : in_book ? level.listing
                                    : places ? rubraview_pal_fs_list_places(pa)
                                    : recent ? recent_listing(app, pa)
                                             : rubraview_pal_fs_list_dir(pa, dir);
@@ -248,9 +315,9 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
     }
     /* Only folders and what the viewer opens (owner, 2026-09-21). */
     char kinds_buf[1024];
-    size_t hidden = in_book ? 0 : rubraview_picker_keep_openable(&listing, kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER ";*.cue;" LIST_FILTER));
+    size_t hidden = in_book || in_arc ? 0 : rubraview_picker_keep_openable(&listing, kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER ";*.cue;" LIST_FILTER));
     /* A RAR set is one book (owner, 2026-10-01): its first volume stands for it. */
-    if (!in_book) {
+    if (!in_book && !in_arc) {
         size_t kept = 0;
         for (size_t i = 0; i < listing.count; ++i) {
             if (!listing.entries[i].is_directory && rubraview_page_source_is_later_volume(listing.entries[i].name)) { hidden++; continue; }
@@ -397,6 +464,7 @@ void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size
 
 size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out) {
     size_t picked = 0;
+    if (picker_in_archive(app)) return 0;   /* RV-207: names inside an archive are no files to copy, move or recycle */
     for (size_t i = 0; i < app->picker_listing.count; ++i) {
         if (app->picker_selected && app->picker_selected[i] && !picker_is_up(app, i)) picked++;   /* 1.22.0: folders too */
     }

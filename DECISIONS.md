@@ -2985,3 +2985,17 @@ Do not store credentials, private infrastructure details, personal data, private
   "Rubraview" item for compressing (two of one name in one menu).
 - Consequences: the Store's package gains five `[menu.*]` rows and needs a new upload; Rubraview is in the menu of
   every file and folder once registered.
+
+## 2026-11-01: D-254 An archive's tree in the open-file screen; Extract and Compress on its bar (W-20261031-1120)
+
+- Status: Accepted (owner 2026-11-01: "남은 단계 처리", "모두 추천대로 진행"; the plan's step).
+- Decision: an archive is listed as its whole tree, not only its pages, when it is looked into (right click Look
+  inside (an archive), Shift+Enter) or opened with nothing the viewer shows; Enter on a book still reads it. The tree
+  comes from FultaArc's entries (`rubraview_archive_index_read`, a level at a time), its paths the archive's path
+  joined with the inner name, so `..`, the path bar and history work unchanged. What is listed there is no file of
+  the disk: `picker_picked_entries` gives nothing, and Copy, Move, Rename, Recycle, the list and Compress say to
+  extract first. A page picked there opens the book at it once the book opens (`open_wanted_entry`), a password asked
+  between. The bar gains Extract (Settings › Files › Extracting, folder or smart; the right click and Explorer keep
+  both) and Compress.
+- Rejected: Enter on any archive showing the tree (a comic is read by Enter); thumbnails inside the tree (later).
+- Consequences: the plan's last step, the file manager's side, is proposed to the owner as a list.

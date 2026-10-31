@@ -904,8 +904,16 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         osd_say(app, on ? TU8("no thumbnails while the wheel turns pages") : TU8("thumbnails while the wheel turns pages"));
     } else if (proven_u8str_view_starts_with(action, PROVEN_LIT("picker_")) && app->picker_open) {   /* 1.22.0: a tile's right click */
         size_t at = app->picker_ctx_index;
-        if (proven_u8str_view_eq(action, PROVEN_LIT("picker_open_item"))) { if (at < app->picker_listing.count) picker_activate(app, at); }
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_look_inside"))) { if (!picker_enter_book(app, at)) osd_say(app, TU8("that is not a book")); }
+        bool inside = picker_in_archive(app);   /* RV-207: what is listed inside an archive is read and written out, nothing more */
+        if (inside && !proven_u8str_view_eq(action, PROVEN_LIT("picker_open_item")) && !proven_u8str_view_eq(action, PROVEN_LIT("picker_deselect_all")) &&
+            !proven_u8str_view_eq(action, PROVEN_LIT("picker_copy_paths")) && !proven_u8str_view_starts_with(action, PROVEN_LIT("picker_extract_"))) {
+            osd_say(app, TU8("inside an archive: extract what you need first"));
+        }
+        else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_folder"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_FOLDER, false);
+        else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_smart"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_SMART, false);
+        else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_to"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_FOLDER, true);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_open_item"))) { if (at < app->picker_listing.count) picker_activate(app, at); }
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_look_inside"))) { if (!picker_enter_book(app, at)) osd_say(app, TU8("that is not an archive")); }
         else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_add_to_list"))) picker_add_to_list(app);
         else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_make_playlist"))) picker_make_playlist(app);
         else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_copy_paths"))) picker_copy_paths(app);

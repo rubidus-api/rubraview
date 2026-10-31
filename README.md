@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.39.62** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.62/rubraview-v1.39.62.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.62/rubraview-v1.39.62.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.62/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.39.63** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview-v1.39.63.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview-v1.39.63.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -250,7 +250,7 @@ ships with, so it cannot drift from them.
 | Toolbar `Reload` | Text: read the file again, at the same place |
 | Toolbar `Delay` | The slide show's delay: a tap lists 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | Open what was right-clicked in the open-file screen |
-| Right click `Look inside (a book)` | Look inside the book right-clicked |
+| Right click `Look inside (an archive)` | Look inside the archive right-clicked: its folders and files |
 | Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
 | Right click `Extract into a folder of its name`, Right click `Extract each into a folder of its name` | The picked archives written out, each into a folder of its name |
 | Right click `Extract here (smart)`, Right click `Extract each here (smart)` | The picked archives written out here: as they are when all is in one top folder, else into a folder of the name |

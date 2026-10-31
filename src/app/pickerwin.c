@@ -3,6 +3,7 @@
  * (RV-163, D-197: moved from main.c as it was).
  */
 #include "app.h"
+#include "rubraview/archive_job.h"
 
 /* ---- Metro file picker (§3.15.2) ---- */
 
@@ -604,6 +605,27 @@ void picker_button(app_state_t *app, picker_button_t button) {
         app->picker_add_mode = false;
         return;
     }
+    /* RV-207: inside an archive only what reads it and picks in it; its names are no files of this disk */
+    if (picker_in_archive(app)) {
+        if (button == PICKER_BTN_OPEN) { if (app->picker.focus < app->picker_listing.count) picker_activate(app, app->picker.focus); return; }
+        if (button == PICKER_BTN_EXTRACT) {
+            archwork_extract_inside(app, (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("extract_mode"))) == 1
+                                         ? RUBRAVIEW_EXTRACT_SMART : RUBRAVIEW_EXTRACT_FOLDER, false);
+            return;
+        }
+        if (button != PICKER_BTN_INDIVIDUAL && button != PICKER_BTN_RANGE && button != PICKER_BTN_SAME_TYPE && button != PICKER_BTN_MEDIA &&
+            button != PICKER_BTN_CLEAR && button != PICKER_BTN_VIEW && button != PICKER_BTN_CANCEL) {
+            osd_say(app, TU8("inside an archive: extract what you need first"));
+            return;
+        }
+    } else if (button == PICKER_BTN_EXTRACT) {
+        archwork_extract(app, (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("extract_mode"))) == 1
+                              ? RUBRAVIEW_EXTRACT_SMART : RUBRAVIEW_EXTRACT_FOLDER, false);
+        return;
+    } else if (button == PICKER_BTN_COMPRESS) {
+        archwork_compress_ask(app);
+        return;
+    }
     if (button == PICKER_BTN_OPEN) { picker_open_picked(app); return; }
     if (app->picker_in_book && button != PICKER_BTN_CLEAR && button != PICKER_BTN_VIEW) {
         osd_say(app, TU8("inside a book: tap a page to go to it"));
@@ -716,19 +738,78 @@ void picker_open(app_state_t *app) {
     }
 }
 
-/* Into an archive without reading it first (right-click, or Shift+Enter;
-   owner, 2026-09-29): the book is opened — cheap now that it is mapped —
-   and the picker stays, at the book's top, to choose where to start. */
-bool picker_enter_book(app_state_t *app, size_t index) {
-    if (index >= app->picker_listing.count) return false;
-    const rubraview_fs_entry_t *entry = &app->picker_listing.entries[index];
-    if (entry->is_directory || !rubraview_glob_match_list(entry->name, PROVEN_LIT(ARCHIVE_FILTER))) return false;
-    open_path(app, entry->path);
-    if (app->source.kind == RUBRAVIEW_PAGE_SOURCE_FOLDER || app->source.archive_path.size == 0) return false;
-    picker_navigate(app, app->source.archive_path);
+/* RV-207: into an archive, its whole tree listed as folders and files, without reading it (owner: "압축파일 열기";
+   right-click Look inside, or Shift+Enter). A picture or a film in it opens the book there. */
+bool picker_enter_archive(app_state_t *app, proven_u8str_view_t path) {
+    char *p = malloc(path.size + 1);
+    rubraview_archive_index_t *ix = calloc(1, sizeof *ix);
+    if (!p || !ix) { free(p); free(ix); return false; }
+    memcpy(p, path.ptr, path.size);
+    p[path.size] = '\0';
+    rubraview_archive_result_t r = rubraview_archive_index_read(p, app->archive_codepage, NULL, ix);
+    /* names locked: the session's passwords, newest first */
+    for (size_t k = app->password_count; r == RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED && k > 0; --k) {
+        char pw[513];
+        snprintf(pw, sizeof pw, "%.*s", (int)app->password_lens[k - 1], app->passwords[k - 1]);
+        r = rubraview_archive_index_read(p, app->archive_codepage, pw, ix);
+        secure_wipe(pw, sizeof pw);
+    }
+    if (r != RUBRAVIEW_ARCHIVE_DONE) {
+        free(p); free(ix);
+        osd_say(app, r == RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED || r == RUBRAVIEW_ARCHIVE_PASSWORD_WRONG
+                     ? TU8("its names are locked: extract it, and its password is asked") : TU8("that archive cannot be read"));
+        return false;
+    }
+    picker_leave_archive(app);
+    app->picker_arc_path = p;
+    app->picker_arc_index = ix;
+    picker_navigate(app, proven_u8str_view_from_cstr(p));
     app->picker.focus = 0;
     app->picker_open = true;
     return true;
+}
+
+bool picker_enter_book(app_state_t *app, size_t index) {
+    if (index >= app->picker_listing.count || picker_in_archive(app)) return false;
+    const rubraview_fs_entry_t *entry = &app->picker_listing.entries[index];
+    if (entry->is_directory || !rubraview_glob_match_list(entry->name, PROVEN_LIT(ARCHIVE_FILTER_ALL))) return false;
+    return picker_enter_archive(app, entry->path);
+}
+
+/* An archive with nothing the viewer shows (no picture, film, song or text): its tree, not a book of no pages. */
+static bool archive_has_nothing_to_show(app_state_t *app, proven_u8str_view_t path) {
+    char p[RUBRAVIEW_ARCHIVE_PATH];
+    if (path.size >= sizeof p) return false;
+    memcpy(p, path.ptr, path.size);
+    p[path.size] = '\0';
+    rubraview_archive_index_t ix;
+    if (rubraview_archive_index_read(p, app->archive_codepage, NULL, &ix) != RUBRAVIEW_ARCHIVE_DONE) return false;
+    char kinds_buf[1024];
+    proven_u8str_view_t kinds = kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER);
+    bool none = true;
+    for (size_t i = 0; i < ix.count && none; ++i)
+        if (!ix.items[i].is_dir && rubraview_glob_match_list(rubraview_path_basename(proven_u8str_view_from_cstr(ix.items[i].name)), kinds)) none = false;
+    rubraview_archive_index_free(&ix);
+    return none;
+}
+
+/* A file inside the archive looked into: a page opens the book there; anything else is extracted first. */
+static void archive_open_entry(app_state_t *app, const rubraview_fs_entry_t *entry) {
+    char rel[RUBRAVIEW_ARCHIVE_PATH];
+    char kinds_buf[1024];
+    if (!picker_archive_rel(app, entry->path, rel, sizeof rel)) return;
+    if (!rubraview_glob_match_list(entry->name, kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER))) {
+        osd_say(app, TU8("extract it to open it (right click, Extract)"));
+        return;
+    }
+    proven_u8str_view_t archive = app_keep(app, proven_u8str_view_from_cstr(app->picker_arc_path));
+    /* opened there by open_path, now or after its password is typed */
+    free(app->open_wanted_archive);
+    free(app->open_wanted_entry);
+    app->open_wanted_archive = strdup(app->picker_arc_path);
+    app->open_wanted_entry = strdup(rel);
+    app->picker_open = false;
+    open_path(app, archive);
 }
 
 /* Activating a tile enters a folder or opens a file. */
@@ -742,6 +823,9 @@ void picker_activate(app_state_t *app, size_t index) {
         return;
     }
 
+    if (picker_in_archive(app)) { archive_open_entry(app, entry); return; }   /* RV-207 */
+    if (rubraview_glob_match_list(entry->name, PROVEN_LIT(ARCHIVE_FILTER_ALL)) && archive_has_nothing_to_show(app, entry->path) &&
+        picker_enter_archive(app, entry->path)) return;
     app->picker_open = false;
     if (app->picker_in_book && app->picker_page_of && index >= app->picker_page_skip) {
         size_t page = app->picker_page_of[index - app->picker_page_skip];

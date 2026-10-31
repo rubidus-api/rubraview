@@ -253,7 +253,7 @@ static const char *const PARTS[] = {
 "# 1.22.0: a right click (or a long press) in the open-file screen: one thing, or the many picked\n"
 "context pickerone\n"
 "  item picker_open_item         \"Open\"\n"
-"  item picker_look_inside       \"Look inside (a book)\"\n"
+"  item picker_look_inside       \"Look inside (an archive)\"\n"
 "  item picker_add_to_list       \"Add to the list\"\n"
 "  group\n"
 "  item picker_extract_folder    \"Extract into a folder of its name\"\n"

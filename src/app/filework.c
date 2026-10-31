@@ -565,7 +565,8 @@ static void rename_extension_commit(app_state_t *app) {
    The box is the rename box, holding its whole name. */
 void rename_picker_begin(app_state_t *app, size_t at) {
     if (at >= app->picker_listing.count || app->rename_active) return;
-    if (rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) || app->picker_in_book) {
+    if (rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) || app->picker_in_book ||
+        picker_in_archive(app)) {
         osd_say(app, TU8("this list's names cannot be changed here"));
         return;
     }

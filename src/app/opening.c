@@ -772,6 +772,25 @@ void open_path(app_state_t *app, proven_u8str_view_t path) {
             app->resume_offer = false;
         }
     }
+    /* RV-207: a page chosen inside the archive in the open-file screen, now that the book is open */
+    if (app->open_wanted_entry && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && app->open_wanted_archive &&
+        rubraview_path_same(app->source.archive_path, proven_u8str_view_from_cstr(app->open_wanted_archive))) {
+        const char *want = app->open_wanted_entry;
+        size_t wn = strlen(want);
+        for (size_t i = 0; i < app->source.page_count; ++i) {
+            proven_u8str_view_t name = app->source.pages[i].name;
+            bool same = name.size == wn;
+            for (size_t k = 0; same && k < wn; ++k)
+                same = name.ptr[k] == (proven_byte_t)want[k] || (rubraview_path_is_sep(name.ptr[k]) && rubraview_path_is_sep(want[k]));
+            if (!same) continue;
+            start_page = i;
+            app->resume_offer = false;
+            break;
+        }
+    }
+    free(app->open_wanted_archive);
+    free(app->open_wanted_entry);
+    app->open_wanted_archive = app->open_wanted_entry = NULL;
     /* --page=N (a restart asks for the page it was on): that page of a book, and no offer to resume; a folder's file is named itself. */
     if (app->launch_page > 0) {
         if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && (size_t)(app->launch_page - 1) < app->source.page_count) {

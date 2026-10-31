@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.62.exe              the viewer, as built
-dist/rubraview-v1.39.62/                 the release bundle
-dist/rubraview-v1.39.62.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.63.exe              the viewer, as built
+dist/rubraview-v1.39.63/                 the release bundle
+dist/rubraview-v1.39.63.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1621,12 +1621,26 @@ lets them go. **Filter names** at the right of the path bar (or `Ctrl+F`)
 shows only the names holding what you type (capitals or not); what you
 picked stays picked when the filter changes or is cleared (`Esc`, or its
 ×). A right click on a tile — or a long press, held still — gives a short
-list: on one thing (that one is picked alone), Open, Look inside (a book),
+list: on one thing (that one is picked alone), Open, Look inside (an archive),
 Add to the list, Copy the whole path, Show in Explorer, Rename, Copy to, Move to
 and To the recycle bin (click it twice); on one of several picked, Add them
 to the list, Make a playlist of them, Copy their paths, Copy or Move them,
 Them to the recycle bin and Pick none. A folder picked is copied or moved
 whole; added to a list, it brings its pictures, films, music and text.
+
+**Archives.** The right click on an archive offers Extract into a folder of
+its name, Extract here (smart: as it is when everything in it is in one top
+folder) and Extract to...; on files and folders, Compress to a ZIP and
+Compress... (the place and name — its ending, .zip or .7z, says which — a
+level and an AES-256 password or none). The bar at the foot has **Extract**
+(the way Settings › Files › Extracting says) and **Compress**. **Look inside
+(an archive)** (or `Shift+Enter`) lists all of an archive's folders and
+files, as a folder is listed; an archive with no picture, film or song in it
+opens that way too. Inside it, pick what you want and Extract it (a folder
+brings all that is in it; nothing picked, the whole archive); a picture opens
+the book at that page; `..` leaves it. Copying, moving, renaming and
+recycling are for files on disk: extract first. Work goes on while the
+screen is used; a line says how far it is and `Esc` stops it.
 **Add** on the list's bar opens this screen at the folder of the file on
 screen, picking at a tap; **Add to the list** (where Playlist is) joins
 what is picked to the list.
@@ -1968,7 +1982,7 @@ listed under a later heading only means that while that is on screen.
 | Toolbar `Reload` | Text: read the file again, at the same place |
 | Toolbar `Delay` | The slide show's delay: a tap lists 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
 | Right click `Open` | Open what was right-clicked in the open-file screen |
-| Right click `Look inside (a book)` | Look inside the book right-clicked |
+| Right click `Look inside (an archive)` | Look inside the archive right-clicked: its folders and files |
 | Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
 | Right click `Extract into a folder of its name`, Right click `Extract each into a folder of its name` | The picked archives written out, each into a folder of its name |
 | Right click `Extract here (smart)`, Right click `Extract each here (smart)` | The picked archives written out here: as they are when all is in one top folder, else into a folder of the name |
