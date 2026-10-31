@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.50.exe              the viewer, as built
-dist/rubraview-v1.39.50/                 the release bundle
-dist/rubraview-v1.39.50.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.51.exe              the viewer, as built
+dist/rubraview-v1.39.51/                 the release bundle
+dist/rubraview-v1.39.51.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1651,8 +1651,14 @@ the same choice again lets them go. **Shape ▾** lists **Wide**, **Tall** and *
 many are picked of how many: a choice picks every picture and film of that
 shape, and the same choice again lets them go; the list stays open for
 another. A photo turned by its camera, or a phone's film stored on its side, counts as it is shown, and square
-means width and height exactly equal. The first time, the sizes are read
-(how far it has got is shown), then kept. **Sort by ▾** and **Rising ▾** each open a list to choose from, and
+means width and height exactly equal. The sizes and lengths are read from
+a small piece at the head of each file by Rubraview itself, and read ahead:
+while a folder is shown here (or a list in the floating list), they are
+read in the background, so Shape and sorting by **Resolution** or **Length**
+are usually ready at once. What was read is kept in `media-facts.txt` beside
+the history, so a folder seen before is known straight away; it is not
+written when Settings › Recent keeps no list, and nothing of a folder kept
+out of Recent goes into it. **Sort by ▾** and **Rising ▾** each open a list to choose from, and
 **Details** (or **Tiles**) at its end changes the view. The bottom row
 acts on what is picked: **Add to the list**, **Recycle** (press
 it twice), **Move to**, **Copy to**, **Cancel** and **Open** (**OK** when

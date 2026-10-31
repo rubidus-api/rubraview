@@ -2816,3 +2816,27 @@ Do not store credentials, private infrastructure details, personal data, private
   line instead of growing it), its stale FultaArc snapshot, test count and next step; `check-actions.py`'s names of
   files that moved.
 - Consequences: `sot-check.sh` reports 0; the context is about half its budget.
+
+## 2026-10-31: D-241 Media facts by our own parsers, read ahead and kept on disk (W-20261031-1300)
+
+- Status: Accepted (owner 2026-10-31: "외부 파서에 기대지 말고 내부 자체 파서로 빠르게 처리할 수 있도록 하고 계획서를
+  써 주세요"; "이번에 디스크캐시 넣고 뒤에서 미리 읽어요"; plan `docs/plans/archive/2026-10-31-RV-210-media-heads.md`).
+- Context: Shape and Sort by Length read each file through WIC first, which reads the whole file (up to 1 GB) before it
+  finds no codec for a film or a song; then the shell's property store, tens of ms a file; on one thread; results kept
+  only when all were read, and only in memory. 700 films were hundreds of GB of reading.
+- Decision: `media_head` (core) parses every kind the viewer lists from a source that holds three windows of the file
+  (the first 64 KB kept; 128 KB or what was asked after) and reads through the caller's function, four reads and 16 MB
+  at most; parsers ask for bytes at an offset and keep nothing. Reading and parsing are apart in the code, not in time:
+  a parse takes microseconds and decides the next read (an MP4's `moov` at its end, an MP3 past its ID3 tag). One first
+  read for every kind, not a size per extension: a read of 64 KB costs what one of 4 KB does. The kind by its bytes.
+  The PAL's readers: four threads on a fixed drive that says it has no seek penalty, else one; a ready flag a file.
+  Read ahead at the lowest CPU priority, not Windows' background mode: on the VM its disk priority held 388 heads back
+  past 4 s behind a playing film, where they take 0.45 s. The facts kept in `media-facts.txt` (text, newest 20 000)
+  under the state files' lock, merged, not written when Recent keeps nothing, kept-out folders left out. The cache is
+  one slot a path (case and either slash alike: the open-file screen and a list name one file both ways); a list's
+  page has no time of its own, so one taken from disk is checked against the file's time
+  (one stat) before it stands. `rubraview_pal_image_shown_size` and the shell's property store are no longer used for
+  facts.
+- Consequences: on the VM the facts of 388 films take 0.45 s to read and 0.02 s from the file; the release before took
+  10.8 s and read 4 GB for the same sort. A kind not parsed is not known (RK-11). Pictures' resolution in the
+  open-file screen is now as shown (EXIF turned), where the shell's was as stored.

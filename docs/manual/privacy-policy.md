@@ -1,6 +1,6 @@
 # Rubraview Privacy Policy
 
-Effective date: October 16, 2026
+Effective date: October 31, 2026
 
 This policy covers Rubraview, an image, comic book and video viewer for Windows, whether you get it from the Microsoft Store, the installer or the standalone download.
 
@@ -19,6 +19,7 @@ To work as you expect, Rubraview keeps a few plain-text files on your device. Th
 - **Settings** (`settings.ini`, `keymap.ini`, `layout.ini`): your options, keyboard shortcuts and window layout.
 - **History** (`history.ini`, `recent.ini`): the files you opened recently and where you stopped reading or watching. You can turn off the recent-files list, keep chosen folders out of it, or clear the reading history in Settings.
 - **Favorites** (`favorites.ini`): the files and folders you mark as favorites.
+- **Media facts** (`media-facts.txt`): the size and length of pictures, videos and music in folders and lists you have looked at, with their paths, so they need not be read again. It is not written while the recent-files list is turned off, and nothing from folders kept out of it goes in.
 - **Lists** (`.rvlist`, `.m3u8`): saved only when you save a list yourself, at the place you choose.
 
 These files are kept in your user profile's application data folder or, if you run Rubraview as a portable program, in its own folder. Uninstalling Rubraview or deleting these files removes this information.

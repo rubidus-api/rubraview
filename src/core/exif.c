@@ -121,6 +121,10 @@ static int32_t orientation_from_tiff(const uint8_t *base, size_t base_len) {
     return 1;
 }
 
+int32_t rubraview_exif_tiff_orientation(const uint8_t *tiff, size_t size) {
+    return tiff ? orientation_from_tiff(tiff, size) : 1;
+}
+
 int32_t rubraview_exif_read_orientation(const uint8_t *jpeg, size_t size) {
     if (!jpeg || size < 2 || jpeg[0] != 0xFF || jpeg[1] != JPEG_MARKER_SOI) return 1;
 

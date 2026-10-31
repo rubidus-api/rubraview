@@ -25,6 +25,8 @@ extern "C" {
  * JPEG, has no Exif APP1 segment, or the tag is absent/unparseable.
  */
 int32_t rubraview_exif_read_orientation(const uint8_t *jpeg, size_t size);
+/* RV-210: the same from EXIF's TIFF block alone (from its "II" or "MM"), as a JPEG's APP1 holds it after "Exif\0\0". */
+int32_t rubraview_exif_tiff_orientation(const uint8_t *tiff, size_t size);
 
 /**
  * What a picture's EXIF says, for the file's information window (owner,

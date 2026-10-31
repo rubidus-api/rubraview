@@ -386,7 +386,8 @@ enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_ORDER,
 enum { SHAPE_FOR_PICKER = 1, SHAPE_FOR_LIST };   /* RV-192 */
 /* RV-202: what a reading of sizes and lengths is for: the shape's choice, the list sorted by length, the open-file
    screen sorted by length or by resolution */
-enum { FACTS_THEN_SHAPE = 0, FACTS_THEN_LIST_SORT, FACTS_THEN_PICKER_SORT };
+enum { FACTS_THEN_SHAPE = 0, FACTS_THEN_LIST_SORT, FACTS_THEN_PICKER_SORT,
+       FACTS_THEN_AHEAD /* RV-210: read ahead, for nothing asked yet: every picture, film and song */ };
 enum { CHOOSE_IN_MAIN = 0, CHOOSE_IN_SETTINGS, CHOOSE_IN_EDIT, CHOOSE_IN_FILES, CHOOSE_IN_BATCH, CHOOSE_IN_NAMES };   /* RV-194: the last two */
 #define CHOOSE_MAX 48
 typedef struct chooser {
@@ -1341,6 +1342,15 @@ typedef struct app_state {
     int32_t                shape_then;             /* RV-202: FACTS_THEN_* */
     int32_t                shape_sort_key;         /* the sort it waits to make, and its way */
     bool                   shape_sort_desc;
+    /* RV-210: the answers taken so far; a reading ahead (nothing asked), and what was last read ahead */
+    uint8_t               *shape_taken;
+    bool                   shape_ahead;
+    uint32_t               facts_ahead_for;        /* the open-file screen's listing + 1; 0 none */
+    const void            *facts_ahead_pages;      /* the list's pages */
+    /* RV-210: the facts kept on disk (media-facts.txt, beside history.ini): read once, written after a reading */
+    bool                   facts_loaded, facts_dirty;
+    double                 facts_saved_at;
+    char                   facts_path[1024];
     /* Move and Copy wait for the digit that names a curation folder;
        Recycle waits to be pressed a second time (§3.18.1's rule). */
     int32_t                picker_pending;     /* a picker_button_t, waiting for its digit */
@@ -2127,6 +2137,7 @@ const char *shape_name(int32_t shape);
 bool shape_table(app_state_t *app, int32_t target, uint8_t **out_shapes, size_t **out_rows, size_t *out_n, bool **out_selected);
 void picker_sort_by(app_state_t *app, int key);
 void picker_sort_set(app_state_t *app, int key, bool desc);
+void picker_resort(app_state_t *app);   /* RV-210 */
 proven_u8str_view_t picker_star_label(const app_state_t *app);
 void picker_thumbs_free(app_state_t *app);
 void picker_thumbs_step(app_state_t *app);

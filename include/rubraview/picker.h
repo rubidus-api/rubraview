@@ -275,6 +275,7 @@ size_t rubraview_shape_toggle(bool *selected, const uint8_t *shapes, const size_
 typedef struct rubraview_shape_cache {
     struct rubraview_shape_slot *slots;
     size_t capacity, count;
+    int64_t clock;   /* RV-210: counts the puts, newest highest */
 } rubraview_shape_cache_t;
 
 #define RUBRAVIEW_SHAPE_CACHE_MAX 65536u
@@ -288,6 +289,23 @@ bool rubraview_shape_cache_put_length(rubraview_shape_cache_t *cache, proven_u8s
                                       rubraview_shape_t shape, double seconds);
 /* The length kept for the file: false when it was never read or its length is not known. */
 bool rubraview_shape_cache_length(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime, double *out_seconds);
+/* RV-210: one slot a path, its time the file's; a time of 0 (a list's page) finds one read or seen this run. */
+/* A picture's or a film's size as shown (its shape from it) and a length (0 or below: not known), read this run. */
+bool rubraview_shape_cache_put_facts(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
+                                     int32_t width, int32_t height, double seconds);
+/* All kept for the file: false when it was never read. Width and height 0 when not known; seconds below 0 likewise. */
+bool rubraview_shape_cache_facts(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
+                                 int32_t *out_width, int32_t *out_height, double *out_seconds);
+/* One taken from the disk and not seen yet this run: its time, for the reader to check the file against. */
+bool rubraview_shape_cache_unverified(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t *out_mtime);
+/* The file's time is still `mtime`: what is kept for it stands. False when nothing with that time is kept. */
+bool rubraview_shape_cache_confirm(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime);
+/* The file on disk (rubraview facts 1): its lines taken in where this run has none for the path, not seen yet.
+   Returns how many. */
+size_t rubraview_shape_cache_parse(rubraview_shape_cache_t *cache, const char *text, size_t size);
+/* The newest `max_entries` with a time, but those `kept_out` says (may be NULL), as the file's text (malloc'ed, ended by a NUL not counted in `*out_size`). */
+char *rubraview_shape_cache_serialize(const rubraview_shape_cache_t *cache, size_t max_entries,
+                                      bool (*kept_out)(void *context, proven_u8str_view_t path), void *context, size_t *out_size);
 void rubraview_shape_cache_free(rubraview_shape_cache_t *cache);
 
 #ifdef __cplusplus

@@ -58,6 +58,7 @@ typedef struct rubraview_mp4 {
     uint64_t              moov_at, moov_end;
     uint32_t              movie_timescale;   /* RV-202: `mvhd`'s clock and the film's length in it; 0 when not said */
     uint64_t              movie_duration;
+    uint64_t              fragment_duration; /* RV-210: `mvex/mehd`'s, read by rubraview_mp4_open_moov */
 } rubraview_mp4_t;
 
 /**
@@ -65,6 +66,10 @@ typedef struct rubraview_mp4 {
  * when it is not one, is fragmented, or its `moov` cannot be read.
  */
 bool rubraview_mp4_open(rubraview_mp4_t *mp4, const uint8_t *data, uint64_t size, const char **out_why);
+
+/* RV-210: a `moov` box alone (its bytes, from its header), for its facts: a fragmented file's is read
+   too, its length from `mvex/mehd` when `mvhd` gives none. The sample walk is not for such an open. */
+bool rubraview_mp4_open_moov(rubraview_mp4_t *mp4, const uint8_t *moov, uint64_t size);
 
 /**
  * RV-202: the first video track's size as it is shown (its matrix's quarter turn applied) and the

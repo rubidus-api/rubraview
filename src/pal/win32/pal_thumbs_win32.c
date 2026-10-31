@@ -29,8 +29,8 @@
 #include "rubraview/pal/pal_image_wic_internal.h"
 #include "rubraview/pal/pal_image.h"
 #include "rubraview/textenc.h"
-#include "rubraview/mp4.h"
-#include "rubraview/matroska.h"
+#include "rubraview/media_head.h"
+#include <winioctl.h>
 
 #define TEXT_TILE_W 192   /* RV-135: a text file's tile, a page */
 #define TEXT_TILE_H 256
@@ -38,13 +38,6 @@ static uint8_t *text_page_small(proven_arena_t *scratch, proven_u8str_view_t pat
 
 /* Defined here so the link does not depend on which MinGW carries it. */
 static const GUID RV_IID_IShellItemImageFactory_T = {0xBCC18B79, 0xBA16, 0x442F, {0x80, 0xC4, 0x8A, 0x59, 0xC3, 0x0C, 0x46, 0x3B}};
-static const GUID RV_IID_IShellItem2_T = {0x7E9FB0D3, 0x919F, 0x4307, {0xAB, 0x2E, 0x9B, 0x18, 0x60, 0x31, 0x0C, 0x93}};
-/* System.Image.HorizontalSize / VerticalSize, System.Media.Duration (100 ns). */
-static const PROPERTYKEY RV_PKEY_Image_Width  = { {0x6444048F, 0x4C8B, 0x11D1, {0x8B, 0x70, 0x08, 0x00, 0x36, 0xB1, 0x1A, 0x03}}, 3 };
-static const PROPERTYKEY RV_PKEY_Image_Height = { {0x6444048F, 0x4C8B, 0x11D1, {0x8B, 0x70, 0x08, 0x00, 0x36, 0xB1, 0x1A, 0x03}}, 4 };
-static const PROPERTYKEY RV_PKEY_Video_Width  = { {0x64440491, 0x4C8B, 0x11D1, {0x8B, 0x70, 0x08, 0x00, 0x36, 0xB1, 0x1A, 0x03}}, 3 };
-static const PROPERTYKEY RV_PKEY_Video_Height = { {0x64440491, 0x4C8B, 0x11D1, {0x8B, 0x70, 0x08, 0x00, 0x36, 0xB1, 0x1A, 0x03}}, 4 };
-static const PROPERTYKEY RV_PKEY_Media_Duration = { {0x64440490, 0x4C8B, 0x11D1, {0x8B, 0x70, 0x08, 0x00, 0x36, 0xB1, 0x1A, 0x03}}, 3 };
 
 #define THUMB_JOBS 256
 #define THUMB_RESULTS 64
@@ -133,35 +126,58 @@ uint8_t *rubraview_pal_shell_thumbnail_bgra(proven_u8str_view_t path, int32_t si
     return result;
 }
 
-/* ---- what the file is: its size in pixels, its length (owner, 2026-10-16) ----
-   From the shell's property store, which reads them from the file's header
-   for every type it has a handler for; 0 for what it does not know. */
-static bool film_head(proven_u8str_view_t path, int32_t *out_w, int32_t *out_h, double *out_seconds);   /* RV-202 */
+/* ---- what the file is: its size as shown, its length (owner, 2026-10-16; RV-210: by our own parsers) ---- */
 
-static void shell_meta(proven_u8str_view_t path, int32_t *out_w, int32_t *out_h, double *out_seconds) {
+#define FILETIME_UNIX_EPOCH 116444736000000000LL
+
+static int64_t unix_seconds(FILETIME ft) {
+    int64_t ticks = (int64_t)(((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime);
+    return (ticks - FILETIME_UNIX_EPOCH) / 10000000LL;   /* as pal_fs_win32 gives a listing's times */
+}
+
+/* The source's reads: at an offset, a handle opened for no particular order. */
+static bool handle_read(void *context, uint64_t at, uint8_t *dst, size_t len, size_t *out_got) {
+    HANDLE file = (HANDLE)context;
+    size_t total = 0;
+    while (total < len) {
+        OVERLAPPED where = { .Offset = (DWORD)(at + total), .OffsetHigh = (DWORD)((at + total) >> 32) };
+        DWORD want = len - total > (1u << 30) ? (1u << 30) : (DWORD)(len - total), got = 0;
+        if (!ReadFile(file, dst + total, want, &got, &where) || got == 0) break;
+        total += got;
+    }
+    *out_got = total;
+    return total > 0;
+}
+
+static bool wide_path(proven_u8str_view_t path, WCHAR *wide, int cap) {
     char narrow[MAX_PATH * 4];
-    WCHAR wide[MAX_PATH * 2];
-    if (path.size == 0 || path.size >= sizeof(narrow)) return;
+    if (path.size == 0 || path.size >= sizeof(narrow)) return false;
     memcpy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
     for (size_t i = 0; i < path.size; ++i) if (narrow[i] == '/') narrow[i] = '\\';
-    IShellItem2 *item = NULL;
-    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, MAX_PATH * 2) <= 0 ||
-        FAILED(SHCreateItemFromParsingName(wide, NULL, &RV_IID_IShellItem2_T, (void**)&item)) || !item) return;
-    ULONG w = 0, h = 0;
-    ULONGLONG ticks = 0;
-    if (FAILED(item->lpVtbl->GetUInt32(item, &RV_PKEY_Image_Width, &w)) || w == 0) {
-        w = 0;
-        (void)item->lpVtbl->GetUInt32(item, &RV_PKEY_Video_Width, &w);
-    }
-    if (FAILED(item->lpVtbl->GetUInt32(item, &RV_PKEY_Image_Height, &h)) || h == 0) {
-        h = 0;
-        (void)item->lpVtbl->GetUInt32(item, &RV_PKEY_Video_Height, &h);
-    }
-    if (SUCCEEDED(item->lpVtbl->GetUInt64(item, &RV_PKEY_Media_Duration, &ticks)) && ticks > 0) *out_seconds = (double)ticks / 1e7;
-    if (w > 0 && h > 0 && w < 0x7FFFFFFF && h < 0x7FFFFFFF) { *out_w = (int32_t)w; *out_h = (int32_t)h; }
-    item->lpVtbl->Release(item);
+    return MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, cap) > 0;
 }
+
+/* A file's facts by media_head over `src` (the calling thread's own); its time too. False when it cannot be opened. */
+static bool head_facts(rubraview_head_src_t *src, proven_u8str_view_t path, rubraview_media_facts_t *out, int64_t *out_mtime) {
+    *out = (rubraview_media_facts_t){0};
+    WCHAR wide[MAX_PATH * 2];
+    if (!wide_path(path, wide, MAX_PATH * 2)) return false;
+    HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                              FILE_FLAG_RANDOM_ACCESS, NULL);   /* not sequential: the cache would read on far past 64 KB */
+    if (file == INVALID_HANDLE_VALUE) return false;
+    BY_HANDLE_FILE_INFORMATION info;
+    bool ok = GetFileInformationByHandle(file, &info) != 0;
+    if (ok) {
+        if (out_mtime) *out_mtime = unix_seconds(info.ftLastWriteTime);
+        rubraview_head_src_reset(src, handle_read, file, ((uint64_t)info.nFileSizeHigh << 32) | info.nFileSizeLow);
+        (void)rubraview_media_head_read(src, rubraview_path_basename(path), out);
+    }
+    CloseHandle(file);
+    return ok;
+}
+
+static _Thread_local rubraview_head_src_t g_thumb_head;   /* the thumbnail thread's */
 
 /* ---- a picture in memory, decoded small ---- */
 
@@ -299,13 +315,13 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
         raw = text_page_small(scratch, path, job->aspect, &w, &h);   /* RV-135 */
         is_text = raw != NULL;
     } else {
-        /* RV-202: a film's own head first (MKV and WebM, a phone's turned film), then the shell's */
-        int32_t fw = 0, fh = 0;
-        double fs = 0.0;
-        bool film = film_head(path, &fw, &fh, &fs);
-        shell_meta(path, &meta->source_width, &meta->source_height, &meta->seconds);
-        if (film) { meta->source_width = fw; meta->source_height = fh; }
-        if (fs > 0.0) meta->seconds = fs;
+        /* RV-202, RV-210: its own head, read by our parsers: its size as shown, its length */
+        rubraview_media_facts_t facts;
+        if (head_facts(&g_thumb_head, path, &facts, NULL)) {
+            meta->source_width = facts.width;
+            meta->source_height = facts.height;
+            meta->seconds = facts.seconds;
+        }
         raw = rubraview_pal_shell_thumbnail_bgra(path, 192, &w, &h);
         if (!raw) {
             raw = own_file_small(factory, path, &w, &h);
@@ -437,6 +453,7 @@ static DWORD WINAPI thumbs_thread(LPVOID param) {
     }
 
     free(memory);
+    rubraview_head_src_free(&g_thumb_head);
     if (factory) IWICImagingFactory_Release(factory);
     if (com) CoUninitialize();
     return 0;
@@ -536,130 +553,127 @@ bool rubraview_pal_thumbs_busy(rubraview_thumbs_t *t) {
     return busy;
 }
 
-/* ---- RV-192: the sizes of many files, as shown ---- */
+/* ---- RV-192, RV-210: the facts of many files ---- */
+
+#define SIZES_THREADS_MAX 4
 
 struct rubraview_sizes {
-    HANDLE thread;
-    volatile LONG stop;
-    volatile LONG done;
+    HANDLE threads[SIZES_THREADS_MAX];
+    unsigned thread_count;
+    volatile LONG stop, next, done;
     size_t count;
     char **paths;
     size_t *lens;
+    int64_t *expect;          /* the time kept on disk, or 0 */
     int32_t *w, *h;
     double *seconds;
+    int64_t *mtime;
+    uint8_t *confirmed;
+    volatile LONG *ready;     /* set after the rest of the answer, by a full barrier */
     rubraview_thumbs_wake_fn wake;
     void *context;
 };
 
-/* RV-202: a film's own head, read by our MP4 and Matroska readers from the file mapped: its size as shown (a
-   phone's upright film turned by its matrix) and its length, where the shell knows neither (MKV, WebM) or
-   gives the stored size. False when it is neither or has no video track. */
-static bool film_head(proven_u8str_view_t path, int32_t *out_w, int32_t *out_h, double *out_seconds) {
-    char narrow[MAX_PATH * 4];
-    WCHAR wide[MAX_PATH * 2];
-    if (path.size == 0 || path.size >= sizeof(narrow)) return false;
-    memcpy(narrow, path.ptr, path.size);
-    narrow[path.size] = '\0';
-    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, MAX_PATH * 2) <= 0) return false;
-    HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, 0, NULL);
-    if (file == INVALID_HANDLE_VALUE) return false;
-    LARGE_INTEGER size;
-    bool ok = false;
-    if (GetFileSizeEx(file, &size) && size.QuadPart >= 16) {
-        HANDLE map = CreateFileMappingW(file, NULL, PAGE_READONLY, 0, 0, NULL);
-        const uint8_t *data = map ? (const uint8_t *)MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0) : NULL;
-        if (data) {
-            static _Thread_local rubraview_mp4_t mp4;   /* large: kept off the stack */
-            static _Thread_local rubraview_mkv_t mkv;
-            double seconds = 0.0;
-            if (rubraview_mp4_open(&mp4, data, (uint64_t)size.QuadPart, NULL)) {
-                ok = rubraview_mp4_frame(&mp4, out_w, out_h, &seconds);
-            } else if (rubraview_mkv_open(&mkv, data, (uint64_t)size.QuadPart, NULL)) {
-                ok = rubraview_mkv_frame(&mkv, out_w, out_h, &seconds);
-            }
-            if (seconds > 0.0) *out_seconds = seconds;
-            UnmapViewOfFile(data);
-        }
-        if (map) CloseHandle(map);
-    }
-    CloseHandle(file);
-    return ok;
-}
-
-/* A picture's size from WIC, turned as its EXIF says; a film's (and a picture WIC has no codec
-   for) from the shell's property store. (The shell's System.Photo.Orientation was not given on
-   the VM for a JPEG turned by EXIF, 2026-10-30.) */
-static void shown_size(proven_u8str_view_t path, int32_t *out_w, int32_t *out_h, double *out_seconds) {
-    int32_t w = 0, h = 0;
-    double seconds = 0.0;
-    if (!rubraview_pal_image_shown_size(path, &w, &h)) {
-        w = h = 0;
-        if (!film_head(path, &w, &h, &seconds)) {   /* RV-202: a film's own head first; the shell for the rest */
-            int32_t sw = 0, sh = 0;
-            double ss = 0.0;
-            shell_meta(path, &sw, &sh, &ss);
-            if (w == 0 || h == 0) { w = sw; h = sh; }
-            if (seconds <= 0.0) seconds = ss;
-        }
-    }
-    *out_w = w;
-    *out_h = h;
-    *out_seconds = seconds;
+/* Readers side by side only where seeking costs nothing: a fixed drive that says it has no seek penalty. */
+static unsigned sizes_threads_for(proven_u8str_view_t path) {
+    WCHAR wide[MAX_PATH * 2], volume[MAX_PATH];
+    if (!wide_path(path, wide, MAX_PATH * 2) || !GetVolumePathNameW(wide, volume, MAX_PATH)) return 1;
+    if (GetDriveTypeW(volume) != DRIVE_FIXED || !(volume[0] && volume[1] == L':')) return 1;
+    WCHAR device[8] = { L'\\', L'\\', L'.', L'\\', volume[0], L':', 0 };
+    HANDLE drive = CreateFileW(device, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);   /* no rights needed to ask */
+    if (drive == INVALID_HANDLE_VALUE) return 1;
+    STORAGE_PROPERTY_QUERY query = { .PropertyId = StorageDeviceSeekPenaltyProperty, .QueryType = PropertyStandardQuery };
+    DEVICE_SEEK_PENALTY_DESCRIPTOR answer = {0};
+    DWORD got = 0;
+    bool ok = DeviceIoControl(drive, IOCTL_STORAGE_QUERY_PROPERTY, &query, sizeof(query), &answer, sizeof(answer), &got, NULL) &&
+              got >= sizeof(answer);
+    CloseHandle(drive);
+    return ok && !answer.IncursSeekPenalty ? SIZES_THREADS_MAX : 1;
 }
 
 static DWORD WINAPI sizes_thread(LPVOID param) {
     rubraview_sizes_t *s = (rubraview_sizes_t*)param;
-    bool com = SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE));
+    rubraview_head_src_t src = {0};
     double told = rubraview_pal_time_now_seconds();
-    for (size_t i = 0; i < s->count && !InterlockedCompareExchange(&s->stop, 0, 0); ++i) {
-        int32_t w = 0, h = 0;
-        double seconds = 0.0;
-        if (com && s->lens[i] > 0) shown_size((proven_u8str_view_t){ .ptr = (const proven_byte_t *)s->paths[i], .size = s->lens[i] }, &w, &h, &seconds);
-        s->w[i] = w;
-        s->h[i] = h;
-        s->seconds[i] = seconds;
-        InterlockedExchange(&s->done, (LONG)(i + 1));   /* a full barrier: the size is written before it is counted */
+    for (;;) {
+        if (InterlockedCompareExchange(&s->stop, 0, 0)) break;
+        size_t i = (size_t)InterlockedIncrement(&s->next) - 1;
+        if (i >= s->count) break;
+        proven_u8str_view_t path = { .ptr = (const proven_byte_t *)s->paths[i], .size = s->lens[i] };
+        rubraview_media_facts_t facts = {0};
+        int64_t mtime = 0;
+        WCHAR wide[MAX_PATH * 2];
+        WIN32_FILE_ATTRIBUTE_DATA attrs;
+        if (s->lens[i] == 0) {
+            /* nothing to read */
+        } else if (s->expect && s->expect[i] && wide_path(path, wide, MAX_PATH * 2) &&
+                   GetFileAttributesExW(wide, GetFileExInfoStandard, &attrs) && unix_seconds(attrs.ftLastWriteTime) == s->expect[i]) {
+            mtime = s->expect[i];   /* as it was when its facts were kept: not read */
+            s->confirmed[i] = 1;
+        } else {
+            (void)head_facts(&src, path, &facts, &mtime);
+        }
+        s->w[i] = facts.width;
+        s->h[i] = facts.height;
+        s->seconds[i] = facts.seconds;
+        s->mtime[i] = mtime;
+        InterlockedExchange(&s->ready[i], 1);   /* a full barrier: the answer is written before it is said ready */
+        LONG done = InterlockedIncrement(&s->done);
         double now = rubraview_pal_time_now_seconds();
-        if (s->wake && (i + 1 == s->count || now - told > 0.2)) { told = now; s->wake(s->context); }
+        if (s->wake && ((size_t)done == s->count || now - told > 0.2)) { told = now; s->wake(s->context); }
     }
-    if (s->count == 0 && s->wake) s->wake(s->context);
-    rubraview_pal_image_thread_end();   /* this thread's own WIC factory */
-    if (com) CoUninitialize();
+    rubraview_head_src_free(&src);
     return 0;
 }
 
 static void sizes_free(rubraview_sizes_t *s) {
-    for (size_t i = 0; i < s->count; ++i) free(s->paths[i]);
-    free(s->paths); free(s->lens); free(s->w); free(s->h); free(s->seconds);
+    for (size_t i = 0; s->paths && i < s->count; ++i) free(s->paths[i]);
+    free(s->paths); free(s->lens); free(s->expect); free(s->w); free(s->h); free(s->seconds); free(s->mtime);
+    free(s->confirmed); free((void *)s->ready);
     free(s);
 }
 
-rubraview_sizes_t *rubraview_pal_sizes_start(const proven_u8str_view_t *paths, size_t count,
-                                             rubraview_thumbs_wake_fn wake, void *context) {
+rubraview_sizes_t *rubraview_pal_sizes_start(const proven_u8str_view_t *paths, const int64_t *expect, size_t count,
+                                             bool background, rubraview_thumbs_wake_fn wake, void *context) {
     if (count > 0 && !paths) return NULL;
     rubraview_sizes_t *s = (rubraview_sizes_t*)calloc(1, sizeof(*s));
     if (!s) return NULL;
     size_t n = count ? count : 1;
     s->paths = (char**)calloc(n, sizeof(char*));
     s->lens = (size_t*)calloc(n, sizeof(size_t));
+    s->expect = expect ? (int64_t*)calloc(n, sizeof(int64_t)) : NULL;
     s->w = (int32_t*)calloc(n, sizeof(int32_t));
     s->h = (int32_t*)calloc(n, sizeof(int32_t));
     s->seconds = (double*)calloc(n, sizeof(double));
+    s->mtime = (int64_t*)calloc(n, sizeof(int64_t));
+    s->confirmed = (uint8_t*)calloc(n, 1);
+    s->ready = (volatile LONG*)calloc(n, sizeof(LONG));
     s->count = count;
-    bool ok = s->paths && s->lens && s->w && s->h && s->seconds;
+    bool ok = s->paths && s->lens && (!expect || s->expect) && s->w && s->h && s->seconds && s->mtime && s->confirmed && s->ready;
     for (size_t i = 0; ok && i < count; ++i) {
+        if (expect) s->expect[i] = expect[i];
         if (paths[i].size == 0) continue;
         s->paths[i] = (char*)malloc(paths[i].size);
         if (!s->paths[i]) { ok = false; break; }
         memcpy(s->paths[i], paths[i].ptr, paths[i].size);
         s->lens[i] = paths[i].size;
     }
-    if (!ok) { if (!s->paths) s->count = 0; sizes_free(s); return NULL; }
+    if (!ok) { sizes_free(s); return NULL; }
     s->wake = wake;
     s->context = context;
-    s->thread = CreateThread(NULL, 0, sizes_thread, s, 0, NULL);
-    if (!s->thread) { sizes_free(s); return NULL; }
-    SetThreadPriority(s->thread, THREAD_PRIORITY_BELOW_NORMAL);
+    unsigned want = 1;
+    for (size_t i = 0; i < count; ++i) if (s->lens[i]) { want = sizes_threads_for(paths[i]); break; }
+    if ((size_t)want > count) want = count ? (unsigned)count : 1;
+    for (unsigned k = 0; k < want; ++k) {
+        s->threads[k] = CreateThread(NULL, 0, sizes_thread, s, 0, NULL);
+        if (!s->threads[k]) break;
+        /* Ahead, the lowest CPU priority, but not Windows' background mode: its disk priority let a film playing
+           beside it hold 388 heads back past 4 s, where they take 0.45 s (the VM, 2026-10-31). */
+        SetThreadPriority(s->threads[k], background ? THREAD_PRIORITY_LOWEST : THREAD_PRIORITY_BELOW_NORMAL);
+        s->thread_count++;
+    }
+    if (s->thread_count == 0) { sizes_free(s); return NULL; }
+    if (count == 0 && wake) wake(context);
     return s;
 }
 
@@ -671,15 +685,15 @@ size_t rubraview_pal_sizes_count(const rubraview_sizes_t *s) {
     return s ? s->count : 0;
 }
 
-void rubraview_pal_sizes_get(const rubraview_sizes_t *s, size_t index, int32_t *out_width, int32_t *out_height, double *out_seconds) {
-    int32_t w = 0, h = 0;
-    double seconds = 0.0;
-    if (s && index < s->count && index < (size_t)InterlockedCompareExchange((volatile LONG*)&s->done, 0, 0)) {
-        w = s->w[index]; h = s->h[index]; seconds = s->seconds[index];
-    }
-    if (out_width) *out_width = w;
-    if (out_height) *out_height = h;
-    if (out_seconds) *out_seconds = seconds;
+bool rubraview_pal_sizes_get(const rubraview_sizes_t *s, size_t index, int32_t *out_width, int32_t *out_height,
+                             double *out_seconds, int64_t *out_mtime, bool *out_confirmed) {
+    if (!s || index >= s->count || !InterlockedCompareExchange((volatile LONG*)&s->ready[index], 0, 0)) return false;
+    if (out_width) *out_width = s->w[index];
+    if (out_height) *out_height = s->h[index];
+    if (out_seconds) *out_seconds = s->seconds[index];
+    if (out_mtime) *out_mtime = s->mtime[index];
+    if (out_confirmed) *out_confirmed = s->confirmed[index] != 0;
+    return true;
 }
 
 proven_u8str_view_t rubraview_pal_sizes_path(const rubraview_sizes_t *s, size_t index) {
@@ -687,15 +701,20 @@ proven_u8str_view_t rubraview_pal_sizes_path(const rubraview_sizes_t *s, size_t 
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s->paths[index], .size = s->lens[index] };
 }
 
+void rubraview_pal_sizes_hurry(rubraview_sizes_t *s) {
+    if (!s) return;
+    for (unsigned k = 0; k < s->thread_count; ++k) SetThreadPriority(s->threads[k], THREAD_PRIORITY_BELOW_NORMAL);
+}
+
 void rubraview_pal_sizes_stop(rubraview_sizes_t *s) {
     if (!s) return;
     InterlockedExchange(&s->stop, 1);
-    /* A shell call may be in flight; it is waited for, briefly. */
-    if (WaitForSingleObject(s->thread, 3000) == WAIT_OBJECT_0) {
-        CloseHandle(s->thread);
+    /* A read may be in flight on each; they are waited for, briefly. */
+    if (WaitForMultipleObjects(s->thread_count, s->threads, TRUE, 3000) == WAIT_OBJECT_0) {
+        for (unsigned k = 0; k < s->thread_count; ++k) CloseHandle(s->threads[k]);
         sizes_free(s);
     }
-    /* Otherwise the thread still holds `s`; it is left, not freed under it. */
+    /* Otherwise a thread still holds `s`; it is left, not freed under it. */
 }
 
 #endif /* _WIN32 */

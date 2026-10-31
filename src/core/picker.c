@@ -581,38 +581,54 @@ struct rubraview_shape_slot {
     char *path;          /* NULL: empty */
     size_t len;
     int64_t mtime;
-    uint64_t hash;
+    uint64_t hash;       /* of the path: one slot a path (RV-210) */
     uint8_t shape;
     double seconds;      /* RV-202: below 0 not known */
+    int32_t width, height;   /* RV-210: as shown; 0 not known */
+    bool verified;       /* RV-210: read or its time seen this run; one from the file on disk is not, until then */
+    int64_t stamp;       /* RV-210: when last put, for which ones the file keeps */
 };
 
-static uint64_t shape_hash(proven_u8str_view_t path, int64_t mtime) {
+/* One file however it is written: case and either slash alike, as rubraview_path_same compares (the open-file
+   screen's listing and a list's pages may name one file both ways). */
+static uint64_t shape_hash(proven_u8str_view_t path) {
     uint64_t h = 1469598103934665603ull;
-    for (size_t i = 0; i < path.size; ++i) { h ^= (uint8_t)path.ptr[i]; h *= 1099511628211ull; }
-    h ^= (uint64_t)mtime;
-    h *= 1099511628211ull;
+    for (size_t i = 0; i < path.size; ++i) {
+        uint8_t c = (uint8_t)path.ptr[i];
+        if (c >= 'A' && c <= 'Z') c = (uint8_t)(c - 'A' + 'a');
+        if (rubraview_path_is_sep((char)c)) c = '/';
+        h ^= c;
+        h *= 1099511628211ull;
+    }
     return h;
 }
 
-static struct rubraview_shape_slot *shape_find(const rubraview_shape_cache_t *cache, proven_u8str_view_t path,
-                                               int64_t mtime, uint64_t h) {
+/* The path's slot, or the empty one it would take; NULL when the table is full or not made. */
+static struct rubraview_shape_slot *shape_find(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, uint64_t h) {
     if (!cache->slots || cache->capacity == 0) return NULL;
     size_t mask = cache->capacity - 1;
     for (size_t at = (size_t)h & mask, tries = 0; tries < cache->capacity; at = (at + 1) & mask, ++tries) {
         struct rubraview_shape_slot *s = &cache->slots[at];
         if (!s->path) return s;
-        if (s->hash == h && s->mtime == mtime && s->len == path.size && memcmp(s->path, path.ptr, path.size) == 0) return s;
+        if (s->hash == h && rubraview_path_same((proven_u8str_view_t){ .ptr = (const proven_byte_t *)s->path, .size = s->len }, path)) return s;
     }
     return NULL;
 }
 
+/* The slot kept for the file as it is: its time the one given, or (time 0, a list's page whose time is not
+   known) one read or seen this run. */
+static const struct rubraview_shape_slot *shape_known(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime) {
+    if (!cache || path.size == 0) return NULL;
+    const struct rubraview_shape_slot *s = shape_find(cache, path, shape_hash(path));
+    if (!s || !s->path) return NULL;
+    return (mtime != 0 ? s->mtime == mtime : s->verified) ? s : NULL;
+}
+
 bool rubraview_shape_cache_get(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
                                rubraview_shape_t *out) {
-    if (!cache || path.size == 0) return false;
-    struct rubraview_shape_slot *s = shape_find(cache, path, mtime, shape_hash(path, mtime));
-    if (!s || !s->path) return false;
-    if (out) *out = (rubraview_shape_t)s->shape;
-    return true;
+    const struct rubraview_shape_slot *s = shape_known(cache, path, mtime);
+    if (s && out) *out = (rubraview_shape_t)s->shape;
+    return s != NULL;
 }
 
 bool rubraview_shape_cache_put(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
@@ -623,45 +639,178 @@ bool rubraview_shape_cache_put(rubraview_shape_cache_t *cache, proven_u8str_view
 }
 
 bool rubraview_shape_cache_length(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime, double *out_seconds) {
-    if (!cache || path.size == 0) return false;
-    struct rubraview_shape_slot *s = shape_find(cache, path, mtime, shape_hash(path, mtime));
-    if (!s || !s->path || !(s->seconds >= 0.0)) return false;
+    const struct rubraview_shape_slot *s = shape_known(cache, path, mtime);
+    if (!s || !(s->seconds >= 0.0)) return false;
     if (out_seconds) *out_seconds = s->seconds;
     return true;
 }
 
-bool rubraview_shape_cache_put_length(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
-                                      rubraview_shape_t shape, double seconds) {
+bool rubraview_shape_cache_facts(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
+                                 int32_t *out_width, int32_t *out_height, double *out_seconds) {
+    const struct rubraview_shape_slot *s = shape_known(cache, path, mtime);
+    if (!s) return false;
+    if (out_width) *out_width = s->width;
+    if (out_height) *out_height = s->height;
+    if (out_seconds) *out_seconds = s->seconds;
+    return true;
+}
+
+bool rubraview_shape_cache_unverified(const rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t *out_mtime) {
     if (!cache || path.size == 0) return false;
+    const struct rubraview_shape_slot *s = shape_find(cache, path, shape_hash(path));
+    if (!s || !s->path || s->verified || s->mtime == 0) return false;
+    if (out_mtime) *out_mtime = s->mtime;
+    return true;
+}
+
+bool rubraview_shape_cache_confirm(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime) {
+    if (!cache || path.size == 0) return false;
+    struct rubraview_shape_slot *s = shape_find(cache, path, shape_hash(path));
+    if (!s || !s->path || s->mtime != mtime) return false;
+    s->verified = true;
+    return true;
+}
+
+static struct rubraview_shape_slot *shape_slot(rubraview_shape_cache_t *cache, proven_u8str_view_t path) {
+    if (!cache || path.size == 0) return NULL;
     if (cache->count >= RUBRAVIEW_SHAPE_CACHE_MAX) rubraview_shape_cache_free(cache);   /* starts over */
     if (!cache->slots || (cache->count + 1) * 10 > cache->capacity * 7) {
         size_t capacity = cache->capacity ? cache->capacity * 2 : 256;
         struct rubraview_shape_slot *slots = (struct rubraview_shape_slot*)calloc(capacity, sizeof(*slots));
-        if (!slots) return false;
-        rubraview_shape_cache_t grown = { .slots = slots, .capacity = capacity, .count = cache->count };
+        if (!slots) return NULL;
+        rubraview_shape_cache_t grown = { .slots = slots, .capacity = capacity, .count = cache->count, .clock = cache->clock };
         for (size_t i = 0; i < cache->capacity; ++i) {
             if (!cache->slots[i].path) continue;
             struct rubraview_shape_slot *to = shape_find(&grown, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)cache->slots[i].path,
                                                                                         .size = cache->slots[i].len },
-                                                         cache->slots[i].mtime, cache->slots[i].hash);
+                                                         cache->slots[i].hash);
             *to = cache->slots[i];
         }
         free(cache->slots);
         *cache = grown;
     }
-    uint64_t h = shape_hash(path, mtime);
-    struct rubraview_shape_slot *s = shape_find(cache, path, mtime, h);
-    if (!s) return false;
+    uint64_t h = shape_hash(path);
+    struct rubraview_shape_slot *s = shape_find(cache, path, h);
+    if (!s) return NULL;
     if (!s->path) {
         char *copy = (char*)malloc(path.size);
-        if (!copy) return false;
+        if (!copy) return NULL;
         memcpy(copy, path.ptr, path.size);
-        *s = (struct rubraview_shape_slot){ .path = copy, .len = path.size, .mtime = mtime, .hash = h };
+        *s = (struct rubraview_shape_slot){ .path = copy, .len = path.size, .hash = h, .seconds = -1.0 };
         cache->count++;
     }
+    return s;
+}
+
+bool rubraview_shape_cache_put_length(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
+                                      rubraview_shape_t shape, double seconds) {
+    struct rubraview_shape_slot *s = shape_slot(cache, path);
+    if (!s) return false;
+    if (s->mtime != mtime) { s->width = 0; s->height = 0; }   /* another file now: what was kept of the old one goes */
+    s->mtime = mtime;
     s->shape = (uint8_t)shape;
     s->seconds = seconds >= 0.0 ? seconds : -1.0;
+    s->verified = true;
+    s->stamp = ++cache->clock;
     return true;
+}
+
+bool rubraview_shape_cache_put_facts(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime,
+                                     int32_t width, int32_t height, double seconds) {
+    if (!rubraview_shape_cache_put_length(cache, path, mtime, rubraview_shape_of(width, height), seconds > 0.0 ? seconds : -1.0)) return false;
+    struct rubraview_shape_slot *s = shape_slot(cache, path);
+    s->width = width > 0 && height > 0 ? width : 0;
+    s->height = width > 0 && height > 0 ? height : 0;
+    return true;
+}
+
+/* ---- RV-210: the facts kept on disk ----
+   A line a file: its time, width, height, length (- when not known), shape, path; tabs between, the newest first. */
+
+#define FACTS_HEAD "rubraview facts 1\n"
+
+size_t rubraview_shape_cache_parse(rubraview_shape_cache_t *cache, const char *text, size_t size) {
+    if (!cache || !text || size < sizeof(FACTS_HEAD) - 1 || memcmp(text, FACTS_HEAD, sizeof(FACTS_HEAD) - 1) != 0) return 0;
+    size_t added = 0, line = 0;
+    for (size_t at = sizeof(FACTS_HEAD) - 1; at < size; ++line) {
+        const char *start = text + at;
+        const char *nl = memchr(start, '\n', size - at);
+        size_t n = nl ? (size_t)(nl - start) : size - at;
+        at += n + 1;
+        char buf[64];
+        const char *tab = start;
+        int fields = 0;
+        long long values[5] = {0};
+        double seconds = -1.0;
+        bool ok = true;
+        for (; fields < 5 && ok; ++fields) {   /* five numbers, then the path */
+            const char *end = memchr(tab, '\t', n - (size_t)(tab - start));
+            if (!end || end == tab || (size_t)(end - tab) >= sizeof(buf)) { ok = false; break; }
+            memcpy(buf, tab, (size_t)(end - tab));
+            buf[end - tab] = '\0';
+            char *stop = NULL;
+            if (fields == 3) { seconds = buf[0] == '-' ? -1.0 : strtod(buf, &stop); ok = buf[0] == '-' || (stop && *stop == '\0'); }
+            else { values[fields] = strtoll(buf, &stop, 10); ok = stop && *stop == '\0'; }
+            tab = end + 1;
+        }
+        size_t path_len = n - (size_t)(tab - start);
+        if (!ok || path_len == 0 || values[0] == 0 || values[4] < 0 || values[4] >= RUBRAVIEW_SHAPE_COUNT) continue;
+        proven_u8str_view_t path = { .ptr = (const proven_byte_t *)tab, .size = path_len };
+        if (cache->count >= RUBRAVIEW_SHAPE_CACHE_MAX - 1) break;
+        struct rubraview_shape_slot *s = shape_find(cache, path, shape_hash(path));
+        if (s && s->path) continue;   /* this run's own stays */
+        s = shape_slot(cache, path);
+        if (!s) break;
+        s->mtime = values[0];
+        s->width = values[1] > 0 && values[1] <= INT32_MAX && values[2] > 0 && values[2] <= INT32_MAX ? (int32_t)values[1] : 0;
+        s->height = s->width ? (int32_t)values[2] : 0;
+        s->seconds = seconds >= 0.0 ? seconds : -1.0;
+        s->shape = (uint8_t)values[4];
+        s->verified = false;
+        s->stamp = -(int64_t)line - 1;   /* older than all of this run's, in the file's order */
+        added++;
+    }
+    return added;
+}
+
+static int stamp_newer(const void *a, const void *b) {
+    int64_t x = (*(const struct rubraview_shape_slot *const *)a)->stamp, y = (*(const struct rubraview_shape_slot *const *)b)->stamp;
+    return x > y ? -1 : x < y ? 1 : 0;
+}
+
+char *rubraview_shape_cache_serialize(const rubraview_shape_cache_t *cache, size_t max_entries,
+                                      bool (*kept_out)(void *context, proven_u8str_view_t path), void *context, size_t *out_size) {
+    *out_size = 0;
+    size_t n = 0;
+    const struct rubraview_shape_slot **order = cache && cache->count ? (const struct rubraview_shape_slot **)malloc(cache->count * sizeof(*order)) : NULL;
+    for (size_t i = 0; order && i < cache->capacity; ++i) {
+        const struct rubraview_shape_slot *s = &cache->slots[i];
+        if (!s->path || s->mtime == 0 || memchr(s->path, '\n', s->len) || memchr(s->path, '\t', s->len)) continue;
+        if (kept_out && kept_out(context, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s->path, .size = s->len })) continue;
+        order[n++] = s;
+    }
+    if (n > 1) qsort(order, n, sizeof(*order), stamp_newer);
+    if (n > max_entries) n = max_entries;
+    size_t cap = sizeof(FACTS_HEAD) + 1;
+    for (size_t i = 0; i < n; ++i) cap += order[i]->len + 96;
+    char *out = (char *)malloc(cap);
+    if (!out) { free(order); return NULL; }
+    size_t at = (size_t)snprintf(out, cap, "%s", FACTS_HEAD);
+    for (size_t i = 0; i < n; ++i) {
+        const struct rubraview_shape_slot *s = order[i];
+        char secs[32] = "-";
+        if (s->seconds >= 0.0) snprintf(secs, sizeof(secs), "%.3f", s->seconds);
+        int k = snprintf(out + at, cap - at, "%lld\t%d\t%d\t%s\t%d\t", (long long)s->mtime, (int)s->width, (int)s->height, secs, (int)s->shape);
+        if (k < 0 || (size_t)k + s->len + 2 > cap - at) break;
+        at += (size_t)k;
+        memcpy(out + at, s->path, s->len);
+        at += s->len;
+        out[at++] = '\n';
+    }
+    free(order);
+    out[at] = '\0';   /* text: ended, not counted */
+    *out_size = at;
+    return out;
 }
 
 void rubraview_shape_cache_free(rubraview_shape_cache_t *cache) {

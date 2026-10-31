@@ -151,7 +151,8 @@ static void read_track(rubraview_mp4_t *mp4, const box_t *trak) {
     mp4->tracks[mp4->track_count++] = t;
 }
 
-bool rubraview_mp4_open(rubraview_mp4_t *mp4, const uint8_t *data, uint64_t size, const char **out_why) {
+/* RV-210: `facts` reads a fragmented file's `moov` too, its length from `mvex/mehd` when `mvhd` has none. */
+static bool open_file(rubraview_mp4_t *mp4, const uint8_t *data, uint64_t size, const char **out_why, bool facts) {
     const char *sink = NULL;
     if (!out_why) out_why = &sink;
     *out_why = NULL;
@@ -161,7 +162,7 @@ bool rubraview_mp4_open(rubraview_mp4_t *mp4, const uint8_t *data, uint64_t size
     bool have_ftyp = false, have_moov = false;
     for (uint64_t at = 0; at < size && box_at(mp4, at, size, &b); at = b.end) {
         if (b.type == FOURCC('f', 't', 'y', 'p')) have_ftyp = true;
-        if (b.type == FOURCC('m', 'o', 'o', 'f')) { *out_why = N_("a fragmented MP4 is not read yet"); return false; }
+        if (b.type == FOURCC('m', 'o', 'o', 'f') && !facts) { *out_why = N_("a fragmented MP4 is not read yet"); return false; }
         if (b.type == FOURCC('m', 'o', 'o', 'v') && !have_moov) { moov = b; have_moov = true; }
         if (b.end <= at) break;
     }
@@ -170,7 +171,17 @@ bool rubraview_mp4_open(rubraview_mp4_t *mp4, const uint8_t *data, uint64_t size
     mp4->moov_at = moov.body - 8;
     mp4->moov_end = moov.end;
     for (uint64_t at = moov.body; at < moov.end && box_at(mp4, at, moov.end, &b); at = b.end) {
-        if (b.type == FOURCC('m', 'v', 'e', 'x')) { *out_why = N_("a fragmented MP4 is not read yet"); return false; }
+        if (b.type == FOURCC('m', 'v', 'e', 'x') && !facts) { *out_why = N_("a fragmented MP4 is not read yet"); return false; }
+        if (b.type == FOURCC('m', 'v', 'e', 'x')) {
+            box_t m;
+            for (uint64_t q = b.body; q < b.end && box_at(mp4, q, b.end, &m); q = m.end) {
+                uint64_t p = 0;
+                uint8_t version = 0;
+                if (m.type == FOURCC('m', 'e', 'h', 'd') && full_body(&m, 4, &p, &version, mp4) && p + (version == 1 ? 8 : 4) <= m.end)
+                    mp4->fragment_duration = version == 1 ? be64(mp4->data + p) : be32(mp4->data + p);
+                if (m.end <= q) break;
+            }
+        }
         if (b.type == FOURCC('t', 'r', 'a', 'k')) read_track(mp4, &b);
         uint64_t p = 0;
         uint8_t version = 0;
@@ -187,13 +198,22 @@ bool rubraview_mp4_open(rubraview_mp4_t *mp4, const uint8_t *data, uint64_t size
     return true;
 }
 
+bool rubraview_mp4_open(rubraview_mp4_t *mp4, const uint8_t *data, uint64_t size, const char **out_why) {
+    return open_file(mp4, data, size, out_why, false);
+}
+
+bool rubraview_mp4_open_moov(rubraview_mp4_t *mp4, const uint8_t *moov, uint64_t size) {
+    return open_file(mp4, moov, size, NULL, true);
+}
+
 bool rubraview_mp4_frame(const rubraview_mp4_t *mp4, int32_t *out_width, int32_t *out_height, double *out_seconds) {
     if (out_width) *out_width = 0;
     if (out_height) *out_height = 0;
     if (out_seconds) *out_seconds = 0.0;
     if (!mp4) return false;
-    if (out_seconds && mp4->movie_timescale > 0 && mp4->movie_duration != UINT64_MAX && mp4->movie_duration != UINT32_MAX)
-        *out_seconds = (double)mp4->movie_duration / (double)mp4->movie_timescale;
+    uint64_t duration = mp4->movie_duration ? mp4->movie_duration : mp4->fragment_duration;   /* RV-210 */
+    if (out_seconds && mp4->movie_timescale > 0 && duration != UINT64_MAX && duration != UINT32_MAX)
+        *out_seconds = (double)duration / (double)mp4->movie_timescale;
     for (size_t i = 0; i < mp4->track_count; ++i) {
         const rubraview_mp4_track_t *t = &mp4->tracks[i];
         if (t->handler != FOURCC('v', 'i', 'd', 'e') || !(t->shown_width >= 1.0) || !(t->shown_height >= 1.0) ||
