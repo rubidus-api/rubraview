@@ -237,6 +237,15 @@ void update_window_title(app_state_t *app) {
             if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
         }
     }
+    size_t said = app->frame_stats ? strnlen(app->stats_text, sizeof(app->stats_text)) : 0;
+    if (said > 0 && used + said + 3 < sizeof(title)) {   /* RV-215: [the timings] */
+        title[used++] = '[';
+        memcpy(title + used, app->stats_text, said);
+        used += said;
+        title[used++] = ']';
+        title[used++] = ' ';
+        title[used] = '\0';
+    }
     snprintf(title + used, sizeof(title) - used, T("%sRubraview %s"), used > 0 ? "- " : "", RUBRAVIEW_VERSION_STRING);
     rubraview_pal_window_set_title(app->window, title);
 }

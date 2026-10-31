@@ -11,6 +11,10 @@ double rubraview_pal_time_now_seconds(void) {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
 }
 
+void rubraview_pal_time_fine(bool fine) {
+    (void)fine;   /* a POSIX sleep is as fine as asked */
+}
+
 void rubraview_pal_time_sleep_ms(uint32_t milliseconds) {
     struct timespec req = {
         .tv_sec = (time_t)(milliseconds / 1000u),

@@ -2883,3 +2883,18 @@ Do not store credentials, private infrastructure details, personal data, private
   PageUp alone, a film's 30 s to Shift+PageDown / PageUp. The old arrows join `rubraview_default_keymap_retired`. The
   film's Toolbar gets Centre (`center_picture`), which only the pictures' had since 1.25.0.
 - Consequences: T269's like pairs name seek over paging and a text's lines over the volume.
+
+## 2026-10-31: D-246 Measure the stutter first; the timer at 1 ms while anything moves (W-20261031-1810)
+
+- Status: Accepted (owner 2026-10-31: "재생중 끊김인거 같은데요. ffmpeg도 별도 프로세스가 아니라 통합해 버리는게 좋을까요? 뭔가
+  어디선가 병목이나 부하가 걸리는 듯한 느낌인데... 심지어 이미지 볼때도 그래요").
+- Context: nothing raised Windows' timer, so every short wait (the loop's 4 ms, the decoders' 2 and 5 ms, the FFmpeg
+  child's 4 ms) lasted a 15.6 ms tick. A stutter in pictures too points at what both share, not at FFmpeg's process.
+  On the VM (no graphics card) a 720p30 film showed 10 of its 30 frames a second: drawing took under 1 ms, taking each
+  picture in 85–110 ms (its upload into Direct2D on the software device). Two textures in turn and a cheaper filter
+  changed nothing there, so neither was kept; the VM's software device is not the owner's card.
+- Decision: the timer at 1 ms while anything moves (`rubraview_pal_time_fine`, winmm loaded when wanted; the FFmpeg child
+  for its life; `RUBRAVIEW_TIMER_DEFAULT` set leaves it, to compare); frame timings on `Ctrl+Shift+F` in the title.
+  FFmpeg stays in its own process until the owner's timings say the hand-over is the cost (it keeps a crash in a
+  decoder from taking the viewer down, D-208).
+- Consequences: the next step is the owner's numbers from the film and the picture that stutter.

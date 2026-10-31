@@ -1328,6 +1328,12 @@ typedef struct app_state {
     size_t                 picker_hold_index;
     double                 picker_hold_x, picker_hold_y, picker_hold_at;
     double                 picker_tap_at;          /* RV-213: the last tap, for a second one that opens */
+    /* RV-215: frame timings, said in the title once a second while asked for (Ctrl+Shift+F) */
+    bool                   frame_stats;
+    double                 stats_since, stats_worst, stats_draw;
+    uint32_t               stats_frames, stats_dropped, stats_taken;
+    double                 stats_media;            /* time taking a film's picture in (its copy or upload) */
+    char                   stats_text[160];
     size_t                 picker_tap_index;
     uint32_t               picker_tap_generation;
     /* D-34: one picture per listed item, made on a thread of its own for

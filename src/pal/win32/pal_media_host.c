@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "rubraview/pal/pal_media_host.h"
+#include "rubraview/pal/pal_time.h"
 #include "rubraview/pal/pal_media.h"
 #include "rubraview/lang.h"
 #include "rubraview/stream.h"
@@ -1447,6 +1448,7 @@ static int32_t child_service(uint32_t kind, uint32_t *serial) {
 
 int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *request_text, const wchar_t *reply_text) {
     g_in_child = true;
+    rubraview_pal_time_fine(true);   /* RV-215: the child lives only while a film plays: its 4 ms waits are 4 ms */
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     SetUnhandledExceptionFilter(child_crash);
     HANDLE mapping = (HANDLE)(uintptr_t)_wcstoui64(mapping_text, NULL, 10);

@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.54.exe              the viewer, as built
-dist/rubraview-v1.39.54/                 the release bundle
-dist/rubraview-v1.39.54.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.55.exe              the viewer, as built
+dist/rubraview-v1.39.55/                 the release bundle
+dist/rubraview-v1.39.55.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1777,6 +1777,7 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |
 | `Ctrl+Shift+T` | Always on top of other windows |
 | `Shift+I` | Information bar |
+| `Ctrl+Shift+F` | Frame timings in the title: frames a second, the slowest, frames dropped, time drawing |
 | `Ctrl+N` | A new window: the viewer once more, nothing open |
 | `Ctrl+,` | Settings |
 | `Shift+/` | This help, in a window of its own |

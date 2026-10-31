@@ -662,6 +662,15 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         rubraview_box_snap_home(&app->toolbox, &m, (double)ww, (double)wh);
         if (app->osd.always_on) app->toolbox.anchor_y -= 28.0 * dpi;
         osd_say(app, TU8("the Floating Widget is back in its corner"));
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_frame_stats"))) {
+        /* RV-215: how the frames come, said in the title once a second */
+        app->frame_stats = !app->frame_stats;
+        app->stats_since = rubraview_pal_time_now_seconds();
+        app->stats_frames = app->stats_dropped = 0;
+        app->stats_worst = app->stats_draw = 0.0;
+        app->stats_text[0] = '\0';
+        osd_say(app, app->frame_stats ? TU8("frame timings in the title, once a second") : TU8("frame timings off"));
+        update_window_title(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_osd"))) {
         app->osd.always_on = !app->osd.always_on;
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_filmstrip"))) {

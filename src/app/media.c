@@ -1261,6 +1261,7 @@ void media_tick(app_state_t *app) {
             if (decision == RUBRAVIEW_FRAME_WAIT) break;
             if (decision == RUBRAVIEW_FRAME_DROP && rubraview_pal_media_frames_ready(m) > 1) {
                 rubraview_pal_media_pop_frame(m);
+                app->stats_dropped++;   /* RV-215 */
                 continue;
             }
             bool first = !app->media_has_frame;

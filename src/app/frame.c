@@ -98,7 +98,13 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     station_job_poll(app);
     station_title_poll(app);   /* RV-158 */
     gmic_list_poll(app);   /* RFC-0009 C */
+    double media_from = rubraview_pal_time_now_seconds();
+    bool had_new = app->media_new_picture;
     media_tick(app);
+    if (app->frame_stats && app->media_new_picture && !had_new) {   /* RV-215: a picture taken in this pass */
+        app->stats_media += rubraview_pal_time_now_seconds() - media_from;
+        app->stats_taken++;
+    }
     bgm_tick(app);
 
     /* Redraw only while something can change on screen. Without a
@@ -132,6 +138,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     if (handled > 0) fc->last_input_seconds = now;
     if (handled > 0 || media_playing || others_moving) fc->last_busy_seconds = now;
     bool settled = now - fc->last_busy_seconds > IDLE_REDRAW_GRACE;
+    rubraview_pal_time_fine(!settled || media_playing);   /* RV-215: 1 ms waits while anything moves, the default when still */
     /* Only the film or the sound moves: draw a new picture when one
        is up and the seek bar four times a second, not on every pass
        (T058 on the VM: every pass kept 1.75 of 2 cores busy on a
@@ -147,11 +154,29 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
                       : (!settled || now - fc->last_idle_frame_seconds >= 10.0 ||
                          scene_signature(app) != fc->last_scene_signature);
     if (draw) {
+        double drawn_at = rubraview_pal_time_now_seconds();
+        if (app->frame_stats && fc->last_render_seconds > 0.0 && now - fc->last_render_seconds > app->stats_worst)
+            app->stats_worst = now - fc->last_render_seconds;
         render_frame(app);
+        if (app->frame_stats) {   /* RV-215 */
+            app->stats_frames++;
+            app->stats_draw += rubraview_pal_time_now_seconds() - drawn_at;
+        }
         fc->last_scene_signature = scene_signature(app);
         fc->last_render_seconds = now;
         app->media_new_picture = false;
         if (settled) fc->last_idle_frame_seconds = now;
+    }
+    if (app->frame_stats && now - app->stats_since >= 1.0) {   /* RV-215: once a second, into the title */
+        double span = now - app->stats_since;
+        snprintf(app->stats_text, sizeof(app->stats_text), T("%.0f frames/s, slowest %.0f ms, %u dropped, taking a picture %.1f ms, drawing %.1f ms"),
+                 app->stats_frames / span, app->stats_worst * 1000.0, (unsigned)app->stats_dropped,
+                 app->stats_taken ? app->stats_media * 1000.0 / app->stats_taken : 0.0,
+                 app->stats_frames ? app->stats_draw * 1000.0 / app->stats_frames : 0.0);
+        app->stats_since = now;
+        app->stats_frames = app->stats_dropped = app->stats_taken = 0;
+        app->stats_worst = app->stats_draw = app->stats_media = 0.0;
+        update_window_title(app);
     }
     if (app->settings_open && now - app->settings_info_seconds >= 1.0) {
         /* `info` lines (cache in use, the adapter) are live data: once a second. */
