@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.39.60** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.60/rubraview-v1.39.60.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.60/rubraview-v1.39.60.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.60/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.39.61** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.61/rubraview-v1.39.61.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.61/rubraview-v1.39.61.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.61/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -252,6 +252,11 @@ ships with, so it cannot drift from them.
 | Right click `Open` | Open what was right-clicked in the open-file screen |
 | Right click `Look inside (a book)` | Look inside the book right-clicked |
 | Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
+| Right click `Extract into a folder of its name`, Right click `Extract each into a folder of its name` | The picked archives written out, each into a folder of its name |
+| Right click `Extract here (smart)`, Right click `Extract each here (smart)` | The picked archives written out here: as they are when all is in one top folder, else into a folder of the name |
+| Right click `Extract to...`, Right click `Extract them to...` | The picked archives written out into a folder chosen |
+| Right click `Compress to a ZIP`, Right click `Compress them to a ZIP` | The picked files and folders packed into a ZIP beside them, at once |
+| Right click `Compress...`, Right click `Compress them...` | The picked files and folders packed: the new archive's place and name, ZIP or 7z, its level, a password |
 | Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
 | Right click `Show in Explorer` | Show in Explorer what was right-clicked |
 | Right click `Favourite (in or out)` | Make the file or folder that was right-clicked a favourite, or no longer one |

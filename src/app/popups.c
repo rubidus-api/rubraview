@@ -556,7 +556,7 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             box.x = (app->panel.bounds.x - box_w) * 0.5;
         /* A password is asked in the middle, clear of the toolbox's anchor
            (VM, 2026-10-01: it showed through the box). */
-        if (app->rename_is_password || app->rename_is_target || app->rename_is_extension) box.y = (win_h - box_h) * 0.5;
+        if (app->rename_is_password || app->rename_is_target || app->rename_is_extension || app->rename_is_pack) box.y = (win_h - box_h) * 0.5;
         if (app->rename_is_extension) {   /* 1.24.0: the rows over the box, the one it edits lit */
             double row_h = 34.0 * dpi, top = box.y - 40.0 * dpi - row_h * (double)app->ext_n;
             if (top < 8.0 * dpi) top = 8.0 * dpi;
@@ -591,6 +591,12 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             rubraview_pal_rect_t label = { box.x, box.y - 30.0 * dpi, box.width, 26.0 * dpi };
             rubraview_pal_render_fill_rect(app->renderer, label, COLOR_BOX_FILL, 3.0);
             rubraview_pal_render_draw_text(app->renderer, TU8("The list shows the names holding this  ·  Esc shows them all"),
+                                           label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
+        if (app->rename_is_pack) {   /* RV-207: the new archive's place */
+            rubraview_pal_rect_t label = { box.x - 40.0 * dpi, box.y - 30.0 * dpi, box.width + 80.0 * dpi, 26.0 * dpi };
+            rubraview_pal_render_fill_rect(app->renderer, label, COLOR_BOX_FILL, 3.0);
+            rubraview_pal_render_draw_text(app->renderer, TU8("Compress into:  its ending (.zip or .7z) says which  ·  Enter, then a password or none"),
                                            label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
         if (app->rename_is_target) {
@@ -686,10 +692,17 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             words[n] = T("Close"); kinds[n++] = RENAME_BTN_CANCEL;
         } else {
             words[n] = app->rename_is_extension ? (app->ext_at + 1 < app->ext_n ? T("Next") : T("Apply"))
-                     : app->rename_is_password ? T("Open") : app->rename_is_filter || app->rename_is_listfilter ? T("Done") : T("OK");
+                     : app->rename_is_password ? (app->password_for_pack ? T("Compress") : app->password_for_extract ? T("Extract") : T("Open"))
+                     : app->rename_is_pack ? T("Next") : app->rename_is_filter || app->rename_is_listfilter ? T("Done") : T("OK");
             kinds[n++] = RENAME_BTN_OK;
             if (app->rename_is_extension && app->ext_at + 1 < app->ext_n) { words[n] = T("Apply"); kinds[n++] = RENAME_BTN_OK + 100; }
             if (app->rename_is_target) { words[n] = T("Browse..."); kinds[n++] = RENAME_BTN_BROWSE; }
+            if (app->rename_is_pack) {   /* RV-207: the ending swapped, the level stepped */
+                static char level[64];
+                snprintf(level, sizeof level, T("Level: %s"), archwork_level_word(app));
+                words[n] = "ZIP / 7z"; kinds[n++] = RENAME_BTN_FORMAT;
+                words[n] = level; kinds[n++] = RENAME_BTN_LEVEL;
+            }
             words[n] = T("Cancel"); kinds[n++] = RENAME_BTN_CANCEL;
         }
         double bw = 120.0 * dpi, bh = 48.0 * dpi, gap = 10.0 * dpi;   /* 1.25.0: roomier */

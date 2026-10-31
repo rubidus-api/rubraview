@@ -2957,3 +2957,14 @@ Do not store credentials, private infrastructure details, personal data, private
   resize, maximise, close (was maximise, resize, close). The subtitle box, the equaliser, the panel and the popups
   already ended with close; windows of their own have Windows' frame.
 - Consequences: the three buttons every Windows user reaches for are where Windows puts them.
+
+## 2026-10-31: D-252 Extract and compress from the open-file screen's right click (W-20261031-1120)
+
+- Status: Accepted (owner 2026-10-31, the plan's answers; "모두 진행 바랍니다").
+- Decision: the open-file screen's right click carries Extract into a folder of its name, Extract here (smart),
+  Extract to..., Compress to a ZIP and Compress...; the Compress box is the rename box's: the new archive's path (its
+  ending says ZIP or 7z), a ZIP / 7z button and a level button, then the password box (empty: none). The work runs on
+  a thread (`archwork.c`) over the core's `archive_job.c`; FultaArc is re-vendored at `e620e6f` for its encrypted,
+  streamed edit and convert writes. A folder of the archive's name there already is never mixed into: name-1.
+- Consequences: Explorer's "Rubraview" submenu, `--extract` / `--compress` and the archive shown as a tree in the
+  screen are the next steps of RV-207.

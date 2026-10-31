@@ -379,6 +379,10 @@ void password_commit(app_state_t *app) {
     memcpy(path, app->password_for, app->password_for_len);
     size_t path_len = app->password_for_len;
     rename_end(app);                                      /* wipes the box */
+    if (archwork_password_box(app, true, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)typed, .size = n })) {   /* RV-207 */
+        secure_wipe(typed, sizeof(typed));
+        return;
+    }
     if (n == 0) { secure_wipe(typed, sizeof(typed)); return; }
     app->open_password = typed;
     app->open_password_len = n;

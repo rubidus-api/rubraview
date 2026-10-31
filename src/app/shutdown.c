@@ -61,6 +61,7 @@ void app_end(app_state_t *app) {
     save_job_poll(app, true);   /* a copy being written is finished, not cut off */
     apply_all_poll(app, true);  /* the copy in hand is finished, the rest left */
     arc_job_poll(app, true);    /* D-88: an archive being written again is stopped; the old one stands */
+    archwork_poll(app, true);   /* RV-207: an extracting or a compressing stopped; nothing half-written stays */
     arc_undo_drop(app);         /* D-89: the kept file of the last edit goes with the program */
     print_temp_drop(app);
     for (size_t i = 0; i < TILE_SETS; ++i) rubraview_pal_tiles_stop(app->tile_sets[i].tiles);

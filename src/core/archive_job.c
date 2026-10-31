@@ -109,6 +109,19 @@ bool rubraview_archive_free_name(proven_u8str_view_t path, bool (*exists)(proven
     return false;
 }
 
+bool rubraview_archive_free_folder_name(proven_u8str_view_t path, bool (*exists)(proven_u8str_view_t path), char *out, size_t cap) {
+    if (!out || cap == 0 || path.size + 1 > cap) return false;
+    memcpy(out, path.ptr, path.size);
+    out[path.size] = '\0';
+    if (!exists || !exists(path)) return true;
+    for (unsigned k = 1; k < 100000; ++k) {
+        int w = snprintf(out, cap, "%.*s-%u", (int)path.size, (const char *)path.ptr, k);
+        if (w <= 0 || (size_t)w >= cap) return false;
+        if (!exists((proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = (size_t)w })) return true;
+    }
+    return false;
+}
+
 static proven_u8str_view_t view(const char *s) { return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = s ? strlen(s) : 0 }; }
 static bool exists_fn(proven_u8str_view_t path) { return rubraview_pal_fs_exists(path); }
 
@@ -264,11 +277,8 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
         char stem[512], want[RUBRAVIEW_ARCHIVE_PATH];
         rubraview_archive_stem(view(job->archive), stem, sizeof stem);
         snprintf(want, sizeof want, "%.*s%c%s", (int)dn, job->dest, sep, stem);
-        rubraview_fs_entry_t st;
-        proven_u8str_view_t w = view(want);
-        bool file_there = rubraview_pal_fs_exists(w) && stat_of(want, &st) && !st.is_directory;
-        if (file_there) rubraview_archive_free_name(w, exists_fn, job->root, sizeof job->root);   /* a file of that name: book-1 */
-        else snprintf(job->root, sizeof job->root, "%s", want);
+        /* a file or a folder of that name there already: book-1, so nothing is mixed into what was there */
+        if (!rubraview_archive_free_folder_name(view(want), exists_fn, job->root, sizeof job->root)) snprintf(job->root, sizeof job->root, "%s", want);
     } else {
         snprintf(job->root, sizeof job->root, "%.*s", (int)dn, job->dest);
     }
@@ -277,6 +287,7 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
     for (size_t i = 0; i < fulta_arc_count(arc); ++i) if (picked(job, i)) total += fulta_arc_entry(arc, i)->size;
     atomic_store(&job->total, total);
     atomic_store(&job->done, 0);
+    bool made_root = !rubraview_pal_fs_exists(view(job->root));   /* taken back if nothing comes of it */
     if (!rubraview_pal_fs_make_dirs(view(job->root))) {
         job->result = RUBRAVIEW_ARCHIVE_CANNOT_WRITE;
         say(job->why, sizeof job->why, T("the folder could not be made"), job->root);
@@ -335,6 +346,10 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
         atomic_fetch_add(&job->files, 1);
     }
     fulta_arc_close(arc);
+    if (made_root && job->written == 0 && job->result != RUBRAVIEW_ARCHIVE_DONE) {
+        (void)rubraview_pal_fs_delete_tree(view(job->root));   /* a wrong password or a stop leaves no empty folder */
+        job->root[0] = '\0';
+    }
     if (job->result == RUBRAVIEW_ARCHIVE_DONE) {
         if (job->failed > 0) job->result = RUBRAVIEW_ARCHIVE_PARTLY;
         else if (job->written == 0 && job->skipped == 0) job->result = RUBRAVIEW_ARCHIVE_NOTHING;

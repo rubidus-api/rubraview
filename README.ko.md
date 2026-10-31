@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.39.60** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.60/rubraview-v1.39.60.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.60/rubraview-v1.39.60.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.60/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.39.61** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.61/rubraview-v1.39.61.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.61/rubraview-v1.39.61.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.61/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -251,6 +251,11 @@
 | 오른쪽 클릭 `Open` | 탐색기에서 우클릭한 것 열기 |
 | 오른쪽 클릭 `Look inside (a book)` | 우클릭한 책 안 보기 |
 | 오른쪽 클릭 `Add to the list`, 오른쪽 클릭 `Add them to the list` | 고른 것을 목록에 추가 |
+| 오른쪽 클릭 `Extract into a folder of its name`, 오른쪽 클릭 `Extract each into a folder of its name` | 고른 압축 파일을 각각 같은 이름의 폴더에 풀기 |
+| 오른쪽 클릭 `Extract here (smart)`, 오른쪽 클릭 `Extract each here (smart)` | 고른 압축 파일을 여기에 풀기: 최상위 폴더가 하나면 그대로, 아니면 같은 이름의 폴더에 |
+| 오른쪽 클릭 `Extract to...`, 오른쪽 클릭 `Extract them to...` | 고른 압축 파일을 고른 폴더에 풀기 |
+| 오른쪽 클릭 `Compress to a ZIP`, 오른쪽 클릭 `Compress them to a ZIP` | 고른 파일과 폴더를 바로 옆에 ZIP으로 압축 |
+| 오른쪽 클릭 `Compress...`, 오른쪽 클릭 `Compress them...` | 고른 파일과 폴더 압축: 새 압축 파일의 위치와 이름, ZIP 또는 7z, 압축 수준, 암호 |
 | 오른쪽 클릭 `Copy the whole path`, 오른쪽 클릭 `Copy their paths` | 고른 것의 경로 복사 |
 | 오른쪽 클릭 `Show in Explorer` | 우클릭한 것을 탐색기에서 보기 |
 | 오른쪽 클릭 `Favourite (in or out)` | 우클릭한 파일이나 폴더를 즐겨찾기에 넣거나 빼기 |

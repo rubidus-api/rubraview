@@ -185,6 +185,8 @@ extern double g_gutter;
 #define KEYMAP_MAX_BYTES (256u * 1024u)
 #define FILMSTRIP_THUMB 120.0
 #define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar;*.alz;*.egg"
+/* RV-207: what can be extracted (FultaArc reads these too, though the viewer does not open them as books) */
+#define ARCHIVE_FILTER_ALL ARCHIVE_FILTER ";*.tar;*.tgz;*.tbz;*.tbz2;*.txz;*.tzst;*.gz;*.bz2;*.xz;*.zst;*.lz;*.cab;*.iso;*.lzh;*.lha;*.cpio;*.deb;*.udf"
 #define MAX_ARCHIVE_BYTES (2048u * 1024u * 1024u)  /* the whole CBZ, held in memory (§3.8.1) */
 #define MAX_PAGE_BYTES (512u * 1024u * 1024u)      /* §10.2's per-page zip-bomb guard */
 #define BATCH_WORK_ARENA_BYTES (256u * 1024u * 1024u)  /* §3.11: one file's worth, reset per file */
@@ -1146,6 +1148,11 @@ typedef struct app_state {
        memory only — never the settings, a log or the clipboard — and are
        wiped when the viewer closes. */
     bool                   rename_is_password;
+    bool                   rename_is_pack;          /* RV-207: the Compress box (the new archive's place) */
+    bool                   password_for_pack;       /* the password box asks for a new archive */
+    bool                   password_for_extract;    /* the password box asks for an archive being extracted */
+    int32_t                pack_level;              /* the Compress box's level: 0 store, 1 fast, 2 normal, 3 best */
+    struct archwork       *archwork;                /* the extracting or compressing under way */
     char                   password_for[1024];
     size_t                 password_for_len;
     char                   passwords[8][512];
@@ -1661,7 +1668,7 @@ extern double g_col_w[RUBRAVIEW_PICKER_SORT_COUNT];
 
 
 /* Moved from main.c: more than one file uses them (RV-163). */
-enum { RENAME_BTN_OK = 1, RENAME_BTN_CANCEL, RENAME_BTN_BROWSE, RENAME_BTN_BACK };
+enum { RENAME_BTN_OK = 1, RENAME_BTN_CANCEL, RENAME_BTN_BROWSE, RENAME_BTN_BACK, RENAME_BTN_FORMAT, RENAME_BTN_LEVEL };   /* RV-207: the Compress box's two */
 
 
 /* Shared variables, defined in the file that owns them. */
@@ -2007,6 +2014,19 @@ void info_local_time(char *buf, size_t cap, int64_t unix_seconds);
 size_t info_pump(app_state_t *app);
 void info_show(app_state_t *app);
 void info_live(app_state_t *app);   /* RV-215 (D-248): the Live rows again */
+/* RV-207 (D-252): archwork.c */
+bool archwork_busy(const app_state_t *app);
+bool archwork_stop(app_state_t *app);
+void archwork_poll(app_state_t *app, bool quitting);
+void archwork_extract(app_state_t *app, int mode, bool choose_folder);
+void archwork_compress_quick(app_state_t *app);
+void archwork_compress_ask(app_state_t *app);
+void archwork_pack_typed(app_state_t *app);
+void archwork_pack_cancelled(app_state_t *app);
+void archwork_pack_toggle_format(app_state_t *app);
+void archwork_pack_next_level(app_state_t *app);
+const char *archwork_level_word(const app_state_t *app);
+bool archwork_password_box(app_state_t *app, bool entered, proven_u8str_view_t typed);
 void filmcache_for(app_state_t *app, proven_u8str_view_t path);   /* RV-216 (D-249): the cache's settings for a film about to open */
 void live_start(app_state_t *app);  /* RV-215: a fresh second's measuring */
 void interval_set(app_state_t *app, double seconds);

@@ -56,6 +56,9 @@ size_t rubraview_archive_stem(proven_u8str_view_t archive_path, char *out, size_
 /* `path`, or the first of path-1.ext, path-2.ext ... that is not there (`exists` tells), into `out`. */
 bool rubraview_archive_free_name(proven_u8str_view_t path, bool (*exists)(proven_u8str_view_t path),
                                  char *out, size_t cap);
+/* The same for a folder: the number goes at the end, a dot in its name being no extension ("2024.10.31-1"). */
+bool rubraview_archive_free_folder_name(proven_u8str_view_t path, bool (*exists)(proven_u8str_view_t path),
+                                        char *out, size_t cap);
 
 #define RUBRAVIEW_ARCHIVE_PATH 4096
 

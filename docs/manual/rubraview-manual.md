@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.60.exe              the viewer, as built
-dist/rubraview-v1.39.60/                 the release bundle
-dist/rubraview-v1.39.60.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.61.exe              the viewer, as built
+dist/rubraview-v1.39.61/                 the release bundle
+dist/rubraview-v1.39.61.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1968,6 +1968,11 @@ listed under a later heading only means that while that is on screen.
 | Right click `Open` | Open what was right-clicked in the open-file screen |
 | Right click `Look inside (a book)` | Look inside the book right-clicked |
 | Right click `Add to the list`, Right click `Add them to the list` | Add what is picked to the list on screen |
+| Right click `Extract into a folder of its name`, Right click `Extract each into a folder of its name` | The picked archives written out, each into a folder of its name |
+| Right click `Extract here (smart)`, Right click `Extract each here (smart)` | The picked archives written out here: as they are when all is in one top folder, else into a folder of the name |
+| Right click `Extract to...`, Right click `Extract them to...` | The picked archives written out into a folder chosen |
+| Right click `Compress to a ZIP`, Right click `Compress them to a ZIP` | The picked files and folders packed into a ZIP beside them, at once |
+| Right click `Compress...`, Right click `Compress them...` | The picked files and folders packed: the new archive's place and name, ZIP or 7z, its level, a password |
 | Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
 | Right click `Show in Explorer` | Show in Explorer what was right-clicked |
 | Right click `Favourite (in or out)` | Make the file or folder that was right-clicked a favourite, or no longer one |

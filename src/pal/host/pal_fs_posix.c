@@ -318,7 +318,28 @@ bool rubraview_pal_fs_move(proven_u8str_view_t from, proven_u8str_view_t to) {
 }
 bool rubraview_pal_fs_copy(proven_u8str_view_t from, proven_u8str_view_t to) { (void)from; (void)to; return false; }
 bool rubraview_pal_fs_copy_tree(proven_u8str_view_t from, proven_u8str_view_t to) { (void)from; (void)to; return false; }
-bool rubraview_pal_fs_delete_tree(proven_u8str_view_t path) { (void)path; return false; }
+static bool tree_gone(const char *z) {
+    struct stat st;
+    if (lstat(z, &st) != 0) return true;
+    if (!S_ISDIR(st.st_mode)) return unlink(z) == 0;
+    DIR *d = opendir(z);
+    if (!d) return false;
+    bool ok = true;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+        char child[4096];
+        if (snprintf(child, sizeof child, "%s/%s", z, e->d_name) >= (int)sizeof child) { ok = false; continue; }
+        ok = tree_gone(child) && ok;
+    }
+    closedir(d);
+    return rmdir(z) == 0 && ok;
+}
+
+bool rubraview_pal_fs_delete_tree(proven_u8str_view_t path) {
+    char z[4096];
+    return z_of(path, z, sizeof z) && tree_gone(z);
+}
 bool rubraview_pal_fs_replace(proven_u8str_view_t from, proven_u8str_view_t to) {
     char a[4096], b[4096];
     return z_of(from, a, sizeof a) && z_of(to, b, sizeof b) && rename(a, b) == 0;

@@ -3,6 +3,7 @@
  * an action carried out, the picker's and the boxes' keys, a key dispatched (RV-163, D-197: moved from main.c as it was).
  */
 #include "app.h"
+#include "rubraview/archive_job.h"
 
 /* The box's grid must match however many tiles the current menu level
    shows, which changes as the reader drills in and back out. */
@@ -491,6 +492,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
 
     if (proven_u8str_view_eq(action, PROVEN_LIT("quit"))) {
         /* Esc closes what is open before it closes the program. */
+        if (archwork_busy(app)) { (void)archwork_stop(app); return; }   /* RV-207 */
         if (app->arc_job && !atomic_load(&app->arc_job->job.cancel)) {
             atomic_store(&app->arc_job->job.cancel, true);
             osd_say(app, PROVEN_LIT("stopping..."));
@@ -922,6 +924,12 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
             rubraview_confirm_press(&app->picker_confirm, PICKER_BTN_RECYCLE, rubraview_pal_time_now_seconds());
             picker_recycle(app);
         }
+        /* RV-207 (D-252): the picked archives written out, or the picked files packed */
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_folder"))) archwork_extract(app, RUBRAVIEW_EXTRACT_FOLDER, false);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_smart"))) archwork_extract(app, RUBRAVIEW_EXTRACT_SMART, false);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_to"))) archwork_extract(app, RUBRAVIEW_EXTRACT_FOLDER, true);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_compress_zip"))) archwork_compress_quick(app);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_compress"))) archwork_compress_ask(app);
         else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_deselect_all"))) {
             for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i) app->picker_selected[i] = false;
             osd_say(app, TU8("nothing picked"));
@@ -1424,6 +1432,12 @@ void memory_watch(app_state_t *app, double now) {
 
 /* The box given up: Esc, or its Cancel. */
 static void rename_cancel(app_state_t *app) {
+    if (app->rename_is_pack) { rename_end(app); archwork_pack_cancelled(app); osd_say(app, TU8("not compressed")); return; }   /* RV-207 */
+    if (app->rename_is_password && (app->password_for_pack || app->password_for_extract)) {
+        rename_end(app);
+        (void)archwork_password_box(app, false, PROVEN_LIT(""));
+        return;
+    }
     if (app->rename_is_password) osd_say(app, TU8("not opened: it needs its password"));
     bool filter = app->rename_is_filter, listfilter = app->rename_is_listfilter;
     rename_end(app);
@@ -1442,6 +1456,8 @@ bool rename_box_press(app_state_t *app, double x, double y) {
             case RENAME_BTN_CANCEL: rename_cancel(app); break;
             case RENAME_BTN_BROWSE: target_browse(app); break;
             case RENAME_BTN_BACK:   text_find_step(app, false); break;
+            case RENAME_BTN_FORMAT: archwork_pack_toggle_format(app); break;   /* RV-207 */
+            case RENAME_BTN_LEVEL:  archwork_pack_next_level(app); break;
             case RENAME_BTN_OK + 100: rename_extension_apply(app); break;   /* Change extensions: all rows now */
             default: break;
         }

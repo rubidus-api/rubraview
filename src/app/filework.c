@@ -272,6 +272,7 @@ void rename_end(app_state_t *app) {
     app->rename_is_filter = false;
     app->rename_is_listfilter = false;
     app->rename_is_target = false;
+    app->rename_is_pack = false;
     app->rename_is_find = false;
     app->rename_is_value = false;
     app->rename_is_gmic = false;
@@ -617,6 +618,7 @@ void rename_commit(app_state_t *app) {
     if (app->rename_is_filter) { picker_filter_follow(app); rename_end(app); return; }   /* 1.22.0: kept */
     if (app->rename_is_listfilter) { list_filter_follow(app); rename_end(app); return; }   /* 1.25.0: kept */
     if (app->rename_is_target) { target_commit(app); return; }
+    if (app->rename_is_pack) { archwork_pack_typed(app); return; }   /* RV-207 */
     if (app->rename_is_password) { password_commit(app); return; }
     if (app->rename_favorite >= 0) { favorite_rename_commit(app); return; }
     /* Enter with a syllable still being built: it is part of the name. */
