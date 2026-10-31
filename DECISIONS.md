@@ -2898,3 +2898,13 @@ Do not store credentials, private infrastructure details, personal data, private
   FFmpeg stays in its own process until the owner's timings say the hand-over is the cost (it keeps a crash in a
   decoder from taking the viewer down, D-208).
 - Consequences: the next step is the owner's numbers from the film and the picture that stutter.
+
+## 2026-10-31: D-247 Frame timings in the information bar, not the title (W-20261031-1810)
+
+- Status: Accepted (owner 2026-10-31: "제목 표시줄에 아무것도 나오지 않습니다 .그리고 이런건 차라리 Shift I 로 나오는 하단 창에
+  표시하는게 더 낫지 않을까요").
+- Context: D-246 put the timings in Windows' window title, which Rubraview's own title bar does not show (it draws the
+  file's name); they were seen only on the taskbar.
+- Decision: a row above the information bar's name; `Ctrl+Shift+F` brings the bar up, `Shift+I` closing the bar ends
+  the timings. The settled screen is drawn again when the row changes, once a second. The title no longer carries them.
+- Consequences: the owner reads the numbers on the picture itself, in full screen too.

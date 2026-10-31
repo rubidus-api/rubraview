@@ -167,7 +167,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
         app->media_new_picture = false;
         if (settled) fc->last_idle_frame_seconds = now;
     }
-    if (app->frame_stats && now - app->stats_since >= 1.0) {   /* RV-215: once a second, into the title */
+    if (app->frame_stats && now - app->stats_since >= 1.0) {   /* RV-215: once a second, into the status bar */
         double span = now - app->stats_since;
         snprintf(app->stats_text, sizeof(app->stats_text), T("%.0f frames/s, slowest %.0f ms, %u dropped, taking a picture %.1f ms, drawing %.1f ms"),
                  app->stats_frames / span, app->stats_worst * 1000.0, (unsigned)app->stats_dropped,
@@ -176,7 +176,6 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
         app->stats_since = now;
         app->stats_frames = app->stats_dropped = app->stats_taken = 0;
         app->stats_worst = app->stats_draw = app->stats_media = 0.0;
-        update_window_title(app);
     }
     if (app->settings_open && now - app->settings_info_seconds >= 1.0) {
         /* `info` lines (cache in use, the adapter) are live data: once a second. */

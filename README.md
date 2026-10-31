@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.39.55** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.55/rubraview-v1.39.55.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.55/rubraview-v1.39.55.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.55/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.39.56** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.56/rubraview-v1.39.56.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.56/rubraview-v1.39.56.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.56/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -61,7 +61,7 @@ ships with, so it cannot drift from them.
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |
 | `Ctrl+Shift+T` | Always on top of other windows |
 | `Shift+I` | Information bar |
-| `Ctrl+Shift+F` | Frame timings in the title: frames a second, the slowest, frames dropped, time drawing |
+| `Ctrl+Shift+F` | Frame timings in the status bar: frames a second, the slowest, frames dropped, time drawing |
 | `Ctrl+N` | A new window: the viewer once more, nothing open |
 | `Ctrl+,` | Settings |
 | `Shift+/` | This help, in a window of its own |

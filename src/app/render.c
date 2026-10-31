@@ -1641,6 +1641,7 @@ uint64_t scene_signature(const app_state_t *app) {
     SIG(&h, app->titlebar.shown); SIG(&h, (int)app->toolbox.state); SIG(&h, (int)app->menubox.state);
     SIG(&h, app->toolbox.tile_count); SIG(&h, app->menubox.tile_count);
     SIG(&h, (int)(rubraview_osd_opacity(&app->osd) * 20.0)); SIG(&h, app->osd.always_on);
+    SIG(&h, app->frame_stats); if (app->frame_stats) SIG(&h, app->stats_since);   /* RV-215: the timings' row, once a second */
     SIG(&h, app->notice_seconds > 0.0);
     SIG(&h, (uintptr_t)app->media); SIG(&h, app->media_paused); SIG(&h, app->media_ended);
     SIG(&h, (int64_t)app->media_position);   /* the time the toolbox shows, to the second */
