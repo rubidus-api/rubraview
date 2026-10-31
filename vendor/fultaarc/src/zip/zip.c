@@ -498,7 +498,7 @@ static fulta_arc_err_t zip_extract(fulta_arc_t *arc, size_t index, const fulta_a
     }
     case 8: e = fa_dec_deflate(raw, false, usize, &s); break;
     case 9: e = fa_dec_deflate(raw, true, usize, &s); break;
-    case 12: e = fa_dec_bzip2(raw, usize, &s); break;
+    case 12: e = fa_dec_bzip2(raw, usize, &arc->limits, &s); break;
     case 14: {
         uint8_t h[4], props[5];
         e = fa_stream_read_exact(raw, h, 4);

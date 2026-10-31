@@ -134,17 +134,32 @@ void fa_aes_encrypt(const fa_aes_t *a, const uint8_t in[16], uint8_t out[16]) {
 /* AES-CTR with a little-endian counter that starts at 0 and is incremented BEFORE each block (so the first block
  * uses counter 1) - the WinZip-AES / FA_CTR_AES_LE1 keystream. XOR is symmetric, so this both encrypts and decrypts
  * a buffer in place. */
-void fa_aes_ctr_le1_xor(const uint8_t *key, size_t keylen, uint8_t *buf, size_t n) {
-    fa_aes_t a;
-    fa_aes_init_enc(&a, key, keylen);
-    uint8_t ctr[16] = {0}, ks[16];
-    for (size_t off = 0; off < n; off += 16) {
-        for (int i = 0; i < 16; i++) if (++ctr[i]) break;   /* little-endian increment, before use */
-        fa_aes_encrypt(&a, ctr, ks);
-        size_t k = n - off < 16 ? n - off : 16;
-        for (size_t i = 0; i < k; i++) buf[off + i] ^= ks[i];
+void fa_aes_ctr_le1_begin(fa_aes_ctr_t *c, const uint8_t *key, size_t keylen) {
+    fa_aes_init_enc(&c->a, key, keylen);
+    memset(c->ctr, 0, sizeof c->ctr);
+    c->used = 16;                                           /* no keystream block yet */
+}
+
+void fa_aes_ctr_xor(fa_aes_ctr_t *c, uint8_t *buf, size_t n) {
+    while (n) {
+        if (c->used == 16) {
+            for (int k = 0; k < 16; k++) if (++c->ctr[k]) break;   /* little-endian increment, before use */
+            fa_aes_encrypt(&c->a, c->ctr, c->ks);
+            c->used = 0;
+        }
+        size_t k = 16 - c->used < n ? 16 - c->used : n;
+        for (size_t i = 0; i < k; i++) buf[i] ^= c->ks[c->used + i];
+        c->used += (unsigned)k; buf += k; n -= k;
     }
-    memset(&a, 0, sizeof a);
+}
+
+void fa_aes_ctr_end(fa_aes_ctr_t *c) { memset(c, 0, sizeof *c); }
+
+void fa_aes_ctr_le1_xor(const uint8_t *key, size_t keylen, uint8_t *buf, size_t n) {
+    fa_aes_ctr_t c;
+    fa_aes_ctr_le1_begin(&c, key, keylen);
+    fa_aes_ctr_xor(&c, buf, n);
+    fa_aes_ctr_end(&c);
 }
 
 /* Cryptographically strong random bytes from the OS (proven's CSPRNG: getrandom/getentropy/urandom, or

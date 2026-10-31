@@ -305,3 +305,27 @@ fulta_arc_err_t fa_dec_deflate(fa_stream_t *in, bool deflate64, uint64_t out_siz
     *out = &z->base;
     return FULTA_ARC_OK;
 }
+
+/* Raw Deflate with a preset dictionary (MSZIP): a CAB MSZIP block is an independent Deflate stream whose LZ77
+ * back-references may reach into the previous block's output. We seed the sliding window with the previous
+ * (cumulative) output's last <=32 KiB and set wtotal to its length, so `dist <= dictlen` reads the dict and the
+ * `dist > wtotal` guard still holds. The ring is a full 64 KiB and dictlen is capped at 32768, so this block's
+ * <=32768 bytes of output (which start at window[dictlen]) never wrap over the dict. See cab.md, [MS-CAB] / RFC 1951. */
+fulta_arc_err_t fa_dec_deflate_dict(fa_stream_t *in, uint64_t out_size, const uint8_t *dict, size_t dictlen,
+                                    fa_stream_t **out) {
+    inflate_stream_t *z = fa_calloc(1, sizeof *z);
+    if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    z->window = fa_malloc(65536);
+    if (!z->window) { fa_free(z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    z->wmask = 65535;
+    if (dictlen > 32768) { dict += dictlen - 32768; dictlen = 32768; }
+    if (dictlen) memcpy(z->window, dict, dictlen);
+    z->wtotal = dictlen;
+    z->src = in;
+    fa_bytes_init(&z->in, in);
+    z->out_size = out_size;
+    z->base.read = inflate_read;
+    z->base.destroy = inflate_destroy;
+    *out = &z->base;
+    return FULTA_ARC_OK;
+}

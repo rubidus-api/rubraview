@@ -3,7 +3,8 @@
  * rar.c and codec/ are the rar-decoder clean room's MIT code from Rubraview (written from docs/specs/rar.md Part A
  * without access to UnRAR or to the spec's sources), ported by renaming only (D-006). This file connects them:
  * volumes found by name and mapped, the password callback, names in a code page, entries, extraction into sinks.
- * RAR 1.5 compression is reported unsupported until the rar15-scratch clean room delivers (D-004). */
+ * Archives of RAR 1.4 / 1.5 alone are read by rar15_glue.c, which hands every other RAR archive here; a RAR 1.5
+ * entry in an archive that mixes it with later ones is still reported unsupported (D-029). */
 #include "../core/internal.h"
 
 #include "rar.h"
@@ -64,15 +65,15 @@ static fulta_arc_err_t add_volume(rar_glue_t *g, const fulta_arc_source_t *src) 
 static fulta_arc_err_t collect_volumes(fulta_arc_t *arc, rar_glue_t *g) {
     fa_rar_volume_info_t info;
     if (!fa_rar_volume_info(g->vols[0].data, g->vols[0].size, &info) || !arc->opt.name) return FULTA_ARC_OK;
-    u8str_t name = {arc->opt.name, strlen(arc->opt.name)};
+    proven_u8str_view_t name = proven_u8str_view_from_cstr(arc->opt.name);
     fa_rar_volume_name_kind_t kind = fa_rar_volume_name_kind(name);
     if (!info.is_volume && !info.headers_encrypted && kind == FA_RAR_NAME_PLAIN) return FULTA_ARC_OK;
     bool old = !info.new_numbering && kind != FA_RAR_NAME_PART;
-    u8str_t cur = name;
+    proven_u8str_view_t cur = name;
     for (uint32_t k = 1; k < 100000; k++) {
-        u8str_t next = fa_rar_next_volume(&g->arena, cur, old);
-        if (!next.ptr || !next.len) break;
-        char *path = fa_strndup(next.ptr, next.len);
+        proven_u8str_view_t next = fa_rar_next_volume(&g->arena, cur, old);
+        if (!next.ptr || !next.size) break;
+        char *path = fa_strndup((const char *)next.ptr, next.size);
         if (!path) return FULTA_ARC_ERR_NOMEM;
         const fulta_arc_source_t *src;
         fulta_arc_err_t e = fa_volume(arc, k, path, &src);
@@ -113,7 +114,7 @@ static fulta_arc_err_t rar_open(fulta_arc_t *arc, uint64_t search) {
             if (e) return attempt > 1 ? FULTA_ARC_ERR_PASSWORD_WRONG : e;
         }
         proven_arena_reset(&g->arena);
-        fa_rar_result_t r = fa_rar_open_volumes(&g->arena, g->vols, g->nvol, (u8str_t){pw, strlen(pw)});
+        fa_rar_result_t r = fa_rar_open_volumes(&g->arena, g->vols, g->nvol, proven_u8str_view_from_cstr(pw));
         if (r.err == FA_RAR_ERR_OUT_OF_MEMORY && arena_size < ((size_t)1 << 30)) {
             arena_size *= 4;
             if ((e = make_arena(g, arena_size))) return e;
@@ -137,13 +138,13 @@ static fulta_arc_err_t rar_open(fulta_arc_t *arc, uint64_t search) {
         const fa_rar_entry_t *re = &g->ar.entries[i];
         bool name_nu = false;
         char *uname = re->name_is_legacy
-                          ? fa_decode_name(arc, (const uint8_t *)re->name.ptr, re->name.len, false, FULTA_ARC_CP_437, &name_nu)
-                          : fa_strndup(re->name.ptr, re->name.len);
+                          ? fa_decode_name(arc, re->name.ptr, re->name.size, false, FULTA_ARC_CP_437, &name_nu)
+                          : fa_strndup((const char *)re->name.ptr, re->name.size);
         if (!uname) return FULTA_ARC_ERR_NOMEM;
         char method[32];
         if (re->method == 0) snprintf(method, sizeof method, "Store");
         else snprintf(method, sizeof method, "RAR%u.%u", re->method / 10, re->method % 10);
-        fa_entry_t *en = fa_add_entry(arc, (const uint8_t *)re->name.ptr, re->name.len, uname, method);
+        fa_entry_t *en = fa_add_entry(arc, re->name.ptr, re->name.size, uname, method);
         fa_free(uname);
         if (!en) return FULTA_ARC_ERR_NOMEM;
         en->pub.size = re->size == FA_RAR_SIZE_UNKNOWN ? 0 : re->size;
@@ -185,7 +186,7 @@ static fulta_arc_err_t rar_extract(fulta_arc_t *arc, size_t index, const fulta_a
             const char *pw;
             fulta_arc_err_t e = fa_password(arc, attempt, &pw);
             if (e) return attempt ? FULTA_ARC_ERR_PASSWORD_WRONG : e;
-            fa_rar_err_t r = fa_rar_set_password(&g->ar, (u8str_t){pw, strlen(pw)});
+            fa_rar_err_t r = fa_rar_set_password(&g->ar, proven_u8str_view_from_cstr(pw));
             if (r == FA_RAR_OK) { fa_password_ok(arc, pw); break; }
             if (r != FA_RAR_ERR_BAD_PASSWORD) return map_err(r);
             if (attempt > 64) return FULTA_ARC_ERR_PASSWORD_WRONG;

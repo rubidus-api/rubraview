@@ -127,7 +127,9 @@ static fulta_arc_err_t parse(xz_stream_t *z, uint64_t off, uint64_t len) {
             b->data_len = uns[i] - hs - cs;
             b->unc = unc[i];
             b->check_type = check;
-            b->check_off = bp + uns[i] - cs;
+            /* layout is [Header][Compressed Data][Block Padding][Check]: the Check is the last `cs` bytes before
+             * the 4-byte-aligned block end, not immediately after the data (Unpadded Size excludes Block Padding). */
+            b->check_off = bp + ((uns[i] + 3) & ~(uint64_t)3) - cs;
             bp += (uns[i] + 3) & ~(uint64_t)3;
         }
         fa_free(uns);

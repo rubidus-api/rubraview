@@ -2,16 +2,143 @@
 #include "internal.h"
 
 #include "proven/hash.h"
+#include "proven/heap.h"
+#include "proven/panic.h"
 
-#include <stdlib.h>
+#include <stddef.h>
 
-void *fa_malloc(size_t n) { return malloc(n ? n : 1); }
+/* Every internal allocation funnels through these four, and through them onto proven's allocator trait.
+ * The LZMA SDK rides along: its ISzAlloc (src/codec/codecs.c) calls fa_malloc/fa_free. Stage 0 (D-021)
+ * binds the seam to proven's heap allocator (malloc underneath); a later stage lets a caller supply one
+ * per archive and places a memory budget behind it. A block is always allocated, reallocated and freed at
+ * one fixed alignment, as the allocator trait requires, and never at an over-aligned class. This seam is
+ * deliberately heap-pinned: it passes `old_size = 0` to the trait's realloc, which is correct only because the
+ * backing is proven's heap (on POSIX a fundamental-align request stays on plain malloc/realloc/free, which ignore
+ * old_size; on Windows the heap uses the _aligned_* family, which also does not need the caller's old_size). A
+ * non-heap backing that needs a true old_size is not this seam but the budget allocator below, which carries the
+ * size in a per-block header. The memory that crosses the public free() boundary (fulta_arc_extract_alloc) is
+ * deliberately NOT from this seam; see arc.c. FA_ALIGN is in internal.h (shared with the budget allocator). */
+static proven_allocator_t fa_allocator(void) { return proven_heap_allocator(); }
+
+void *fa_malloc(size_t n) {
+    proven_allocator_t a = fa_allocator();
+    proven_result_mem_mut_t r = a.alloc_fn(a.ctx, n ? n : 1, FA_ALIGN);
+    return r.err == PROVEN_OK ? r.value.ptr : NULL;
+}
 void *fa_calloc(size_t count, size_t n) {
     if (n && count > SIZE_MAX / n) return NULL;
-    return calloc(count ? count : 1, n ? n : 1);
+    size_t total = count * n;
+    if (!total) total = 1;
+    void *p = fa_malloc(total);
+    if (p) memset(p, 0, total);
+    return p;
 }
-void *fa_realloc(void *p, size_t n) { return realloc(p, n ? n : 1); }
-void fa_free(void *p) { free(p); }
+void *fa_realloc(void *p, size_t n) {
+    proven_allocator_t a = fa_allocator();
+    proven_result_mem_mut_t r = a.realloc_fn(a.ctx, p, 0 /* old_size: unused by the heap at FA_ALIGN */,
+                                             n ? n : 1, FA_ALIGN);
+    return r.err == PROVEN_OK ? r.value.ptr : NULL;
+}
+void fa_free(void *p) {
+    proven_allocator_t a = fa_allocator();
+    a.free_fn(a.ctx, p);
+}
+
+/* The codec memory budget, expressed as proven's allocator trait (fa_budget_as_allocator). Distinct from the
+ * fa_malloc seam: a block carries an FA_ALIGN-sized size prefix (holding the whole backing allocation's size) so the
+ * trait's free/realloc can credit the live counter -- proven's free_fn is handed only a pointer -- and so the
+ * returned pointer stays FA_ALIGN-aligned (PPMd and LZMA state need it). Only fundamental alignment (<= FA_ALIGN) is
+ * served, which is every codec state/buffer. These blocks live and die strictly inside one codec's alloc/free hook;
+ * they never reach fa_free or libc free, so the prefix is only ever read back here. */
+static proven_result_mem_mut_t budget_alloc(void *ctx, proven_size_t size, proven_size_t align) {
+    fa_budget_t *b = ctx;
+    proven_result_mem_mut_t r = { .err = PROVEN_ERR_INVALID_ARG };
+    if (size == 0 || align > FA_ALIGN) return r;   /* size 0 is a caller bug (as proven's heap); only fundamental align */
+    if (size > SIZE_MAX - FA_ALIGN) { r.err = PROVEN_ERR_NOMEM; return r; }
+    size_t total = FA_ALIGN + size;
+    if (b->limit && (b->live > b->limit || total > b->limit - b->live)) {
+        b->exceeded = true;
+        r.err = PROVEN_ERR_NOMEM;
+        return r;
+    }
+    proven_result_mem_mut_t br = b->backing.alloc_fn(b->backing.ctx, total, FA_ALIGN);
+    if (br.err != PROVEN_OK) return br;
+    uint8_t *base = br.value.ptr;
+    memcpy(base, &total, sizeof total);   /* sizeof(size_t) <= FA_ALIGN */
+    b->live += total;
+    r.err = PROVEN_OK;
+    r.value.ptr = base + FA_ALIGN;
+    r.value.size = size;
+    return r;
+}
+
+static void budget_free(void *ctx, void *ptr) {
+    if (!ptr) return;
+    fa_budget_t *b = ctx;
+    uint8_t *base = (uint8_t *)ptr - FA_ALIGN;
+    size_t total = 0;
+    memcpy(&total, base, sizeof total);
+    /* live < total is never an input condition: it means a block was freed through the wrong budget or its prefix
+     * was corrupted -- a wiring bug in a codec hook. Be loud (proven's panic, the idiom this allocator lives in);
+     * do not silently clamp, and never set `exceeded` here (that would mislabel the next error as LIMIT). */
+    if (b->live < total) proven_panic("fa budget_free: live underflow (freed through the wrong budget?)");
+    else b->live -= total;
+    b->backing.free_fn(b->backing.ctx, base);
+}
+
+/* The codecs never realloc through the budget, but a proven_allocator_t must be complete and correct: alloc a new
+ * block, copy, free the old; on failure the old block is left intact (the trait's failure-atomicity). */
+static proven_result_mem_mut_t budget_realloc(void *ctx, void *old_ptr, proven_size_t old_size,
+                                              proven_size_t new_size, proven_size_t align) {
+    if (!old_ptr) return budget_alloc(ctx, new_size, align);
+    if (new_size == 0) { budget_free(ctx, old_ptr); return (proven_result_mem_mut_t){ .err = PROVEN_OK }; }
+    size_t total = 0;
+    memcpy(&total, (uint8_t *)old_ptr - FA_ALIGN, sizeof total);
+    size_t real_old = total - FA_ALIGN;   /* the size we actually handed out; the block's own record */
+    if (old_size != real_old)             /* proven's contract: a wrong old_size is a caller bug, not a resize */
+        return (proven_result_mem_mut_t){ .err = PROVEN_ERR_INVALID_ARG };
+    proven_result_mem_mut_t r = budget_alloc(ctx, new_size, align);
+    if (r.err != PROVEN_OK) return r;     /* failure atomicity: the old block is left intact */
+    memcpy(r.value.ptr, old_ptr, real_old < new_size ? real_old : new_size);
+    budget_free(ctx, old_ptr);
+    return r;
+}
+
+proven_allocator_t fa_budget_as_allocator(fa_budget_t *b) {
+    return (proven_allocator_t){ .ctx = b, .alloc_fn = budget_alloc,
+                                 .realloc_fn = budget_realloc, .free_fn = budget_free };
+}
+
+/* Re-arm a budget for a fresh decode: clear the sticky `exceeded` so a refusal in the previous decode cannot
+ * mislabel this one. `live` is already 0 between decodes (each codec frees its own buffers on destroy). */
+void fa_budget_arm(fa_budget_t *b) { b->exceeded = false; }
+
+/* Bridge a caller's plain-pointer allocator to proven's result-returning trait. The trait's ctx carries the public
+ * allocator struct, which lives on the archive handle (arc->opt.allocator) for the handle's lifetime. */
+static proven_result_mem_mut_t user_alloc(void *ctx, proven_size_t size, proven_size_t align) {
+    const fulta_arc_allocator_t *ua = ctx;
+    proven_result_mem_mut_t r = { .err = PROVEN_ERR_NOMEM };
+    void *p = ua->alloc(ua->ctx, size, align);
+    if (p) { r.err = PROVEN_OK; r.value.ptr = p; r.value.size = size; }
+    return r;
+}
+static proven_result_mem_mut_t user_realloc(void *ctx, void *old_ptr, proven_size_t old_size,
+                                            proven_size_t new_size, proven_size_t align) {
+    const fulta_arc_allocator_t *ua = ctx;
+    proven_result_mem_mut_t r = { .err = PROVEN_ERR_NOMEM };
+    void *p = ua->realloc(ua->ctx, old_ptr, old_size, new_size, align);
+    if (p) { r.err = PROVEN_OK; r.value.ptr = p; r.value.size = new_size; }
+    else if (new_size == 0) r.err = PROVEN_OK;   /* a free, not a failure */
+    return r;
+}
+static void user_free(void *ctx, void *ptr) {
+    const fulta_arc_allocator_t *ua = ctx;
+    ua->free(ua->ctx, ptr);
+}
+proven_allocator_t fa_allocator_from_user(const fulta_arc_allocator_t *ua) {
+    return (proven_allocator_t){ .ctx = (void *)ua, .alloc_fn = user_alloc,
+                                 .realloc_fn = user_realloc, .free_fn = user_free };
+}
 
 char *fa_strndup(const char *s, size_t n) {
     char *d = fa_malloc(n + 1);

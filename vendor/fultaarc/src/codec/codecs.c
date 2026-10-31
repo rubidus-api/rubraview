@@ -9,15 +9,71 @@
 #include "Lzma2Dec.h"
 #include "LzmaDec.h"
 #include "Ppmd7.h"
+#define ZSTD_STATIC_LINKING_ONLY   /* for ZSTD_customMem + ZSTD_createDStream_advanced (the custom-allocator hook) */
 #include "zstd.h"
 
 #include <stdlib.h>
 
 #define INBUF 65536
 
-static void *sz_alloc(ISzAllocPtr p, size_t n) { (void)p; return fa_malloc(n); }
-static void sz_free(ISzAllocPtr p, void *a) { (void)p; fa_free(a); }
-static const ISzAlloc g_alloc = {sz_alloc, sz_free};
+/* A per-decode bridge from the LZMA SDK's ISzAlloc to the archive's codec memory budget, which is a
+ * proven_allocator_t (fa_budget_as_allocator). The ISzAlloc vtable is the first member so an ISzAllocPtr casts
+ * straight back to it. The SAME instance is handed to every *_Allocate and its matching *_Free and lives in the
+ * decoder's own state for the decoder's lifetime; the budget's blocks never leave this hook pair, so they never
+ * meet fa_free or libc free. When an archive supplies no budget (a direct call without limits), the bridge carries
+ * its own unlimited `fallback` so the allocator is always a real fa_budget_t. */
+typedef struct { ISzAlloc vt; fa_budget_t *b; fa_budget_t fallback; } fa_sz_alloc_t;
+static void *sz_balloc(ISzAllocPtr p, size_t n) {
+    proven_allocator_t a = fa_budget_as_allocator(((const fa_sz_alloc_t *)p)->b);
+    proven_result_mem_mut_t r = a.alloc_fn(a.ctx, n ? n : 1, FA_ALIGN);
+    return r.err == PROVEN_OK ? r.value.ptr : NULL;
+}
+static void sz_bfree(ISzAllocPtr p, void *a_) {
+    proven_allocator_t a = fa_budget_as_allocator(((const fa_sz_alloc_t *)p)->b);
+    a.free_fn(a.ctx, a_);
+}
+static void sz_init(fa_sz_alloc_t *s, const fa_limits_t *lim) {
+    s->vt.Alloc = sz_balloc;
+    s->vt.Free = sz_bfree;
+    s->fallback = (fa_budget_t){ .backing = proven_heap_allocator() };   /* always valid; used when no archive budget */
+    s->b = (lim && lim->budget) ? lim->budget : &s->fallback;
+}
+/* A codec reported out of memory: report LIMIT when the budget was the cause, NOMEM otherwise. */
+static fulta_arc_err_t budget_mem_err(const fa_budget_t *b) {
+    return (b && b->exceeded) ? FULTA_ARC_ERR_LIMIT : FULTA_ARC_ERR_NOMEM;
+}
+static fulta_arc_err_t mem_err(const fa_limits_t *lim) {
+    return budget_mem_err(lim ? lim->budget : NULL);
+}
+
+/* bzip2 (bzalloc(opaque,items,size)/bzfree) and zstd (customAlloc(opaque,size)/customFree) bridge to the same
+ * fa_budget_as_allocator trait as the LZMA SDK hook; `opaque` is the fa_budget_t* the codec frees back through. */
+static void *bz_balloc(void *opaque, int items, int size) {
+    if (items <= 0 || size <= 0) return NULL;
+    proven_allocator_t a = fa_budget_as_allocator(opaque);
+    proven_result_mem_mut_t r = a.alloc_fn(a.ctx, (size_t)items * (size_t)size, FA_ALIGN);
+    return r.err == PROVEN_OK ? r.value.ptr : NULL;
+}
+static void bz_bfree(void *opaque, void *p) {
+    proven_allocator_t a = fa_budget_as_allocator(opaque);
+    a.free_fn(a.ctx, p);
+}
+static void *zstd_balloc(void *opaque, size_t n) {
+    proven_allocator_t a = fa_budget_as_allocator(opaque);
+    proven_result_mem_mut_t r = a.alloc_fn(a.ctx, n ? n : 1, FA_ALIGN);
+    return r.err == PROVEN_OK ? r.value.ptr : NULL;
+}
+static void zstd_bfree(void *opaque, void *p) {
+    proven_allocator_t a = fa_budget_as_allocator(opaque);
+    a.free_fn(a.ctx, p);
+}
+/* Pick the active budget for a decode: the archive's, or a decoder-owned unlimited fallback when called without
+ * limits. The returned pointer is stable for the decoder's lifetime (archive budget on the handle, or `*fallback`
+ * which lives in the decoder's own state). */
+static fa_budget_t *budget_of(const fa_limits_t *lim, fa_budget_t *fallback) {
+    *fallback = (fa_budget_t){ .backing = proven_heap_allocator() };
+    return (lim && lim->budget) ? lim->budget : fallback;
+}
 
 /* bzip2 needs this when built with BZ_NO_STDIO */
 void bz_internal_error(int errcode) { (void)errcode; abort(); }
@@ -63,7 +119,17 @@ typedef struct bz_stream_w {
     bz_stream bz;
     bool open, ended;
     uint64_t out_size, produced;
+    fa_budget_t *bptr;        /* the active codec budget (archive's, or &fallback) */
+    fa_budget_t fallback;     /* used when fa_dec_bzip2 is called without a budget */
 } bz_w_t;
+
+/* bzip2 adopts the default allocator only when bzalloc == NULL, so these must be set before every
+ * BZ2_bzDecompressInit -- including the re-init after memset on a concatenated stream. */
+static void bz_set_alloc(bz_w_t *z) {
+    z->bz.bzalloc = bz_balloc;
+    z->bz.bzfree = bz_bfree;
+    z->bz.opaque = z->bptr;
+}
 
 static fulta_arc_err_t bz_read(fa_stream_t *s, void *buf, size_t n, size_t *got) {
     bz_w_t *z = (bz_w_t *)s;
@@ -78,7 +144,8 @@ static fulta_arc_err_t bz_read(fa_stream_t *s, void *buf, size_t n, size_t *got)
             if (z->in.data[z->in.pos] != 'B') break;
             BZ2_bzDecompressEnd(&z->bz);
             memset(&z->bz, 0, sizeof z->bz);
-            if (BZ2_bzDecompressInit(&z->bz, 0, 0) != BZ_OK) return FULTA_ARC_ERR_NOMEM;
+            bz_set_alloc(z);                          /* restore the budget hooks the memset cleared */
+            if (BZ2_bzDecompressInit(&z->bz, 0, 0) != BZ_OK) return budget_mem_err(z->bptr);
             z->ended = false;
         }
         fulta_arc_err_t e = inbuf_fill(&z->in);
@@ -93,7 +160,7 @@ static fulta_arc_err_t bz_read(fa_stream_t *s, void *buf, size_t n, size_t *got)
         z->in.pos += before_in - z->bz.avail_in;
         *got += before_out - z->bz.avail_out;
         if (r == BZ_STREAM_END) { z->ended = true; continue; }
-        if (r != BZ_OK) return r == BZ_MEM_ERROR ? FULTA_ARC_ERR_NOMEM : FULTA_ARC_ERR_CORRUPT;
+        if (r != BZ_OK) return r == BZ_MEM_ERROR ? budget_mem_err(z->bptr) : FULTA_ARC_ERR_CORRUPT;
         if (before_in == z->bz.avail_in && before_out == z->bz.avail_out) {
             if (z->in.eof) return *got ? FULTA_ARC_OK : FULTA_ARC_ERR_TRUNCATED;
         }
@@ -110,11 +177,13 @@ static void bz_destroy(fa_stream_t *s) {
     fa_free(z);
 }
 
-fulta_arc_err_t fa_dec_bzip2(fa_stream_t *in, uint64_t out_size, fa_stream_t **out) {
+fulta_arc_err_t fa_dec_bzip2(fa_stream_t *in, uint64_t out_size, const fa_limits_t *lim, fa_stream_t **out) {
     bz_w_t *z = fa_calloc(1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     if (inbuf_init(&z->in, in)) { fa_free(z->in.data); fa_free(z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
-    if (BZ2_bzDecompressInit(&z->bz, 0, 0) != BZ_OK) { inbuf_free(&z->in); fa_free(z); return FULTA_ARC_ERR_NOMEM; }
+    z->bptr = budget_of(lim, &z->fallback);
+    bz_set_alloc(z);
+    if (BZ2_bzDecompressInit(&z->bz, 0, 0) != BZ_OK) { fulta_arc_err_t e = budget_mem_err(z->bptr); inbuf_free(&z->in); fa_free(z); return e; }
     z->open = true;
     z->out_size = out_size;
     z->base.read = bz_read;
@@ -131,6 +200,7 @@ typedef struct lzma_w {
     bool is2;
     CLzmaDec dec;
     CLzma2Dec dec2;
+    fa_sz_alloc_t sz;
     uint64_t out_size, produced;
     bool finished;
 } lzma_w_t;
@@ -168,8 +238,8 @@ static fulta_arc_err_t lzma_read(fa_stream_t *s, void *buf, size_t n, size_t *go
 
 static void lzma_destroy(fa_stream_t *s) {
     lzma_w_t *z = (lzma_w_t *)s;
-    if (z->is2) Lzma2Dec_Free(&z->dec2, &g_alloc);
-    else LzmaDec_Free(&z->dec, &g_alloc);
+    if (z->is2) Lzma2Dec_Free(&z->dec2, &z->sz.vt);
+    else LzmaDec_Free(&z->dec, &z->sz.vt);
     inbuf_free(&z->in);
     fa_free(z);
 }
@@ -199,12 +269,13 @@ fulta_arc_err_t fa_dec_lzma(fa_stream_t *in, const uint8_t props[5], uint64_t ou
         uint32_t d = out_size < 4096 ? 4096u : (uint32_t)out_size;
         fa_put_le32(p2 + 1, d);
     }
+    sz_init(&z->sz, lim);
     LzmaDec_CONSTRUCT(&z->dec);
-    SRes r = LzmaDec_Allocate(&z->dec, p2, 5, &g_alloc);
+    SRes r = LzmaDec_Allocate(&z->dec, p2, 5, &z->sz.vt);
     if (r != SZ_OK) {
         inbuf_free(&z->in);
         fa_free(z);
-        return r == SZ_ERROR_MEM ? FULTA_ARC_ERR_NOMEM : FULTA_ARC_ERR_UNSUPPORTED;
+        return r == SZ_ERROR_MEM ? mem_err(lim) : FULTA_ARC_ERR_UNSUPPORTED;
     }
     LzmaDec_Init(&z->dec);
     z->out_size = out_size;
@@ -236,12 +307,13 @@ fulta_arc_err_t fa_dec_lzma2(fa_stream_t *in, uint8_t prop, uint64_t out_size, c
         for (p = 0; p < 40; p++)
             if (((uint64_t)(2 | (p & 1)) << (p / 2 + 11)) >= out_size) break;
     }
+    sz_init(&z->sz, lim);
     Lzma2Dec_CONSTRUCT(&z->dec2);
-    SRes r = Lzma2Dec_Allocate(&z->dec2, p, &g_alloc);
+    SRes r = Lzma2Dec_Allocate(&z->dec2, p, &z->sz.vt);
     if (r != SZ_OK) {
         inbuf_free(&z->in);
         fa_free(z);
-        return r == SZ_ERROR_MEM ? FULTA_ARC_ERR_NOMEM : FULTA_ARC_ERR_UNSUPPORTED;
+        return r == SZ_ERROR_MEM ? mem_err(lim) : FULTA_ARC_ERR_UNSUPPORTED;
     }
     Lzma2Dec_Init(&z->dec2);
     z->out_size = out_size;
@@ -259,6 +331,7 @@ typedef struct ppmd_w {
     fa_bytes_t in;
     fa_stream_t *src;
     CPpmd7 model;
+    fa_sz_alloc_t sz;
     uint64_t out_size, produced;
     bool started;
     unsigned order;
@@ -296,7 +369,7 @@ static fulta_arc_err_t ppmd_read(fa_stream_t *s, void *buf, size_t n, size_t *go
 
 static void ppmd_destroy(fa_stream_t *s) {
     ppmd_w_t *z = (ppmd_w_t *)s;
-    Ppmd7_Free(&z->model, &g_alloc);
+    Ppmd7_Free(&z->model, &z->sz.vt);
     fa_stream_destroy(z->src);
     fa_free(z);
 }
@@ -313,8 +386,9 @@ fulta_arc_err_t fa_dec_ppmd7z(fa_stream_t *in, const uint8_t *props, size_t npro
     if (mem > max_dict(lim)) { fa_stream_destroy(in); return FULTA_ARC_ERR_LIMIT; }
     ppmd_w_t *z = fa_calloc(1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    sz_init(&z->sz, lim);
     Ppmd7_Construct(&z->model);
-    if (!Ppmd7_Alloc(&z->model, mem, &g_alloc)) { fa_free(z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    if (!Ppmd7_Alloc(&z->model, mem, &z->sz.vt)) { fulta_arc_err_t me = mem_err(lim); fa_free(z); fa_stream_destroy(in); return me; }
     z->vt.Read = ppmd_byte;
     z->src = in;
     fa_bytes_init(&z->in, in);
@@ -550,6 +624,7 @@ typedef struct ppmd8_w {
     fa_bytes_t in;
     fa_stream_t *src;
     CPpmd8 model;
+    fa_sz_alloc_t sz;
     uint64_t out_size, produced;
     bool started;
     unsigned order, restore;
@@ -586,7 +661,7 @@ static fulta_arc_err_t ppmd8_read(fa_stream_t *s, void *buf, size_t n, size_t *g
 
 static void ppmd8_destroy(fa_stream_t *s) {
     ppmd8_w_t *z = (ppmd8_w_t *)s;
-    Ppmd8_Free(&z->model, &g_alloc);
+    Ppmd8_Free(&z->model, &z->sz.vt);
     fa_stream_destroy(z->src);
     fa_free(z);
 }
@@ -600,8 +675,9 @@ fulta_arc_err_t fa_dec_ppmd8_zip(fa_stream_t *in, uint64_t out_size, const fa_li
     if (((uint64_t)mem << 20) > max_dict(lim)) { fa_stream_destroy(in); return FULTA_ARC_ERR_LIMIT; }
     ppmd8_w_t *z = fa_calloc(1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    sz_init(&z->sz, lim);
     Ppmd8_Construct(&z->model);
-    if (!Ppmd8_Alloc(&z->model, (UInt32)mem << 20, &g_alloc)) { fa_free(z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    if (!Ppmd8_Alloc(&z->model, (UInt32)mem << 20, &z->sz.vt)) { fulta_arc_err_t me = mem_err(lim); fa_free(z); fa_stream_destroy(in); return me; }
     z->vt.Read = ppmd8_byte;
     z->src = in;
     fa_bytes_init(&z->in, in);
@@ -622,6 +698,9 @@ typedef struct zstd_w {
     ZSTD_DStream *ds;
     uint64_t out_size, produced;
     size_t pending;                    /* ZSTD_decompressStream's last hint: 0 at a frame's end */
+    bool frame_open;                   /* input consumed into a frame that has not reached a boundary yet */
+    fa_budget_t *bptr;                 /* the active codec budget (archive's, or &fallback) */
+    fa_budget_t fallback;              /* used when fa_dec_zstd is called without a budget */
 } zstd_w_t;
 
 static fulta_arc_err_t zstd_read(fa_stream_t *s, void *buf, size_t n, size_t *got) {
@@ -636,16 +715,22 @@ static fulta_arc_err_t zstd_read(fa_stream_t *s, void *buf, size_t n, size_t *go
         size_t r = ZSTD_decompressStream(z->ds, &ob, &ib);
         if (ZSTD_isError(r)) {
             ZSTD_ErrorCode c = ZSTD_getErrorCode(r);
-            return c == ZSTD_error_memory_allocation ? FULTA_ARC_ERR_NOMEM
+            return c == ZSTD_error_memory_allocation ? budget_mem_err(z->bptr)
                  : c == ZSTD_error_frameParameter_windowTooLarge ? FULTA_ARC_ERR_LIMIT : FULTA_ARC_ERR_CORRUPT;
         }
-        bool moved = ib.pos != z->in.pos || ob.pos != *got;
+        bool consumed = ib.pos != z->in.pos;
+        bool moved = consumed || ob.pos != *got;
         z->in.pos = ib.pos;
         *got = ob.pos;
         z->pending = r;
+        /* r == 0 is a clean frame boundary; a positive r after consuming input means the current frame is still
+         * open (truncated if the input then ends). At a boundary, ZSTD keeps hinting the *next* frame's header
+         * size with input exhausted — that is a clean end, not a truncation, so key off frame_open, not pending. */
+        if (r == 0) z->frame_open = false;
+        else if (consumed) z->frame_open = true;
         if (!moved && z->in.eof) {
-            if (*got || z->pending == 0) break;      /* the end: after a whole frame, or with output to hand back */
-            return FULTA_ARC_ERR_TRUNCATED;
+            if (*got || !z->frame_open) break;       /* end: output to hand back, or at a clean frame boundary */
+            return FULTA_ARC_ERR_TRUNCATED;          /* input ended in the middle of a frame */
         }
     }
     z->produced += *got;
@@ -664,8 +749,9 @@ fulta_arc_err_t fa_dec_zstd(fa_stream_t *in, uint64_t out_size, const fa_limits_
     zstd_w_t *z = fa_calloc(1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     if (inbuf_init(&z->in, in)) { fa_free(z->in.data); fa_free(z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
-    z->ds = ZSTD_createDStream();
-    if (!z->ds) { inbuf_free(&z->in); fa_free(z); return FULTA_ARC_ERR_NOMEM; }
+    z->bptr = budget_of(lim, &z->fallback);
+    z->ds = ZSTD_createDStream_advanced((ZSTD_customMem){ zstd_balloc, zstd_bfree, z->bptr });
+    if (!z->ds) { fulta_arc_err_t e = budget_mem_err(z->bptr); inbuf_free(&z->in); fa_free(z); return e; }
     /* the window is the dictionary: refuse frames whose window passes the limit */
     int wlog = 10;
     while (wlog < 31 && (UINT64_C(1) << (wlog + 1)) <= max_dict(lim)) wlog++;

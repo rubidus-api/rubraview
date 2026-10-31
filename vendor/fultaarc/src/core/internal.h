@@ -5,6 +5,8 @@
 #include "fulta/arc.h"
 
 #include "proven/hash.h"
+#include "proven/allocator.h"
+#include "proven/heap.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -29,11 +31,39 @@ static inline void fa_put_le64(uint8_t *p, uint64_t v) { fa_put_le32(p, (uint32_
 
 /* ---- memory ------------------------------------------------------------------------------------------------- */
 
+/* One fixed allocation alignment for both the fa_malloc seam and the budget allocator: fundamental alignment, which
+ * covers every string, buffer, byte array and codec state. A block is allocated, reallocated and freed at this one
+ * class, as proven's allocator trait requires. */
+#define FA_ALIGN (alignof(max_align_t))
+
 void *fa_malloc(size_t n);                 /* NULL on failure; n == 0 gives a valid pointer */
 void *fa_calloc(size_t count, size_t n);   /* checks the multiplication */
 void *fa_realloc(void *p, size_t n);
 void fa_free(void *p);
 char *fa_strndup(const char *s, size_t n);
+
+/* A per-archive memory budget for the vendored codecs' own buffers (the attacker-driven allocations: PPMd models,
+ * LZMA/bzip2/zstd state and windows). `fa_budget_as_allocator(b)` exposes it as proven's allocator trait (as
+ * proven_arena_as_allocator and proven_alloc_check_wrap do for their allocators), so it pairs with proven's
+ * trait-generic world and with each codec's own alloc/free hook. It allocates from `backing`, counts live bytes and
+ * refuses once `limit` would be passed (`limit == 0` is unlimited). A block carries an FA_ALIGN-sized size prefix so
+ * the trait's free/realloc can credit the counter (proven's free_fn is handed only a pointer); the returned pointer
+ * stays FA_ALIGN-aligned. Its blocks live and die inside one codec's hook, so they never meet fa_free or libc free.
+ * `exceeded` marks a refusal as the budget's doing (not a backing OOM), so the dec paths report FULTA_ARC_ERR_LIMIT
+ * rather than NOMEM. See D-021 and docs/plans/active/2026-10-13-proven-allocator-seam.md. */
+typedef struct fa_budget {
+    proven_allocator_t backing;
+    uint64_t limit;
+    uint64_t live;
+    bool exceeded;
+} fa_budget_t;
+
+proven_allocator_t fa_budget_as_allocator(fa_budget_t *b);   /* b must not be NULL */
+void fa_budget_arm(fa_budget_t *b);   /* clear the sticky `exceeded` before a fresh decode; b must not be NULL */
+
+/* Bridge a caller-supplied allocator (public, plain-pointer) to proven's trait, for use as a budget backing. `ua`
+ * must have all three functions set and must outlive the returned allocator (it points into it). */
+proven_allocator_t fa_allocator_from_user(const fulta_arc_allocator_t *ua);
 
 /* A growable byte buffer. */
 typedef struct fa_buf { uint8_t *data; size_t size, cap; } fa_buf_t;
@@ -98,12 +128,44 @@ int fa_bytes_get(fa_bytes_t *b);      /* 0..255, or -1 at the end or on error (b
 
 /* ---- decoders (src/codec) ----------------------------------------------------------------------------------- */
 
-typedef struct fa_limits { uint64_t max_dictionary; int (*cancel)(void *); void *cancel_ctx; } fa_limits_t;
+typedef struct fa_limits {
+    uint64_t max_dictionary; int (*cancel)(void *); void *cancel_ctx;
+    fa_budget_t *budget;   /* the owning archive's codec memory budget; may be NULL (unlimited). A pointer, never
+                              embedded by value: fa_limits_t is copied (e.g. the xz decoder keeps its own), and all
+                              copies must share one live counter. */
+} fa_limits_t;
 
 /* Each takes ownership of `in` (destroyed with the decoder). `out_size` is the expected output size (UINT64_MAX:
  * unknown, decode to the stream's own end). */
 fulta_arc_err_t fa_dec_deflate(fa_stream_t *in, bool deflate64, uint64_t out_size, fa_stream_t **out);
-fulta_arc_err_t fa_dec_bzip2(fa_stream_t *in, uint64_t out_size, fa_stream_t **out);
+/* Raw Deflate with a preset dictionary (CAB MSZIP block-to-block window; src/codec/inflate.c). `dict`/`dictlen`
+ * is the previous output's tail (capped at 32768); `out_size` is this block's uncompressed size. */
+fulta_arc_err_t fa_dec_deflate_dict(fa_stream_t *in, uint64_t out_size, const uint8_t *dict, size_t dictlen,
+                                    fa_stream_t **out);
+/* CAB LZX decompression (CFFOLDER typeCompress 3; src/codec/lzx.c). A per-folder state object, not a pull stream:
+ * the LZX window, R0/R1/R2, Huffman trees and an in-progress block all span CFDATA chunks. `out`/`out_cap` is the
+ * folder's cumulative output buffer (matches reference into it); fa_lzx_chunk is called once per CFDATA with its
+ * payload and uncompressed size; fa_lzx_finish runs the E8 x86 post-pass. See cab.md, [MS-PATCH]. */
+typedef struct fa_lzx fa_lzx_t;
+fulta_arc_err_t fa_lzx_create(unsigned window_bits, uint8_t *out, uint64_t out_cap, fa_lzx_t **lzx);
+fulta_arc_err_t fa_lzx_chunk(fa_lzx_t *lzx, const uint8_t *in, size_t in_len, uint64_t uncomp);
+void fa_lzx_finish(fa_lzx_t *lzx);
+void fa_lzx_destroy(fa_lzx_t *lzx);
+/* CAB Quantum decompression (CFFOLDER typeCompress 2; src/codec/quantum.c, from the sibling clean room's record).
+ * Same seam as LZX: one state per folder (adaptive tables and window span the CFDATAs; the arithmetic coder
+ * restarts per block), `out`/`out_cap` the folder's cumulative buffer, one fa_quantum_chunk per CFDATA with its
+ * payload and cbUncomp. window_bits = (typeCompress >> 8) & 0x1F, 10..21. A copy that would cross the block's
+ * cbUncomp, a source before the stream start, or a block that runs out of bits is an error (the measured
+ * behaviour of Windows' reader). See cab.md. */
+typedef struct fa_quantum fa_quantum_t;
+fulta_arc_err_t fa_quantum_create(unsigned window_bits, uint8_t *out, uint64_t out_cap, fa_quantum_t **q);
+fulta_arc_err_t fa_quantum_chunk(fa_quantum_t *q, const uint8_t *in, size_t in_len, uint64_t uncomp);
+uint64_t fa_quantum_produced(const fa_quantum_t *q);
+void fa_quantum_destroy(fa_quantum_t *q);
+fulta_arc_err_t fa_dec_bzip2(fa_stream_t *in, uint64_t out_size, const fa_limits_t *lim, fa_stream_t **out);
+/* Unix compress (.Z) LZW decode (src/codec/compress.c); reads the 3-byte header itself. The table is maxbits-bounded
+ * (<= 256 KiB), not archive-driven, so it takes no budget. */
+fulta_arc_err_t fa_dec_compress(fa_stream_t *in, fa_stream_t **out);
 fulta_arc_err_t fa_dec_lzma(fa_stream_t *in, const uint8_t props[5], uint64_t out_size, const fa_limits_t *lim,
                             fa_stream_t **out);
 fulta_arc_err_t fa_dec_lzma2(fa_stream_t *in, uint8_t prop, uint64_t out_size, const fa_limits_t *lim,
@@ -151,6 +213,11 @@ void fa_aes_init_dec(fa_aes_t *a, const uint8_t *key, size_t keylen);
 void fa_aes_encrypt(const fa_aes_t *a, const uint8_t in[16], uint8_t out[16]);
 /* AES-CTR (little-endian counter from 1, FA_CTR_AES_LE1) over a buffer in place; encrypt == decrypt. */
 void fa_aes_ctr_le1_xor(const uint8_t *key, size_t keylen, uint8_t *buf, size_t n);
+/* The same keystream in pieces of any length: begin, xor chunk after chunk, end (wipes the state). */
+typedef struct fa_aes_ctr { fa_aes_t a; uint8_t ctr[16], ks[16]; unsigned used; } fa_aes_ctr_t;
+void fa_aes_ctr_le1_begin(fa_aes_ctr_t *c, const uint8_t *key, size_t keylen);
+void fa_aes_ctr_xor(fa_aes_ctr_t *c, uint8_t *buf, size_t n);
+void fa_aes_ctr_end(fa_aes_ctr_t *c);
 /* AES-CBC encrypt in place (n a multiple of 16); iv advanced to the last block. */
 void fa_aes_cbc_encrypt(const uint8_t *key, size_t keylen, uint8_t iv[16], uint8_t *buf, size_t n);
 /* OS CSPRNG bytes; false => no entropy, caller must refuse to encrypt. */
@@ -238,6 +305,7 @@ struct fulta_arc {
     fa_entry_t *entries;
     size_t count, cap;
     fa_limits_t limits;
+    fa_budget_t budget;                  /* codec memory budget; limits.budget points here */
     /* password cache: the last good UTF-8 password */
     char *password;
     uint32_t password_attempts;
@@ -260,7 +328,21 @@ struct fa_format_ops {
     fulta_arc_editable_t (*editable)(const fulta_arc_t *arc);
 };
 
-extern const fa_format_ops_t fa_zip_ops, fa_7z_ops, fa_rar_ops, fa_alz_ops, fa_egg_ops;
+extern const fa_format_ops_t fa_zip_ops, fa_7z_ops, fa_rar_ops, fa_alz_ops, fa_egg_ops, fa_gzip_ops, fa_bzip2_ops,
+    fa_xz_ops, fa_zstd_ops, fa_tar_ops, fa_compress_ops, fa_lzip_ops, fa_ar_ops, fa_cpio_ops, fa_iso_ops, fa_cab_ops, fa_udf_ops,
+    fa_lha_ops, fa_rar15_ops;
+
+/* An internal sink-write return that means "stop, I have enough" -- used by the wrapper-reprobe peek. It is outside
+ * the public fulta_arc_err_t range and fa_pump returns a sink error verbatim, so nothing maps or mistakes it. */
+#define FA_SINK_STOP 0x7000
+
+/* A memory source that OWNS its buffer: close() frees the buffer too (unlike fulta_arc_source_memory, which only
+ * references the caller's data). Used to back an unwrapped stream for the reprobe layer. Takes ownership of `buf`. */
+fulta_arc_source_t fa_source_memory_owned(uint8_t *buf, size_t size);
+
+/* True when `h` (n bytes, needs >= 512) looks like a tar header block: not all-zero and the ustar checksum matches.
+ * The reprobe layer uses this to decide whether an unwrapped stream is a tar before fully decompressing it. */
+bool fa_tar_detect(const uint8_t *h, size_t n);
 
 /* ---- editing support: a ZIP entry's "copy this verbatim" descriptor (src/write/edit.c copy route) -------------
  * Only valid for an open ZIP. The packed bytes at [data_off .. data_off+csize) are the stored/deflated payload,

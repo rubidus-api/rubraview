@@ -64,7 +64,7 @@ typedef enum fa_rar_crypt {
 } fa_rar_crypt_t;
 
 typedef struct fa_rar_entry {
-    u8str_t  name;          /* '/' between folders; UTF-8 unless `name_is_legacy` */
+    proven_u8str_view_t name; /* '/' between folders; UTF-8 unless `name_is_legacy` */
     bool     name_is_legacy;/* RAR 4 without Unicode: the bytes of a code page, as ZIP's are */
     uint64_t size, packed_size;   /* size FA_RAR_SIZE_UNKNOWN: the header does not say */
     uint64_t data_offset;   /* of its first piece, in its volume */
@@ -132,7 +132,7 @@ bool fa_rar_needs_codec(const fa_rar_archive_t *archive, size_t index);
  * ERR_BAD_PASSWORD. The volume array is copied; the bytes are borrowed.
  */
 [[nodiscard]] fa_rar_result_t fa_rar_open_volumes(proven_arena_t *arena, const fa_rar_volume_t *volumes,
-                                                                size_t volume_count, u8str_t password);
+                                                                size_t volume_count, proven_u8str_view_t password);
 
 /**
  * The password for encrypted files, checked at once: RAR 5 by the check
@@ -140,7 +140,7 @@ bool fa_rar_needs_codec(const fa_rar_archive_t *archive, size_t index);
  * starts a stream. OK, ERR_BAD_PASSWORD, or what that decoding said. The
  * password is kept (in memory only) until the archive is closed.
  */
-fa_rar_err_t fa_rar_set_password(fa_rar_archive_t *archive, u8str_t password);
+fa_rar_err_t fa_rar_set_password(fa_rar_archive_t *archive, proven_u8str_view_t password);
 
 /** Some file is encrypted and no password that opens it has been given. */
 bool fa_rar_needs_password(const fa_rar_archive_t *archive);
@@ -163,20 +163,20 @@ typedef enum fa_rar_volume_name_kind {
     FA_RAR_NAME_OLD,         /* `x.r00`, `x.s12` (the `x.rar` before them is PLAIN) */
 } fa_rar_volume_name_kind_t;
 
-fa_rar_volume_name_kind_t fa_rar_volume_name_kind(u8str_t name);
+fa_rar_volume_name_kind_t fa_rar_volume_name_kind(proven_u8str_view_t name);
 
 /** The volume number in a name: 1 for `x.part1.rar` and `x.rar`, 2 for `x.r00`; 0 when none. */
-unsigned fa_rar_volume_number(u8str_t name);
+unsigned fa_rar_volume_number(proven_u8str_view_t name);
 
 /** The first volume's path of the set `path` is in (`old` numbering: `.rar, .r00, ...`). */
-u8str_t fa_rar_first_volume(proven_arena_t *arena, u8str_t path, bool old);
+proven_u8str_view_t fa_rar_first_volume(proven_arena_t *arena, proven_u8str_view_t path, bool old);
 
 /** The next volume's path after `path`, in RAR's volume naming. */
-u8str_t fa_rar_next_volume(proven_arena_t *arena, u8str_t path, bool old);
+proven_u8str_view_t fa_rar_next_volume(proven_arena_t *arena, proven_u8str_view_t path, bool old);
 
 typedef struct fa_rar_data_result {
     fa_rar_err_t err;
-    u8str_t data;           /* in the caller's arena on success */
+    proven_mem_view_t data; /* in the caller's arena on success */
 } fa_rar_data_result_t;
 
 /**

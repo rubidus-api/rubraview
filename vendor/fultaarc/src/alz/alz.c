@@ -443,7 +443,7 @@ fa_alz_result_t fa_alz_open_volumes(proven_arena_t *arena, const fa_alz_volume_t
             proven_result_mem_mut_t nres = proven_arena_alloc(arena, name_len);
             if (!proven_is_ok(nres.err)) { free(list.data); result.err = FA_ALZ_ERR_OUT_OF_MEMORY; return result; }
             memcpy(nres.value.ptr, name, name_len);
-            e.name = (u8str_t){ .ptr = (const char*)nres.value.ptr, .len = name_len };
+            e.name = (proven_u8str_view_t){ .ptr = nres.value.ptr, .size = name_len };
             if (!entry_push(&list, &e)) { free(list.data); result.err = FA_ALZ_ERR_OUT_OF_MEMORY; return result; }
         }
         if (e.truncated) break;
@@ -475,7 +475,7 @@ bool fa_alz_needs_password(const fa_alz_archive_t *archive) {
     return false;
 }
 
-fa_alz_err_t fa_alz_set_password(fa_alz_archive_t *archive, u8str_t password) {
+fa_alz_err_t fa_alz_set_password(fa_alz_archive_t *archive, proven_u8str_view_t password) {
     if (!archive) return FA_ALZ_ERR_BAD_INDEX;
     alz_state_t *s = (alz_state_t*)archive->state;
     if (!s) {
@@ -484,10 +484,10 @@ fa_alz_err_t fa_alz_set_password(fa_alz_archive_t *archive, u8str_t password) {
         archive->state = s;
     }
     state_forget(s);
-    s->password = (uint8_t*)malloc(password.len ? password.len : 1);
+    s->password = (uint8_t*)malloc(password.size ? password.size : 1);
     if (!s->password) return FA_ALZ_ERR_OUT_OF_MEMORY;
-    if (password.len) memcpy(s->password, password.ptr, password.len);
-    s->password_len = password.len;
+    if (password.size) memcpy(s->password, password.ptr, password.size);
+    s->password_len = password.size;
 
     /* Every encrypted file's check byte: one byte each, so a wrong password
        that passes them all is rare once there are a few. */
@@ -527,7 +527,7 @@ fa_alz_err_t fa_alz_set_password(fa_alz_archive_t *archive, u8str_t password) {
 
 fa_alz_data_result_t fa_alz_read_entry(proven_arena_t *arena, const fa_alz_archive_t *archive,
                                                       size_t index, uint64_t max_entry_bytes) {
-    fa_alz_data_result_t result = { .err = FA_ALZ_ERR_BAD_INDEX, .data = { .ptr = "", .len = 0 } };
+    fa_alz_data_result_t result = { .err = FA_ALZ_ERR_BAD_INDEX, .data = { .ptr = (const proven_byte_t*)"", .size = 0 } };
     if (!arena || !archive || index >= archive->entry_count) return result;
     const fa_alz_entry_t *e = &archive->entries[index];
     if (e->truncated) { result.err = FA_ALZ_ERR_TRUNCATED; return result; }
@@ -542,27 +542,27 @@ fa_alz_data_result_t fa_alz_read_entry(proven_arena_t *arena, const fa_alz_archi
     result.err = decode(archive, e, s ? s->password : NULL, s ? s->password_len : 0, out);
     if (result.err != FA_ALZ_OK) return result;
     out[e->size] = '\0';
-    result.data = (u8str_t){ .ptr = (const char*)out, .len = (size_t)e->size };
+    result.data = (proven_mem_view_t){ .ptr = out, .size = (size_t)e->size };
     return result;
 }
 
-u8str_t fa_alz_volume_path(proven_arena_t *arena, u8str_t first_path, unsigned number) {
-    u8str_t none = { .ptr = "", .len = 0 };
-    if (!arena || number == 0 || number > 26 * 100 || first_path.len < 4) return none;
-    const char *ext = first_path.ptr + first_path.len - 4;
+proven_u8str_view_t fa_alz_volume_path(proven_arena_t *arena, proven_u8str_view_t first_path, unsigned number) {
+    proven_u8str_view_t none = PROVEN_LIT("");
+    if (!arena || number == 0 || number > 26 * 100 || first_path.size < 4) return none;
+    const char *ext = (const char *)first_path.ptr + first_path.size - 4;
     if (ext[0] != '.' || (ext[1] | 0x20) != 'a' || (ext[2] | 0x20) != 'l' || (ext[3] | 0x20) != 'z') return none;
-    proven_result_mem_mut_t res = proven_arena_alloc(arena, first_path.len + 1);
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, first_path.size + 1);
     if (!proven_is_ok(res.err)) return none;
     char *out = (char*)res.value.ptr;
-    memcpy(out, first_path.ptr, first_path.len);
+    memcpy(out, first_path.ptr, first_path.size);
     unsigned i = number - 1;
     char letter = (char)('a' + i / 100);
     if (ext[1] == 'A') letter = (char)(letter - 'a' + 'A');
-    out[first_path.len - 3] = letter;
-    out[first_path.len - 2] = (char)('0' + (i % 100) / 10);
-    out[first_path.len - 1] = (char)('0' + i % 10);
-    out[first_path.len] = '\0';
-    return (u8str_t){ .ptr = out, .len = first_path.len };
+    out[first_path.size - 3] = letter;
+    out[first_path.size - 2] = (char)('0' + (i % 100) / 10);
+    out[first_path.size - 1] = (char)('0' + i % 10);
+    out[first_path.size] = '\0';
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = first_path.size };
 }
 
 int32_t fa_alz_volume_number(const uint8_t *data, size_t size) {

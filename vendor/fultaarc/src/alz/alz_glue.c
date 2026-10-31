@@ -70,11 +70,11 @@ static fulta_arc_err_t alz_open(fulta_arc_t *arc, uint64_t search) {
     if (e) return e;
     /* volumes (alz.md 5): a whole .alz ends in "CLZ" 02; otherwise .a00, .a01, ... until the last */
     if (arc->opt.name) {
-        u8str_t first = {arc->opt.name, strlen(arc->opt.name)};
+        proven_u8str_view_t first = proven_u8str_view_from_cstr(arc->opt.name);
         for (unsigned k = 1; k < 2600 && !fa_alz_volume_is_last(g->vols[g->nvol - 1].data, g->vols[g->nvol - 1].size); k++) {
-            u8str_t p = fa_alz_volume_path(&g->arena, first, k);
+            proven_u8str_view_t p = fa_alz_volume_path(&g->arena, first, k);
             if (!p.ptr) break;
-            char *path = fa_strndup(p.ptr, p.len);
+            char *path = fa_strndup((const char *)p.ptr, p.size);
             if (!path) return FULTA_ARC_ERR_NOMEM;
             const fulta_arc_source_t *src;
             e = fa_volume(arc, k, path, &src);
@@ -104,13 +104,13 @@ static fulta_arc_err_t alz_open(fulta_arc_t *arc, uint64_t search) {
     }
     for (size_t i = 0; i < g->ar.entry_count; i++) {
         const fa_alz_entry_t *ae = &g->ar.entries[i];
-        char *uname = fa_codepage_to_utf8((const uint8_t *)ae->name.ptr, ae->name.len, arc->opt.codepage, FULTA_ARC_CP_949);
+        char *uname = fa_codepage_to_utf8(ae->name.ptr, ae->name.size, arc->opt.codepage, FULTA_ARC_CP_949);
         if (!uname) return FULTA_ARC_ERR_NOMEM;
         const char *m = ae->method == FA_ALZ_METHOD_STORED ? "Store" : ae->method == FA_ALZ_METHOD_DEFLATE ? "Deflate"
                       : ae->method == FA_ALZ_METHOD_BZIP2 ? "BZip2-ALZ" : "Unknown";
         char method[32];
         snprintf(method, sizeof method, "%s%s", m, ae->encrypted ? ":ZipCrypto" : "");
-        fa_entry_t *en = fa_add_entry(arc, (const uint8_t *)ae->name.ptr, ae->name.len, uname, method);
+        fa_entry_t *en = fa_add_entry(arc, ae->name.ptr, ae->name.size, uname, method);
         fa_free(uname);
         if (!en) return FULTA_ARC_ERR_NOMEM;
         en->pub.size = ae->size;
@@ -129,14 +129,14 @@ static fulta_arc_err_t alz_open(fulta_arc_t *arc, uint64_t search) {
 
 /* A password in the forms ALZip may have stored it: UTF-8 as given, then CP949 (alz.md 7) when it converts. */
 static fa_alz_err_t try_password(const fulta_arc_t *arc, fa_alz_archive_t *ar, const char *pw) {
-    fa_alz_err_t r = fa_alz_set_password(ar, (u8str_t){pw, strlen(pw)});
+    fa_alz_err_t r = fa_alz_set_password(ar, proven_u8str_view_from_cstr(pw));
     if (r != FA_ALZ_ERR_BAD_PASSWORD) return r;
     fulta_arc_codepage_t cps[2] = {arc->opt.codepage, FULTA_ARC_CP_949};
     for (int k = 0; k < 2; k++) {
         if (cps[k] == FULTA_ARC_CP_AUTO || cps[k] == FULTA_ARC_CP_UTF8 || (k == 1 && cps[0] == FULTA_ARC_CP_949)) continue;
         char *c = fa_utf8_to_codepage(pw, cps[k]);
         if (!c) continue;
-        r = fa_alz_set_password(ar, (u8str_t){c, strlen(c)});
+        r = fa_alz_set_password(ar, proven_u8str_view_from_cstr(c));
         memset(c, 0, strlen(c));
         fa_free(c);
         if (r != FA_ALZ_ERR_BAD_PASSWORD) return r;
@@ -167,7 +167,7 @@ static fulta_arc_err_t alz_extract(fulta_arc_t *arc, size_t index, const fulta_a
     proven_arena_t a = proven_arena_create((proven_mem_mut_t){.ptr = mem, .size = need});
     fa_alz_data_result_t r = fa_alz_read_entry(&a, &g->ar, index, ae->size);
     fulta_arc_err_t e = map_err(r.err);
-    if (!e && sink && r.data.len) e = sink->write(sink->ctx, r.data.ptr, r.data.len);
+    if (!e && sink && r.data.size) e = sink->write(sink->ctx, r.data.ptr, r.data.size);
     fa_free(mem);
     return e;
 }

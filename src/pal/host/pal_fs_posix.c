@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/path.h"
@@ -295,15 +296,47 @@ void rubraview_pal_config_unlock(void) {}
  */
 
 bool rubraview_pal_fs_recycle(proven_u8str_view_t path) { (void)path; return false; }
-bool rubraview_pal_fs_delete(proven_u8str_view_t path) { (void)path; return false; }
+/* RV-207: the few the archive jobs use, as Windows does them: delete a file, move to a name not taken,
+   replace one that is there, make a folder and the folders above it. */
+static bool z_of(proven_u8str_view_t path, char *z, size_t cap) {
+    if (path.size == 0 || !path.ptr || path.size >= cap) return false;
+    memcpy(z, path.ptr, path.size);
+    z[path.size] = '\0';
+    return true;
+}
+
+bool rubraview_pal_fs_delete(proven_u8str_view_t path) {
+    char z[4096];
+    return z_of(path, z, sizeof z) && unlink(z) == 0;
+}
 bool rubraview_pal_fs_restore_last_recycled(proven_u8str_view_t original_path) { (void)original_path; return false; }
-bool rubraview_pal_fs_move(proven_u8str_view_t from, proven_u8str_view_t to) { (void)from; (void)to; return false; }
+bool rubraview_pal_fs_move(proven_u8str_view_t from, proven_u8str_view_t to) {
+    char a[4096], b[4096];
+    struct stat st;
+    if (!z_of(from, a, sizeof a) || !z_of(to, b, sizeof b) || stat(b, &st) == 0) return false;   /* never over one there */
+    return rename(a, b) == 0;
+}
 bool rubraview_pal_fs_copy(proven_u8str_view_t from, proven_u8str_view_t to) { (void)from; (void)to; return false; }
 bool rubraview_pal_fs_copy_tree(proven_u8str_view_t from, proven_u8str_view_t to) { (void)from; (void)to; return false; }
 bool rubraview_pal_fs_delete_tree(proven_u8str_view_t path) { (void)path; return false; }
-bool rubraview_pal_fs_replace(proven_u8str_view_t from, proven_u8str_view_t to) { (void)from; (void)to; return false; }
+bool rubraview_pal_fs_replace(proven_u8str_view_t from, proven_u8str_view_t to) {
+    char a[4096], b[4096];
+    return z_of(from, a, sizeof a) && z_of(to, b, sizeof b) && rename(a, b) == 0;
+}
 bool rubraview_pal_fs_free_bytes(proven_u8str_view_t dir, uint64_t *out_bytes) { (void)dir; (void)out_bytes; return false; }
-bool rubraview_pal_fs_make_dirs(proven_u8str_view_t path) { (void)path; return false; }
+bool rubraview_pal_fs_make_dirs(proven_u8str_view_t path) {
+    char z[4096];
+    if (!z_of(path, z, sizeof z)) return false;
+    for (char *p = z + 1; *p; ++p) {
+        if (*p != '/') continue;
+        *p = '\0';
+        if (mkdir(z, 0755) != 0 && errno != EEXIST) { *p = '/'; return false; }
+        *p = '/';
+    }
+    if (mkdir(z, 0755) != 0 && errno != EEXIST) return false;
+    struct stat st;
+    return stat(z, &st) == 0 && S_ISDIR(st.st_mode);
+}
 
 bool rubraview_pal_fs_map(proven_u8str_view_t path, rubraview_fs_mapping_t *out) {
     if (!out) return false;

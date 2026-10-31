@@ -42,7 +42,7 @@ fulta_arc_err_t fulta_arc_source_file(const char *path, fulta_arc_source_t *out)
     return FULTA_ARC_OK;
 }
 
-typedef struct mem_src { const uint8_t *p; size_t n; } mem_src_t;
+typedef struct mem_src { const uint8_t *p; size_t n; uint8_t *owned; } mem_src_t;
 
 static fulta_arc_err_t mem_read_at(void *ctx, uint64_t offset, void *buf, size_t n, size_t *got) {
     const mem_src_t *m = ctx;
@@ -55,13 +55,26 @@ static fulta_arc_err_t mem_read_at(void *ctx, uint64_t offset, void *buf, size_t
     return FULTA_ARC_OK;
 }
 
-static void mem_close(void *ctx) { fa_free(ctx); }
+static void mem_close(void *ctx) {
+    mem_src_t *m = ctx;
+    if (m) fa_free(m->owned);   /* NULL for a referencing source; the owned buffer for fa_source_memory_owned */
+    fa_free(ctx);
+}
 
 fulta_arc_source_t fulta_arc_source_memory(const void *data, size_t size) {
     mem_src_t *m = fa_calloc(1, sizeof *m);
     if (!m) return (fulta_arc_source_t){0};
     m->p = data;
     m->n = size;
+    return (fulta_arc_source_t){.ctx = m, .size = size, .read_at = mem_read_at, .close = mem_close};
+}
+
+fulta_arc_source_t fa_source_memory_owned(uint8_t *buf, size_t size) {
+    mem_src_t *m = fa_calloc(1, sizeof *m);
+    if (!m) return (fulta_arc_source_t){0};
+    m->p = buf;
+    m->n = size;
+    m->owned = buf;   /* freed by mem_close */
     return (fulta_arc_source_t){.ctx = m, .size = size, .read_at = mem_read_at, .close = mem_close};
 }
 

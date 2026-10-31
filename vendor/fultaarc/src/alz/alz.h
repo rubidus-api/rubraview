@@ -59,7 +59,7 @@ enum {
 };
 
 typedef struct fa_alz_entry {
-    u8str_t  name;          /* raw bytes in the maker's code page; `\` (or `/`) between folders */
+    proven_u8str_view_t name; /* raw bytes in the maker's code page; `\` (or `/`) between folders */
     uint64_t size, packed_size;
     uint64_t data_offset;   /* in the joined stream, after the 12-byte encryption header */
     uint32_t crc32;
@@ -104,14 +104,14 @@ bool fa_alz_is_alz(const uint8_t *data, size_t size);
  * decoded and its CRC-32 compared. OK or ERR_BAD_PASSWORD. Kept (in memory
  * only, wiped on close) until the archive is closed.
  */
-fa_alz_err_t fa_alz_set_password(fa_alz_archive_t *archive, u8str_t password);
+fa_alz_err_t fa_alz_set_password(fa_alz_archive_t *archive, proven_u8str_view_t password);
 
 /** Some file is encrypted and no password that opens it has been given. */
 bool fa_alz_needs_password(const fa_alz_archive_t *archive);
 
 typedef struct fa_alz_data_result {
     fa_alz_err_t err;
-    u8str_t data;           /* in the caller's arena on success (one allocation of size + 1) */
+    proven_mem_view_t data; /* in the caller's arena on success (one allocation of size + 1) */
 } fa_alz_data_result_t;
 
 /** Read one entry. The cap is checked against the declared size before anything is allocated. */
@@ -124,7 +124,7 @@ typedef struct fa_alz_data_result {
  * case of the `.alz`'s. Empty when `first_path` does not end in `.alz` or
  * the number is past `z99`.
  */
-u8str_t fa_alz_volume_path(proven_arena_t *arena, u8str_t first_path, unsigned number);
+proven_u8str_view_t fa_alz_volume_path(proven_arena_t *arena, proven_u8str_view_t first_path, unsigned number);
 
 /*
  * What a volume's own bytes say about its set. Not in the spec (its section 2

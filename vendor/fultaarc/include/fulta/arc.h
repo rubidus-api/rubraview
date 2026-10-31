@@ -63,9 +63,25 @@ typedef enum fulta_arc_format {
     FULTA_ARC_FORMAT_UNKNOWN = 0,
     FULTA_ARC_FORMAT_ZIP,
     FULTA_ARC_FORMAT_7Z,
-    FULTA_ARC_FORMAT_RAR,      /* RAR 1.5 to 7.0 archives (RAR 4 and RAR 5 containers) */
+    FULTA_ARC_FORMAT_RAR,      /* RAR 1.4 to 7.0 archives (RAR 1.4, RAR 4 and RAR 5 containers) */
     FULTA_ARC_FORMAT_ALZ,
     FULTA_ARC_FORMAT_EGG,
+    FULTA_ARC_FORMAT_GZIP,     /* gzip stream (.gz); the outer wrapper of tar.gz */
+    FULTA_ARC_FORMAT_BZIP2,    /* bzip2 stream (.bz2); the outer wrapper of tar.bz2 */
+    FULTA_ARC_FORMAT_XZ,       /* xz stream (.xz); the outer wrapper of tar.xz */
+    FULTA_ARC_FORMAT_ZSTD,     /* Zstandard stream (.zst); the outer wrapper of tar.zst */
+    FULTA_ARC_FORMAT_TAR,      /* Unix tape archive (.tar); ustar/POSIX pax/GNU. A gzip/bzip2/xz/zstd/compress stream
+                                  wrapping a tar opens as TAR directly (the payload is decompressed into memory, up to
+                                  1 GiB, at open; a larger wrapped payload stays a single stored entry of its type). */
+    FULTA_ARC_FORMAT_COMPRESS, /* Unix compress stream (.Z); the outer wrapper of tar.Z */
+    FULTA_ARC_FORMAT_LZIP,     /* lzip stream (.lz); LZMA1 with a CRC-32 trailer; the outer wrapper of tar.lz */
+    FULTA_ARC_FORMAT_AR,       /* Unix ar archive (.a static library, .deb) */
+    FULTA_ARC_FORMAT_CPIO,     /* cpio archive (newc/crc/odc/old-binary) */
+    FULTA_ARC_FORMAT_ISO,      /* ISO 9660 (ECMA-119) CD/DVD image */
+    FULTA_ARC_FORMAT_CAB,      /* Microsoft Cabinet (.cab); Store, MSZIP, LZX and Quantum; cabinet sets */
+    FULTA_ARC_FORMAT_UDF,      /* UDF (ECMA-167 / OSTA UDF) optical-disc filesystem */
+    FULTA_ARC_FORMAT_LHA,      /* LHA/LZH (.lzh, .lha; LArc .lzs, PMarc .pma; self-extractors); -lh0/1/2/3/4/5/6/7/x-,
+                                  -lhd-, -lk7-, -lz4/5-, -lzs-, -pm0/1/2-; an unknown method is listed unsupported */
 } fulta_arc_format_t;
 
 const char *fulta_arc_format_name(fulta_arc_format_t format);
@@ -109,6 +125,22 @@ typedef enum fulta_arc_codepage {
     FULTA_ARC_CP_KOI8R,        /* Russian, KOI8-R (RFC 1489; Unix) */
 } fulta_arc_codepage_t;
 
+/* A memory allocator for the decompressor buffers that `max_memory` caps. Supply all three functions together (or
+   leave all NULL to use the C library's malloc); supplying one or two is rejected with FULTA_ARC_ERR_INVALID_ARG.
+   The library never mixes allocators: every block these functions return is reallocated and freed only by them.
+   `align` is a power of two, at most alignof(max_align_t). `alloc` returns NULL on failure (reported as
+   FULTA_ARC_ERR_NOMEM, or FULTA_ARC_ERR_LIMIT when max_memory was the cause). `realloc` with ptr==NULL behaves as
+   alloc and with new_size==0 frees and returns NULL; `old_size` is the size last requested for ptr. `free(NULL)` is
+   a no-op. This backs only the codec buffers; the fulta_arc_extract_alloc result is always a C-library malloc block
+   (release it with free()), independent of this hook. The current codec-budget path exercises alloc and free;
+   realloc completes the contract for future buffered paths. */
+typedef struct fulta_arc_allocator {
+    void *(*alloc)(void *ctx, size_t size, size_t align);
+    void *(*realloc)(void *ctx, void *ptr, size_t old_size, size_t new_size, size_t align);
+    void (*free)(void *ctx, void *ptr);
+    void *ctx;
+} fulta_arc_allocator_t;
+
 typedef struct fulta_arc_options {
     const char *name;                    /* the first volume's file name (for volume names); may be NULL */
     fulta_arc_volume_fn volume;          /* may be NULL: then split archives fail with VOLUME_MISSING */
@@ -117,6 +149,17 @@ typedef struct fulta_arc_options {
     void *password_ctx;
     fulta_arc_codepage_t codepage;       /* default FULTA_ARC_CP_AUTO */
     uint64_t max_dictionary;             /* refuse windows/dictionaries/models larger than this; 0 = 1 GiB */
+    /* Cap the total live memory the vendored decompressors (PPMd/LZMA/bzip2/zstd) may hold while opening or
+       extracting, so a hostile archive cannot drive unbounded allocation; a decode that would exceed it stops with
+       FULTA_ARC_ERR_LIMIT. 0 = unlimited (NB: unlike max_dictionary, whose 0 means 1 GiB). This bounds the codec
+       buffers sized by archive-declared parameters -- the PPMd model, the LZMA/LZMA2 state and window, the zstd
+       window, the bzip2 block table -- which are the attacker-driven allocations. It does not account for the
+       library's own small bookkeeping or fixed-size scratch (the deflate window and codec input buffers are a
+       constant 64 KiB each and go uncounted). max_dictionary still caps each single request and is checked first. */
+    uint64_t max_memory;
+    /* Back the decompressor buffers that max_memory caps with a caller-supplied allocator (see
+       fulta_arc_allocator_t). All-NULL (the default) uses the C library's malloc. */
+    fulta_arc_allocator_t allocator;
     /* Polled during long operations; return nonzero to cancel. May be NULL. */
     int (*cancel)(void *ctx);
     void *cancel_ctx;
@@ -235,6 +278,38 @@ typedef enum fulta_arc_encrypt {
     FULTA_ARC_ENCRYPT_7Z_AES256
 } fulta_arc_encrypt_t;
 
+/* Compression method for written entries. DEFAULT keeps the historical choice (ZIP -> Deflate, 7z -> LZMA).
+   Each method is valid only for some formats; an invalid method x format is FULTA_ARC_ERR_INVALID_ARG.
+   ZIP accepts STORE, DEFLATE, BZIP2, LZMA, PPMD, ZSTD; 7z accepts STORE(=Copy), DEFLATE, BZIP2, LZMA, LZMA2, PPMD
+   (7z follows stock 7-Zip: no zstd-in-7z). */
+typedef enum fulta_arc_method {
+    FULTA_ARC_METHOD_DEFAULT = 0,
+    FULTA_ARC_METHOD_STORE,           /* ZIP method 0 / 7z Copy */
+    FULTA_ARC_METHOD_DEFLATE,         /* ZIP method 8 / 7z 040108 */
+    FULTA_ARC_METHOD_BZIP2,           /* ZIP method 12 / 7z 040202 */
+    FULTA_ARC_METHOD_LZMA,            /* ZIP method 14 / 7z 030101 */
+    FULTA_ARC_METHOD_LZMA2,           /* 7z 21 (not a ZIP method) */
+    FULTA_ARC_METHOD_PPMD,            /* ZIP method 98 (var.I) / 7z 030401 (var.H) */
+    FULTA_ARC_METHOD_ZSTD             /* ZIP method 93 (not a stock-7z method) */
+} fulta_arc_method_t;
+
+/* Optional 7z content filter, chained before the compression method. Ignored for ZIP. DELTA uses filter_delta_dist
+   (1..256; 0 treated as 1). The branch filters suit executables of that architecture. */
+typedef enum fulta_arc_filter {
+    FULTA_ARC_FILTER_NONE = 0,
+    FULTA_ARC_FILTER_DELTA,
+    FULTA_ARC_FILTER_BCJ_X86,
+    FULTA_ARC_FILTER_BCJ2,
+    FULTA_ARC_FILTER_ARM, FULTA_ARC_FILTER_ARM64, FULTA_ARC_FILTER_PPC, FULTA_ARC_FILTER_SPARC, FULTA_ARC_FILTER_IA64
+} fulta_arc_filter_t;
+
+/* 7z solid grouping (7-Zip's `-ms`). ZIP entries are always independent, so this is ignored for ZIP. */
+typedef enum fulta_arc_solid {
+    FULTA_ARC_SOLID_DEFAULT = 0,      /* = ON: one solid folder for all files (best ratio; the previous behaviour) */
+    FULTA_ARC_SOLID_ON,               /* one solid folder for all files */
+    FULTA_ARC_SOLID_OFF               /* one folder per file: the result can be edited in place (no reconvert) */
+} fulta_arc_solid_t;
+
 typedef struct fulta_arc_write_options {
     int level;                        /* 0 store/copy, 1..9 compress; out of range = 6 */
     int zip64;                        /* ZIP: write Zip64 records even when nothing needs them */
@@ -242,6 +317,10 @@ typedef struct fulta_arc_write_options {
     void *progress_ctx;
     const char *password;             /* NULL = no encryption; otherwise every file entry is encrypted (UTF-8) */
     fulta_arc_encrypt_t encryption;   /* scheme when `password` is set; must match the output format */
+    fulta_arc_method_t method;        /* 0 = DEFAULT; compression method (validated against the output format) */
+    fulta_arc_filter_t filter;        /* 7z only; 0 = none; a content filter chained before `method` */
+    uint32_t filter_delta_dist;       /* DELTA filter byte distance (1..256); 0 = 1 */
+    fulta_arc_solid_t solid;          /* 7z only; 0 = default (solid); SOLID_OFF = one folder per file (editable) */
 } fulta_arc_write_options_t;
 
 /* Write `entries`, in order, as one ZIP or 7z archive. `options` may be NULL. */
@@ -293,7 +372,9 @@ fulta_arc_err_t fulta_arc_edit_add(fulta_arc_edit_t *edit, const char *name, con
 
 /* Write the edited archive. When `format` is the source's own format the untouched entries are copied without
    re-encoding (requires fulta_arc_editable(arc) == FULTA_ARC_EDIT_OK); a different ZIP/7z re-encodes everything
-   (the convert route, streamed). `opts` carries the level, progress/cancel, and a password to encrypt the output.
+   (the convert route, streamed). `opts` carries the level, progress/cancel, and a password to encrypt the output:
+   with a password every file entry is re-encoded and encrypted (the convert route, also for the source's own
+   format), as fulta_arc_write would encrypt it; a 7z output's temporary spill is made private and nameless at once.
    The source archive is never modified. */
 fulta_arc_err_t fulta_arc_edit_write(fulta_arc_edit_t *edit, fulta_arc_format_t format,
                                      const fulta_arc_write_sink_t *sink, const fulta_arc_write_options_t *opts);

@@ -365,7 +365,7 @@ static fulta_arc_err_t decoder(fulta_arc_t *arc, const egg_block_t *b, fa_stream
     switch (b->method) {
     case 0: return fa_stream_limit(in, b->out, out);
     case 1: return fa_dec_deflate(in, false, b->out, out);
-    case 2: return fa_dec_bzip2(in, b->out, out);
+    case 2: return fa_dec_bzip2(in, b->out, &arc->limits, out);
     case 3: {
         fulta_arc_err_t e = fa_dec_azo(in, &in);
         if (e) return e;

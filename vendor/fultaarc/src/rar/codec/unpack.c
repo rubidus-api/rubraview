@@ -300,7 +300,7 @@ fa_rar_unpack_status_t rc_unpack_file(void *p, const fa_rar_unpack_params_t *prm
     if (!u || !prm || !read || !write) return FA_RAR_UNPACK_CORRUPT;
     unsigned family;
     switch (prm->method) {
-    case 15: return FA_RAR_UNPACK_UNSUPPORTED;   /* RAR 1.5: D-004 */
+    case 15: return FA_RAR_UNPACK_UNSUPPORTED;   /* RAR 1.5: read by src/rar/rar15/ (D-029); here only when mixed */
     case 20: case 26: family = 20; break;
     case 29: family = 29; break;
     case 50: case 70: family = 50; break;

@@ -13,7 +13,7 @@ SRCS_CORE = src/core/number.c src/core/subbox.c src/core/thumb.c src/core/thumbq
             src/core/utf8.c src/core/glob.c src/core/ini.c src/core/nfc.c src/core/encoding.c \
             src/core/viewport.c src/core/tiles.c src/core/screencopy.c src/core/layout.c src/core/comicinfo.c \
             src/core/lru.c src/core/exif.c src/core/keymap.c src/core/slideshow.c src/core/batch.c \
-            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_scrollbar.c src/core/ui_subwin.c src/core/ui_ctxmenu.c src/core/ui_chooser.c src/core/ui_slidepop.c src/core/action_words.c src/core/matroska.c src/core/mp4.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/detail.c src/core/aspect.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/apng.c src/core/shellreq.c src/core/arcedit.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/webp_write.c src/core/avif_read.c src/core/bigtiff.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c src/core/lang.c src/core/textenc.c src/core/textview.c src/core/effects.c src/core/classify.c src/core/fontspec.c src/core/memory.c src/core/keepinfo.c src/core/tonemap.c src/core/plugin.c src/core/stream.c src/core/gmic.c src/core/ffilter.c src/core/media_host.c src/core/media_head.c src/core/filmcache.c src/core/keyboard.c
+            src/core/playlist.c src/core/compositor.c src/core/transform.c src/core/ui_input.c src/core/ui_box.c src/core/ui_menu.c src/core/ui_chrome.c src/core/ui_edgenav.c src/core/ui_listwin.c src/core/ui_scrollbar.c src/core/ui_subwin.c src/core/ui_ctxmenu.c src/core/ui_chooser.c src/core/ui_slidepop.c src/core/action_words.c src/core/matroska.c src/core/mp4.c src/core/ui_eqwin.c src/core/repeat.c src/core/audio_chain.c src/core/ui_virtual.c src/core/filmstrip.c src/core/picker.c src/core/favorites.c src/core/fileinfo.c src/core/detail.c src/core/aspect.c src/core/notices_text.c src/core/default_keymap.c src/core/history.c src/core/pagesource.c src/core/precache.c src/core/animation.c src/core/apng.c src/core/shellreq.c src/core/arcedit.c src/core/edit.c src/core/export.c src/core/batchrun.c src/core/resample_mt.c src/core/jpegtran.c src/core/webp_write.c src/core/avif_read.c src/core/bigtiff.c src/core/ui_panel.c src/core/filemanage.c src/core/settings.c src/core/settings_doc.c src/core/default_settings_doc.c src/core/ui_settings.c src/core/boxes_doc.c src/core/default_boxes_doc.c src/core/subtitle.c src/core/vobsub.c src/core/pgs.c src/core/tags.c src/core/music.c src/core/help.c src/core/playback.c src/core/audio_dsp.c src/core/lyrics.c src/core/mediaclock.c src/core/ui_actions.c src/core/lang.c src/core/textenc.c src/core/textview.c src/core/effects.c src/core/classify.c src/core/fontspec.c src/core/memory.c src/core/keepinfo.c src/core/tonemap.c src/core/plugin.c src/core/stream.c src/core/gmic.c src/core/ffilter.c src/core/media_host.c src/core/media_head.c src/core/filmcache.c src/core/keyboard.c src/core/archive_job.c
 # FultaArc (MIT; vendor/fultaarc, D-74) reads and writes every archive: ZIP,
 # 7z and RAR 2.0-7.0, with the decoders it vendors itself (LZMA SDK, miniz,
 # bzip2, zstd). It is built once as a static library, with its own flags and
@@ -28,13 +28,15 @@ FULTA_INCLUDES = -I$(FULTA)/include -I$(FULTA)/src -Ivendor/proven/include -Iven
 FULTA_MINIZ_DEF = -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ARCHIVE_WRITING_APIS -DMINIZ_NO_ZLIB_COMPATIBLE_NAMES
 FULTA_OWN_SRCS = $(wildcard $(FULTA)/src/core/*.c $(FULTA)/src/codec/*.c $(FULTA)/src/crypto/*.c $(FULTA)/src/text/*.c \
                    $(FULTA)/src/platform/*.c $(FULTA)/src/zip/*.c $(FULTA)/src/7z/*.c $(FULTA)/src/write/*.c \
-                   $(FULTA)/src/rar/*.c $(FULTA)/src/rar/codec/*.c \
-                   $(FULTA)/src/alz/*.c $(FULTA)/src/egg/*.c $(FULTA)/src/azo/*.c)
+                   $(FULTA)/src/rar/*.c $(FULTA)/src/rar/codec/*.c $(FULTA)/src/rar/rar15/*.c \
+                   $(FULTA)/src/alz/*.c $(FULTA)/src/egg/*.c $(FULTA)/src/azo/*.c $(FULTA)/src/filter/*.c \
+                   $(FULTA)/src/tar/*.c $(FULTA)/src/ar/*.c $(FULTA)/src/cpio/*.c $(FULTA)/src/iso/*.c \
+                   $(FULTA)/src/cab/*.c $(FULTA)/src/udf/*.c $(FULTA)/src/lha/*.c $(FULTA)/src/lha/lhadec/src/*.c)
 FULTA_LZMA_SRCS = $(wildcard $(FULTA)/vendor/lzma/*.c)
 FULTA_BZ_SRCS = $(addprefix $(FULTA)/vendor/bzip2/,bzlib.c decompress.c compress.c blocksort.c huffman.c crctable.c randtable.c)
 # ALZ's own bzip2: the decoder's files, built under other names (FultaArc's Makefile, BZA_SRCS).
 FULTA_BZA_SRCS = $(addprefix $(FULTA)/vendor/bzip2_alz/,bzlib.c decompress.c huffman.c crctable.c randtable.c)
-FULTA_OTHER_SRCS = $(FULTA)/vendor/miniz/miniz.c $(FULTA)/vendor/zstd/zstddeclib.c
+FULTA_OTHER_SRCS = $(FULTA)/vendor/miniz/miniz.c $(FULTA)/vendor/zstd/zstd.c
 FULTA_SRCS = $(FULTA_OWN_SRCS) $(FULTA_LZMA_SRCS) $(FULTA_BZ_SRCS) $(FULTA_BZA_SRCS) $(FULTA_OTHER_SRCS)
 FULTA_OBJS = $(patsubst $(FULTA)/%.c,build/fulta/%.o,$(FULTA_SRCS))
 FULTA_OBJS_WIN = $(patsubst $(FULTA)/%.c,build/fulta-win/%.o,$(FULTA_SRCS))
@@ -158,7 +160,7 @@ TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resa
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
             build/tests/test_viewport build/tests/test_tiles build/tests/test_screencopy build/tests/test_layout build/tests/test_archives build/tests/test_comicinfo \
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
-            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_scrollbar build/tests/test_ui_subwin build/tests/test_ui_ctxmenu build/tests/test_ui_chooser build/tests/test_ui_slidepop build/tests/test_matroska build/tests/test_mp4 build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_detail build/tests/test_aspect build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_apng build/tests/test_shellreq build/tests/test_arcedit build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_webp_write build/tests/test_avif_read build/tests/test_bigtiff build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock build/tests/test_lang build/tests/test_textenc build/tests/test_textview build/tests/test_effects build/tests/test_classify build/tests/test_fontspec build/tests/test_memory build/tests/test_keepinfo build/tests/test_tonemap build/tests/test_plugin build/tests/test_gmic build/tests/test_ffilter build/tests/test_media_host build/tests/test_media_head build/tests/test_filmcache build/tests/test_keyboard
+            build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_scrollbar build/tests/test_ui_subwin build/tests/test_ui_ctxmenu build/tests/test_ui_chooser build/tests/test_ui_slidepop build/tests/test_matroska build/tests/test_mp4 build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_detail build/tests/test_aspect build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_apng build/tests/test_shellreq build/tests/test_arcedit build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_webp_write build/tests/test_avif_read build/tests/test_bigtiff build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock build/tests/test_lang build/tests/test_textenc build/tests/test_textview build/tests/test_effects build/tests/test_classify build/tests/test_fontspec build/tests/test_memory build/tests/test_keepinfo build/tests/test_tonemap build/tests/test_plugin build/tests/test_gmic build/tests/test_ffilter build/tests/test_media_host build/tests/test_media_head build/tests/test_filmcache build/tests/test_keyboard build/tests/test_archive_job
 
 .PHONY: all test test-area fuzz-smoke check clean win64 package store mfprobe
 
@@ -175,6 +177,11 @@ build/fulta/vendor/bzip2_alz/%.o: $(FULTA)/vendor/bzip2_alz/%.c
 build/fulta/vendor/%.o: $(FULTA)/vendor/%.c
 	@mkdir -p $(dir $@)
 	$(CC) -std=c11 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_INCLUDES) -g -fsanitize=address,undefined -c $< -o $@
+
+# LHA's clean-room decoder takes FultaArc's shim first, as FultaArc's own Makefile builds it (LHADEC_SHIM).
+build/fulta/src/lha/lhadec/src/%.o: $(FULTA)/src/lha/lhadec/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) -include $(FULTA)/src/lha/lhadec_shim.h $(FULTA_INCLUDES) -g -fsanitize=address,undefined -c $< -o $@
 
 build/fulta/src/%.o: $(FULTA)/src/%.c
 	@mkdir -p $(dir $@)
@@ -303,6 +310,10 @@ build/fulta-win/vendor/bzip2_alz/%.o: $(FULTA)/vendor/bzip2_alz/%.c
 build/fulta-win/vendor/%.o: $(FULTA)/vendor/%.c
 	@mkdir -p $(dir $@)
 	$(MINGW_CC) -std=c11 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_INCLUDES) -c $< -o $@
+
+build/fulta-win/src/lha/lhadec/src/%.o: $(FULTA)/src/lha/lhadec/src/%.c
+	@mkdir -p $(dir $@)
+	$(MINGW_CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) -include $(FULTA)/src/lha/lhadec_shim.h $(FULTA_INCLUDES) -c $< -o $@
 
 build/fulta-win/src/%.o: $(FULTA)/src/%.c
 	@mkdir -p $(dir $@)

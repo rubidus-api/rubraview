@@ -96,15 +96,15 @@ static void state_free(rar_state_t *st) {
 }
 
 /* Spec 6.1.1 / 6.2.1 / 14: the password as UTF-8 and as UTF-16LE, 128 characters at most. */
-static void state_set_password(rar_state_t *st, u8str_t pw) {
+static void state_set_password(rar_state_t *st, proven_u8str_view_t pw) {
     size_t i = 0, chars = 0, n8 = 0, n16 = 0;
     const uint8_t *s = (const uint8_t*)pw.ptr;
-    while (i < pw.len && chars < 128) {
+    while (i < pw.size && chars < 128) {
         uint32_t cp = s[i];
         size_t len = 1;
-        if (cp >= 0xF0 && i + 3 < pw.len) { cp = (cp & 7) << 18 | (s[i + 1] & 0x3Fu) << 12 | (s[i + 2] & 0x3Fu) << 6 | (s[i + 3] & 0x3Fu); len = 4; }
-        else if (cp >= 0xE0 && i + 2 < pw.len) { cp = (cp & 15) << 12 | (s[i + 1] & 0x3Fu) << 6 | (s[i + 2] & 0x3Fu); len = 3; }
-        else if (cp >= 0xC0 && i + 1 < pw.len) { cp = (cp & 31) << 6 | (s[i + 1] & 0x3Fu); len = 2; }
+        if (cp >= 0xF0 && i + 3 < pw.size) { cp = (cp & 7) << 18 | (s[i + 1] & 0x3Fu) << 12 | (s[i + 2] & 0x3Fu) << 6 | (s[i + 3] & 0x3Fu); len = 4; }
+        else if (cp >= 0xE0 && i + 2 < pw.size) { cp = (cp & 15) << 12 | (s[i + 1] & 0x3Fu) << 6 | (s[i + 2] & 0x3Fu); len = 3; }
+        else if (cp >= 0xC0 && i + 1 < pw.size) { cp = (cp & 31) << 6 | (s[i + 1] & 0x3Fu); len = 2; }
         if (n8 + len > sizeof(st->pwd8) || n16 + 4 > sizeof(st->pwd16)) break;
         memcpy(st->pwd8 + n8, s + i, len);
         n8 += len;
@@ -196,6 +196,7 @@ typedef struct parser {
     vec_t entries, pieces;
     long pending;                  /* the entry whose next part is due, or -1 */
     bool rar5, solid, headers_encrypted, is_volume, new_numbering;
+    bool av_announced;   /* RAR 4 main header flag 0x0020: authenticity information present */
     bool password_given;
     uint8_t hkey[32];              /* RAR 5 header key of the current volume */
     uint8_t *buf; size_t cap;      /* one header, decrypted */
@@ -214,12 +215,12 @@ static bool reserve(parser_t *p, size_t n) {
     return true;
 }
 
-static u8str_t arena_copy(proven_arena_t *arena, const void *src, size_t n) {
+static proven_u8str_view_t arena_copy(proven_arena_t *arena, const void *src, size_t n) {
     proven_result_mem_mut_t r = proven_arena_alloc(arena, n + 1);
-    if (!proven_is_ok(r.err)) return (u8str_t){ .ptr = NULL, .len = 0 };
+    if (!proven_is_ok(r.err)) return (proven_u8str_view_t){ .ptr = NULL, .size = 0 };
     if (n) memcpy(r.value.ptr, src, n);
     r.value.ptr[n] = 0;
-    return (u8str_t){ .ptr = (const char*)r.value.ptr, .len = n };
+    return (proven_u8str_view_t){ .ptr = r.value.ptr, .size = n };
 }
 
 static size_t utf8_put(uint8_t *o, uint32_t cp) {
@@ -235,7 +236,7 @@ static size_t utf8_put(uint8_t *o, uint32_t cp) {
 }
 
 /* Spec 2.4: the narrow name, then the encoded UTF-16 one; to UTF-8 with '/' separators. */
-static u8str_t rar4_name(proven_arena_t *arena, const uint8_t *name, size_t len, bool unicode, bool *legacy) {
+static proven_u8str_view_t rar4_name(proven_arena_t *arena, const uint8_t *name, size_t len, bool unicode, bool *legacy) {
     *legacy = false;
     const uint8_t *zero = unicode ? memchr(name, 0, len) : NULL;
     uint8_t *tmp = NULL;
@@ -246,7 +247,7 @@ static u8str_t rar4_name(proven_arena_t *arena, const uint8_t *name, size_t len,
         size_t elen = len - nlen - 1;
         uint16_t *u = (uint16_t*)malloc((nlen + 1) * sizeof(uint16_t));
         tmp = (uint8_t*)malloc(nlen * 4 + 4);
-        if (!u || !tmp) { free(u); free(tmp); return (u8str_t){ .ptr = NULL, .len = 0 }; }
+        if (!u || !tmp) { free(u); free(tmp); return (proven_u8str_view_t){ .ptr = NULL, .size = 0 }; }
         size_t n = 0;
         if (elen > 0) {
             uint8_t high = enc[0], flags = 0;
@@ -291,13 +292,13 @@ static u8str_t rar4_name(proven_arena_t *arena, const uint8_t *name, size_t len,
         if (n == 0) { memcpy(tmp, name, nlen); out_len = nlen; }   /* nothing encoded: the narrow name */
     } else {
         tmp = (uint8_t*)malloc(len + 1);
-        if (!tmp) return (u8str_t){ .ptr = NULL, .len = 0 };
+        if (!tmp) return (proven_u8str_view_t){ .ptr = NULL, .size = 0 };
         memcpy(tmp, name, len);
         out_len = len;
         *legacy = !unicode;
     }
     for (size_t i = 0; i < out_len; ++i) if (tmp[i] == '\\') tmp[i] = '/';
-    u8str_t r = arena_copy(arena, tmp, out_len);
+    proven_u8str_view_t r = arena_copy(arena, tmp, out_len);
     free(tmp);
     return r;
 }
@@ -318,7 +319,7 @@ static bool add_piece(parser_t *p, fa_rar_entry_t *e, uint32_t vol, uint64_t off
 
 /* A file part, after its header is parsed. `cont` is a part that continues one before it. */
 typedef struct part {
-    u8str_t name;                  /* raw, for matching parts */
+    proven_u8str_view_t name;                  /* raw, for matching parts */
     bool before, after;
     uint64_t data_off, data_size;
     uint32_t crc; bool has_crc;
@@ -331,7 +332,7 @@ static perr_t take_part(parser_t *p, uint32_t vol, const part_t *pt, const fa_ra
     if (pt->before) {
         if (p->pending < 0) return P_OK;   /* the rest of a file that began in a volume not opened */
         fa_rar_entry_t *e = entry_at(p, p->pending);
-        if (!fa_rar_u8_eq(e->name, pt->name)) {
+        if (!proven_u8str_view_eq(e->name, pt->name)) {
             e->split = true;               /* "mismatch of file parts" (spec 4.2) */
             p->pending = -1;
             return P_OK;
@@ -423,12 +424,16 @@ static perr_t rar4_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
                     crc = crc32_update(crc32_update(0, h + 2, hsize - 2), d + block_end, (size_t)add);
                     ok = (crc & 0xFFFF) == rd16(h);
                 }
+                /* policy: an AV_HEAD the main header announced is skipped unread; the sources give no rule for its
+                 * HEAD_CRC, and RAR 2.00's and 2.50's own installers carry one that matches neither rule above */
+                if (!ok && type == 0x76 && p->av_announced) ok = true;
                 if (!ok) return P_CORRUPT;
             }
         }
         switch (type) {
         case 0x73:
             p->is_volume = flags & 0x0001;
+            p->av_announced = flags & 0x0020;
             p->solid = flags & 0x0008;
             p->new_numbering = flags & 0x0010;
             if (flags & 0x0080) {
@@ -731,7 +736,7 @@ static fa_rar_err_t perr_map(perr_t e) {
 }
 
 fa_rar_result_t fa_rar_open_volumes(proven_arena_t *arena, const fa_rar_volume_t *volumes,
-                                                  size_t volume_count, u8str_t password) {
+                                                  size_t volume_count, proven_u8str_view_t password) {
     fa_rar_result_t out = { .err = FA_RAR_ERR_NOT_A_RAR };
     if (!arena || !volumes || volume_count == 0 || !volumes[0].data) return out;
     size_t start;
@@ -745,7 +750,7 @@ fa_rar_result_t fa_rar_open_volumes(proven_arena_t *arena, const fa_rar_volume_t
     p.st = (rar_state_t*)calloc(1, sizeof(rar_state_t));
     if (!p.st) { out.err = FA_RAR_ERR_OUT_OF_MEMORY; return out; }
     p.st->next = SIZE_MAX;
-    if (password.len > 0) { state_set_password(p.st, password); p.password_given = true; }
+    if (password.size > 0) { state_set_password(p.st, password); p.password_given = true; }
 
     perr_t err = P_OK;
     size_t used = 0;
@@ -827,7 +832,7 @@ fail:
 
 fa_rar_result_t fa_rar_open(proven_arena_t *arena, const uint8_t *data, size_t size) {
     fa_rar_volume_t one = { .data = data, .size = size };
-    return fa_rar_open_volumes(arena, &one, 1, (u8str_t){ .ptr = "", .len = 0 });
+    return fa_rar_open_volumes(arena, &one, 1, PROVEN_LIT(""));
 }
 
 void fa_rar_close(fa_rar_archive_t *archive) {
@@ -1126,7 +1131,7 @@ static bool fixed_write(void *ctx, const uint8_t *data, size_t size) {
 
 fa_rar_data_result_t fa_rar_read_entry(proven_arena_t *arena, fa_rar_archive_t *archive,
                                                      size_t index, uint64_t max_entry_bytes) {
-    fa_rar_data_result_t out = { .err = FA_RAR_ERR_BAD_INDEX, .data = { .ptr = "", .len = 0 } };
+    fa_rar_data_result_t out = { .err = FA_RAR_ERR_BAD_INDEX, .data = { .ptr = (const proven_byte_t*)"", .size = 0 } };
     if (!arena || !archive || !archive->state || index >= archive->entry_count) return out;
     const fa_rar_entry_t *e = &archive->entries[index];
     if (e->size != FA_RAR_SIZE_UNKNOWN) {
@@ -1137,15 +1142,16 @@ fa_rar_data_result_t fa_rar_read_entry(proven_arena_t *arena, fa_rar_archive_t *
         out.err = fa_rar_extract(archive, index, fixed_write, &f);
         if (out.err != FA_RAR_OK) return out;
         r.value.ptr[f.len] = 0;
-        out.data = (u8str_t){ .ptr = (const char*)r.value.ptr, .len = f.len };
+        out.data = (proven_mem_view_t){ .ptr = r.value.ptr, .size = f.len };
         return out;
     }
     grow_t g = { .max = max_entry_bytes };
     out.err = fa_rar_extract(archive, index, grow_write, &g);
     if (out.err == FA_RAR_ERR_CANCELLED && g.too_large) out.err = FA_RAR_ERR_TOO_LARGE;
     if (out.err == FA_RAR_OK) {
-        out.data = arena_copy(arena, g.p ? g.p : (const uint8_t*)"", g.len);
-        if (!out.data.ptr) { out.err = FA_RAR_ERR_OUT_OF_MEMORY; out.data = (u8str_t){ .ptr = "", .len = 0 }; }
+        proven_u8str_view_t c = arena_copy(arena, g.p ? g.p : (const uint8_t*)"", g.len);
+        out.data = (proven_mem_view_t){ .ptr = c.ptr, .size = c.size };
+        if (!out.data.ptr) { out.err = FA_RAR_ERR_OUT_OF_MEMORY; out.data = (proven_mem_view_t){ .ptr = (const proven_byte_t*)"", .size = 0 }; }
     }
     free(g.p);
     return out;
@@ -1154,7 +1160,7 @@ fa_rar_data_result_t fa_rar_read_entry(proven_arena_t *arena, fa_rar_archive_t *
 /* ------------------------------------------------------------------ */
 /* passwords */
 
-fa_rar_err_t fa_rar_set_password(fa_rar_archive_t *archive, u8str_t password) {
+fa_rar_err_t fa_rar_set_password(fa_rar_archive_t *archive, proven_u8str_view_t password) {
     if (!archive || !archive->state) return FA_RAR_ERR_BAD_INDEX;
     rar_state_t *st = (rar_state_t*)archive->state;
     if (!g_codec) return FA_RAR_ERR_NO_CODEC;
@@ -1241,41 +1247,41 @@ bool fa_rar_volume_info(const uint8_t *data, size_t size, fa_rar_volume_info_t *
     return false;
 }
 
-static size_t ext_dot(u8str_t name) {
-    for (size_t i = name.len; i-- > 0;) {
+static size_t ext_dot(proven_u8str_view_t name) {
+    for (size_t i = name.size; i-- > 0;) {
         if (name.ptr[i] == '.') return i;
         if (name.ptr[i] == '/' || name.ptr[i] == '\\') break;
     }
     return SIZE_MAX;
 }
 
-static bool is_digit(char c) { return c >= '0' && c <= '9'; }
+static bool is_digit(proven_byte_t c) { return c >= '0' && c <= '9'; }
 
 /* `.partN` right before the extension: where its digits are. */
-static bool part_digits(u8str_t name, size_t dot, size_t *d0, size_t *d1) {
+static bool part_digits(proven_u8str_view_t name, size_t dot, size_t *d0, size_t *d1) {
     size_t e = dot, s = dot;
     while (s > 0 && is_digit(name.ptr[s - 1])) s--;
     if (s == e || s < 5) return false;
-    u8str_t tag = { name.ptr + s - 5, 5 };
+    proven_u8str_view_t tag = { .ptr = name.ptr + s - 5, .size = 5 };
     if (!fa_rar_u8_eq_lit_ci(tag, ".part")) return false;
     *d0 = s; *d1 = e;
     return true;
 }
 
-static bool old_ext(u8str_t name, size_t dot) {
-    if (dot == SIZE_MAX || name.len - dot != 4) return false;
-    char c = fa_rar_ascii_lower(name.ptr[dot + 1]);
+static bool old_ext(proven_u8str_view_t name, size_t dot) {
+    if (dot == SIZE_MAX || name.size - dot != 4) return false;
+    proven_byte_t c = fa_rar_ascii_lower(name.ptr[dot + 1]);
     return c >= 'r' && c <= 'z' && is_digit(name.ptr[dot + 2]) && is_digit(name.ptr[dot + 3]);
 }
 
-fa_rar_volume_name_kind_t fa_rar_volume_name_kind(u8str_t name) {
+fa_rar_volume_name_kind_t fa_rar_volume_name_kind(proven_u8str_view_t name) {
     size_t dot = ext_dot(name), d0, d1;
     if (old_ext(name, dot)) return FA_RAR_NAME_OLD;
     if (dot != SIZE_MAX && part_digits(name, dot, &d0, &d1)) return FA_RAR_NAME_PART;
     return FA_RAR_NAME_PLAIN;
 }
 
-unsigned fa_rar_volume_number(u8str_t name) {
+unsigned fa_rar_volume_number(proven_u8str_view_t name) {
     size_t dot = ext_dot(name), d0, d1;
     if (old_ext(name, dot)) {
         unsigned letter = (unsigned)(fa_rar_ascii_lower(name.ptr[dot + 1]) - 'r');
@@ -1287,29 +1293,29 @@ unsigned fa_rar_volume_number(u8str_t name) {
         return n;
     }
     if (dot != SIZE_MAX) {
-        u8str_t ext = { name.ptr + dot, name.len - dot };
+        proven_u8str_view_t ext = { .ptr = name.ptr + dot, .size = name.size - dot };
         if (fa_rar_u8_eq_lit_ci(ext, ".rar") || fa_rar_u8_eq_lit_ci(ext, ".cbr")) return 1;
     }
     return 0;
 }
 
-static u8str_t splice(proven_arena_t *arena, u8str_t path, size_t from, size_t to, const char *mid, size_t mid_len) {
-    size_t n = from + mid_len + (path.len - to);
+static proven_u8str_view_t splice(proven_arena_t *arena, proven_u8str_view_t path, size_t from, size_t to, const char *mid, size_t mid_len) {
+    size_t n = from + mid_len + (path.size - to);
     proven_result_mem_mut_t r = proven_arena_alloc(arena, n + 1);
-    if (!proven_is_ok(r.err)) return (u8str_t){ .ptr = "", .len = 0 };
+    if (!proven_is_ok(r.err)) return PROVEN_LIT("");
     memcpy(r.value.ptr, path.ptr, from);
     memcpy(r.value.ptr + from, mid, mid_len);
-    memcpy(r.value.ptr + from + mid_len, path.ptr + to, path.len - to);
+    memcpy(r.value.ptr + from + mid_len, path.ptr + to, path.size - to);
     r.value.ptr[n] = 0;
-    return (u8str_t){ .ptr = (const char*)r.value.ptr, .len = n };
+    return (proven_u8str_view_t){ .ptr = r.value.ptr, .size = n };
 }
 
-u8str_t fa_rar_first_volume(proven_arena_t *arena, u8str_t path, bool old) {
-    if (!arena) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t fa_rar_first_volume(proven_arena_t *arena, proven_u8str_view_t path, bool old) {
+    if (!arena) return PROVEN_LIT("");
     size_t dot = ext_dot(path), d0, d1;
     if (old_ext(path, dot)) {
         bool upper = path.ptr[dot + 1] >= 'A' && path.ptr[dot + 1] <= 'Z';
-        return splice(arena, path, dot + 1, path.len, upper ? "RAR" : "rar", 3);
+        return splice(arena, path, dot + 1, path.size, upper ? "RAR" : "rar", 3);
     }
     if (!old && dot != SIZE_MAX && part_digits(path, dot, &d0, &d1)) {
         char digits[32];
@@ -1321,8 +1327,8 @@ u8str_t fa_rar_first_volume(proven_arena_t *arena, u8str_t path, bool old) {
     return splice(arena, path, 0, 0, "", 0);
 }
 
-u8str_t fa_rar_next_volume(proven_arena_t *arena, u8str_t path, bool old) {
-    if (!arena) return (u8str_t){ .ptr = "", .len = 0 };
+proven_u8str_view_t fa_rar_next_volume(proven_arena_t *arena, proven_u8str_view_t path, bool old) {
+    if (!arena) return PROVEN_LIT("");
     size_t dot = ext_dot(path);
     if (old) {
         if (old_ext(path, dot)) {
@@ -1331,20 +1337,20 @@ u8str_t fa_rar_next_volume(proven_arena_t *arena, u8str_t path, bool old) {
             if (n == 100) { n = 0; ext[0]++; }
             ext[1] = (char)('0' + n / 10);
             ext[2] = (char)('0' + n % 10);
-            return splice(arena, path, dot + 1, path.len, ext, 3);
+            return splice(arena, path, dot + 1, path.size, ext, 3);
         }
-        bool upper = dot != SIZE_MAX && dot + 1 < path.len && path.ptr[dot + 1] >= 'A' && path.ptr[dot + 1] <= 'Z';
-        if (dot == SIZE_MAX) return splice(arena, path, path.len, path.len, upper ? ".R00" : ".r00", 4);
-        return splice(arena, path, dot + 1, path.len, upper ? "R00" : "r00", 3);
+        bool upper = dot != SIZE_MAX && dot + 1 < path.size && path.ptr[dot + 1] >= 'A' && path.ptr[dot + 1] <= 'Z';
+        if (dot == SIZE_MAX) return splice(arena, path, path.size, path.size, upper ? ".R00" : ".r00", 4);
+        return splice(arena, path, dot + 1, path.size, upper ? "R00" : "r00", 3);
     }
     /* New naming: the last run of digits before the extension, its width kept; in `x.part3of5.rar`
        the first of the last two numbers (spec 4.1). */
-    size_t end = dot == SIZE_MAX ? path.len : dot;
+    size_t end = dot == SIZE_MAX ? path.size : dot;
     size_t e = end;
     while (e > 0 && !is_digit(path.ptr[e - 1])) e--;
     size_t s = e;
     while (s > 0 && is_digit(path.ptr[s - 1])) s--;
-    if (s == e) return (u8str_t){ .ptr = "", .len = 0 };
+    if (s == e) return PROVEN_LIT("");
     if (s >= 2 && fa_rar_ascii_lower(path.ptr[s - 2]) == 'o' && fa_rar_ascii_lower(path.ptr[s - 1]) == 'f') {
         size_t e2 = s - 2, s2 = e2;
         while (s2 > 0 && is_digit(path.ptr[s2 - 1])) s2--;
@@ -1352,7 +1358,7 @@ u8str_t fa_rar_next_volume(proven_arena_t *arena, u8str_t path, bool old) {
     }
     char digits[34];
     size_t w = e - s;
-    if (w > 32) return (u8str_t){ .ptr = "", .len = 0 };
+    if (w > 32) return PROVEN_LIT("");
     memcpy(digits + 1, path.ptr + s, w);
     digits[0] = '0';
     size_t i = w;

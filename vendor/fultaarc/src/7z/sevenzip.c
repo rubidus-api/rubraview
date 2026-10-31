@@ -520,7 +520,7 @@ static fulta_arc_err_t open_coder(fulta_arc_t *arc, const sz_streams_t *ss, uint
     if (coder_is(c, 0x030401)) return fa_dec_ppmd7z(in, p, np, size, &arc->limits, out);
     if (coder_is(c, 0x040108)) return fa_dec_deflate(in, false, size, out);
     if (coder_is(c, 0x040109)) return fa_dec_deflate(in, true, size, out);
-    if (coder_is(c, 0x040202)) return fa_dec_bzip2(in, size, out);
+    if (coder_is(c, 0x040202)) return fa_dec_bzip2(in, size, &arc->limits, out);
     if (coder_is(c, 0x04F71101)) return fa_dec_zstd(in, size, &arc->limits, out);   /* 7-Zip ZS's id */
     uint32_t start = np == 4 ? fa_le32(p) : 0;
     struct { uint32_t id; fa_filter_kind_t k; } F[] = {

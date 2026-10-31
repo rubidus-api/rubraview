@@ -126,14 +126,27 @@ static fulta_arc_err_t edit_write_to(fulta_arc_edit_t *edit, fulta_arc_format_t 
     int level = opts ? opts->level : 6;
     if (level < 0 || level > 9) level = 6;
     bool same_format = (format == fulta_arc_format(edit->arc));
-    if (same_format && v == FULTA_ARC_EDIT_OK) {             /* copy route */
-        if (format == FULTA_ARC_FORMAT_ZIP)
+    bool sel = opts && (opts->method != FULTA_ARC_METHOD_DEFAULT ||
+                        (format == FULTA_ARC_FORMAT_7Z && opts->filter != FULTA_ARC_FILTER_NONE) ||
+                        (format == FULTA_ARC_FORMAT_7Z && opts->solid == FULTA_ARC_SOLID_OFF));
+    bool encrypt = opts && opts->password;                   /* copied bytes cannot be encrypted: convert instead */
+    if (same_format && v == FULTA_ARC_EDIT_OK && !encrypt) { /* copy route */
+        if (format == FULTA_ARC_FORMAT_ZIP) {
+            /* ZIP copy route does not yet honour an explicit method (RFC-0004 step 7b); reject, don't ignore */
+            if (sel) return FULTA_ARC_ERR_UNSUPPORTED;
             return fa_write_zip_edited(edit->items, edit->n, level, opts && opts->zip64, opts, sink);
+        }
+        /* 7z copy route honours method/filter/BCJ2 on added/replaced entries (step 7b); copied folders stay verbatim.
+           SOLID_OFF is moot here (the source is already non-solid) but a BCJ2+password mix is caught by write_7z. */
         return fa_write_7z_edited(edit->items, edit->n, level, opts, sink);
     }
-    /* convert route: re-encode everything into the target format */
-    if (format == FULTA_ARC_FORMAT_ZIP)
+    /* convert route: re-encode everything into the target format (also the same format when a password is given:
+       every entry is then encrypted, D-016). The 7z convert route honours method/filter/solid (step 2); the ZIP
+       convert route does not yet (step 3) and rejects an explicit non-default selector. */
+    if (format == FULTA_ARC_FORMAT_ZIP) {
+        if (sel) return FULTA_ARC_ERR_UNSUPPORTED;
         return fa_write_zip_convert(edit->items, edit->n, level, opts && opts->zip64, opts, sink);
+    }
     return fa_write_7z_convert(edit->items, edit->n, level, opts, sink, spill_hint);
 }
 
