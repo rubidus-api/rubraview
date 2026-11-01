@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.66.exe              the viewer, as built
-dist/rubraview-v1.39.66/                 the release bundle
-dist/rubraview-v1.39.66.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.67.exe              the viewer, as built
+dist/rubraview-v1.39.67/                 the release bundle
+dist/rubraview-v1.39.67.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1480,8 +1480,10 @@ filename code page, the memory cap). Some worth knowing:
   English is left out. Persian is shown in its letters, but the windows are
   still laid out left to right.
 - **General › On startup** — started with no file, the viewer shows
-  nothing (`blank`), reopens what you read last (`last_file`), or opens the
-  picker in its folder (`last_folder`, the default). **Frameless window**
+  nothing (`blank`), reopens what you read last (`last_file`), opens the
+  picker in its folder (`last_folder`, the default), or opens the picker
+  where you left it (`file_screen`; the PC page the first time).
+  **Frameless window**
   off gives the window Windows' own title bar and borders.
 - **Viewer** — the fit a new session starts with, the layout (the one
   `B` changes), the gap between two pages, how much one zoom step is, and
@@ -1654,6 +1656,10 @@ already gets -1; `Ctrl+Z` takes the paste back.
 
 Inside an archive the pictures show their thumbnails too (not those locked
 by a password, nor one deep inside a large solid 7z).
+
+With nothing open, this screen opens at the folder you left it in, the
+next time the viewer starts too (in an archive, the folder the archive is
+in); with a file open, at that file's folder.
 **Add** on the list's bar opens this screen at the folder of the file on
 screen, picking at a tap; **Add to the list** (where Playlist is) joins
 what is picked to the list.

@@ -18,7 +18,7 @@ static const char *const PARTS[] = {
 "\n",
 "page general \"General\"\n"
 "  section \"Window\"\n"
-"  choice general.startup          \"On startup\"              blank | last_file | last_folder = last_folder wired\n"
+"  choice general.startup          \"On startup\"              blank | last_file | last_folder | file_screen = last_folder wired\n"
 "  toggle general.always_on_top    \"Always on top\"           = false wired\n"
 "  toggle general.frameless        \"Frameless window\"        = true wired\n"
 "  section \"Opening a file from Explorer\"\n"

@@ -731,6 +731,8 @@ void picker_open(app_state_t *app) {
         /* Nothing open: the PC page, not the folder the viewer happened
            to be started in (owner, 2026-09-28). */
         dir = app->source_dir.size > 0 ? app->source_dir : PROVEN_LIT(RUBRAVIEW_PICKER_PLACES);
+        /* RV-207: nothing open either, the folder it was left in last time (layout.ini) */
+        if (app->source_dir.size == 0 && app->picker_last.size > 0) dir = app->picker_last;
     }
     /* Reading a book: the picker opens inside it, at the page's own folder,
        on the page (owner, 2026-09-28). */

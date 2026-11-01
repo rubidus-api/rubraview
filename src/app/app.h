@@ -1311,6 +1311,7 @@ typedef struct app_state {
     bool                   speed_press_detached;
     double                 speed_press_y, speed_press_base;
     proven_u8str_view_t                picker_dir;
+    proven_u8str_view_t    picker_last;     /* RV-207: the folder it was left in last time (layout.ini), kept */
     rubraview_fs_listing_t picker_places;   /* the places bar: the usual folders and the drives */
     /* The picker's own memory (2026-09-29): every folder shown took a
        listing from the working arena for good. Two arenas take turns: a

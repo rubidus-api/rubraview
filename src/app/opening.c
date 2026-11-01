@@ -48,6 +48,11 @@ static double ini_number(const rubraview_ini_doc_t *doc, proven_u8str_view_t sec
     return (text && rubraview_parse_double_prefix(*text, &value, NULL)) ? value : fallback;
 }
 
+/* A place kept as text (a folder), not a setting either. */
+static const proven_u8str_view_t *ini_text(const rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key) {
+    return rubraview_ini_get(doc, section, key);
+}
+
 /* A box saved on a larger screen, or left near the edge of a window that
    then shrank, must not be out of reach: each anchor stays inside the
    window with room to grab it. A toolbox that is its own window is not
@@ -150,6 +155,23 @@ void layout_load(app_state_t *app) {
         frame[i] = (v > -100000.0 && v < 100000.0) ? (int32_t)v : 0;
     }
     if (frame[2] >= 200 && frame[3] >= 150) memcpy(app->settings_frame, frame, sizeof(frame));
+
+    /* RV-207: the folder the open-file screen was left in, if it is still there */
+    const proven_u8str_view_t *last = ini_text(&doc, PROVEN_LIT("picker"), PROVEN_LIT("last_dir"));
+    rubraview_fs_entry_t entry;
+    if (last && last->size > 0 &&
+        (rubraview_picker_is_places(*last) || rubraview_picker_is_recent(*last) ||
+         (rubraview_pal_fs_stat(app->arena, *last, &entry) && entry.is_directory)))
+        app->picker_last = app_keep(app, *last);
+}
+
+/* RV-207: where the open-file screen is, as a folder it can be opened at again: an archive's tree or a book read
+   leaves the folder the archive is in. */
+static proven_u8str_view_t picker_folder_to_keep(app_state_t *app) {
+    if (app->picker_dir.size == 0) return app->picker_last;   /* not opened this time: the one from before stays */
+    if (picker_in_archive(app)) return rubraview_path_dirname(proven_u8str_view_from_cstr(app->picker_arc_path));
+    if (app->picker_in_book) return rubraview_path_dirname(app->source.archive_path);
+    return app->picker_dir;
 }
 
 void layout_save(app_state_t *app) {
@@ -175,6 +197,8 @@ void layout_save(app_state_t *app) {
         rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("settings_window"), PROVEN_LIT("width"), app->settings_frame[2]);
         rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("settings_window"), PROVEN_LIT("height"), app->settings_frame[3]);
     }
+    proven_u8str_view_t last = picker_folder_to_keep(app);
+    if (last.size > 0) rubraview_ini_set_string(app->arena, &doc, PROVEN_LIT("picker"), PROVEN_LIT("last_dir"), last);
     proven_u8str_view_t text = rubraview_ini_serialize(app->arena, &doc);
     if (text.size > 0) rubraview_pal_fs_write_file_atomic(app->layout_path, text);   /* D-99: the last viewer closed leaves its places */
 }

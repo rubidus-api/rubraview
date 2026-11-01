@@ -10,9 +10,10 @@
    given: nothing (the picker's PC page, as before), the last thing read,
    or the picker in the folder it was in. */
 void startup_without_file(app_state_t *app, bool no_file) {
-    if (!no_file || app->history.count == 0) return;
+    if (!no_file) return;
     int mode = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("startup")));
-    if (mode == 0) return;
+    if (mode == 3) { picker_open(app); return; }   /* RV-207: the open-file screen, where it was left (or the PC page) */
+    if (mode == 0 || app->history.count == 0) return;
     const rubraview_history_entry_t *last = &app->history.entries[0];
     for (size_t i = 1; i < app->history.count; ++i) {
         if (app->history.entries[i].timestamp > last->timestamp) last = &app->history.entries[i];
