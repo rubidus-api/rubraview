@@ -487,3 +487,13 @@ proven_u8str_view_t rubraview_shell_selection_of_kinds(proven_arena_t *arena, pr
     out[len] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = len };
 }
+
+rubraview_paste_check_t rubraview_paste_check(proven_u8str_view_t source, proven_u8str_view_t dir, bool moving) {
+    while (source.size > 1 && rubraview_path_is_sep((char)source.ptr[source.size - 1])) source.size--;
+    while (dir.size > 1 && rubraview_path_is_sep((char)dir.ptr[dir.size - 1])) dir.size--;
+    if (moving && rubraview_path_same(rubraview_path_dirname(source), dir)) return RUBRAVIEW_PASTE_HERE_ALREADY;
+    /* `dir` is `source`, or starts with it and a separator */
+    if (dir.size >= source.size && rubraview_path_same((proven_u8str_view_t){ .ptr = dir.ptr, .size = source.size }, source) &&
+        (dir.size == source.size || rubraview_path_is_sep((char)dir.ptr[source.size]))) return RUBRAVIEW_PASTE_INTO_ITSELF;
+    return RUBRAVIEW_PASTE_GO;
+}

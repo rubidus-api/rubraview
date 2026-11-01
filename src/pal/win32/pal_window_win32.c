@@ -1122,6 +1122,78 @@ bool rubraview_pal_clipboard_set_text(rubraview_window_t *window, proven_u8str_v
     return ok;
 }
 
+/* RV-207: Explorer's way of copying files — a DROPFILES of wide paths, double-NUL-ended, and its "Preferred
+   DropEffect" (DROPEFFECT_MOVE for a cut, DROPEFFECT_COPY | DROPEFFECT_LINK as Explorer gives a copy). */
+bool rubraview_pal_clipboard_set_files(rubraview_window_t *window, const proven_u8str_view_t *paths, size_t count, bool moving) {
+    if (!paths || count == 0 || count > 100000) return false;
+    size_t chars = 1;
+    for (size_t i = 0; i < count; ++i) {
+        int n = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)paths[i].ptr, (int)paths[i].size, NULL, 0);
+        if (n <= 0) return false;
+        chars += (size_t)n + 1;
+    }
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, sizeof(DROPFILES) + chars * sizeof(WCHAR));
+    HGLOBAL effect = GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD));
+    if (!memory || !effect) { if (memory) GlobalFree(memory); if (effect) GlobalFree(effect); return false; }
+    DROPFILES *head = (DROPFILES*)GlobalLock(memory);
+    DWORD *said = (DWORD*)GlobalLock(effect);
+    if (!head || !said) {
+        if (head) GlobalUnlock(memory);
+        if (said) GlobalUnlock(effect);
+        GlobalFree(memory); GlobalFree(effect);
+        return false;
+    }
+    head->pFiles = sizeof(DROPFILES);
+    head->fWide = TRUE;
+    WCHAR *at = (WCHAR*)((BYTE*)head + sizeof(DROPFILES)), *end = at + chars;
+    for (size_t i = 0; i < count; ++i) {
+        int n = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)paths[i].ptr, (int)paths[i].size, at, (int)(end - at));
+        for (int k = 0; k < n; ++k) if (at[k] == L'/') at[k] = L'\\';
+        at += n + 1;   /* zeroed: each NUL-ended, the last twice */
+    }
+    *said = moving ? DROPEFFECT_MOVE : (DROPEFFECT_COPY | DROPEFFECT_LINK);
+    GlobalUnlock(memory);
+    GlobalUnlock(effect);
+    if (!OpenClipboard(window ? window->hwnd : NULL)) { GlobalFree(memory); GlobalFree(effect); return false; }
+    EmptyClipboard();
+    bool ok = SetClipboardData(CF_HDROP, memory) != NULL;
+    if (!ok) GlobalFree(memory);   /* on success the clipboard owns it */
+    if (!ok || SetClipboardData(RegisterClipboardFormatW(L"Preferred DropEffect"), effect) == NULL) GlobalFree(effect);
+    CloseClipboard();
+    return ok;
+}
+
+size_t rubraview_pal_clipboard_get_files(rubraview_window_t *window, char *buf, size_t cap, bool *moving) {
+    if (moving) *moving = false;
+    if (!buf || cap == 0 || !IsClipboardFormatAvailable(CF_HDROP)) return 0;
+    if (!OpenClipboard(window ? window->hwnd : NULL)) return 0;
+    size_t count = 0, used = 0;
+    HDROP drop = (HDROP)GetClipboardData(CF_HDROP);
+    UINT n = drop ? DragQueryFileW(drop, 0xFFFFFFFFu, NULL, 0) : 0;
+    for (UINT i = 0; i < n; ++i) {
+        WCHAR wide[MAX_PATH * 4];
+        if (DragQueryFileW(drop, i, wide, (UINT)(sizeof(wide) / sizeof(wide[0]))) == 0) continue;
+        int written = WideCharToMultiByte(CP_UTF8, 0, wide, -1, buf + used, (int)(cap - used), NULL, NULL);
+        if (written <= 0) { count = 0; break; }   /* too many to hold: none, rather than some */
+        used += (size_t)written;
+        count++;
+    }
+    HANDLE effect = count > 0 ? GetClipboardData(RegisterClipboardFormatW(L"Preferred DropEffect")) : NULL;
+    const DWORD *said = effect ? (const DWORD*)GlobalLock(effect) : NULL;
+    if (said) {
+        if (moving) *moving = (*said & DROPEFFECT_MOVE) != 0 && (*said & DROPEFFECT_COPY) == 0;
+        GlobalUnlock(effect);
+    }
+    CloseClipboard();
+    return count;
+}
+
+void rubraview_pal_clipboard_clear(rubraview_window_t *window) {
+    if (!OpenClipboard(window ? window->hwnd : NULL)) return;
+    EmptyClipboard();
+    CloseClipboard();
+}
+
 void rubraview_pal_window_wake(rubraview_window_t *window) {
     if (window && window->hwnd) PostMessageW(window->hwnd, WM_NULL, 0, 0);
 }

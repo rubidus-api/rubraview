@@ -186,6 +186,18 @@ rubraview_target_step_t rubraview_target_folder_step(proven_u8str_view_t path, b
 /** The typed text without the spaces and quotes round it (Explorer's "Copy as path"). */
 proven_u8str_view_t rubraview_target_folder_trim(proven_u8str_view_t typed);
 
+/**
+ * RV-207: whether a file or folder on the clipboard is pasted into `dir`
+ * (owner, 2026-11-01): a cut into the folder it is in already is nothing to
+ * do; a folder into itself or a folder under it would copy without end.
+ */
+typedef enum {
+    RUBRAVIEW_PASTE_GO = 0,
+    RUBRAVIEW_PASTE_HERE_ALREADY,   /* a cut, its folder `dir` itself */
+    RUBRAVIEW_PASTE_INTO_ITSELF,    /* `dir` is `source` or under it */
+} rubraview_paste_check_t;
+rubraview_paste_check_t rubraview_paste_check(proven_u8str_view_t source, proven_u8str_view_t dir, bool moving);
+
 /* ---- §3.19.2 drops ---- */
 
 typedef enum rubraview_drop_kind {

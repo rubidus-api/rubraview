@@ -588,6 +588,87 @@ void picker_recycle(app_state_t *app) {
     picker_navigate(app, app->picker_dir);
 }
 
+/* RV-207 (owner, 2026-11-01): Ctrl+C / Ctrl+X put what is picked (nothing picked, the tile in focus) on the
+   clipboard as Explorer does, so Explorer pastes it too; Ctrl+V puts what is there — from here or from Explorer —
+   into the folder on screen: a name there already gets -1, a cut is then cleared, one undo takes all of it back. */
+void picker_clip_put(app_state_t *app, bool moving) {
+    if (picker_in_archive(app)) { osd_say(app, TU8("inside an archive: extract what you need first")); return; }
+    rubraview_fs_entry_t *entries = NULL;
+    size_t n = picker_picked_entries(app, &entries);
+    rubraview_fs_entry_t one;
+    if (n == 0 && !app->picker_in_book && app->picker.focus < app->picker_listing.count && !picker_is_up(app, app->picker.focus) &&
+        !rubraview_picker_is_places(app->picker_dir)) {
+        one = app->picker_listing.entries[app->picker.focus];
+        entries = &one;
+        n = 1;
+    }
+    if (n == 0) { osd_say(app, TU8("pick some files first")); return; }
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n, sizeof(proven_u8str_view_t));
+    if (!proven_is_ok(res.err)) return;
+    proven_u8str_view_t *paths = (proven_u8str_view_t*)(void*)res.value.ptr;
+    for (size_t i = 0; i < n; ++i) paths[i] = entries[i].path;
+    if (!rubraview_pal_clipboard_set_files(app->window, paths, n, moving)) { osd_say(app, TU8("the clipboard would not take it")); return; }
+    char line[128];
+    int written = snprintf(line, sizeof(line), moving ? T("%zu to move: Ctrl+V in another folder") : T("%zu to copy: Ctrl+V where they go"), n);
+    if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
+}
+
+static bool path_is_there(proven_u8str_view_t path) { return rubraview_pal_fs_exists(path); }
+
+void picker_clip_paste(app_state_t *app) {
+    proven_u8str_view_t dir = app->picker_dir;
+    if (dir.size == 0 || rubraview_picker_is_places(dir) || rubraview_picker_is_recent(dir) || app->picker_in_book || picker_in_archive(app)) {
+        osd_say(app, TU8("nothing can be pasted here"));
+        return;
+    }
+    enum { CLIP_BYTES = 1u << 20 };
+    char *buf = (char*)malloc(CLIP_BYTES);
+    if (!buf) return;
+    bool moving = false;
+    size_t count = rubraview_pal_clipboard_get_files(app->window, buf, CLIP_BYTES, &moving);
+    if (count == 0) { free(buf); osd_say(app, TU8("no files on the clipboard: Ctrl+C or Ctrl+X them first")); return; }
+    size_t done = 0, skipped = 0, failed = 0;
+    uint32_t batch = ++app->undo_batch;
+    const char *at = buf;
+    for (size_t i = 0; i < count; ++i, at += strlen(at) + 1) {
+        proven_u8str_view_t source = proven_u8str_view_from_cstr(at);
+        rubraview_fs_entry_t entry;
+        if (!rubraview_pal_fs_stat(app->arena, source, &entry)) { failed++; continue; }   /* gone since it was copied */
+        rubraview_paste_check_t check = rubraview_paste_check(source, dir, moving);
+        if (check != RUBRAVIEW_PASTE_GO) { skipped++; continue; }
+        proven_u8str_view_t want = rubraview_path_join(app->arena, dir, rubraview_path_basename(source));
+        char target[RUBRAVIEW_ARCHIVE_PATH];
+        bool named = want.size > 0 && (entry.is_directory ? rubraview_archive_free_folder_name(want, path_is_there, target, sizeof(target))
+                                                          : rubraview_archive_free_name(want, path_is_there, target, sizeof(target)));
+        if (!named) { failed++; continue; }
+        proven_u8str_view_t to = app_keep(app, proven_u8str_view_from_cstr(target));
+        bool ok;
+        if (moving) {
+            ok = rubraview_pal_fs_move(source, to);
+            /* a folder to another drive: copied whole, then the one left behind to the recycle bin */
+            if (!ok && entry.is_directory && rubraview_pal_fs_copy_tree(source, to)) ok = rubraview_pal_fs_recycle(source);
+        } else {
+            ok = entry.is_directory ? rubraview_pal_fs_copy_tree(source, to) : rubraview_pal_fs_copy(source, to);
+        }
+        if (!ok) { failed++; continue; }
+        rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+            .op = moving ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
+            .source_path = app_keep(app, source),
+            .target_path = to,
+            .batch = batch,
+        });
+        done++;
+    }
+    free(buf);
+    if (moving && done > 0 && failed == 0) rubraview_pal_clipboard_clear(app->window);   /* as Explorer: a cut is pasted once */
+    char line[160];
+    int written = failed > 0 ? snprintf(line, sizeof(line), T("%zu pasted, %zu could not be"), done, failed)
+                : skipped > 0 && done == 0 ? snprintf(line, sizeof(line), "%s", T("already here, or a folder into itself: nothing pasted"))
+                : snprintf(line, sizeof(line), moving ? T("%zu moved here") : T("%zu copied here"), done);
+    if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
+    if (done > 0) picker_navigate(app, dir);
+}
+
 /* Move or copy the picked files into a folder. */
 void picker_curate_to(app_state_t *app, proven_u8str_view_t target_dir, bool moving) {
     rubraview_fs_entry_t *entries = NULL;

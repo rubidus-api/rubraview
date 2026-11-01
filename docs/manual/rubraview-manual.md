@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.64.exe              the viewer, as built
-dist/rubraview-v1.39.64/                 the release bundle
-dist/rubraview-v1.39.64.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.65.exe              the viewer, as built
+dist/rubraview-v1.39.65/                 the release bundle
+dist/rubraview-v1.39.65.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1645,6 +1645,12 @@ screen is used; a line says how far it is and `Esc` stops it.
 **A new folder.** `Ctrl+Shift+N`, New folder here on a right click, or a
 right click past the last tile makes a new folder in the folder on screen
 and opens its name to type (`Enter` keeps it, `Esc` leaves it "New folder").
+
+**Cut, copy and paste.** `Ctrl+C` copies and `Ctrl+X` cuts what is picked
+(nothing picked, the tile in focus); in another folder `Ctrl+V` (or Paste on
+a right click past the tiles) puts them there. Files copied in Explorer
+paste here, and what you copy here pastes in Explorer. A name there
+already gets -1; `Ctrl+Z` takes the paste back.
 **Add** on the list's bar opens this screen at the folder of the file on
 screen, picking at a tap; **Add to the list** (where Playlist is) joins
 what is picked to the list.
@@ -1993,6 +1999,8 @@ listed under a later heading only means that while that is on screen.
 | Right click `Extract to...`, Right click `Extract them to...` | The picked archives written out into a folder chosen |
 | Right click `Compress to a ZIP`, Right click `Compress them to a ZIP` | The picked files and folders packed into a ZIP beside them, at once |
 | Right click `Compress...`, Right click `Compress them...` | The picked files and folders packed: the new archive's place and name, ZIP or 7z, its level, a password |
+| Right click `Copy`, Right click `Copy them` | What is picked on the clipboard to copy, as Explorer takes it (Ctrl+C) |
+| Right click `Cut`, Right click `Cut them` | What is picked on the clipboard to move, as Explorer takes it (Ctrl+X) |
 | Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
 | Right click `Show in Explorer` | Show in Explorer what was right-clicked |
 | Right click `Favourite (in or out)` | Make the file or folder that was right-clicked a favourite, or no longer one |
@@ -2004,6 +2012,7 @@ listed under a later heading only means that while that is on screen.
 | Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
 | Right click `Make a playlist of them` | Make a playlist of what is picked |
 | Right click `Pick none` | Pick nothing in the open-file screen |
+| Right click `Paste` | The files on the clipboard, from here or Explorer, copied or moved into the folder on screen (Ctrl+V) |
 | Right click `Open` | A file of a list, right-clicked: open it |
 | Right click `Copy the whole path` | A file of a list, right-clicked: its whole path to the clipboard |
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |

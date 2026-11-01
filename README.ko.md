@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.39.64** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview-v1.39.64.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview-v1.39.64.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.39.65** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.65/rubraview-v1.39.65.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.65/rubraview-v1.39.65.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.65/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -256,6 +256,8 @@
 | 오른쪽 클릭 `Extract to...`, 오른쪽 클릭 `Extract them to...` | 고른 압축 파일을 고른 폴더에 풀기 |
 | 오른쪽 클릭 `Compress to a ZIP`, 오른쪽 클릭 `Compress them to a ZIP` | 고른 파일과 폴더를 바로 옆에 ZIP으로 압축 |
 | 오른쪽 클릭 `Compress...`, 오른쪽 클릭 `Compress them...` | 고른 파일과 폴더 압축: 새 압축 파일의 위치와 이름, ZIP 또는 7z, 압축 수준, 암호 |
+| 오른쪽 클릭 `Copy`, 오른쪽 클릭 `Copy them` | 고른 것을 복사하도록 클립보드에 (탐색기와 같은 방식, Ctrl+C) |
+| 오른쪽 클릭 `Cut`, 오른쪽 클릭 `Cut them` | 고른 것을 옮기도록 클립보드에 (탐색기와 같은 방식, Ctrl+X) |
 | 오른쪽 클릭 `Copy the whole path`, 오른쪽 클릭 `Copy their paths` | 고른 것의 경로 복사 |
 | 오른쪽 클릭 `Show in Explorer` | 우클릭한 것을 탐색기에서 보기 |
 | 오른쪽 클릭 `Favourite (in or out)` | 우클릭한 파일이나 폴더를 즐겨찾기에 넣거나 빼기 |
@@ -267,6 +269,7 @@
 | 오른쪽 클릭 `To the recycle bin`, 오른쪽 클릭 `Them to the recycle bin` | 고른 것을 휴지통으로 |
 | 오른쪽 클릭 `Make a playlist of them` | 고른 것으로 재생목록 만들기 |
 | 오른쪽 클릭 `Pick none` | 탐색기에서 고른 것 모두 해제 |
+| 오른쪽 클릭 `Paste` | 클립보드의 파일(여기나 탐색기에서 넣은)을 지금 폴더에 복사 또는 이동 (Ctrl+V) |
 | 오른쪽 클릭 `Open` | 목록의 파일 우클릭: 열기 |
 | 오른쪽 클릭 `Copy the whole path` | 목록의 파일 우클릭: 전체 경로를 클립보드로 |
 | 오른쪽 클릭 `Show in Explorer` | 목록의 파일 우클릭: 탐색기에서 선택해 보여 주기 |

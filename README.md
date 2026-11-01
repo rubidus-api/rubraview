@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.39.64** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview-v1.39.64.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview-v1.39.64.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.39.65** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.65/rubraview-v1.39.65.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.65/rubraview-v1.39.65.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.65/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -257,6 +257,8 @@ ships with, so it cannot drift from them.
 | Right click `Extract to...`, Right click `Extract them to...` | The picked archives written out into a folder chosen |
 | Right click `Compress to a ZIP`, Right click `Compress them to a ZIP` | The picked files and folders packed into a ZIP beside them, at once |
 | Right click `Compress...`, Right click `Compress them...` | The picked files and folders packed: the new archive's place and name, ZIP or 7z, its level, a password |
+| Right click `Copy`, Right click `Copy them` | What is picked on the clipboard to copy, as Explorer takes it (Ctrl+C) |
+| Right click `Cut`, Right click `Cut them` | What is picked on the clipboard to move, as Explorer takes it (Ctrl+X) |
 | Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
 | Right click `Show in Explorer` | Show in Explorer what was right-clicked |
 | Right click `Favourite (in or out)` | Make the file or folder that was right-clicked a favourite, or no longer one |
@@ -268,6 +270,7 @@ ships with, so it cannot drift from them.
 | Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
 | Right click `Make a playlist of them` | Make a playlist of what is picked |
 | Right click `Pick none` | Pick nothing in the open-file screen |
+| Right click `Paste` | The files on the clipboard, from here or Explorer, copied or moved into the folder on screen (Ctrl+V) |
 | Right click `Open` | A file of a list, right-clicked: open it |
 | Right click `Copy the whole path` | A file of a list, right-clicked: its whole path to the clipboard |
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |

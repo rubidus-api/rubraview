@@ -316,6 +316,13 @@ void rubraview_pal_window_wake(rubraview_window_t *window);
 size_t rubraview_pal_clipboard_get_text(rubraview_window_t *window, char *buf, size_t cap);
 bool rubraview_pal_clipboard_set_text(rubraview_window_t *window, proven_u8str_view_t text);
 
+/** RV-207: files on the clipboard as Explorer puts them (CF_HDROP), a cut saying so ("Preferred DropEffect"
+    move), so either pastes the other's. Getting them: their UTF-8 paths, each NUL-ended, into `buf`; their count
+    (0 when there are none or they do not fit); `*moving` for a cut. Clearing it after a cut is pasted, as Explorer. */
+bool rubraview_pal_clipboard_set_files(rubraview_window_t *window, const proven_u8str_view_t *paths, size_t count, bool moving);
+size_t rubraview_pal_clipboard_get_files(rubraview_window_t *window, char *buf, size_t cap, bool *moving);
+void rubraview_pal_clipboard_clear(rubraview_window_t *window);
+
 /** RV-108: a picture on the clipboard — BGRA rows, top first — as other programs paste it. */
 bool rubraview_pal_clipboard_set_image(rubraview_window_t *window, const uint8_t *bgra,
                                        int32_t width, int32_t height, size_t stride);

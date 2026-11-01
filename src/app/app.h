@@ -2193,6 +2193,8 @@ void picker_make_playlist(app_state_t *app);
 rubraview_pal_rect_t picker_nav_rect(const app_state_t *app, double dpi, int which);
 void picker_navigate(app_state_t *app, proven_u8str_view_t dir);
 void picker_new_folder(app_state_t *app);
+void picker_clip_put(app_state_t *app, bool moving);
+void picker_clip_paste(app_state_t *app);
 void picker_open(app_state_t *app);
 void picker_path_begin(app_state_t *app);
 size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out);
