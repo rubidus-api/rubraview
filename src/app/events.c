@@ -370,6 +370,8 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                     /* In a picking mode the tap picks; otherwise it opens. */
                     /* In a book a tap always goes to the page, whatever mode was left on outside it. */
                     if (app->picker_in_book || !rubraview_picker_tap(&app->picker, index)) picker_activate(app, index);
+                } else if (event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {
+                    picker_context_here(app, event->mouse.x, event->mouse.y);   /* RV-207: past the last tile */
                 }
                 break;
             }

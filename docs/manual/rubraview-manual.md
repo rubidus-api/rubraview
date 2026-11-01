@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.63.exe              the viewer, as built
-dist/rubraview-v1.39.63/                 the release bundle
-dist/rubraview-v1.39.63.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.64.exe              the viewer, as built
+dist/rubraview-v1.39.64/                 the release bundle
+dist/rubraview-v1.39.64.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1641,6 +1641,10 @@ brings all that is in it; nothing picked, the whole archive); a picture opens
 the book at that page; `..` leaves it. Copying, moving, renaming and
 recycling are for files on disk: extract first. Work goes on while the
 screen is used; a line says how far it is and `Esc` stops it.
+
+**A new folder.** `Ctrl+Shift+N`, New folder here on a right click, or a
+right click past the last tile makes a new folder in the folder on screen
+and opens its name to type (`Enter` keeps it, `Esc` leaves it "New folder").
 **Add** on the list's bar opens this screen at the folder of the file on
 screen, picking at a tap; **Add to the list** (where Playlist is) joins
 what is picked to the list.
@@ -1992,6 +1996,7 @@ listed under a later heading only means that while that is on screen.
 | Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
 | Right click `Show in Explorer` | Show in Explorer what was right-clicked |
 | Right click `Favourite (in or out)` | Make the file or folder that was right-clicked a favourite, or no longer one |
+| Right click `New folder here`, Right click `New folder` | Make a new folder in the folder on screen and type its name (Ctrl+Shift+N) |
 | Right click `Rename` | Rename the file or folder that was right-clicked |
 | Right click `Change extensions...`, Right click `Change their extensions...` | Give the picked files new extensions, one for each extension they have |
 | Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |

@@ -129,6 +129,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "picker_look_inside", "Look inside the archive right-clicked: its folders and files" },
     { "picker_make_playlist", "Make a playlist of what is picked" },
     { "picker_move_to", "Move what is picked to a folder" },
+    { "picker_new_folder", "Make a new folder in the folder on screen and type its name (Ctrl+Shift+N)" },
     { "picker_open_item", "Open what was right-clicked in the open-file screen" },
     { "picker_recycle", "Put what is picked in the recycle bin" },
     { "picker_rename", "Rename the file or folder that was right-clicked" },

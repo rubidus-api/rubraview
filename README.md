@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.39.63** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview-v1.39.63.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview-v1.39.63.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.39.64** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview-v1.39.64.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview-v1.39.64.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -260,6 +260,7 @@ ships with, so it cannot drift from them.
 | Right click `Copy the whole path`, Right click `Copy their paths` | Copy the paths of what is picked |
 | Right click `Show in Explorer` | Show in Explorer what was right-clicked |
 | Right click `Favourite (in or out)` | Make the file or folder that was right-clicked a favourite, or no longer one |
+| Right click `New folder here`, Right click `New folder` | Make a new folder in the folder on screen and type its name (Ctrl+Shift+N) |
 | Right click `Rename` | Rename the file or folder that was right-clicked |
 | Right click `Change extensions...`, Right click `Change their extensions...` | Give the picked files new extensions, one for each extension they have |
 | Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |

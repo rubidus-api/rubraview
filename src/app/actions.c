@@ -912,6 +912,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_folder"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_FOLDER, false);
         else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_smart"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_SMART, false);
         else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_to"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_FOLDER, true);
+        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_new_folder"))) picker_new_folder(app);
         else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_open_item"))) { if (at < app->picker_listing.count) picker_activate(app, at); }
         else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_look_inside"))) { if (!picker_enter_book(app, at)) osd_say(app, TU8("that is not an archive")); }
         else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_add_to_list"))) picker_add_to_list(app);
@@ -1243,6 +1244,10 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     }
     if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "D")) {
         picker_toggle_favorite(app);   /* D-43, as a browser bookmarks a page */
+        return true;
+    }
+    if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && (combo.modifiers & RUBRAVIEW_MOD_SHIFT) && key_is(combo, "N")) {
+        picker_new_folder(app);   /* RV-207: as Explorer */
         return true;
     }
     if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "A")) { picker_select_everything(app); return true; }   /* 1.22.0 */

@@ -526,6 +526,33 @@ void picker_make_playlist(app_state_t *app) {
                                                        : TU8("playlist opened"));
 }
 
+/* RV-207 (owner, 2026-11-01): a new folder in the folder on screen ("New folder", or New folder-1 when that is
+   there), its name then typed in the rename box. */
+void picker_new_folder(app_state_t *app) {
+    if (app->picker_dir.size == 0 || rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) ||
+        app->picker_in_book || picker_in_archive(app)) {
+        osd_say(app, TU8("no new folder can be made here"));
+        return;
+    }
+    proven_u8str_view_t want = rubraview_path_join(app->arena, app->picker_dir, proven_u8str_view_from_cstr(T("New folder")));
+    char made[RUBRAVIEW_ARCHIVE_PATH];
+    if (want.size == 0 || !rubraview_archive_free_folder_name(want, rubraview_pal_fs_exists, made, sizeof(made)) ||
+        !rubraview_pal_fs_make_dirs(proven_u8str_view_from_cstr(made))) {
+        osd_say(app, TU8("could not make a new folder here"));
+        return;
+    }
+    picker_navigate(app, app->picker_dir);   /* it is listed now */
+    proven_u8str_view_t name = rubraview_path_basename(proven_u8str_view_from_cstr(made));
+    for (size_t i = 0; i < app->picker_listing.count; ++i) {
+        if (!proven_u8str_view_eq(app->picker_listing.entries[i].name, name)) continue;
+        app->picker.focus = i;
+        rubraview_picker_reveal_focus(&app->picker);
+        rename_picker_begin(app, i);
+        return;
+    }
+    osd_say(app, TU8("a new folder is made"));   /* hidden by the filter: made, not renamed */
+}
+
 /* The picked files to the recycle bin, once the button has been pressed
    twice (§3.18.1 asks before anything leaves the disk). */
 void picker_recycle(app_state_t *app) {

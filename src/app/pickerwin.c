@@ -548,6 +548,21 @@ void picker_context(app_state_t *app, size_t index, double x, double y) {
     app->picker_ctx_index = index;
 }
 
+/* RV-207: a right click past the tiles, on the folder itself: a new folder in it. */
+void picker_context_here(app_state_t *app, double x, double y) {
+    if (app->picker_in_book) return;
+    ctx_close(app);
+    slidepop_close(app);
+    const rubraview_toolbox_profile_t *list = rubraview_boxes_context(rubraview_boxes_document(), PROVEN_LIT("pickerhere"));
+    if (!list || list->tile_count <= 0) return;
+    app->ctx_open = true;
+    app->ctx_in_files = false;
+    app->ctx_list = list;
+    app->ctx_x = x;
+    app->ctx_y = y;
+    app->picker_ctx_index = app->picker_listing.count;   /* no tile */
+}
+
 /* A press held still on a tile is a right click (owner: "손가락 오래 누르는건 우클릭"). */
 #define PICKER_HOLD_SECONDS 0.55
 /* 1.25.0 (owner, 2026-10-20: "제자리에서 오래 누르고 있을 때도 우클릭과 동일한 동작"): a press on the picture held

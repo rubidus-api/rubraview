@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.39.63** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview-v1.39.63.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview-v1.39.63.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.63/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.39.64** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview-v1.39.64.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview-v1.39.64.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.64/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -259,6 +259,7 @@
 | 오른쪽 클릭 `Copy the whole path`, 오른쪽 클릭 `Copy their paths` | 고른 것의 경로 복사 |
 | 오른쪽 클릭 `Show in Explorer` | 우클릭한 것을 탐색기에서 보기 |
 | 오른쪽 클릭 `Favourite (in or out)` | 우클릭한 파일이나 폴더를 즐겨찾기에 넣거나 빼기 |
+| 오른쪽 클릭 `New folder here`, 오른쪽 클릭 `New folder` | 지금 폴더에 새 폴더를 만들고 이름 입력 (Ctrl+Shift+N) |
 | 오른쪽 클릭 `Rename` | 우클릭한 파일이나 폴더의 이름 바꾸기 |
 | 오른쪽 클릭 `Change extensions...`, 오른쪽 클릭 `Change their extensions...` | 고른 파일들의 확장자를, 지금 확장자마다 따로 바꾸기 |
 | 오른쪽 클릭 `Copy to...`, 오른쪽 클릭 `Copy them to...` | 고른 것을 폴더로 복사 |
