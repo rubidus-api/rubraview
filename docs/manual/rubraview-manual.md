@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.65.exe              the viewer, as built
-dist/rubraview-v1.39.65/                 the release bundle
-dist/rubraview-v1.39.65.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.66.exe              the viewer, as built
+dist/rubraview-v1.39.66/                 the release bundle
+dist/rubraview-v1.39.66.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1651,6 +1651,9 @@ and opens its name to type (`Enter` keeps it, `Esc` leaves it "New folder").
 a right click past the tiles) puts them there. Files copied in Explorer
 paste here, and what you copy here pastes in Explorer. A name there
 already gets -1; `Ctrl+Z` takes the paste back.
+
+Inside an archive the pictures show their thumbnails too (not those locked
+by a password, nor one deep inside a large solid 7z).
 **Add** on the list's bar opens this screen at the folder of the file on
 screen, picking at a tap; **Add to the list** (where Playlist is) joins
 what is picked to the list.

@@ -52,6 +52,9 @@ bool rubraview_pal_thumbs_request_bytes(rubraview_thumbs_t *thumbs, uint32_t gen
                                         double aspect, uint8_t *bytes, size_t len);
 bool rubraview_pal_thumbs_request(rubraview_thumbs_t *thumbs, uint32_t generation, size_t index,
                                   bool folder, double aspect, proven_u8str_view_t path);
+/* RV-207: a picture inside an archive (the open-file screen's tree of it): the archive's path and the entry's name. */
+bool rubraview_pal_thumbs_request_entry(rubraview_thumbs_t *thumbs, uint32_t generation, size_t index, double aspect,
+                                        proven_u8str_view_t archive, proven_u8str_view_t inner);
 /* A finished one of the current generation, or false. */
 bool rubraview_pal_thumbs_take(rubraview_thumbs_t *thumbs, rubraview_thumb_result_t *out);
 /* Requests queued or being made. */

@@ -3,6 +3,7 @@
  * screen's thumbnails stepped (D-40; RV-163, D-197: moved from main.c as it was).
  */
 #include "app.h"
+#include "rubraview/archive_job.h"
 
 /* ---- D-40: tiles over a page shown reduced ---- */
 
@@ -259,6 +260,19 @@ void picker_thumbs_step(app_state_t *app) {
            lost network drive would hold the one thumbnail thread. */
         if (rubraview_picker_is_places(app->picker_dir)) { t->state = 2; continue; }
         if (!app->picker_in_book && thumb_kept_out(app, entry->path, entry->is_directory)) { t->state = 2; continue; }
+        if (picker_in_archive(app)) {
+            /* RV-207: a picture in an archive's tree, read out of the archive on the thread; folders and the rest
+               keep their kind's tile */
+            char rel[RUBRAVIEW_ARCHIVE_PATH];
+            bool asked = !entry->is_directory && rubraview_glob_match_list(entry->name, PROVEN_LIT(IMAGE_FILTER)) &&
+                         picker_archive_rel(app, entry->path, rel, sizeof(rel)) &&
+                         rubraview_pal_thumbs_request_entry(app->thumbs, app->picker_generation, index, tw / th,
+                                                            proven_u8str_view_from_cstr(app->picker_arc_path),
+                                                            proven_u8str_view_from_cstr(rel));
+            if (asked) t->state = 3;
+            else if (t->state == 0) t->state = 2;
+            continue;
+        }
         if (app->picker_in_book) {
             /* A page in the book has no file to ask about: its bytes go to
                the thread instead (owner, 2026-09-29) — three a pass, so the

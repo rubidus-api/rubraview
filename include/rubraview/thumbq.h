@@ -31,6 +31,7 @@ typedef struct rubraview_thumb_job {
     char     path[RUBRAVIEW_THUMBQ_PATH];   /* UTF-8, not NUL-terminated beyond path_len */
     uint8_t *bytes;            /* a page inside a book: its bytes (malloc), the queue's until taken */
     size_t   bytes_len;
+    size_t   inner_at;         /* RV-207: non-zero, `path` is the archive's up to here and the entry's name after it */
 } rubraview_thumb_job_t;
 
 typedef struct rubraview_thumbq {
@@ -48,6 +49,11 @@ bool rubraview_thumbq_push(rubraview_thumbq_t *q, uint32_t generation, size_t in
    request or drops it later; a take hands them to the taker. */
 bool rubraview_thumbq_push_bytes(rubraview_thumbq_t *q, uint32_t generation, size_t index,
                                  double aspect, uint8_t *bytes, size_t len);
+
+/* RV-207: a picture inside an archive listed in the open-file screen — the archive's path and the entry's name in
+   it, kept one after the other in the job's path (`inner_at` where the name starts). */
+bool rubraview_thumbq_push_entry(rubraview_thumbq_t *q, uint32_t generation, size_t index, double aspect,
+                                 proven_u8str_view_t archive, proven_u8str_view_t inner);
 
 /* The newest request, removed from the queue; false when there is none. */
 bool rubraview_thumbq_take(rubraview_thumbq_t *q, rubraview_thumb_job_t *out);

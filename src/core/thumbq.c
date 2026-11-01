@@ -29,6 +29,19 @@ bool rubraview_thumbq_push(rubraview_thumbq_t *q, uint32_t generation, size_t in
     memcpy(job->path, path.ptr, path.size);
     job->bytes = NULL;
     job->bytes_len = 0;
+    job->inner_at = 0;
+    return true;
+}
+
+bool rubraview_thumbq_push_entry(rubraview_thumbq_t *q, uint32_t generation, size_t index, double aspect,
+                                 proven_u8str_view_t archive, proven_u8str_view_t inner) {
+    if (archive.size == 0 || inner.size == 0 || archive.size + inner.size > RUBRAVIEW_THUMBQ_PATH) return false;
+    char both[RUBRAVIEW_THUMBQ_PATH];
+    memcpy(both, archive.ptr, archive.size);
+    memcpy(both + archive.size, inner.ptr, inner.size);
+    if (!rubraview_thumbq_push(q, generation, index, false, aspect,
+                               (proven_u8str_view_t){ .ptr = (const proven_byte_t *)both, .size = archive.size + inner.size })) return false;
+    q->jobs[q->count - 1].inner_at = archive.size;
     return true;
 }
 

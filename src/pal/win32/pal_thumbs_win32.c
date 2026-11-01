@@ -276,6 +276,34 @@ static uint8_t *archive_first_page(proven_arena_t *scratch, IWICImagingFactory *
     return result;
 }
 
+/* RV-207: a picture inside an archive listed in the open-file screen — found by its name among the archive's
+   pictures, read under the same limits as a cover (one deep in a solid 7z block is let go). */
+static uint8_t *archive_entry_page(proven_arena_t *scratch, IWICImagingFactory *factory, proven_u8str_view_t path,
+                                   proven_u8str_view_t inner, proven_u8str_view_t picture_filter, int32_t *out_w, int32_t *out_h) {
+    uint8_t *result = NULL;
+    rubraview_fs_mapping_t map = {0};
+    if (!rubraview_pal_fs_map(path, &map)) return NULL;
+    if (map.size <= (uint64_t)SIZE_MAX) {
+        rubraview_page_source_t source = rubraview_page_source_from_archive(
+            scratch, map.data, (size_t)map.size, path, picture_filter, RUBRAVIEW_CODEPAGE_AUTO,
+            ARCHIVE_MAX_ENTRY, ARCHIVE_7Z_MAX_FILE);
+        for (size_t i = 0; i < source.page_count; ++i) {
+            if (!rubraview_path_same(source.pages[i].name, inner)) continue;
+            if (rubraview_page_source_read_cost(&source, i) <= ARCHIVE_MAX_COST) {
+                rubraview_page_bytes_t page = rubraview_page_source_read(scratch, &source, i, ARCHIVE_MAX_ENTRY);
+                if (page.ok && page.data.size > 0) {
+                    result = decode_small_bgra(factory, (const uint8_t*)page.data.ptr, page.data.size,
+                                               THUMB_DECODE_SIDE, out_w, out_h);
+                }
+            }
+            break;
+        }
+        rubraview_page_source_close(&source);
+    }
+    rubraview_pal_fs_unmap(&map);
+    return result;
+}
+
 /* ---- one job ---- */
 
 static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICImagingFactory *factory,
@@ -293,6 +321,11 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
         raw = decode_small_bgra(factory, job->bytes, job->bytes_len, THUMB_DECODE_SIDE, &w, &h);
         meta->source_width = g_decoded_w;
         meta->source_height = g_decoded_h;
+    } else if (job->inner_at > 0 && job->inner_at < job->path_len) {
+        proven_u8str_view_t archive = { .ptr = path.ptr, .size = job->inner_at };
+        proven_u8str_view_t inner = { .ptr = path.ptr + job->inner_at, .size = path.size - job->inner_at };
+        raw = archive_entry_page(scratch, factory, archive, inner, pictures, &w, &h);
+        if (raw) { meta->source_width = g_decoded_w; meta->source_height = g_decoded_h; }
     } else if (job->folder) {
         /* Its first picture in the order it would open, else its first film;
            when the shell has nothing for one, the next — three at most, so
@@ -516,6 +549,16 @@ bool rubraview_pal_thumbs_request(rubraview_thumbs_t *t, uint32_t generation, si
     if (!t || rubraview_stream_is_address(path)) return false;   /* RV-157: no picture made of a station */
     AcquireSRWLockExclusive(&t->lock);
     bool ok = rubraview_thumbq_push(&t->queue, generation, index, folder, aspect, path);
+    ReleaseSRWLockExclusive(&t->lock);
+    if (ok) WakeConditionVariable(&t->wake_worker);
+    return ok;
+}
+
+bool rubraview_pal_thumbs_request_entry(rubraview_thumbs_t *t, uint32_t generation, size_t index, double aspect,
+                                        proven_u8str_view_t archive, proven_u8str_view_t inner) {
+    if (!t) return false;
+    AcquireSRWLockExclusive(&t->lock);
+    bool ok = rubraview_thumbq_push_entry(&t->queue, generation, index, aspect, archive, inner);
     ReleaseSRWLockExclusive(&t->lock);
     if (ok) WakeConditionVariable(&t->wake_worker);
     return ok;
