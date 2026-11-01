@@ -2999,3 +2999,21 @@ Do not store credentials, private infrastructure details, personal data, private
   both) and Compress.
 - Rejected: Enter on any archive showing the tree (a comic is read by Enter); thumbnails inside the tree (later).
 - Consequences: the plan's last step, the file manager's side, is proposed to the owner as a list.
+
+## 2026-11-02: D-255 File types named in English only; RV-201 withdrawn (W-20261102-0900)
+
+- Status: Accepted (owner 2026-11-02: "RV-201의 파일 형식 이름을 한국어로 바꾸는걸 철회합니다. 파일 형식은 철저하게 영어로
+  해 주세요.").
+- Decision: every name Rubraview gives a file type is English and never translated, in every language Windows runs
+  in. The Store package's `[assoc.*]` descriptions stay as they are (Picture, Comic book, Video, Music, Text). The
+  classic registration, which wrote no name and so let Windows make one in its own language ("JPG 파일"), now names
+  each `Rubraview.<ext>` type "<EXT> <kind>" ("JPG Picture", "ZIP Archive"), as its key's default and its
+  `FriendlyTypeName` (`rubraview_shell_type_name`), its kind from the list of types that can be registered
+  (`SHELL_GROUPS`, `rubraview_shell_kind_of`) in the Store's words; one not in it is "<EXT> File". The package's Korean description (D-206, RV-113 (5)) is not a type's name and
+  stays.
+- Rejected: Korean type names in the Store package (RV-201, waiting on rubrapack): withdrawn; nothing is asked of
+  rubrapack.
+- Consequences: RV-201 closed as withdrawn; D-206's "the types' names wait for rubrapack" no longer holds. A type
+  registered by an older version keeps Windows' name until it is registered again (Settings › Explorer). A type
+  whose default the reader gave another program (Default apps, `UserChoice`) shows that program's name, which is
+  not ours to set (VM T329: .jpg with Photos stays "JPG 파일"; .cbz, ours, "CBZ Comic book").

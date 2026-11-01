@@ -276,6 +276,14 @@ proven_u8str_view_t rubraview_shell_extensions_all(void);
 uint32_t rubraview_shell_kind_of(proven_u8str_view_t extension);
 
 /**
+ * D-255 (owner, 2026-11-02: "파일 형식은 철저하게 영어로"): the name Explorer shows for a type registered, always
+ * English, never translated: the extension in capitals and its kind, as the Store package names the kinds ("JPG
+ * Picture", "CBZ Comic book", "MP3 Music", "TXT Text"; "XYZ File" for one not ours). "jpg" or ".jpg". Written
+ * NUL-ended when `cap` holds it; returns its length, 0 for an empty extension or one over 16 letters.
+ */
+size_t rubraview_shell_type_name(proven_u8str_view_t extension, char *out, size_t cap);
+
+/**
  * D-86: a choice of extensions, written as words with commas between — an
  * extension ("jpg"), a kind ("pictures", "comics", "video", "music",
  * "archives") or "all" — as the `;`-separated list of the extensions it

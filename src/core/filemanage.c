@@ -419,6 +419,25 @@ uint32_t rubraview_shell_kind_of(proven_u8str_view_t extension) {
     return 0;
 }
 
+size_t rubraview_shell_type_name(proven_u8str_view_t extension, char *out, size_t cap) {
+    if (extension.size > 0 && extension.ptr[0] == '.') { extension.ptr++; extension.size--; }
+    if (extension.size == 0 || extension.size > 16) return 0;
+    /* the words of the Store package's [assoc.*] descriptions */
+    uint32_t kind = rubraview_shell_kind_of(extension);
+    const char *word = kind == RUBRAVIEW_SHELL_PICTURES ? "Picture" : kind == RUBRAVIEW_SHELL_COMICS ? "Comic book"
+                     : kind == RUBRAVIEW_SHELL_VIDEO ? "Video" : kind == RUBRAVIEW_SHELL_MUSIC ? "Music"
+                     : kind == RUBRAVIEW_SHELL_TEXT ? "Text" : kind == RUBRAVIEW_SHELL_ARCHIVES ? "Archive" : "File";
+    size_t n = strlen(word), len = extension.size + 1 + n;
+    if (!out || cap <= len) return len;
+    for (size_t i = 0; i < extension.size; ++i) {
+        char c = (char)extension.ptr[i];
+        out[i] = (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c;
+    }
+    out[extension.size] = ' ';
+    memcpy(out + extension.size + 1, word, n + 1);
+    return len;
+}
+
 /* Is `extension` chosen by `words` — by its own name, its kind's word, or "all"? */
 static bool words_choose(proven_u8str_view_t words, proven_u8str_view_t extension, const char *kind_word) {
     proven_u8str_view_t word;

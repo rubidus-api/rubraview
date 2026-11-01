@@ -15,6 +15,7 @@
 #include "rubraview/stream.h"
 #include "rubraview/pal/pal_window.h"
 #include "rubraview/path.h"
+#include "rubraview/filemanage.h"
 
 #define RUBRAVIEW_WINDOW_CLASS L"Rubraview_MainWindow_Class"
 #define EVENT_QUEUE_CAPACITY 128
@@ -1650,6 +1651,21 @@ static bool register_one(const WCHAR *ext, const WCHAR *progid) {
     wcscat(subkey, progid);
     wcscat(subkey, L"\\shell\\open\\command");
     if (!write_key(g_shell_root, subkey, NULL, command)) return false;
+
+    /* D-255 (owner, 2026-11-02: "파일 형식은 철저하게 영어로"): the type named in English, "JPG Picture"; with no name
+       Windows makes one in its own language ("JPG 파일"). The type's key's default and its FriendlyTypeName. */
+    {
+        char narrow[64], name[64];
+        WCHAR wide[64];
+        int n = WideCharToMultiByte(CP_UTF8, 0, ext, -1, narrow, (int)sizeof narrow, NULL, NULL);
+        if (n > 1 && rubraview_shell_type_name(proven_u8str_view_from_bytes(narrow, (size_t)n - 1), name, sizeof name) > 0 &&
+            MultiByteToWideChar(CP_UTF8, 0, name, -1, wide, 64) > 0) {
+            wcscpy(subkey, L"Software\\Classes\\");
+            wcscat(subkey, progid);
+            write_key(g_shell_root, subkey, NULL, wide);
+            write_key(g_shell_root, subkey, L"FriendlyTypeName", wide);
+        }
+    }
 
     wcscpy(subkey, L"Software\\Classes\\");
     wcscat(subkey, progid);
