@@ -1319,6 +1319,12 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
+    /* The owner (2026-11-02: "열기 화면의 홈 엔드 키"): the first tile and the last, as Explorer. */
+    if (key_is(combo, "Home") || key_is(combo, "End")) {
+        app->picker.focus = key_is(combo, "Home") ? 0 : count - 1;
+        rubraview_picker_reveal_focus(&app->picker);
+        return true;
+    }
     if (proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Enter"))) {
         if ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && picker_enter_book(app, app->picker.focus)) return true;
         picker_activate(app, app->picker.focus);

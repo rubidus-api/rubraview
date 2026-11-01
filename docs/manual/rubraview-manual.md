@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.68.exe              the viewer, as built
-dist/rubraview-v1.39.68/                 the release bundle
-dist/rubraview-v1.39.68.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.69.exe              the viewer, as built
+dist/rubraview-v1.39.69/                 the release bundle
+dist/rubraview-v1.39.69.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1614,6 +1614,9 @@ In the file picker each tile shows its picture — softened and a little
 dark, so the name drawn over it stays readable — and a folder shows the
 first picture in it (or its first film). The tiles fill in as they come
 into view; an archive keeps a plain tile.
+
+The arrows move from tile to tile, `Home` to the first and `End` to the
+last; `Enter` opens it and `Backspace` goes up a folder.
 
 Every tile (and every row of the details view) has a check box at its top
 left: a click on it picks that file or folder, or lets it go, whatever the
