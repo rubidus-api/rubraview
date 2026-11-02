@@ -3100,3 +3100,16 @@ Do not store credentials, private infrastructure details, personal data, private
 - Rejected: splitting the finished archive ourselves (a raw `.zip.001` neither Windows nor FultaArc reads; the
   owner chose FultaArc); dimmed buttons for nothing picked (the owner chose hidden); keeping the choices in the
   settings (not asked; the level was per session before).
+
+## 2026-11-02: D-261 The Compress window takes the password itself, and offers a 7z's names hidden (W-20261102-2130)
+
+- Status: Accepted (owner 2026-11-02: "압축에 암호 거는 것도 있어야지요"; "파일명 암호화 옵션도 필요함").
+- Decision: the password, asked after Enter in a box of its own since RV-207, is two fields in the Compress window,
+  Password and Again: `Tab` (Shift+Tab back) or a click moves the one box between the name and them, a password field
+  shown as dots and never copied out; what is typed is held in memory only and wiped when the window closes. Enter
+  compresses: two that differ say so and go back to Again; both empty, no password. Names: Readable, or Hidden by the
+  password for a 7z (7-Zip's `-mhe`); FultaArc writes no encrypted header yet, so it is greyed and the job refuses it
+  (`rubraview_pack_names_hidden_supported`); asked of FultaArc with the other writes (RV-219). ZIP has no standard way
+  to hide names, so it is greyed there for good.
+- Rejected: the password box after Enter (the owner looked for the password in the window); a show-the-password
+  switch (two fields catch a typing slip instead).

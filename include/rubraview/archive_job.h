@@ -151,6 +151,9 @@ enum { RUBRAVIEW_PACK_LEVEL_STEPS = 6, RUBRAVIEW_PACK_LEVEL_NORMAL = 3 };
 int rubraview_pack_level_of(int step);
 /* Split volumes: FultaArc writes none yet (asked for, D-260), so no format splits; a job asking is refused. */
 bool rubraview_pack_split_supported(rubraview_pack_format_t format);
+/* D-261: a 7z's names hidden behind its password (7-Zip's -mhe): FultaArc writes no encrypted header yet (asked for);
+   ZIP has no standard way. A job asking is refused. */
+bool rubraview_pack_names_hidden_supported(rubraview_pack_format_t format);
 
 typedef struct rubraview_compress_job {
     /* given */
@@ -162,6 +165,7 @@ typedef struct rubraview_compress_job {
     rubraview_pack_method_t method;    /* D-260: DEFAULT, or one rubraview_pack_method_fits and _ready */
     bool solid_off;                    /* D-260, 7z: one block a file (the default packs them together) */
     uint64_t volume_bytes;             /* D-260: 0 one file; otherwise volumes of this size (not written yet) */
+    bool names_hidden;                 /* D-261: with a password, the 7z's names encrypted too (not written yet) */
     const char *password;              /* NULL or "": none. ZIP: WinZip AES-256; 7z: AES-256 (its names stay readable) */
     /* while it runs */
     _Atomic bool cancel;

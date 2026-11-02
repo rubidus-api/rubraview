@@ -615,12 +615,32 @@ static void draw_pack_window(app_state_t *app, rubraview_pal_rect_t name_label, 
     rubraview_pal_render_stroke_rect(app->renderer, panel, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
     rubraview_pal_render_draw_text(app->renderer, TU8("Compress"), (rubraview_pal_rect_t){ panel.x + pad, panel.y, panel.width - 2.0 * pad, title_h },
                                    16.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-    static const char *const ROW_WORD[PACK_ROWS] = { N_("Format"), N_("Level"), N_("Codec"), N_("Solid"), N_("Split") };
+    static const char *const ROW_WORD[PACK_ROWS] = { N_("Format"), N_("Level"), N_("Codec"), N_("Solid"), N_("Split"),
+                                                     N_("Password"), N_("Again"), N_("Names") };
     app->pack_chip_n = 0;
     for (int32_t row = 0; row < PACK_ROWS; ++row) {
         double y = panel.y + title_h + row_h * (double)row;
         rubraview_pal_render_draw_text(app->renderer, cstr(rubraview_tr(ROW_WORD[row])), (rubraview_pal_rect_t){ panel.x + pad, y, label_w, row_h - 6.0 * dpi },
                                        14.0 * dpi, 0xC0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+        if (row == PACK_ROW_PASSWORD || row == PACK_ROW_AGAIN) {   /* D-261: a field; the box itself is drawn there when typed in */
+            int f = row == PACK_ROW_PASSWORD ? 1 : 2;
+            rubraview_pal_rect_t field = { panel.x + pad + label_w, y + 3.0 * dpi, 320.0 * dpi, row_h - 8.0 * dpi };
+            app->pack_field[f] = field;
+            if (app->pack_focus == f) continue;
+            rubraview_pal_render_fill_rect(app->renderer, field, COLOR_BOX_FILL, 3.0);
+            rubraview_pal_render_stroke_rect(app->renderer, field, COLOR_BOX_BORDER, 1.0, 3.0);
+            char dots[3 * 256];
+            size_t nd = 0;
+            for (size_t i = 0; i < app->pack_pw_len[f - 1]; ++i)
+                if (((unsigned char)app->pack_pw[f - 1][i] & 0xC0) != 0x80) { memcpy(dots + nd, "\xE2\x97\x8F", 3); nd += 3; }
+            if (nd) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)dots, .size = nd },
+                                                   (rubraview_pal_rect_t){ field.x + 10.0 * dpi, field.y, field.width - 20.0 * dpi, field.height },
+                                                   14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+            else if (f == 1) rubraview_pal_render_draw_text(app->renderer, TU8("none (Tab or a click to type one)"),
+                                                            (rubraview_pal_rect_t){ field.x + 10.0 * dpi, field.y, field.width - 20.0 * dpi, field.height },
+                                                            13.0 * dpi, 0x80F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+            continue;
+        }
         const char *words[8];
         bool on[8] = { 0 }, off[8] = { 0 };
         int32_t n = 0;
@@ -642,6 +662,11 @@ static void draw_pack_window(app_state_t *app, rubraview_pal_rect_t name_label, 
             case PACK_ROW_SOLID:
                 words[n] = T("Solid");        on[n] = sevenz && !app->pack_solid_off; off[n++] = !sevenz;
                 words[n] = T("File by file"); on[n] = !sevenz || app->pack_solid_off;  off[n++] = !sevenz;
+                break;
+            case PACK_ROW_NAMES:   /* D-261: 7z only, not written by FultaArc yet */
+                words[n] = T("Readable"); on[n] = !sevenz || !app->pack_names_hidden; off[n++] = !sevenz;
+                words[n] = T("Hidden by the password"); on[n] = sevenz && app->pack_names_hidden;
+                off[n++] = !sevenz || !rubraview_pack_names_hidden_supported(format);
                 break;
             default:
                 for (int32_t k = 0; k < PACK_SPLITS; ++k) {
@@ -670,13 +695,14 @@ static void draw_pack_window(app_state_t *app, rubraview_pal_rect_t name_label, 
         }
     }
     /* what the choice means, then what is greyed */
-    const char *note = store ? T("Store: the files go in as they are, the codec unused")
+    const char *note = app->pack_pw_len[0] || app->pack_focus > 0 ? (sevenz ? T("Password: AES-256 (7-Zip's own)") : T("Password: AES-256 (WinZip's; Windows' own ZIP cannot open it)"))
+                     : store ? T("Store: the files go in as they are, the codec unused")
                      : !sevenz && rubraview_pack_method_plain(format, lit) ? T("ZIP with Deflate: Windows opens it too")
                      : sevenz ? T("7z: 7-Zip, Bandizip and this viewer open it") : "";
     double ny = panel.y + title_h + row_h * PACK_ROWS;
     rubraview_pal_render_draw_text(app->renderer, cstr(note), (rubraview_pal_rect_t){ panel.x + pad, ny, panel.width - 2.0 * pad, note_h },
                                    13.0 * dpi, 0xC0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
-    rubraview_pal_render_draw_text(app->renderer, TU8("Greyed: not written by FultaArc yet (split volumes; ZIP's codecs but Deflate)"),
+    rubraview_pal_render_draw_text(app->renderer, TU8("Greyed: not written by FultaArc yet (split volumes; ZIP's codecs but Deflate; hidden names)"),
                                    (rubraview_pal_rect_t){ panel.x + pad, ny + note_h, panel.width - 2.0 * pad, note_h },
                                    13.0 * dpi, 0x90F0F0F0u, RUBRAVIEW_TEXT_LEFT);
 }
@@ -737,9 +763,17 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
         if (app->rename_is_pack) {   /* RV-207: the new archive's place */
             rubraview_pal_rect_t label = { box.x - 40.0 * dpi, box.y - 30.0 * dpi, box.width + 80.0 * dpi, 26.0 * dpi };
             rubraview_pal_render_fill_rect(app->renderer, label, COLOR_BOX_FILL, 3.0);
-            rubraview_pal_render_draw_text(app->renderer, TU8("Compress into:  its ending (.zip or .7z) says which  ·  Enter, then a password or none"),
+            rubraview_pal_render_draw_text(app->renderer, TU8("Compress into:  its ending (.zip or .7z) says which  ·  Tab: the password  ·  Enter compresses"),
                                            label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
             draw_pack_window(app, label, dpi);   /* D-260 */
+            app->pack_field[0] = box;
+            if (app->pack_focus > 0) {   /* D-261: the name stays where it is; the box types the password in its row */
+                rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+                rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+                rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len },
+                                               box, 18.0 * dpi, 0xC0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+                box = app->pack_field[app->pack_focus];
+            }
         }
         if (app->rename_is_target) {
             rubraview_pal_rect_t label = { box.x - 40.0 * dpi, box.y - 30.0 * dpi, box.width + 80.0 * dpi, 26.0 * dpi };
@@ -795,7 +829,7 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             char title[1200];
             proven_u8str_view_t name = rubraview_path_basename((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->password_for, .size = app->password_for_len });
             int tn = snprintf(title, sizeof(title), T("Password for %.*s"), (int)name.size, name.ptr);
-            if (tn > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)title, .size = (size_t)(tn < (int)sizeof(title) ? tn : (int)sizeof(title) - 1) },
+            if (tn > 0 && !app->rename_is_pack) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)title, .size = (size_t)(tn < (int)sizeof(title) ? tn : (int)sizeof(title) - 1) },
                                                        label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
         double size = 18.0 * dpi, pad = 14.0 * dpi;
@@ -834,8 +868,8 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             words[n] = T("Close"); kinds[n++] = RENAME_BTN_CANCEL;
         } else {
             words[n] = app->rename_is_extension ? (app->ext_at + 1 < app->ext_n ? T("Next") : T("Apply"))
-                     : app->rename_is_password ? (app->password_for_pack ? T("Compress") : app->password_for_extract ? T("Extract") : T("Open"))
-                     : app->rename_is_pack ? T("Next") : app->rename_is_filter || app->rename_is_listfilter ? T("Done") : T("OK");
+                     : app->rename_is_pack ? T("Compress")
+                     : app->rename_is_password ? (app->password_for_extract ? T("Extract") : T("Open")) : app->rename_is_filter || app->rename_is_listfilter ? T("Done") : T("OK");
             kinds[n++] = RENAME_BTN_OK;
             if (app->rename_is_extension && app->ext_at + 1 < app->ext_n) { words[n] = T("Apply"); kinds[n++] = RENAME_BTN_OK + 100; }
             if (app->rename_is_target) { words[n] = T("Browse..."); kinds[n++] = RENAME_BTN_BROWSE; }
@@ -846,9 +880,10 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             double tw = 0.0;
             if (rubraview_pal_render_measure_text(app->renderer, cstr(words[i]), 15.0 * dpi, &tw) && tw + 36.0 * dpi > bw) bw = tw + 36.0 * dpi;
         }
-        double bx = app->rename_is_path || app->rename_is_filter ? box.x + box.width - (bw + gap) * (double)n
-                                                                   : box.x + (box.width - (bw + gap) * (double)n + gap) * 0.5;
-        double by = box.y + box.height + 10.0 * dpi;
+        rubraview_pal_rect_t at = app->rename_is_pack ? app->pack_field[0] : box;   /* D-261: under the name, whichever field is typed in */
+        double bx = app->rename_is_path || app->rename_is_filter ? at.x + at.width - (bw + gap) * (double)n
+                                                                   : at.x + (at.width - (bw + gap) * (double)n + gap) * 0.5;
+        double by = at.y + at.height + 10.0 * dpi;
         app->rename_btn_n = n;
         for (int32_t i = 0; i < n; ++i) {
             rubraview_pal_rect_t b = { bx + (double)i * (bw + gap), by, bw, bh };

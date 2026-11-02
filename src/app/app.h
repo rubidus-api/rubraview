@@ -1150,7 +1150,6 @@ typedef struct app_state {
        wiped when the viewer closes. */
     bool                   rename_is_password;
     bool                   rename_is_pack;          /* RV-207: the Compress box (the new archive's place) */
-    bool                   password_for_pack;       /* the password box asks for a new archive */
     bool                   password_for_extract;    /* the password box asks for an archive being extracted */
     int32_t                pack_level;              /* the Compress window's level step: 0 store ... 5 ultra (D-260) */
     int32_t                pack_method;             /* its codec (rubraview_pack_method_t; DEFAULT = the format's first) */
@@ -1162,6 +1161,13 @@ typedef struct app_state {
     bool                   pack_chip_off[PACK_CHIPS_MAX];
     int32_t                pack_chip_n;
     rubraview_pal_rect_t   pack_panel;              /* the window's rows: a press there is its own */
+    int32_t                pack_focus;              /* D-261: the field typed in: 0 the name, 1 the password, 2 it again */
+    char                   pack_name[1024];         /* the name while a password is typed */
+    size_t                 pack_name_len;
+    char                   pack_pw[2][256];         /* the password and its repeat: memory only, wiped when done */
+    size_t                 pack_pw_len[2];
+    bool                   pack_names_hidden;       /* 7z: its names behind the password (not written yet) */
+    rubraview_pal_rect_t   pack_field[3];           /* the name box, the password's, the repeat's */
     struct archwork       *archwork;                /* the extracting or compressing under way */
     char                   password_for[1024];
     size_t                 password_for_len;
@@ -1690,7 +1696,9 @@ extern double g_col_w[RUBRAVIEW_PICKER_SORT_COUNT];
 /* Moved from main.c: more than one file uses them (RV-163). */
 enum { RENAME_BTN_OK = 1, RENAME_BTN_CANCEL, RENAME_BTN_BROWSE, RENAME_BTN_BACK };
 /* D-260: the Compress window's rows; a chip's kind is its row * 16 + its place in the row */
-enum { PACK_ROW_FORMAT = 0, PACK_ROW_LEVEL, PACK_ROW_METHOD, PACK_ROW_SOLID, PACK_ROW_SPLIT, PACK_ROWS };
+enum { PACK_ROW_FORMAT = 0, PACK_ROW_LEVEL, PACK_ROW_METHOD, PACK_ROW_SOLID, PACK_ROW_SPLIT,
+       PACK_ROW_PASSWORD, PACK_ROW_AGAIN, PACK_ROW_NAMES,   /* D-261: the password typed twice, the names hidden or not */
+       PACK_ROWS };
 
 
 /* Shared variables, defined in the file that owns them. */
@@ -2064,6 +2072,7 @@ void archwork_compress_ask(app_state_t *app);
 void archwork_pack_typed(app_state_t *app);
 void archwork_pack_cancelled(app_state_t *app);
 bool archwork_pack_is_7z(const app_state_t *app);
+void archwork_pack_focus(app_state_t *app, int32_t to);
 void archwork_pack_set_format(app_state_t *app, bool sevenz);
 rubraview_pack_method_t archwork_pack_method(const app_state_t *app, bool sevenz);
 bool pack_window_press(app_state_t *app, double x, double y);   /* D-260: a chip of the Compress window */

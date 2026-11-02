@@ -1460,7 +1460,7 @@ void memory_watch(app_state_t *app, double now) {
 /* The box given up: Esc, or its Cancel. */
 static void rename_cancel(app_state_t *app) {
     if (app->rename_is_pack) { rename_end(app); archwork_pack_cancelled(app); osd_say(app, TU8("not compressed")); return; }   /* RV-207 */
-    if (app->rename_is_password && (app->password_for_pack || app->password_for_extract)) {
+    if (app->rename_is_password && app->password_for_extract) {
         rename_end(app);
         (void)archwork_password_box(app, false, PROVEN_LIT(""));
         return;
@@ -1507,6 +1507,10 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         }
         if (key_is(combo, "Enter")) { rename_commit(app); return true; }
         if (key_is(combo, "Escape")) { rename_cancel(app); return true; }
+        if (app->rename_is_pack && key_is(combo, "Tab")) {   /* D-261: the name, the password, it again */
+            archwork_pack_focus(app, (app->pack_focus + ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) ? 2 : 1)) % 3);
+            return true;
+        }
         if (app->rename_is_extension && key_is(combo, "Tab")) {   /* 1.24.0: the next row, or with Shift the one before */
             int32_t to = app->ext_at + ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) ? -1 : 1);
             ext_switch(app, (to % app->ext_n + app->ext_n) % app->ext_n);

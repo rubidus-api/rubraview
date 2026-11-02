@@ -701,6 +701,11 @@ bool rubraview_pack_split_supported(rubraview_pack_format_t format) {
     return false;   /* FultaArc writes no volumes yet; the request: D-260 */
 }
 
+bool rubraview_pack_names_hidden_supported(rubraview_pack_format_t format) {
+    (void)format;
+    return false;   /* FultaArc writes no encrypted 7z header yet; the request: D-261 */
+}
+
 static fulta_arc_method_t fulta_method(rubraview_pack_method_t m) {
     switch (m) {
         case RUBRAVIEW_PACK_METHOD_DEFLATE: return FULTA_ARC_METHOD_DEFLATE;
@@ -719,6 +724,11 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
     if (job->volume_bytes > 0 && !rubraview_pack_split_supported(job->format)) {
         job->result = RUBRAVIEW_ARCHIVE_CANNOT_WRITE;
         say(job->why, sizeof job->why, T("split volumes are not written yet"), "");
+        return;
+    }
+    if (job->names_hidden && !rubraview_pack_names_hidden_supported(job->format)) {
+        job->result = RUBRAVIEW_ARCHIVE_CANNOT_WRITE;
+        say(job->why, sizeof job->why, T("hidden names are not written yet"), "");
         return;
     }
     if (!rubraview_pack_method_ready(job->format, job->method)) {

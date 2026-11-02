@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.73.exe              the viewer, as built
-dist/rubraview-v1.39.73/                 the release bundle
-dist/rubraview-v1.39.73.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.74.exe              the viewer, as built
+dist/rubraview-v1.39.74/                 the release bundle
+dist/rubraview-v1.39.74.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1649,9 +1649,12 @@ Compress... (a window: the place and name — its ending, .zip or .7z, says
 which — then **Format** ZIP or 7z, **Level** Store, Fastest, Fast, Normal,
 Maximum or Ultra, **Codec** (ZIP: Deflate, which Windows opens too; 7z: LZMA2,
 LZMA, PPMd, BZip2 or Deflate), **Solid** or file by file for a 7z, and
-**Split**; `Enter` then asks an AES-256 password or none). Greyed chips are
-what FultaArc does not write yet: split volumes, and ZIP's codecs other than
-Deflate. The bar at the foot has **Extract** (the way Settings › Files ›
+**Split**, **Password** and **Again** (typed twice, shown as dots; `Tab` or
+a click moves between the name and them; empty for none) and **Names**
+readable or hidden by the password (7z); `Enter` compresses. The password is
+AES-256; a ZIP with one needs 7-Zip or Bandizip, not Windows' own. Greyed
+chips are what FultaArc does not write yet: split volumes, ZIP's codecs other
+than Deflate, and a 7z's hidden names. The bar at the foot has **Extract** (the way Settings › Files ›
 Extracting says) and **Compress**, when they fit what is picked. **Look inside
 (an archive)** (or `Shift+Enter`) lists all of an archive's folders and
 files, as a folder is listed. Opening an archive opens it that way too: a ZIP,

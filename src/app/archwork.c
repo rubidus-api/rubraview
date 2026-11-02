@@ -330,10 +330,13 @@ static void compress_go(app_state_t *app, archwork_t *w, bool ask) {
     rubraview_textedit_select_all(&app->rename_edit);
     app->rename_active = true;
     app->rename_is_pack = true;
+    app->pack_focus = 0;   /* D-261: the name first; the password fields empty */
+    secure_wipe(app->pack_pw, sizeof app->pack_pw);
+    app->pack_pw_len[0] = app->pack_pw_len[1] = 0;
     if (app->pack_level < 0 || app->pack_level >= RUBRAVIEW_PACK_LEVEL_STEPS) app->pack_level = RUBRAVIEW_PACK_LEVEL_NORMAL;
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, true);
-    osd_say(app, TU8("where the new archive goes, and how it is packed"));
+    osd_say(app, TU8("where the new archive goes, and how it is packed (Tab: the password)"));
 }
 
 static bool ends_with_ci(const char *s, const char *tail) {
@@ -341,27 +344,63 @@ static bool ends_with_ci(const char *s, const char *tail) {
     return n >= t && _stricmp(s + n - t, tail) == 0;
 }
 
-/* D-260: the Compress window's format is the name's ending; a chip changes the ending. */
+/* D-260: the Compress window's format is the name's ending; a chip changes the ending. D-261: the name is in the box
+   while it is typed, in pack_name while a password is. */
+static proven_u8str_view_t pack_name_text(const app_state_t *app) {
+    return app->pack_focus == 0 ? rubraview_textedit_text(&app->rename_edit)
+                                : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len };
+}
+
 bool archwork_pack_is_7z(const app_state_t *app) {
-    proven_u8str_view_t t = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t t = pack_name_text(app);
     return t.size >= 3 && t.ptr[t.size - 3] == '.' && t.ptr[t.size - 2] == '7' && (t.ptr[t.size - 1] | 0x20) == 'z';
 }
 
 void archwork_pack_set_format(app_state_t *app, bool sevenz) {
     if (archwork_pack_is_7z(app) == sevenz) return;
-    proven_u8str_view_t t = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t t = pack_name_text(app);
     char s[RUBRAVIEW_ARCHIVE_PATH];
-    if (t.size + 5 >= sizeof s) return;
+    if (t.size + 5 >= sizeof s || t.size + 5 >= sizeof app->pack_name) return;
     memcpy(s, t.ptr, t.size);
     s[t.size] = '\0';
     size_t n = t.size;
     if (n >= 4 && _stricmp(s + n - 4, ".zip") == 0) n -= 4;
     else if (n >= 3 && _stricmp(s + n - 3, ".7z") == 0) n -= 3;
     snprintf(s + n, sizeof s - n, sevenz ? ".7z" : ".zip");
-    rubraview_textedit_set(&app->rename_edit, proven_u8str_view_from_cstr(s));
+    if (app->pack_focus == 0) rubraview_textedit_set(&app->rename_edit, proven_u8str_view_from_cstr(s));
+    else { app->pack_name_len = strlen(s); memcpy(app->pack_name, s, app->pack_name_len); }
     /* a codec the other format does not take goes back to the format's first */
     if (!rubraview_pack_method_fits(sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP, (rubraview_pack_method_t)app->pack_method))
         app->pack_method = RUBRAVIEW_PACK_METHOD_DEFAULT;
+}
+
+/* What the box holds put back in its field. */
+static void pack_field_keep(app_state_t *app) {
+    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
+    app->rename_composing_length = 0;
+    proven_u8str_view_t t = rubraview_textedit_text(&app->rename_edit);
+    if (app->pack_focus == 0) {
+        app->pack_name_len = t.size < sizeof app->pack_name ? t.size : sizeof app->pack_name - 1;
+        memcpy(app->pack_name, t.ptr, app->pack_name_len);
+    } else {
+        int k = app->pack_focus - 1;
+        app->pack_pw_len[k] = t.size < sizeof app->pack_pw[k] ? t.size : sizeof app->pack_pw[k] - 1;
+        memcpy(app->pack_pw[k], t.ptr, app->pack_pw_len[k]);
+    }
+}
+
+/* D-261: the box moves to the name, the password or its repeat (Tab, or a click on the field). */
+void archwork_pack_focus(app_state_t *app, int32_t to) {
+    if (!app->rename_is_pack || to < 0 || to > 2 || to == app->pack_focus) return;
+    pack_field_keep(app);
+    secure_wipe(app->rename_buffer, sizeof app->rename_buffer);
+    secure_wipe(app->rename_composing, sizeof app->rename_composing);
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof app->rename_buffer);
+    proven_u8str_view_t v = to == 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len }
+                                    : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_pw[to - 1], .size = app->pack_pw_len[to - 1] };
+    rubraview_textedit_set(&app->rename_edit, v);
+    app->pack_focus = to;
+    app->rename_is_password = to > 0;   /* dots, never copied out, wiped when it ends */
 }
 
 /* The codec the window shows lit: the one chosen, or the format's first. */
@@ -381,6 +420,7 @@ bool pack_window_press(app_state_t *app, double x, double y) {
         bool sevenz = archwork_pack_is_7z(app);
         if (app->pack_chip_off[i]) {
             osd_say(app, row == PACK_ROW_SOLID ? TU8("ZIP packs each file on its own")
+                       : row == PACK_ROW_NAMES && !sevenz ? TU8("ZIP keeps its names readable; 7z can hide them")
                        : row == PACK_ROW_METHOD && app->pack_level == 0 ? TU8("Store keeps the files as they are: no codec")
                        : TU8("FultaArc does not write that yet"));
             return true;
@@ -395,65 +435,59 @@ bool pack_window_press(app_state_t *app, double x, double y) {
                 break;
             }
             case PACK_ROW_SOLID:  app->pack_solid_off = k == 1; break;
-            default:              app->pack_split = k; break;
+            case PACK_ROW_SPLIT:  app->pack_split = k; break;
+            case PACK_ROW_NAMES:  app->pack_names_hidden = k == 1; break;
+            default:              break;
         }
         return true;
     }
+    for (int32_t f = 0; f < 3; ++f) if (pal_rect_has(app->pack_field[f], x, y)) { archwork_pack_focus(app, f); return true; }   /* D-261 */
     return pal_rect_has(app->pack_panel, x, y);   /* between the chips: nothing under it is pressed */
 }
 
-/* Enter in the Compress box: then its password, or none. */
+/* Enter in the Compress window (D-261): the two passwords the same, then it is packed. */
 void archwork_pack_typed(app_state_t *app) {
-    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
-    app->rename_composing_length = 0;
-    proven_u8str_view_t t = rubraview_textedit_text(&app->rename_edit);
+    pack_field_keep(app);
+    if (app->pack_pw_len[0] != app->pack_pw_len[1] || memcmp(app->pack_pw[0], app->pack_pw[1], app->pack_pw_len[0]) != 0) {
+        osd_say(app, TU8("the two passwords differ: type it again"));
+        archwork_pack_focus(app, app->pack_pw_len[0] ? 2 : 1);
+        return;
+    }
     archwork_t *w = g_packing;
+    g_packing = NULL;
+    proven_u8str_view_t t = { .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len };
+    char pw[256];
+    memcpy(pw, app->pack_pw[0], app->pack_pw_len[0]);
+    pw[app->pack_pw_len[0]] = '\0';
+    secure_wipe(app->pack_pw, sizeof app->pack_pw);
+    app->pack_pw_len[0] = app->pack_pw_len[1] = 0;
     rename_end(app);
-    if (!w) return;
-    if (t.size == 0 || t.size >= sizeof w->output) { osd_say(app, TU8("not compressed: no name")); work_free(w); g_packing = NULL; return; }
+    if (w && (t.size == 0 || t.size >= sizeof w->output)) { osd_say(app, TU8("not compressed: no name")); work_free(w); w = NULL; }
     bool bare = true;   /* a name alone goes beside the files, not where the program was started */
-    for (size_t i = 0; i < t.size; ++i) if (t.ptr[i] == '\\' || t.ptr[i] == '/' || t.ptr[i] == ':') bare = false;
-    if (bare) {
+    for (size_t i = 0; w && i < t.size; ++i) if (t.ptr[i] == '\\' || t.ptr[i] == '/' || t.ptr[i] == ':') bare = false;
+    if (w && bare) {
         int n = snprintf(w->output, sizeof w->output, "%s%s%.*s", w->dir, dir_sep(w->dir), (int)t.size, (const char *)t.ptr);
-        if (n <= 0 || (size_t)n >= sizeof w->output) { osd_say(app, TU8("not compressed: no name")); work_free(w); g_packing = NULL; return; }
-    } else {
+        if (n <= 0 || (size_t)n >= sizeof w->output) { osd_say(app, TU8("not compressed: no name")); work_free(w); w = NULL; }
+    } else if (w) {
         memcpy(w->output, t.ptr, t.size);
         w->output[t.size] = '\0';
     }
-    if (!ends_with_ci(w->output, ".zip") && !ends_with_ci(w->output, ".7z")) {
+    if (w && !ends_with_ci(w->output, ".zip") && !ends_with_ci(w->output, ".7z")) {
         if (strlen(w->output) + 5 < sizeof w->output) strcat(w->output, ".zip");
     }
-    /* the password box, for the new archive */
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    app->rename_active = true;
-    app->rename_is_password = true;
-    app->password_for_pack = true;
-    size_t pn = strlen(w->output);   /* the box says whose */
-    if (pn < sizeof(app->password_for)) { memcpy(app->password_for, w->output, pn); app->password_for_len = pn; }
-    rubraview_pal_window_text_input(app->window, true);
-    osd_say(app, ends_with_ci(w->output, ".7z") ? TU8("a password for it (AES-256; its names stay readable), or Enter for none")
-                                                : TU8("a password for it (AES-256), or Enter for none"));
-}
-
-void archwork_pack_password_typed(app_state_t *app, proven_u8str_view_t password) {
-    archwork_t *w = g_packing;
-    g_packing = NULL;
-    app->password_for_pack = false;
-    if (!w) return;
-    char pw[256];
-    size_t n = password.size < sizeof pw ? password.size : 0;
-    memcpy(pw, password.ptr, n);
-    pw[n] = '\0';
-    bool sevenz = ends_with_ci(w->output, ".7z");
-    pack_start(app, w, sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP, rubraview_pack_level_of(app->pack_level),
-               archwork_pack_method(app, sevenz), sevenz && app->pack_solid_off, pw);
+    if (w) {
+        bool sevenz = ends_with_ci(w->output, ".7z");
+        w->pk.names_hidden = sevenz && pw[0] && app->pack_names_hidden;
+        pack_start(app, w, sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP, rubraview_pack_level_of(app->pack_level),
+                   archwork_pack_method(app, sevenz), sevenz && app->pack_solid_off, pw);
+    }
     secure_wipe(pw, sizeof pw);
 }
 
 void archwork_pack_cancelled(app_state_t *app) {
-    (void)app;
     if (g_packing) { work_free(g_packing); g_packing = NULL; }
-    app->password_for_pack = false;
+    secure_wipe(app->pack_pw, sizeof app->pack_pw);
+    app->pack_pw_len[0] = app->pack_pw_len[1] = 0;
 }
 
 /* ---- each pass ---- */
@@ -542,10 +576,6 @@ void archwork_poll(app_state_t *app, bool quitting) {
 
 /* The password box's Enter or Esc, when it was asked for the work. True when it was. */
 bool archwork_password_box(app_state_t *app, bool entered, proven_u8str_view_t typed) {
-    if (app->password_for_pack) {
-        if (entered) archwork_pack_password_typed(app, typed); else archwork_pack_cancelled(app);
-        return true;
-    }
     if (app->password_for_extract) {
         app->password_for_extract = false;
         if (entered) archwork_password_typed(app, typed);
