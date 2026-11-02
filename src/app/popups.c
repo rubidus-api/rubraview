@@ -531,7 +531,37 @@ double name_scale(const app_state_t *app) {
     return k < 0.6 ? 0.6 : k > 2.0 ? 2.0 : k;
 }
 
+/* What Shape (or a sort by length) waits for, under the button pressed: how many of how many, a bar, Esc. */
+void draw_reading(app_state_t *app, double win_w, double win_h, double dpi) {
+    size_t done = 0, count = 0;
+    bool sizes = true;
+    if (!shape_waiting(app, &done, &count, &sizes) || count == 0) return;
+    double w = 340.0 * dpi, h = 78.0 * dpi;
+    rubraview_pal_rect_t box = { app->shape_x, app->shape_y + 4.0 * dpi, w, h };
+    if (app->shape_x <= 0.0 && app->shape_y <= 0.0) box = (rubraview_pal_rect_t){ (win_w - w) * 0.5, win_h * 0.3, w, h };
+    if (box.x + w > win_w - 8.0 * dpi) box.x = win_w - 8.0 * dpi - w;
+    if (box.x < 8.0 * dpi) box.x = 8.0 * dpi;
+    if (box.y + h > win_h - 8.0 * dpi) box.y = win_h - 8.0 * dpi - h;
+    rubraview_pal_render_fill_rect(app->renderer, box, 0xF6202020u, 4.0 * dpi);
+    rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
+    int pct = (int)(done * 100u / count);
+    char line[128];
+    int k = snprintf(line, sizeof line, sizes ? T("Reading the sizes: %zu / %zu (%d%%)") : T("Reading the lengths: %zu / %zu (%d%%)"),
+                     done, count, pct);
+    rubraview_pal_rect_t text = { box.x + 12.0 * dpi, box.y + 6.0 * dpi, w - 24.0 * dpi, 26.0 * dpi };
+    if (k > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k },
+                                              text, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    rubraview_pal_rect_t track = { text.x, box.y + 38.0 * dpi, text.width, 8.0 * dpi };
+    rubraview_pal_render_fill_rect(app->renderer, track, 0x60FFFFFFu, 4.0 * dpi);
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ track.x, track.y, track.width * (double)done / (double)count, track.height },
+                                   COLOR_TILE_CURRENT, 4.0 * dpi);
+    rubraview_pal_render_draw_text(app->renderer, TU8("Esc stops it; the choices open when it is done"),
+                                   (rubraview_pal_rect_t){ text.x, box.y + 50.0 * dpi, text.width, 24.0 * dpi },
+                                   12.0 * dpi, 0xC0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+}
+
 void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi) {
+    draw_reading(app, win_w, win_h, chrome_dpi);
     if (app->notice_seconds > 0.0 && app->notice_length > 0) {
         double k = name_scale(app);   /* 1.25.0 */
         int before = place_font_begin(app, PF_NAME, NULL);

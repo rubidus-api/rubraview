@@ -1085,11 +1085,9 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     size_t selected = 0;
     uint64_t bytes = 0;
     rubraview_picker_selection_metrics(&app->picker, &selected, &bytes);
-    char hidden[48] = "";
-    if (app->picker_hidden > 0) snprintf(hidden, sizeof(hidden), T("   |   %zu other files hidden"), app->picker_hidden);
     int written = snprintf(status, sizeof(status),
-                           T("%zu items%s   |   selected %zu (%llu bytes)   |   Enter opens, Ctrl+L types a path, Ctrl+D stars, Esc closes"),
-                           app->picker_listing.count, hidden, selected, (unsigned long long)bytes);
+                           T("%zu items   |   selected %zu (%llu bytes)   |   Enter opens, Ctrl+L types a path, Ctrl+D stars, Esc closes"),
+                           app->picker_listing.count, selected, (unsigned long long)bytes);
     if (written > 0) {
         rubraview_pal_render_draw_text(app->renderer,
                                        (proven_u8str_view_t){ .ptr = (const proven_byte_t *)status, .size = (size_t)written },

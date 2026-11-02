@@ -217,12 +217,6 @@ const char *rubraview_picker_sort_name(rubraview_picker_sort_key_t key);
 void rubraview_picker_sort_order(const rubraview_fs_listing_t *listing, const rubraview_picker_media_t *media,
                                  rubraview_picker_sort_key_t key, bool descending, size_t *order);
 
-/**
- * Keep the folders and the files whose names match `patterns` (a glob
- * list, "*.jpg;*.png"), in their order, and return how many files were
- * dropped (owner, 2026-09-21: the picker shows only what can be opened).
- */
-size_t rubraview_picker_keep_openable(rubraview_fs_listing_t *listing, proven_u8str_view_t patterns);
 
 /** §3.15.2: the bottom bar's "N files (M bytes)" metrics. */
 void rubraview_picker_selection_metrics(const rubraview_picker_t *picker,

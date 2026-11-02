@@ -1603,6 +1603,14 @@ void audio_track_set(app_state_t *app, int32_t next) {
 }
 
 void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
+    size_t reading_done = 0, reading_count = 0;
+    bool reading_sizes = true;
+    if (key_is(combo, "Escape") && combo.modifiers == 0 && !app->rename_active &&   /* an open text box keeps its Esc */
+        shape_waiting(app, &reading_done, &reading_count, &reading_sizes)) {
+        shape_stop(app);   /* the owner (2026-11-02): the reading Shape waits for, stopped */
+        osd_say(app, TU8("reading stopped"));
+        return;
+    }
     if (chooser_key(app, CHOOSE_IN_MAIN, combo)) return;   /* 1.24.0: the list's keys while it is open */
     if (tmenu_key(app, combo)) return;                     /* 1.25.0: the title bar's ☰ */
     if (ab_edit_handle_key(app, combo)) return;

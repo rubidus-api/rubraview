@@ -284,6 +284,13 @@ uint32_t rubraview_shell_kind_of(proven_u8str_view_t extension);
 size_t rubraview_shell_type_name(proven_u8str_view_t extension, char *out, size_t cap);
 
 /**
+ * D-258: does a file of this name run a program when Windows opens it ("setup.exe", "a.bat", "go.lnk", "x.ps1")?
+ * The open-file screen hands any other file it cannot show to the program Windows opens it with; these it does not
+ * run. By the last extension, any case.
+ */
+bool rubraview_shell_runs_program(proven_u8str_view_t name);
+
+/**
  * D-86: a choice of extensions, written as words with commas between — an
  * extension ("jpg"), a kind ("pictures", "comics", "video", "music",
  * "archives") or "all" — as the `;`-separated list of the extensions it

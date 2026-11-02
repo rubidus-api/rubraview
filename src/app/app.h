@@ -1331,7 +1331,6 @@ typedef struct app_state {
     rubraview_favorites_t  favorites;       /* D-43: the reader's own, first on the places bar */
     proven_u8str_view_t                favorites_path;
     rubraview_fs_listing_t picker_listing;
-    size_t                 picker_hidden;   /* files in the folder the viewer cannot open, not listed */
     rubraview_confirm_t    menu_confirm;    /* a destructive menu item asks first */
     rubraview_picker_t     picker;
     bool                  *picker_selected;   /* one per listed item, remade on every folder */
@@ -1583,7 +1582,9 @@ static const picker_button_t PICKER_BOTTOM[] = { PICKER_BTN_PLAYLIST, PICKER_BTN
 enum { PICKER_TOOL_EXT = 0,   /* RV-204: the files picked by extension, leftmost */
        PICKER_TOOL_ALL, PICKER_TOOL_INDIVIDUAL, PICKER_TOOL_RANGE, PICKER_TOOL_SAME, PICKER_TOOL_MEDIA,
        PICKER_TOOL_SHAPE,   /* RV-192 */
-       PICKER_TOOL_SORT, PICKER_TOOL_ORDER, PICKER_TOOL_VIEW, PICKER_TOOL_COUNT };
+       PICKER_TOOL_SORT, PICKER_TOOL_ORDER, PICKER_TOOL_VIEW,
+       PICKER_TOOL_SHOWN,   /* D-258: every file, or only what the viewer opens */
+       PICKER_TOOL_COUNT };
 enum {
     FILES_PREVIEW_NONE = 0,   /* nothing asked for yet */
     FILES_PREVIEW_SHOWN,
@@ -2034,6 +2035,15 @@ void archwork_extract_inside(app_state_t *app, int mode, bool choose_folder);
 bool picker_in_archive(const app_state_t *app);
 bool picker_enter_archive(app_state_t *app, proven_u8str_view_t path);
 bool open_archive_tree(app_state_t *app, proven_u8str_view_t path);
+int picker_index_read(app_state_t *app, const char *path, rubraview_codepage_t codepage,   /* a rubraview_archive_result_t */
+                      struct rubraview_archive_index *ix);
+bool picker_viewer_opens(proven_u8str_view_t name);
+bool picker_every_file(const app_state_t *app);
+bool shape_waiting(const app_state_t *app, size_t *done, size_t *count, bool *sizes);
+void shape_stop(app_state_t *app);
+void draw_reading(app_state_t *app, double win_w, double win_h, double dpi);
+void picker_toggle_every_file(app_state_t *app);
+void picker_open_file(app_state_t *app, proven_u8str_view_t path);
 void open_path_or_tree(app_state_t *app, proven_u8str_view_t path);
 void picker_leave_archive(app_state_t *app);
 bool picker_archive_rel(const app_state_t *app, proven_u8str_view_t path, char *out, size_t cap);

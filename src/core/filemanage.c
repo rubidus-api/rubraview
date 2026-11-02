@@ -438,6 +438,20 @@ size_t rubraview_shell_type_name(proven_u8str_view_t extension, char *out, size_
     return len;
 }
 
+/* D-258: what Windows runs, or follows to something it runs, when it opens it */
+bool rubraview_shell_runs_program(proven_u8str_view_t name) {
+    size_t dot = name.size;
+    while (dot > 0 && name.ptr[dot - 1] != '.' && name.ptr[dot - 1] != '/' && name.ptr[dot - 1] != '\\') dot--;
+    if (dot == 0 || name.ptr[dot - 1] != '.') return false;
+    proven_u8str_view_t extension = { .ptr = name.ptr + dot, .size = name.size - dot };
+    return extension.size > 0 &&
+           list_has("exe;com;bat;cmd;scr;pif;msi;msp;mst;msc;cpl;hta;vbs;vbe;js;jse;wsf;wsh;ws;ps1;psm1;psd1;ps1xml;"
+                    "reg;jar;lnk;url;website;appref-ms;application;gadget;inf;scf;sct;shb;shs;settingcontent-ms;"
+                    "library-ms;search-ms;searchconnector-ms;appx;appxbundle;msix;msixbundle;diagcab;xll;chm;"
+                    "py;pyw;pyz;pyzw;pyc;pl;rb;rbw;php;lua;tcl;ahk;au3;sh;bash;vb;vbscript;wsc;cmdline;mde;ade;adp",
+                    extension);
+}
+
 /* Is `extension` chosen by `words` — by its own name, its kind's word, or "all"? */
 static bool words_choose(proven_u8str_view_t words, proven_u8str_view_t extension, const char *kind_word) {
     proven_u8str_view_t word;

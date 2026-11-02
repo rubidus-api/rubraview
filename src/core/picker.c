@@ -366,20 +366,6 @@ void rubraview_picker_selection_metrics(const rubraview_picker_t *picker,
     if (out_total_bytes) *out_total_bytes = bytes;
 }
 
-size_t rubraview_picker_keep_openable(rubraview_fs_listing_t *listing, proven_u8str_view_t patterns) {
-    if (!listing || !listing->entries) return 0;
-    size_t kept = 0;
-    for (size_t i = 0; i < listing->count; ++i) {
-        const rubraview_fs_entry_t *e = &listing->entries[i];
-        if (e->is_directory || rubraview_glob_match_list(e->name, patterns)) {
-            listing->entries[kept++] = *e;
-        }
-    }
-    size_t hidden = listing->count - kept;
-    listing->count = kept;
-    return hidden;
-}
-
 size_t rubraview_picker_size_text(char *buf, size_t cap, uint64_t bytes) {
     int n;
     if (!buf || cap == 0) return 0;

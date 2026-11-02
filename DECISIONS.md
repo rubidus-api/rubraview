@@ -3045,3 +3045,39 @@ Do not store credentials, private infrastructure details, personal data, private
   Explorer's Browse verb, which opens the book and its pages' screen.
 - Consequences: a ZIP read as a book is opened from its tree (a picture in it) or reached by the next-archive keys.
   Supersedes D-256's "opening an archive from elsewhere is unchanged".
+
+## 2026-11-02: D-258 The open-file screen lists every file; Every file / Viewer's files on its tool row (W-20261102-1700)
+
+- Status: Accepted (owner 2026-11-02: "현재 파일 브라우저에서는 미디어 파일 또는 압축 파일만 보이는데, 모든 파일이 다 보이게 해야
+  할 것 같아요. 압축파일 내에서도 모든 파일이 다 보이게요."; to the questions asked: a file the viewer does not show
+  "Windows 기본 앱으로 (권장)", a RAR set's later volumes "모두 보이기 (권장)"; "파일 브라우저에서 연결파일만 보여주는 것과
+  전체 파일 다 보여주는걸 상단 버튼에서 선택 가능하면 좋겠네요").
+- Decision: the open-file screen lists every file of a folder, a RAR set's later volumes too, and in the book being
+  read what its archive holds that is no page (`book_listing_whole`, from the archive's names; its names locked, the
+  pages alone). The tool row's last chip, **Every file** / **Viewer's files**, switches to the old listing (folders,
+  what the viewer opens, a RAR set by its first volume) and back; Settings › Files › "Open-file screen shows every
+  file" (`files.picker_all`, on by default) keeps it. A file the viewer does not show, opened there (Enter, a double
+  click, Open, a typed path), goes to the program Windows opens it with (`rubraview_pal_shell_open_file`, as
+  Explorer's double click; none, Windows' Open with); one that runs a program (`rubraview_shell_runs_program`: exe,
+  bat, cmd, msi, lnk, ps1, js, and the scripts an installed interpreter runs: py, rb, pl, php, ahk ...) is not
+  opened and the screen says so, nor is a type Windows itself calls dangerous (`AssocIsDangerous`, asked before it
+  is opened). A later RAR volume opens the book from the
+  first. In a book, a file that is no page says to look inside the archive to extract it. Add to the list and
+  opening several picked at once take only what the viewer shows. The status line's "N other files hidden" is gone.
+- Rejected: running programs as Explorer does (asked: the default app, programs refused); the old filter kept as the
+  only listing (2026-09-21, D-18).
+- Consequences: `rubraview_picker_keep_openable` and its test are gone; the three texts that said files were hidden
+  or nothing could be opened are out of the language packs.
+
+## 2026-11-02: D-259 Shape shows how far its reading is, in a small window under the button (W-20261102-1700)
+
+- Status: Accepted (owner 2026-11-02: "파일 브라우저에서 비율 버튼이 동작을 안해요 ... 최소한 검색중이면 검색중이라고 퍼센트나
+  진행/전체 파일 수 등과 같이 표시는 해 주어야 해요. 버튼 누르면 작은 창으로 알려주고, 다 끝났으면 버튼 눌렀을 떄 그 하위
+  메뉴가 보이게").
+- Cause: nothing was broken: a folder of 700 files, 388 of them films, takes tens of seconds to read the first time
+  (VM, cold), and the only sign was the passing line at the top ("reading the sizes: 71 of 700").
+- Decision: while Shape (or a sort by Resolution or Length) waits for the sizes, a small window under the button
+  (`draw_reading`, from `shape_waiting`; in the middle when nothing was pressed) says "Reading the sizes: N / M (P%)"
+  with a bar and "Esc stops it; the choices open when it is done"; when it is done the choices open there as before.
+  Pressed again while it reads (its own or a sort's), nothing starts over; `Esc` stops it (`shape_stop`, what was
+  read kept) and leaves the screen open; a text box open keeps its own `Esc`. The passing line is gone.

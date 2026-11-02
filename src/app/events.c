@@ -303,6 +303,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                             case PICKER_TOOL_SORT:       chooser_open_sort(app, false, t.x, t.y + t.height, t.y); break;
                             case PICKER_TOOL_ORDER:      chooser_open_sort(app, true, t.x, t.y + t.height, t.y); break;
                             case PICKER_TOOL_VIEW:       picker_button(app, PICKER_BTN_VIEW); break;
+                            case PICKER_TOOL_SHOWN:      picker_toggle_every_file(app); break;   /* D-258 */
                             default: break;
                         }
                         break;

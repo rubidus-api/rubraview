@@ -195,6 +195,7 @@ static const char *const PARTS[] = {
 "  choice files.archive_codepage   \"Archive filenames\"       auto | utf8 | cp949 | shift_jis | gbk | big5 | cp1252 = auto wired\n"
 "  toggle files.comicinfo          \"Read ComicInfo.xml\"      = true wired\n"
 "  toggle files.picker_details     \"Open-file screen as a list with details\" = false wired\n"
+"  toggle files.picker_all         \"Open-file screen shows every file\" = true wired\n"
 "  choice files.picker_sort        \"  sorted by\"               as_folder | name | type | size | created | modified | resolution | length = as_folder wired\n"
 "  toggle files.picker_sort_desc   \"  the other way round\"     = false wired\n"
 "  choice files.list_paths         \"A saved list names its files\" relative | absolute = relative wired\n"

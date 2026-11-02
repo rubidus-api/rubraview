@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.71.exe              the viewer, as built
-dist/rubraview-v1.39.71/                 the release bundle
-dist/rubraview-v1.39.71.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.72.exe              the viewer, as built
+dist/rubraview-v1.39.72/                 the release bundle
+dist/rubraview-v1.39.72.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1618,6 +1618,15 @@ into view; an archive keeps a plain tile.
 The arrows move from tile to tile, `Home` to the first and `End` to the
 last; `Enter` opens it and `Backspace` goes up a folder.
 
+Every file in the folder is listed. One Rubraview does not show (a
+document, a PDF, a settings file) opens in the program Windows opens it
+with, as a double click in Explorer does; a program (`.exe`, `.bat`,
+`.msi`, a shortcut ...) is never run from here. **Every file** at the end
+of the tool row switches to **Viewer's files** — folders and what
+Rubraview opens — and back, and is remembered (Settings › Files). In a
+book the files in it that are no page are listed too; extract them with
+Look inside.
+
 Every tile (and every row of the details view) has a check box at its top
 left: a click on it picks that file or folder, or lets it go, whatever the
 mode. `Ctrl+A` picks everything here, folders too, and again nothing.
@@ -1703,7 +1712,9 @@ means width and height exactly equal. The sizes and lengths are read from
 a small piece at the head of each file by Rubraview itself, and read ahead:
 while a folder is shown here (or a list in the floating list), they are
 read in the background, so Shape and sorting by **Resolution** or **Length**
-are usually ready at once. What was read is kept in `media-facts.txt` beside
+are usually ready at once. When they are not, a small window under
+**Shape ▾** shows how many are read of how many, with a bar; the list opens
+there when they are all read, and `Esc` stops the reading. What was read is kept in `media-facts.txt` beside
 the history, so a folder seen before is known straight away; it is not
 written when Settings › Recent keeps no list, and nothing of a folder kept
 out of Recent goes into it. **Sort by ▾** and **Rising ▾** each open a list to choose from, and

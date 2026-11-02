@@ -1912,6 +1912,35 @@ bool rubraview_pal_shell_open_folder(proven_u8str_view_t path, bool make) {
     return ok != FALSE;
 }
 
+/* Windows' own list of types that run something (shlwapi's AssocIsDangerous, looked up: no import library needed) */
+static bool type_is_dangerous(const WCHAR *path) {
+    const WCHAR *dot = wcsrchr(path, L'.'), *sep = wcsrchr(path, L'\\');
+    if (!dot || (sep && dot < sep)) return false;
+    typedef BOOL (WINAPI *assoc_dangerous_fn)(PCWSTR);
+    HMODULE m = LoadLibraryExW(L"shlwapi.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!m) return false;
+    assoc_dangerous_fn f = (assoc_dangerous_fn)(void *)GetProcAddress(m, "AssocIsDangerous");
+    bool dangerous = f && f(dot);
+    FreeLibrary(m);
+    return dangerous;
+}
+
+bool rubraview_pal_shell_open_file(proven_u8str_view_t path, bool *dangerous) {
+    if (dangerous) *dangerous = false;
+    WCHAR wide[MAX_PATH * 2];
+    if (path.size == 0 || path.size > INT_MAX) return false;
+    int n = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)path.ptr, (int)path.size, wide, (int)(sizeof(wide) / sizeof(wide[0])) - 1);
+    if (n <= 0) return false;
+    wide[n] = L'\0';
+    for (int i = 0; i < n; ++i) if (wide[i] == L'/') wide[i] = L'\\';
+    DWORD at = GetFileAttributesW(wide);
+    if (at == INVALID_FILE_ATTRIBUTES || (at & FILE_ATTRIBUTE_DIRECTORY)) return false;
+    if (type_is_dangerous(wide)) { if (dangerous) *dangerous = true; return false; }
+    /* the default verb, as a double click; no association asks "Open with" */
+    SHELLEXECUTEINFOW info = { .cbSize = sizeof(info), .fMask = SEE_MASK_INVOKEIDLIST, .lpFile = wide, .nShow = SW_SHOWNORMAL };
+    return ShellExecuteExW(&info) != FALSE;
+}
+
 void rubraview_pal_shell_open_default_apps(void) {
     ShellExecuteW(NULL, L"open", L"ms-settings:defaultapps", NULL, NULL, SW_SHOWNORMAL);
 }

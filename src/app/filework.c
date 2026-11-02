@@ -350,8 +350,8 @@ static void picker_path_commit(app_state_t *app) {
         picker_navigate(app, path);
         app->picker.focus = 0;
     } else {
-        app->picker_open = false;
-        open_path_or_tree(app, path);
+        if (open_archive_tree(app, path)) return;
+        picker_open_file(app, path);   /* D-258 */
     }
 }
 

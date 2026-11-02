@@ -228,6 +228,7 @@ proven_u8str_view_t picker_tool_label(const app_state_t *app, int which, char *b
             break;
         case PICKER_TOOL_ORDER:      n = snprintf(buf, cap, "%s \xE2\x96\xBE", desc ? T("Falling") : T("Rising")); break;
         case PICKER_TOOL_VIEW:       n = snprintf(buf, cap, "%s", picker_details(app) ? T("Tiles") : T("Details")); break;
+        case PICKER_TOOL_SHOWN:      n = snprintf(buf, cap, "%s", picker_every_file(app) ? T("Every file") : T("Viewer's files")); break;
         default: break;
     }
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
@@ -241,7 +242,7 @@ rubraview_pal_rect_t picker_tool_rect(const app_state_t *app, double dpi, int wh
         char buf[96];
         double w = picker_chip_width(picker_tool_label(app, i, buf, sizeof(buf)), dpi) + (i == PICKER_TOOL_ALL ? 26.0 * dpi : 0.0);
         if (i == which) return (rubraview_pal_rect_t){ x, y + 4.0 * dpi, w, h - 8.0 * dpi };
-        x += w + (i == PICKER_TOOL_EXT || i == PICKER_TOOL_ALL || i == PICKER_TOOL_SHAPE || i == PICKER_TOOL_ORDER ? 14.0 : 4.0) * dpi;   /* gaps between the kinds */
+        x += w + (i == PICKER_TOOL_EXT || i == PICKER_TOOL_ALL || i == PICKER_TOOL_SHAPE || i == PICKER_TOOL_ORDER || i == PICKER_TOOL_VIEW ? 14.0 : 4.0) * dpi;   /* gaps between the kinds */
     }
     return (rubraview_pal_rect_t){ 0 };
 }
@@ -488,7 +489,10 @@ void picker_add_to_list(app_state_t *app) {
     char kinds_buf[1024];
     const char *const KINDS = (const char * const)kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER).ptr;
     for (size_t i = 0; i < n && count < cap; ++i) {
-        if (!entries[i].is_directory) { paths[count++] = app_keep(app, entries[i].path); continue; }
+        if (!entries[i].is_directory) {   /* D-258: what the viewer does not show stays out */
+            if (picker_viewer_opens(entries[i].name)) paths[count++] = app_keep(app, entries[i].path);
+            continue;
+        }
         rubraview_fs_listing_t inside = rubraview_pal_fs_list_dir(app->arena, entries[i].path);
         for (size_t k = 0; k < inside.count && count < cap; ++k) {
             const rubraview_fs_entry_t *e = &inside.entries[k];
@@ -596,7 +600,7 @@ static void picker_open_picked(app_state_t *app) {
     if (picked == 1) { picker_activate(app, one); return; }
     rubraview_fs_entry_t *entries = NULL;
     size_t n = picker_picked_entries(app, &entries), files = 0;
-    for (size_t i = 0; i < n; ++i) if (!entries[i].is_directory) entries[files++] = entries[i];
+    for (size_t i = 0; i < n; ++i) if (!entries[i].is_directory && picker_viewer_opens(entries[i].name)) entries[files++] = entries[i];   /* D-258 */
     if (files == 0) { osd_say(app, TU8("pick some files first")); return; }
     char line[64];
     int k = snprintf(line, sizeof(line), T("%zu files opened together"), files);
@@ -763,14 +767,7 @@ bool picker_enter_archive(app_state_t *app, proven_u8str_view_t path) {
     if (!p || !ix) { free(p); free(ix); return false; }
     memcpy(p, path.ptr, path.size);
     p[path.size] = '\0';
-    rubraview_archive_result_t r = rubraview_archive_index_read(p, app->archive_codepage, NULL, ix);
-    /* names locked: the session's passwords, newest first */
-    for (size_t k = app->password_count; r == RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED && k > 0; --k) {
-        char pw[513];
-        snprintf(pw, sizeof pw, "%.*s", (int)app->password_lens[k - 1], app->passwords[k - 1]);
-        r = rubraview_archive_index_read(p, app->archive_codepage, pw, ix);
-        secure_wipe(pw, sizeof pw);
-    }
+    rubraview_archive_result_t r = (rubraview_archive_result_t)picker_index_read(app, p, app->archive_codepage, ix);   /* names locked: the session's passwords */
     if (r != RUBRAVIEW_ARCHIVE_DONE) {
         free(p); free(ix);
         osd_say(app, r == RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED || r == RUBRAVIEW_ARCHIVE_PASSWORD_WRONG
@@ -837,6 +834,7 @@ bool open_archive_tree(app_state_t *app, proven_u8str_view_t path) {
     proven_u8str_view_t name = rubraview_path_basename(path);
     if (!rubraview_glob_match_list(name, PROVEN_LIT(ARCHIVE_FILTER_ALL)) ||
         rubraview_shell_kind_of(rubraview_path_ext(name)) == RUBRAVIEW_SHELL_COMICS) return false;
+    if (rubraview_page_source_is_later_volume(name)) return false;   /* D-258: a RAR set's later volume, the book from its first */
     if (app->picker_places.count == 0) app->picker_places = rubraview_pal_fs_list_places(app->arena);
     return picker_enter_archive(app, app_keep(app, path));
 }
@@ -863,14 +861,28 @@ void picker_activate(app_state_t *app, size_t index) {
     /* D-254: a comic holding nothing the viewer shows, its tree too */
     if (rubraview_shell_kind_of(rubraview_path_ext(entry->name)) == RUBRAVIEW_SHELL_COMICS &&
         archive_has_nothing_to_show(app, entry->path) && picker_enter_archive(app, entry->path)) return;
-    app->picker_open = false;
     if (app->picker_in_book && app->picker_page_of && index >= app->picker_page_skip) {
         size_t page = app->picker_page_of[index - app->picker_page_skip];
         if (page != RUBRAVIEW_PICKER_NOT_A_PAGE && page < page_count(app)) {
+            app->picker_open = false;
             go_to_spread(app, spread_for_chosen_page(app, (int32_t)page));
             update_precache(app);
             return;
         }
+        /* D-258: in the book, a file that is no page has no file of its own on disk */
+        osd_say(app, TU8("not a page: Look inside the archive to extract it"));
+        return;
     }
-    open_path(app, entry->path);
+    picker_open_file(app, entry->path);
+}
+
+/* D-258: a file on disk chosen in the open-file screen: the viewer's own kinds in the viewer, any other in the
+   program Windows opens it with, never a program itself. */
+void picker_open_file(app_state_t *app, proven_u8str_view_t path) {
+    proven_u8str_view_t name = rubraview_path_basename(path);
+    if (picker_viewer_opens(name)) { app->picker_open = false; open_path(app, path); return; }
+    if (rubraview_shell_runs_program(name)) { osd_say(app, TU8("a program is not run from here")); return; }
+    bool dangerous = false;
+    if (!rubraview_pal_shell_open_file(path, &dangerous))
+        osd_say(app, dangerous ? TU8("a program is not run from here") : TU8("Windows would not open it"));
 }

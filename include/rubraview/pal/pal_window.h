@@ -282,6 +282,11 @@ bool rubraview_pal_shell_reveal(proven_u8str_view_t path);
  *  nothing named is ever run. */
 bool rubraview_pal_shell_open_folder(proven_u8str_view_t path, bool make);
 
+/** D-258: a file the viewer does not show, opened as Explorer's double click opens it (its default program, or
+ *  Windows' "Open with" when it has none). The caller keeps programs out (rubraview_shell_runs_program); a type
+ *  Windows itself calls dangerous (AssocIsDangerous) is not opened either, `*dangerous` set. False when not opened. */
+bool rubraview_pal_shell_open_file(proven_u8str_view_t path, bool *dangerous);
+
 /** Windows' own Default apps page, where a type's default is chosen. */
 void rubraview_pal_shell_open_default_apps(void);
 

@@ -259,6 +259,87 @@ static rubraview_fs_listing_t archive_listing(app_state_t *app, proven_arena_t *
     return listing;
 }
 
+/* What the viewer itself opens: pictures, films, music, text, books, cue sheets and lists (D-258: the rest its program). */
+bool picker_viewer_opens(proven_u8str_view_t name) {
+    char kinds_buf[1024];
+    return rubraview_glob_match_list(name, kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER ";*.cue;" LIST_FILTER));
+}
+
+/* D-258 (owner, 2026-11-02: "연결파일만 보여주는 것과 전체 파일 다 보여주는걸 상단 버튼에서 선택"): Settings › Files. */
+static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool from_history);
+
+bool picker_every_file(const app_state_t *app) {
+    return rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_all")) > 0.5;
+}
+
+/* The tool row's Every file / Viewer's files: the other, kept, and the folder listed again. */
+void picker_toggle_every_file(app_state_t *app) {
+    bool all = !picker_every_file(app);
+    rubraview_settings_set(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_all"), all ? 1.0 : 0.0);
+    proven_u8str_view_t here = app_keep(app, app->picker_dir);
+    picker_navigate_to(app, here, true);
+    osd_say(app, all ? TU8("every file shown") : TU8("only what the viewer opens shown"));
+}
+
+/* An archive's names, its passwords tried when they are locked: none, then the session's, newest first. */
+int picker_index_read(app_state_t *app, const char *path, rubraview_codepage_t codepage, struct rubraview_archive_index *ix) {
+    rubraview_archive_result_t r = rubraview_archive_index_read(path, codepage, NULL, ix);
+    for (size_t k = app->password_count; r == RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED && k > 0; --k) {
+        char pw[513];
+        snprintf(pw, sizeof pw, "%.*s", (int)app->password_lens[k - 1], app->passwords[k - 1]);
+        r = rubraview_archive_index_read(path, codepage, pw, ix);
+        secure_wipe(pw, sizeof pw);
+    }
+    return r;
+}
+
+/* D-258: in the book being read, what is in its archive and is no page (a text, a ComicInfo.xml, a folder of
+   them) after the folders and pages, as no page; its names unread (locked), the pages alone. */
+static void book_listing_whole(app_state_t *app, proven_arena_t *pa, rubraview_archive_level_t *level,
+                               proven_u8str_view_t inner, proven_u8str_view_t dir) {
+    proven_u8str_view_t archive = rubraview_page_source_first_volume(&app->source);
+    char path[RUBRAVIEW_ARCHIVE_PATH], rel[RUBRAVIEW_ARCHIVE_PATH];
+    if (archive.size == 0 || archive.size >= sizeof path || inner.size >= sizeof rel) return;
+    memcpy(path, archive.ptr, archive.size);
+    path[archive.size] = '\0';
+    for (size_t i = 0; i < inner.size; ++i) rel[i] = inner.ptr[i] == '\\' ? '/' : (char)inner.ptr[i];
+    rel[inner.size] = '\0';
+    rubraview_archive_index_t *ix = calloc(1, sizeof *ix);
+    if (!ix) return;
+    rubraview_codepage_t cp = app->names_codepage >= 0 ? (rubraview_codepage_t)app->names_codepage : app->archive_codepage;
+    if (picker_index_read(app, path, cp, ix) != RUBRAVIEW_ARCHIVE_DONE) { free(ix); return; }
+    rubraview_archive_child_t *kids = ix->count ? malloc(ix->count * sizeof *kids) : NULL;
+    size_t n = kids ? rubraview_archive_index_level(ix, proven_u8str_view_from_cstr(rel), kids, ix->count) : 0;
+    size_t have = level->listing.count;
+    proven_result_mem_mut_t er = rubraview_arena_alloc_array(pa, have + n + 1, sizeof(rubraview_fs_entry_t));
+    proven_result_mem_mut_t pr = rubraview_arena_alloc_array(pa, have + n + 1, sizeof(size_t));
+    if (n > 0 && proven_is_ok(er.err) && proven_is_ok(pr.err)) {
+        rubraview_fs_entry_t *e = (rubraview_fs_entry_t *)(void *)er.value.ptr;
+        size_t *page_of = (size_t *)(void *)pr.value.ptr;
+        if (have) {
+            memcpy(e, level->listing.entries, have * sizeof *e);
+            memcpy(page_of, level->page_of, have * sizeof *page_of);
+        }
+        size_t count = have;
+        for (size_t i = 0; i < n; ++i) {
+            bool listed = false;
+            for (size_t k = 0; k < have && !listed; ++k)
+                listed = e[k].is_directory == kids[i].is_dir && proven_u8str_view_eq(e[k].name, kids[i].name);
+            if (listed) continue;
+            proven_u8str_view_t full = rubraview_path_join(pa, dir, kids[i].name);
+            e[count] = (rubraview_fs_entry_t){ .name = { .ptr = full.ptr + full.size - kids[i].name.size, .size = kids[i].name.size },
+                                               .path = full, .size_bytes = kids[i].size, .mtime = kids[i].mtime,
+                                               .ctime = kids[i].mtime, .is_directory = kids[i].is_dir };
+            page_of[count++] = RUBRAVIEW_PICKER_NOT_A_PAGE;
+        }
+        level->listing = (rubraview_fs_listing_t){ .entries = e, .count = count };
+        level->page_of = page_of;
+    }
+    free(kids);
+    rubraview_archive_index_free(ix);
+    free(ix);
+}
+
 static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool from_history) {
     /* Where it was, kept before the listing's memory turns over; another folder goes on the way back. */
     char was[PICKER_HIST_PATH];
@@ -313,28 +394,23 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
             listing.count += app->favorites.count;
         }
     }
-    /* Only folders and what the viewer opens (owner, 2026-09-21). */
-    char kinds_buf[1024];
-    size_t hidden = in_book || in_arc ? 0 : rubraview_picker_keep_openable(&listing, kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER ";" ARCHIVE_FILTER ";*.cue;" LIST_FILTER));
-    /* A RAR set is one book (owner, 2026-10-01): its first volume stands for it. */
-    if (!in_book && !in_arc) {
+    /* D-258 (owner, 2026-11-02: "모든 파일이 다 보이게"): every file, a RAR set's later volumes too; what the viewer
+       does not show opens in its own program (picker_activate). Was: only what the viewer opens (2026-09-21). */
+    if (in_book && picker_every_file(app)) {
+        book_listing_whole(app, pa, &level, inner, dir);
+        listing = level.listing;
+    }
+    if (!picker_every_file(app) && !in_book && !in_arc && !places && !recent) {
+        /* Viewer's files: folders and what the viewer opens, a RAR set by its first volume (owner, 2026-09-21, 2026-10-01) */
         size_t kept = 0;
         for (size_t i = 0; i < listing.count; ++i) {
-            if (!listing.entries[i].is_directory && rubraview_page_source_is_later_volume(listing.entries[i].name)) { hidden++; continue; }
-            listing.entries[kept++] = listing.entries[i];
+            const rubraview_fs_entry_t *e = &listing.entries[i];
+            if (!e->is_directory && (!picker_viewer_opens(e->name) || rubraview_page_source_is_later_volume(e->name))) continue;
+            listing.entries[kept++] = *e;
         }
         listing.count = kept;
     }
-    if (listing.count == 0 && rubraview_picker_parent(dir).size == 0) {
-        if (hidden > 0) osd_say(app, TU8("nothing in that folder can be opened here"));
-        return;
-    }
-    if (listing.count == 0 && hidden > 0) {
-        /* D-18 kept the reader out of a folder with nothing to open; with
-           `..` on screen it is no longer a trap, so it is only said. */
-        osd_say(app, TU8("nothing here can be opened"));
-    }
-    app->picker_hidden = hidden;
+    if (listing.count == 0 && rubraview_picker_parent(dir).size == 0) return;
 
     /* Directories first, then files, each in the Sort by order — folders are
        what a reader scans for first on a touch screen. */

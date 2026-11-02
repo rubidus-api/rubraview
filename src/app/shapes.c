@@ -235,6 +235,24 @@ static void facts_then(app_state_t *app) {
     else chooser_open_shape(app, app->shape_where, app->shape_x, app->shape_y, app->shape_above);
 }
 
+/* The owner (2026-11-02: "검색중이면 검색중이라고 퍼센트나 진행/전체 파일 수 ... 작은 창으로 알려주고, 다 끝났으면 ...
+   하위 메뉴가 보이게"): a reading someone waits for — how many of how many are read, and whether it is sizes. */
+bool shape_waiting(const app_state_t *app, size_t *done, size_t *count, bool *sizes) {
+    if (!app->shape_reader || app->shape_ahead || app->shape_then == FACTS_THEN_AHEAD) return false;
+    *done = rubraview_pal_sizes_done(app->shape_reader);
+    *count = rubraview_pal_sizes_count(app->shape_reader);
+    *sizes = app->shape_then == FACTS_THEN_SHAPE ||
+             (app->shape_then == FACTS_THEN_PICKER_SORT && app->shape_sort_key == RUBRAVIEW_PICKER_SORT_RESOLUTION);
+    return true;
+}
+
+/* Esc on that window: the reading stopped; what it read is kept. */
+void shape_stop(app_state_t *app) {
+    facts_take(app);
+    shape_reader_end(app);
+    app->shape_then = FACTS_THEN_SHAPE;
+}
+
 static void facts_begin(app_state_t *app, int32_t target, int where, double x, double y, double above_y) {
     size_t count = shape_items(app, target);
     if (count == 0) { osd_say(app, target == SHAPE_FOR_PICKER && app->picker_in_book ? TU8("inside a book: tap a page to go to it")
@@ -279,6 +297,8 @@ bool facts_read_for_sort(app_state_t *app, int32_t target, int32_t then, int key
 }
 
 void shape_begin(app_state_t *app, int32_t target, int where, double x, double y, double above_y) {
+    /* pressed while a reading is waited for here (Shape's, or a sort's): its window stays, nothing starts over */
+    if (app->shape_reader && !app->shape_ahead && app->shape_for == target && app->shape_then != FACTS_THEN_AHEAD) return;
     app->shape_then = FACTS_THEN_SHAPE;
     facts_begin(app, target, where, x, y, above_y);
 }
@@ -315,15 +335,7 @@ void shape_step(app_state_t *app) {
             if (app->shape_reader) { app->shape_ahead = more; app->shape_then = FACTS_THEN_AHEAD; if (!more) shape_reader_end(app); }
             return;
         }
-        double now = rubraview_pal_time_now_seconds();
-        if (now - app->shape_said > 0.25) {
-            app->shape_said = now;
-            char line[96];
-            bool sizes = app->shape_then == FACTS_THEN_SHAPE || (app->shape_then == FACTS_THEN_PICKER_SORT && app->shape_sort_key == RUBRAVIEW_PICKER_SORT_RESOLUTION);
-            int k = snprintf(line, sizeof(line), sizes ? T("reading the sizes: %zu of %zu") : T("reading the lengths: %zu of %zu"), done, count);
-            if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
-        }
-        return;
+        return;   /* how far it is: the small window under what asked (shape_waiting, draw_reading) */
     }
     if (done < count) return;
     /* a reading ahead done: the open-file screen sorted again when its order is one of them */
