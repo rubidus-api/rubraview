@@ -125,6 +125,31 @@ bool rubraview_archive_free_folder_name(proven_u8str_view_t path, bool (*exists)
 static proven_u8str_view_t view(const char *s) { return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = s ? strlen(s) : 0 }; }
 static bool exists_fn(proven_u8str_view_t path) { return rubraview_pal_fs_exists(path); }
 
+/* D-263: a split set's names. Volume `i` of the set named `set` ("x.7z", "x.zip"), not its last (ZIP's last is the
+   set's own name); false past the name's room. */
+static bool volume_name(rubraview_pack_format_t format, const char *set, uint32_t i, char *out, size_t cap) {
+    return fulta_arc_volume_name(format == RUBRAVIEW_PACK_7Z ? FULTA_ARC_FORMAT_7Z : FULTA_ARC_FORMAT_ZIP, set, i, UINT32_MAX,
+                                 out, cap) == FULTA_ARC_OK;
+}
+
+/* Taken when the name or the set's first volume is there (for the free name a split set is given). */
+static _Thread_local rubraview_pack_format_t g_set_format;
+static bool set_exists_fn(proven_u8str_view_t path) {
+    char set[RUBRAVIEW_ARCHIVE_PATH], first[RUBRAVIEW_ARCHIVE_PATH + 16];
+    if (path.size >= sizeof set) return true;
+    memcpy(set, path.ptr, path.size);
+    set[path.size] = '\0';
+    return rubraview_pal_fs_exists(path) || !volume_name(g_set_format, set, 0, first, sizeof first) || rubraview_pal_fs_exists(view(first));
+}
+
+/* Every volume of a set and the set's own name, deleted (a set that failed its check). */
+static void delete_set(rubraview_pack_format_t format, const char *set) {
+    char name[RUBRAVIEW_ARCHIVE_PATH + 16];
+    for (uint32_t i = 0; i < 100000 && volume_name(format, set, i, name, sizeof name) && rubraview_pal_fs_exists(view(name)); ++i)
+        (void)rubraview_pal_fs_delete(view(name));
+    (void)rubraview_pal_fs_delete(view(set));
+}
+
 /* A file's facts; the path's copy kept in a small arena of the caller's stack. */
 static bool stat_of(const char *path, rubraview_fs_entry_t *out) {
     static _Thread_local uint8_t room[3 * RUBRAVIEW_ARCHIVE_PATH];
@@ -624,12 +649,10 @@ static int cmp_order(const void *a, const void *b) {
 
 /* The archive at `path` holds exactly `list`'s files and folders, byte for byte. */
 static bool check_written(const char *path, pack_list_t *list, rubraview_compress_job_t *job) {
-    fulta_arc_source_t src;
-    if (fulta_arc_source_file(path, &src) != FULTA_ARC_OK) return false;
     fulta_arc_options_t opt = { .name = path, .password = cmp_password, .password_ctx = (void *)job->password,
                                 .codepage = FULTA_ARC_CP_UTF8 };
     fulta_arc_t *arc = NULL;
-    if (fulta_arc_open(&src, &opt, &arc) != FULTA_ARC_OK) return false;
+    if (fulta_arc_open_file(path, &opt, &arc) != FULTA_ARC_OK) return false;   /* a split set's volumes found by name */
     bool ok = fulta_arc_count(arc) == list->count;
     qsort(list->items, list->count, sizeof list->items[0], cmp_order);
     for (size_t i = 0; ok && i < fulta_arc_count(arc); ++i) {
@@ -683,8 +706,7 @@ bool rubraview_pack_method_fits(rubraview_pack_format_t format, rubraview_pack_m
 }
 
 bool rubraview_pack_method_ready(rubraview_pack_format_t format, rubraview_pack_method_t method) {
-    if (!rubraview_pack_method_fits(format, method)) return false;
-    return format == RUBRAVIEW_PACK_7Z || method == RUBRAVIEW_PACK_METHOD_DEFAULT || method == RUBRAVIEW_PACK_METHOD_DEFLATE;
+    return rubraview_pack_method_fits(format, method);   /* FultaArc 1bc526c writes them all, ZIP's too (D-263) */
 }
 
 bool rubraview_pack_method_plain(rubraview_pack_format_t format, rubraview_pack_method_t method) {
@@ -698,12 +720,11 @@ int rubraview_pack_level_of(int step) {
 
 bool rubraview_pack_split_supported(rubraview_pack_format_t format) {
     (void)format;
-    return false;   /* FultaArc writes no volumes yet; the request: D-260 */
+    return true;   /* D-263: FultaArc 1bc526c writes 7z's name.7z.001... and ZIP's name.z01...name.zip */
 }
 
 bool rubraview_pack_names_hidden_supported(rubraview_pack_format_t format) {
-    (void)format;
-    return false;   /* FultaArc writes no encrypted 7z header yet; the request: D-261 */
+    return format == RUBRAVIEW_PACK_7Z;   /* D-263: FultaArc's encrypt_names; ZIP has no standard way */
 }
 
 static bool plain_byte(proven_byte_t c) { return c >= 0x21 && c <= 0x7E; }
@@ -810,7 +831,9 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
         if (list.items[i].dir) job->folders++;
         else { job->files++; total += list.items[i].size; }
     }
-    if (!rubraview_archive_free_name(view(job->output), exists_fn, job->written, sizeof job->written)) {
+    bool split = job->volume_bytes > 0;
+    g_set_format = job->format;
+    if (!rubraview_archive_free_name(view(job->output), split ? set_exists_fn : exists_fn, job->written, sizeof job->written)) {
         job->result = RUBRAVIEW_ARCHIVE_CANNOT_WRITE; list_free(&list); return;
     }
 
@@ -843,8 +866,10 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
         .progress = pack_progress, .progress_ctx = job,
         .password = secret ? job->password : NULL,
         .encryption = !secret ? FULTA_ARC_ENCRYPT_DEFAULT : job->format == RUBRAVIEW_PACK_7Z ? FULTA_ARC_ENCRYPT_7Z_AES256 : FULTA_ARC_ENCRYPT_ZIP_AES256,
-        /* level 0 stores, whatever the codec; ZIP's Deflate is its default (its writer takes no named codec yet) */
-        .method = job->level <= 0 || job->format == RUBRAVIEW_PACK_ZIP ? FULTA_ARC_METHOD_DEFAULT : fulta_method(job->method),
+        /* level 0 stores, whatever the codec */
+        .method = job->level <= 0 ? FULTA_ARC_METHOD_DEFAULT : fulta_method(job->method),
+        .volume_size = split ? (job->volume_bytes < FULTA_ARC_VOLUME_MIN ? FULTA_ARC_VOLUME_MIN : job->volume_bytes) : 0,
+        .encrypt_names = secret && job->names_hidden && job->format == RUBRAVIEW_PACK_7Z,
         .solid = job->format == RUBRAVIEW_PACK_7Z && job->solid_off ? FULTA_ARC_SOLID_OFF : FULTA_ARC_SOLID_DEFAULT,
     };
     fulta_arc_format_t format = job->format == RUBRAVIEW_PACK_7Z ? FULTA_ARC_FORMAT_7Z : FULTA_ARC_FORMAT_ZIP;
@@ -861,17 +886,24 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
         (void)rubraview_pal_fs_delete(view(job->written));   /* FultaArc renames only a whole one over it; nothing of ours stays */
         job->result = err == FULTA_ARC_ERR_CANCELLED || atomic_load(&job->cancel) ? RUBRAVIEW_ARCHIVE_CANCELLED
                     : job->why[0] ? RUBRAVIEW_ARCHIVE_CANNOT_READ : RUBRAVIEW_ARCHIVE_CANNOT_WRITE;
+        if (err == FULTA_ARC_ERR_EXISTS) say(job->why, sizeof job->why, T("a later part of an older split set of that name is there: move it away first"), job->written);
         if (!job->why[0] && job->result == RUBRAVIEW_ARCHIVE_CANNOT_WRITE) say(job->why, sizeof job->why, fulta_arc_strerror(err), job->written);
         job->written[0] = '\0';
         list_free(&list);
         return;
     }
 
-    /* read back and compared before it is kept */
+    /* read back and compared before it is kept; a split set opened as Rubraview opens it (D-263): a 7z's first volume,
+       a ZIP's own name */
+    char set[RUBRAVIEW_ARCHIVE_PATH];
+    snprintf(set, sizeof set, "%s", job->written);
+    if (split && job->format == RUBRAVIEW_PACK_7Z && !volume_name(job->format, set, 0, job->written, sizeof job->written))
+        snprintf(job->written, sizeof job->written, "%s", set);
     atomic_store(&job->phase, 2);
     atomic_store(&job->done, 0);
     if (!check_written(job->written, &list, job)) {
-        (void)rubraview_pal_fs_delete(view(job->written));
+        if (split) delete_set(job->format, set);
+        else (void)rubraview_pal_fs_delete(view(job->written));
         job->result = atomic_load(&job->cancel) ? RUBRAVIEW_ARCHIVE_CANCELLED : RUBRAVIEW_ARCHIVE_CHECK_FAILED;
         job->written[0] = '\0';
     }

@@ -449,6 +449,11 @@ bool pack_window_press(app_state_t *app, double x, double y) {
 /* Enter in the Compress window (D-261): the two passwords the same, then it is packed. */
 void archwork_pack_typed(app_state_t *app) {
     pack_field_keep(app);
+    if (app->pack_names_hidden && archwork_pack_is_7z(app) && app->pack_pw_len[0] == 0) {   /* D-263 */
+        osd_say(app, TU8("hidden names need a password: type one"));
+        archwork_pack_focus(app, 1);
+        return;
+    }
     if (app->pack_pw_len[0] != app->pack_pw_len[1] || memcmp(app->pack_pw[0], app->pack_pw[1], app->pack_pw_len[0]) != 0) {
         osd_say(app, TU8("the two passwords differ: type it again"));
         archwork_pack_focus(app, app->pack_pw_len[0] ? 2 : 1);
@@ -479,6 +484,10 @@ void archwork_pack_typed(app_state_t *app) {
     if (w) {
         bool sevenz = ends_with_ci(w->output, ".7z");
         w->pk.names_hidden = sevenz && pw[0] && app->pack_names_hidden;
+        /* D-263: the window's split sizes in MiB, 4 GB as FAT32's largest file allows */
+        static const uint64_t SPLIT_MIB[] = { 0, 10, 100, 700, 4095 };
+        int32_t k = app->pack_split;
+        w->pk.volume_bytes = k > 0 && k < (int32_t)(sizeof SPLIT_MIB / sizeof *SPLIT_MIB) ? SPLIT_MIB[k] << 20 : 0;
         pack_start(app, w, sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP, rubraview_pack_level_of(app->pack_level),
                    archwork_pack_method(app, sevenz), sevenz && app->pack_solid_off, pw);
     }

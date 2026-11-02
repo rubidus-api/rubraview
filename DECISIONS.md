@@ -3127,3 +3127,20 @@ Do not store credentials, private infrastructure details, personal data, private
   and resets when the box closes.
 - Why plain: archivers store a non-ASCII password's bytes differently (UTF-8, a code page), so such an archive may
   not open elsewhere; and dots hide what an IME composed.
+
+## 2026-11-02: D-263 FultaArc 1bc526c: split sets, ZIP's codecs and a 7z's hidden names written (W-20261102-2359)
+
+- Status: Accepted (owner 2026-11-02, for split: "fultaarc쪽에 구현요청하고 여기는 껍데기만 만들어두고 구현되면
+  마무리"; the same done for ZIP's codecs and hidden names, D-260, D-261). FultaArc's session wrote them on request
+  (RV-219) and said so: `9537a00` (ZIP codecs on the edit and convert routes), `1bc526c` (split output, 7z header
+  encryption).
+- Decision: `vendor/fultaarc` resynced to `1bc526c`, unmodified. The Compress window's chips are on: every codec in
+  both formats; Split passes `volume_size` (10 / 100 / 700 MiB, 4 GB as 4095 MiB), the set given a free name as a
+  whole (its name or its first volume there: the next number), read back from its first volume (`fulta_arc_open_file`
+  finds the others) and deleted whole if the check fails; `FULTA_ARC_ERR_EXISTS` (an older set's later volume where
+  the new one would end) says to move it away, nothing deleted; Hidden by the password sets `encrypt_names` (7z with
+  a password; Enter with none asks for one). The viewer reads the sets it makes: `*.7z.0??` are archives, a later
+  `x.7z.NNN` and a split ZIP's `x.zNN` open the set from `x.7z.001` / `x.zip` (`rubraview_page_source_is_later_volume`;
+  `.zNN` was taken for RAR's old numbering before and sent to a `.rar` that is not there).
+- Rejected: waiting for FultaArc's next snapshot (proven v0.107.x, announced): the owner asked to finish once it was
+  written; that one is resynced when it comes.

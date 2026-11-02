@@ -53,6 +53,7 @@ typedef int32_t fulta_arc_err_t;
 #define FULTA_ARC_ERR_CANCELLED        0x1009  /* the cancel callback said stop */
 #define FULTA_ARC_ERR_BAD_NAME         0x100A  /* writing: a name that may not be stored */
 #define FULTA_ARC_DAMAGED              0x100B  /* with options.keep_damaged: bytes were delivered to the sink but failed the checksum or ended early */
+#define FULTA_ARC_ERR_EXISTS           0x100C  /* writing a split set: a later volume of the same name exists and would join it */
 
 /* A short English description of an error code (static string). */
 const char *fulta_arc_strerror(fulta_arc_err_t err);
@@ -321,16 +322,50 @@ typedef struct fulta_arc_write_options {
     fulta_arc_filter_t filter;        /* 7z only; 0 = none; a content filter chained before `method` */
     uint32_t filter_delta_dist;       /* DELTA filter byte distance (1..256); 0 = 1 */
     fulta_arc_solid_t solid;          /* 7z only; 0 = default (solid); SOLID_OFF = one folder per file (editable) */
+    uint64_t volume_size;             /* 0 = one file; else split into volumes of this many bytes (at least
+                                         FULTA_ARC_VOLUME_MIN): honoured by the *_file and *_volumes calls only */
+    int encrypt_names;                /* 7z with a password: encrypt the header too (names hidden, like 7-Zip's
+                                         -mhe=on); ignored without a password; INVALID_ARG for ZIP */
 } fulta_arc_write_options_t;
+
+/* The smallest volume: a ZIP header never spans two volumes, and one may be nearly 64 KiB. */
+#define FULTA_ARC_VOLUME_MIN ((uint64_t)65536)
+
+/* Split output. A 7z set is 7-Zip's byte cut, `name.7z.001`, `name.7z.002`, ...; a ZIP set is PKWARE's split form,
+   `name.z01`, `name.z02`, ..., `name.zip` (the last volume holds the central directory; disk numbers recorded). A
+   ZIP that fits one volume is a plain `name.zip`; a 7z set of one volume is still `name.7z.001`.
+   The callbacks: open() volume `index` (0 = first) and give a sink for it (write appends, patch overwrites earlier
+   bytes of that volume); close() says no write or patch will reach volume `index` again; finish() ends the set:
+   with ok != 0 all `count` volumes are complete (give them their names, fulta_arc_volume_name), else discard them
+   all. finish() is called once whenever open() was offered, also after a failure or cancel. */
+typedef struct fulta_arc_volume_sink {
+    void *ctx;
+    fulta_arc_err_t (*open)(void *ctx, uint32_t index, fulta_arc_write_sink_t *out);
+    fulta_arc_err_t (*close)(void *ctx, uint32_t index);                  /* may be NULL */
+    fulta_arc_err_t (*finish)(void *ctx, uint32_t count, int ok);
+} fulta_arc_volume_sink_t;
+
+/* The name of volume `index` of a `count`-volume set named `set_name` (the name the whole archive would have,
+   e.g. "book.7z" or "book.zip"). LIMIT when `cap` is too small. */
+fulta_arc_err_t fulta_arc_volume_name(fulta_arc_format_t format, const char *set_name, uint32_t index,
+                                      uint32_t count, char *buf, size_t cap);
 
 /* Write `entries`, in order, as one ZIP or 7z archive. `options` may be NULL. */
 fulta_arc_err_t fulta_arc_write(fulta_arc_format_t format, const fulta_arc_write_entry_t *entries, size_t count,
                                 const fulta_arc_write_options_t *options, const fulta_arc_write_sink_t *sink);
 
-/* Write to a file (created or replaced). */
+/* Write to a file (created or replaced). With options->volume_size, `path` names the set: its volumes are written
+   under temporary names beside it and all renamed only on success (none left on failure or cancel); EXISTS when the
+   volume after the new set's last one already exists (an older, longer set: it would be read as part of this one),
+   and nothing is deleted. */
 fulta_arc_err_t fulta_arc_write_file(const char *path, fulta_arc_format_t format,
                                      const fulta_arc_write_entry_t *entries, size_t count,
                                      const fulta_arc_write_options_t *options);
+
+/* Write as a split set through the caller's own volume sink; options->volume_size is required. */
+fulta_arc_err_t fulta_arc_write_volumes(fulta_arc_format_t format, const fulta_arc_write_entry_t *entries,
+                                        size_t count, const fulta_arc_write_options_t *options,
+                                        const fulta_arc_volume_sink_t *volumes);
 
 /* ---- editing (ZIP and 7z) ----------------------------------------------------------------------------------- */
 
@@ -378,9 +413,14 @@ fulta_arc_err_t fulta_arc_edit_add(fulta_arc_edit_t *edit, const char *name, con
    The source archive is never modified. */
 fulta_arc_err_t fulta_arc_edit_write(fulta_arc_edit_t *edit, fulta_arc_format_t format,
                                      const fulta_arc_write_sink_t *sink, const fulta_arc_write_options_t *opts);
-/* As above, to a file: written to a temporary beside `path` and renamed over it only on success. */
+/* As above, to a file: written to a temporary beside `path` and renamed over it only on success. With
+   opts->volume_size, a split set as fulta_arc_write_file writes it. */
 fulta_arc_err_t fulta_arc_edit_write_file(fulta_arc_edit_t *edit, fulta_arc_format_t format, const char *path,
                                           const fulta_arc_write_options_t *opts);
+/* As fulta_arc_edit_write, as a split set through the caller's volume sink; opts->volume_size is required. */
+fulta_arc_err_t fulta_arc_edit_write_volumes(fulta_arc_edit_t *edit, fulta_arc_format_t format,
+                                             const fulta_arc_volume_sink_t *volumes,
+                                             const fulta_arc_write_options_t *opts);
 
 void fulta_arc_edit_free(fulta_arc_edit_t *edit);
 

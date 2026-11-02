@@ -189,9 +189,21 @@ static bool rar_old_later(proven_u8str_view_t name) {
     return c >= 'r' && c <= 'z' && d1 >= '0' && d1 <= '9' && d2 >= '0' && d2 <= '9';
 }
 
+/* D-263: where the digits of 7-Zip's `x.7z.001` are (three or more), or false. */
+static bool sevenz_part_digits(proven_u8str_view_t name, size_t *out_at, size_t *out_len) {
+    size_t at = name.size;
+    while (at > 0 && name.ptr[at - 1] >= '0' && name.ptr[at - 1] <= '9') at--;
+    size_t len = name.size - at;
+    if (len < 3 || at < 5 || name.ptr[at - 1] != '.' || name.ptr[at - 4] != '.') return false;
+    if (!proven_u8str_view_eq_ascii_ci(proven_u8str_view_slice(name, at - 3, 2), PROVEN_LIT("7z"))) return false;
+    *out_at = at;
+    *out_len = len;
+    return true;
+}
+
 bool rubraview_page_source_is_later_volume(proven_u8str_view_t name) {
     size_t at = 0, len = 0;
-    if (rar_part_digits(name, &at, &len)) {
+    if (rar_part_digits(name, &at, &len) || sevenz_part_digits(name, &at, &len)) {
         bool first = name.ptr[at + len - 1] == '1';
         for (size_t i = 0; i + 1 < len; ++i) first = first && name.ptr[at + i] == '0';
         return !first;
@@ -199,16 +211,17 @@ bool rubraview_page_source_is_later_volume(proven_u8str_view_t name) {
     return rar_old_later(name);
 }
 
-/* The first volume's path for a later volume's, in `out` (malloc); NULL when `path` is not one. */
+/* The first volume's path for a later volume's, in `out` (malloc); NULL when `path` is not one. D-263: `x.7z.002`
+   gives `x.7z.001`, and `x.z01` (PKWARE's split ZIP, as Rubraview writes it) `x.zip`, whose last volume it is. */
 static char *rar_first_volume_path(proven_u8str_view_t path) {
     size_t at = 0, len = 0;
     if (!rubraview_page_source_is_later_volume(path)) return NULL;
     char *out = ps_strdup(path);
     if (!out) return NULL;
-    if (rar_part_digits(path, &at, &len)) {
+    if (rar_part_digits(path, &at, &len) || sevenz_part_digits(path, &at, &len)) {
         for (size_t i = 0; i < len; ++i) out[at + i] = i + 1 == len ? '1' : '0';
     } else {
-        memcpy(out + path.size - 3, "rar", 3);
+        memcpy(out + path.size - 3, rubraview_ascii_lower(path.ptr[path.size - 3]) == 'z' ? "zip" : "rar", 3);
     }
     return out;
 }

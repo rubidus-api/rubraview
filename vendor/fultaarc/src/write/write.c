@@ -32,6 +32,7 @@ typedef struct out {
     const fulta_arc_write_sink_t *sink;
     uint64_t at;            /* bytes appended so far */
     bool failed;
+    const char *hdr_pw;     /* 7z: encrypt the header with this password (encrypt_names), else NULL */
 } out_t;
 
 static void put(out_t *o, const void *data, size_t size) {
@@ -123,7 +124,8 @@ static void dos_time(int64_t t, uint16_t *out_time, uint16_t *out_date) {
 /* ---- ZIP ---- */
 
 typedef struct zip_record {
-    uint64_t size, packed, offset;
+    uint64_t size, packed, offset;  /* offset: of the local header, within its disk */
+    uint32_t disk;                  /* the volume holding the local header (0 unless split) */
     uint32_t crc, ext_attr;
     uint16_t method, time, date, flags, made_by_host;
     bool zip64;
@@ -151,7 +153,26 @@ static uint16_t zip_version_needed(const zip_record_t *r) {
     if (r->encrypted && v < 51) v = 51;   /* AES needs 5.1 */
     return v;
 }
-static void zip_local_header(out_t *o, const zip_record_t *r);
+static uint64_t zip_local_header(out_t *o, zip_record_t *r);
+
+/* Where a record of `len` bytes starts: on split output (src/write/volumes.c) in a fresh volume when it would not fit
+ * whole in this one, after settling the volumes no patch can reach any more (patches go only to the entry being
+ * written, whose header is not out yet). Gives the disk and the offset within it. */
+static void zip_here(out_t *o, uint64_t len, uint32_t *disk, uint64_t *off) {
+    fa_vol_t *v = fa_vol_of(o->sink);
+    if (!v) { *disk = 0; *off = o->at; return; }
+    if (fa_vol_settle(v, o->at)) o->failed = true;
+    if (fa_vol_room(v) < len) fa_vol_next(v);
+    *disk = fa_vol_disk(v);
+    *off = fa_vol_disk_offset(v);
+}
+
+/* A split set starts with the spanning signature PK\7\8 (APPNOTE 8.5.3); write_zip_central turns it into the
+ * single-segment marker PK00 if the set ends in one volume. */
+static void zip_begin(out_t *o) {
+    static const uint8_t span[4] = {0x50, 0x4B, 0x07, 0x08};
+    if (fa_vol_of(o->sink) && o->at == 0) put(o, span, 4);
+}
 
 /* WinZip-AES strength (1/2/3) for a ZIP password + scheme, or 0 if the scheme is not a ZIP one. */
 static const size_t aes_salt_len[4] = {0, 8, 12, 16}, aes_key_len[4] = {0, 16, 24, 32};
@@ -213,20 +234,30 @@ static bool ascii(const char *s) {
 /* The central directory and end records, from the per-entry records written in the first pass. Shared by the plain
  * writer and the editing writer (src/write/edit.c). */
 static fulta_arc_err_t write_zip_central(out_t *o, const zip_record_t *rec, size_t count, bool force64) {
-    uint64_t cd_start = o->at;
+    uint64_t cd_start = o->at;               /* logical, for the size */
+    uint32_t cd_disk = 0, disk = 0;
+    uint64_t cd_off = 0, off = 0, on_disk = 0;   /* records on the disk the end records land on */
     for (size_t i = 0; i < count; ++i) {
         const zip_record_t *r = &rec[i];
         bool big_offset = force64 || r->offset >= 0xFFFFFFFFu;
-        bool big = r->zip64 || big_offset;
-        uint8_t x64[28];
+        bool big_disk = r->disk >= 0xFFFFu;
+        bool big = r->zip64 || big_offset || big_disk;
+        uint8_t x64[32];
         size_t x64_len = 0;
         if (big) {                                    /* only what does not fit, in APPNOTE's order */
             le16(x64, 0x0001);
             x64_len = 4;
             if (r->zip64) { le64(x64 + x64_len, r->size); x64_len += 8; le64(x64 + x64_len, r->packed); x64_len += 8; }
             if (big_offset) { le64(x64 + x64_len, r->offset); x64_len += 8; }
+            if (big_disk) { le32(x64 + x64_len, r->disk); x64_len += 4; }
             le16(x64 + 2, (uint32_t)(x64_len - 4));
         }
+        size_t extra = x64_len + (r->mtime ? 9u : 0u) + (r->encrypted ? 11u : 0u);
+        uint32_t d; uint64_t at;
+        zip_here(o, 46 + r->name_len + extra, &d, &at);   /* a central record stays whole on one volume */
+        if (i == 0) { cd_start = o->at; cd_disk = d; cd_off = at; }
+        if (d != disk) { disk = d; on_disk = 0; }
+        on_disk++;
         uint16_t ver = zip_version_needed(r);
         uint8_t h[46];
         le32(h, 0x02014b50);
@@ -240,9 +271,9 @@ static fulta_arc_err_t write_zip_central(out_t *o, const zip_record_t *rec, size
         le32(h + 20, r->zip64 ? 0xFFFFFFFFu : (uint32_t)r->packed);
         le32(h + 24, r->zip64 ? 0xFFFFFFFFu : (uint32_t)r->size);
         le16(h + 28, (uint32_t)r->name_len);
-        le16(h + 30, (uint32_t)x64_len + (r->mtime ? 9u : 0u) + (r->encrypted ? 11u : 0u));
+        le16(h + 30, (uint32_t)extra);
         le16(h + 32, 0);                              /* comment */
-        le16(h + 34, 0);                              /* disk */
+        le16(h + 34, big_disk ? 0xFFFFu : r->disk);   /* the disk the local header is on */
         le16(h + 36, 0);                              /* internal attributes */
         le32(h + 38, r->ext_attr);                    /* external attributes (preserved on copy) */
         le32(h + 42, big_offset ? 0xFFFFFFFFu : (uint32_t)r->offset);
@@ -257,31 +288,43 @@ static fulta_arc_err_t write_zip_central(out_t *o, const zip_record_t *rec, size
         if (r->encrypted) put_aes_extra(o, r);
     }
     uint64_t cd_size = o->at - cd_start;
-    bool end64 = force64 || count >= 0xFFFF || cd_size >= 0xFFFFFFFFu || cd_start >= 0xFFFFFFFFu;
+    uint32_t end_disk;
+    zip_here(o, 56 + 20 + 22, &end_disk, &off);       /* the end records together, on the last volume */
+    if (count == 0) { cd_disk = end_disk; cd_off = off; }
+    if (end_disk != disk) on_disk = 0;
+    bool end64 = force64 || count >= 0xFFFF || cd_size >= 0xFFFFFFFFu || cd_off >= 0xFFFFFFFFu ||
+                 end_disk >= 0xFFFF || cd_disk >= 0xFFFF;
     if (end64) {
-        uint64_t end64_at = o->at;
+        uint64_t end64_off = off;
         uint8_t z[56];
         le32(z, 0x06064b50);
         le64(z + 4, 44);                              /* the size of what follows this field */
         le16(z + 12, 45); le16(z + 14, 45);
-        le32(z + 16, 0); le32(z + 20, 0);
-        le64(z + 24, count); le64(z + 32, count);
-        le64(z + 40, cd_size); le64(z + 48, cd_start);
+        le32(z + 16, end_disk); le32(z + 20, cd_disk);
+        le64(z + 24, on_disk); le64(z + 32, count);
+        le64(z + 40, cd_size); le64(z + 48, cd_off);
         put(o, z, sizeof(z));
         uint8_t l[20];
-        le32(l, 0x07064b50); le32(l + 4, 0); le64(l + 8, end64_at); le32(l + 16, 1);
+        le32(l, 0x07064b50); le32(l + 4, end_disk); le64(l + 8, end64_off); le32(l + 16, end_disk + 1);
         put(o, l, sizeof(l));
     }
     uint8_t e[22];
     le32(e, 0x06054b50);
-    le16(e + 4, 0); le16(e + 6, 0);
-    le16(e + 8, end64 ? 0xFFFFu : (uint32_t)count);
+    le16(e + 4, end64 ? 0xFFFFu : end_disk);
+    le16(e + 6, end64 ? 0xFFFFu : cd_disk);
+    le16(e + 8, end64 ? 0xFFFFu : (uint32_t)on_disk);
     le16(e + 10, end64 ? 0xFFFFu : (uint32_t)count);
     le32(e + 12, end64 ? 0xFFFFFFFFu : (uint32_t)cd_size);
-    le32(e + 16, end64 ? 0xFFFFFFFFu : (uint32_t)cd_start);
+    le32(e + 16, end64 ? 0xFFFFFFFFu : (uint32_t)cd_off);
     le16(e + 20, 0);
     put(o, e, sizeof(e));
-    return o->failed ? FULTA_ARC_ERR_IO : FULTA_ARC_OK;
+    if (o->failed) return FULTA_ARC_ERR_IO;
+    fa_vol_t *v = fa_vol_of(o->sink);
+    if (v && fa_vol_count(v) == 1) {                  /* one volume after all: the single-segment marker */
+        static const uint8_t pk00[4] = {0x50, 0x4B, 0x30, 0x30};
+        if (o->sink->patch(o->sink->ctx, 0, pk00, 4)) return FULTA_ARC_ERR_IO;
+    }
+    return FULTA_ARC_OK;
 }
 
 static void *sz_alloc(ISzAllocPtr p, size_t size) { (void)p; return malloc(size); }
@@ -483,6 +526,7 @@ static fulta_arc_err_t write_zip(const fulta_arc_write_entry_t *entries, size_t 
     fulta_arc_method_t m;
     fulta_arc_err_t me = method_concrete(FULTA_ARC_FORMAT_ZIP, level, opt ? opt->method : FULTA_ARC_METHOD_DEFAULT, &m);
     if (me) return me;                                         /* INVALID_ARG: method cannot apply to ZIP */
+    zip_begin(o);
     zip_record_t *rec = (zip_record_t*)calloc(count ? count : 1, sizeof(zip_record_t));
     if (!rec) return FULTA_ARC_ERR_NOMEM;
     fulta_arc_err_t err = FULTA_ARC_OK;
@@ -546,8 +590,12 @@ static fulta_arc_err_t write_zip(const fulta_arc_write_entry_t *entries, size_t 
     return err;
 }
 
-/* Write a regenerated local file header (no data descriptor; real sizes/crc) from a filled record. */
-static void zip_local_header(out_t *o, const zip_record_t *r) {
+/* Write a regenerated local file header (no data descriptor; real sizes/crc) from a filled record; sets its disk and
+ * offset, and returns where it starts in the output (for the patches). */
+static uint64_t zip_local_header(out_t *o, zip_record_t *r) {
+    size_t extra = (r->zip64 ? 20u : 0u) + (r->mtime ? 9u : 0u) + (r->encrypted ? 11u : 0u);
+    zip_here(o, 30 + r->name_len + extra, &r->disk, &r->offset);   /* sets the record's disk and offset */
+    uint64_t start = o->at;
     uint8_t h[30];
     le32(h, 0x04034b50);
     le16(h + 4, zip_version_needed(r));
@@ -559,7 +607,7 @@ static void zip_local_header(out_t *o, const zip_record_t *r) {
     le32(h + 18, r->zip64 ? 0xFFFFFFFFu : (uint32_t)r->packed);
     le32(h + 22, r->zip64 ? 0xFFFFFFFFu : (uint32_t)r->size);
     le16(h + 26, (uint32_t)r->name_len);
-    le16(h + 28, (r->zip64 ? 20u : 0u) + (r->mtime ? 9u : 0u) + (r->encrypted ? 11u : 0u));
+    le16(h + 28, (uint32_t)extra);
     put(o, h, sizeof(h));
     put(o, r->name, r->name_len);
     if (r->zip64) {
@@ -573,31 +621,7 @@ static void zip_local_header(out_t *o, const zip_record_t *r) {
         put(o, x, sizeof(x));
     }
     if (r->encrypted) put_aes_extra(o, r);
-}
-
-/* Pull every byte from a reader into a freshly malloc'd buffer (*out, *n). Caller frees. */
-static fulta_arc_err_t slurp_reader(const fulta_arc_reader_t *rd, uint8_t **out, uint64_t *n) {
-    *out = NULL; *n = 0;
-    size_t cap = rd->size != UINT64_MAX && rd->size < (1u << 20) ? (size_t)rd->size : 1u << 16;
-    if (cap == 0) cap = 1;   /* a zero-size reader still needs a 1-byte buffer; cap must track the real allocation so the grow step never computes ncap = cap * 2 = 0 (realloc(buf, 0) frees buf, then the !nb branch frees it again — a double-free) */
-    uint8_t *buf = malloc(cap);
-    if (!buf) return FULTA_ARC_ERR_NOMEM;
-    uint64_t len = 0;
-    for (;;) {
-        if (len == cap) {
-            size_t ncap = cap < (1u << 26) ? cap * 2 : cap + (1u << 26);
-            uint8_t *nb = realloc(buf, ncap);
-            if (!nb) { free(buf); return FULTA_ARC_ERR_NOMEM; }
-            buf = nb; cap = ncap;
-        }
-        size_t got = 0;
-        fulta_arc_err_t e = rd->read(rd->ctx, buf + len, cap - (size_t)len, &got);
-        if (e) { free(buf); return e; }
-        if (got == 0) break;
-        len += got;
-    }
-    *out = buf; *n = len;
-    return FULTA_ARC_OK;
+    return start;
 }
 
 static bool name_is_dir(const char *name) {
@@ -605,16 +629,611 @@ static bool name_is_dir(const char *name) {
     return n && (name[n - 1] == '/' || name[n - 1] == '\\');
 }
 
+/* ---- the convert routes' disk spill (shared by ZIP-LZMA and the 7z convert; see the 7z convert section) ---- */
+
+/* The spill file as the SDK's input stream, read sequentially. */
+typedef struct sz_spill_r {
+    ISeqInStream vt;
+    proven_file_t f;
+    bool io_err;
+} sz_spill_r_t;
+
+static SRes sz_spill_read(ISeqInStreamPtr pp, void *buf, size_t *size) {
+    sz_spill_r_t *p = (sz_spill_r_t *)(void *)pp;
+    proven_result_size_t r = proven_fs_read(p->f, (proven_mem_mut_t){.ptr = buf, .size = *size});
+    if (r.err == PROVEN_ERR_EOF) { *size = r.value; return SZ_OK; }   /* 0 bytes left -> EOF to the encoder */
+    if (r.err) { *size = 0; p->io_err = true; return SZ_ERROR_READ; }
+    *size = r.value;
+    return SZ_OK;
+}
+
+/* The spill directory's name: beside the output (`<hint>.d-<random>`) when a file path is known, else
+ * `<temp>/fa7z-<random>`. */
+static fulta_arc_err_t spill_path(const char *hint, char **out) {
+    *out = NULL;
+    const char *pre = hint, *sep = ".d-";
+    if (!pre) {
+        pre = getenv("TMPDIR");
+        if (!pre || !*pre) pre = getenv("TMP");
+        if (!pre || !*pre) pre = getenv("TEMP");
+        if (!pre || !*pre) pre = "/tmp";
+        sep = "/fa7z-";
+    }
+    uint8_t rnd[12];
+    if (!fa_random_bytes(rnd, sizeof rnd)) return FULTA_ARC_ERR_IO;
+    size_t pn = strlen(pre), sn = strlen(sep);
+    char *s = malloc(pn + sn + 24 + 1);
+    if (!s) return FULTA_ARC_ERR_NOMEM;
+    static const char hexd[] = "0123456789abcdef";
+    char *q = s;
+    memcpy(q, pre, pn); q += pn;
+    memcpy(q, sep, sn); q += sn;
+    for (int i = 0; i < 12; ++i) { *q++ = hexd[rnd[i] >> 4]; *q++ = hexd[rnd[i] & 15]; }
+    *q = 0;
+    *out = s;
+    return FULTA_ARC_OK;
+}
+
+/* The spill: one handle, read and written; its names removed as soon as it is open (see the section comment). */
+typedef struct spill {
+    proven_file_t f;
+    bool open;
+    char *dir, *file;
+    bool dir_named, file_named;   /* still to be removed at the close */
+} spill_t;
+
+static void spill_close(spill_t *s) {
+    proven_allocator_t heap = proven_heap_allocator();
+    if (s->open) { proven_err_t ig = proven_fs_close(s->f); (void)ig; }
+    if (s->file_named) { proven_err_t ig = proven_fs_remove(heap, proven_u8str_view_from_cstr(s->file)); (void)ig; }
+    if (s->dir_named) { proven_err_t ig = proven_fs_rmdir(heap, proven_u8str_view_from_cstr(s->dir)); (void)ig; }
+    free(s->dir); free(s->file);
+    memset(s, 0, sizeof *s);
+}
+
+static fulta_arc_err_t spill_open(const char *hint, spill_t *s) {
+    memset(s, 0, sizeof *s);
+    proven_allocator_t heap = proven_heap_allocator();
+    fulta_arc_err_t err = spill_path(hint, &s->dir);
+    if (err) return err;
+    if (proven_fs_mkdir(heap, proven_u8str_view_from_cstr(s->dir))) { free(s->dir); s->dir = NULL; return FULTA_ARC_ERR_IO; }
+    s->dir_named = true;
+#ifndef _WIN32
+    if (proven_fs_chmod(heap, proven_u8str_view_from_cstr(s->dir),
+                        PROVEN_FS_PERM_OWNER_R | PROVEN_FS_PERM_OWNER_W | PROVEN_FS_PERM_OWNER_X)) {
+        spill_close(s);
+        return FULTA_ARC_ERR_IO;
+    }
+#endif
+    size_t dn = strlen(s->dir);
+    s->file = malloc(dn + 3);
+    if (!s->file) { spill_close(s); return FULTA_ARC_ERR_NOMEM; }
+    memcpy(s->file, s->dir, dn);
+    memcpy(s->file + dn, "/s", 3);
+    proven_result_file_t rf = proven_fs_open(heap, proven_u8str_view_from_cstr(s->file),
+                                             PROVEN_FS_READ | PROVEN_FS_WRITE | PROVEN_FS_CREATE_NEW);
+    if (rf.err) { spill_close(s); return FULTA_ARC_ERR_IO; }
+    s->f = rf.value; s->open = true; s->file_named = true;
+#ifndef _WIN32
+    if (proven_fs_chmod(heap, proven_u8str_view_from_cstr(s->file), PROVEN_FS_PERM_OWNER_R | PROVEN_FS_PERM_OWNER_W)) {
+        spill_close(s);
+        return FULTA_ARC_ERR_IO;
+    }
+#endif
+    if (!proven_fs_remove(heap, proven_u8str_view_from_cstr(s->file))) s->file_named = false;
+    if (!s->file_named && !proven_fs_rmdir(heap, proven_u8str_view_from_cstr(s->dir))) s->dir_named = false;
+    return FULTA_ARC_OK;
+}
+
+/* Back to the start of the spill for pass 2. */
+static fulta_arc_err_t spill_rewind(spill_t *s) {
+    return proven_fs_seek(s->f, 0, PROVEN_FS_SEEK_SET).err ? FULTA_ARC_ERR_IO : FULTA_ARC_OK;
+}
+
+/* ---- convert route: re-encode any open archive's entries into a fresh ZIP, streaming -------------------------
+ * Each entry's plaintext is produced once (fulta_arc_extract pushes it for a source entry, or the item's reader is
+ * pulled for an add/replace) and fed straight into an incremental encoder whose output goes to the sink; nothing is
+ * held whole in memory, so a multi-GiB entry converts in bounded space. Deflate, bzip2, PPMd (var.I) and zstd take
+ * pushed input; the LZMA encoder pulls, so it reads an add's reader directly and a source entry from a disk spill
+ * (the same private, nameless spill as the 7z convert). The local header is written with zeroed crc/sizes, then
+ * patched (sink->patch) once the real values are known. With a password every file entry is WinZip-AES (AE-2)
+ * encrypted on the way out, as fulta_arc_write does it but in pieces: AES-CTR and the HMAC run over the compressed
+ * bytes as they leave the compressor, so memory stays bounded. Editing an encrypted source is refused earlier
+ * (fulta_arc_editable). The copy route (fa_write_zip_edited) writes its added entries through the same code. */
+
+static fulta_arc_err_t patch_u32(out_t *o, uint64_t off, uint32_t v) {
+    uint8_t b[4]; le32(b, v);
+    return o->sink->patch(o->sink->ctx, off, b, 4);
+}
+static fulta_arc_err_t patch_u64(out_t *o, uint64_t off, uint64_t v) {
+    uint8_t b[8]; le64(b, v);
+    return o->sink->patch(o->sink->ctx, off, b, 8);
+}
+
+/* The running state while one entry is pushed through its encoder (or stored) into the ZIP sink. */
+typedef struct conv_zip conv_zip_t;
+typedef struct conv_ppmd_out {             /* the PPMd range coder's bytes, batched into conv_emit */
+    IByteOut vt;
+    conv_zip_t *c;
+    size_t len;
+    uint8_t buf[4096];
+} conv_ppmd_out_t;
+struct conv_zip {
+    out_t *o;
+    fulta_arc_method_t m;      /* STORE, DEFLATE, BZIP2, PPMD or ZSTD here; LZMA runs conv_lzma instead */
+    tdefl_compressor *comp;    /* DEFLATE (owned by the caller) */
+    bz_stream bz; bool bz_on;
+    ZSTD_CCtx *zs;
+    CPpmd8 ppmd; bool ppmd_on;
+    conv_ppmd_out_t pout;
+    uint32_t crc;
+    uint64_t usize, csize;
+    const fulta_arc_write_options_t *opt;
+    uint64_t *done, total;     /* progress across the whole convert */
+    fulta_arc_err_t err;
+    bool aes;                  /* WinZip AES: what goes out is encrypted and authenticated (csize counts ciphertext) */
+    fa_aes_ctr_t ctr;
+    fa_hmac_sha1_t mac;
+};
+
+/* The entry's packed bytes out: as they are, or AES-CTR encrypted and fed to the HMAC. */
+static void conv_emit(conv_zip_t *c, const void *data, size_t n) {
+    if (!c->aes) { put(c->o, data, n); c->csize += n; return; }
+    uint8_t tmp[4096];
+    const uint8_t *p = (const uint8_t *)data;
+    while (n && !c->o->failed) {
+        size_t k = n < sizeof tmp ? n : sizeof tmp;
+        memcpy(tmp, p, k);
+        fa_aes_ctr_xor(&c->ctr, tmp, k);
+        fa_hmac_sha1_update(&c->mac, tmp, k);
+        put(c->o, tmp, k);
+        c->csize += k; p += k; n -= k;
+    }
+    memset(tmp, 0, sizeof tmp);
+}
+
+/* miniz put-buf callback: the deflated bytes of the current entry. */
+static mz_bool conv_put(const void *buf, int len, void *user) {
+    conv_zip_t *c = (conv_zip_t *)user;
+    conv_emit(c, buf, (size_t)len);
+    return c->o->failed ? MZ_FALSE : MZ_TRUE;
+}
+
+static void conv_ppmd_byte(IByteOutPtr pp, Byte b) {
+    conv_ppmd_out_t *w = (conv_ppmd_out_t *)((char *)pp - offsetof(conv_ppmd_out_t, vt));
+    w->buf[w->len++] = b;
+    if (w->len == sizeof w->buf) { conv_emit(w->c, w->buf, w->len); w->len = 0; }
+}
+
+/* Start the entry's encoder. ZIP's per-method body headers (PPMd's 2-byte parameters) go out first. */
+static fulta_arc_err_t conv_begin(conv_zip_t *c, fulta_arc_method_t m, int level, tdefl_compressor *comp, mz_uint zf) {
+    c->m = m;
+    int l = level < 1 ? 1 : level > 9 ? 9 : level;
+    switch (m) {
+        case FULTA_ARC_METHOD_DEFLATE:
+            if (tdefl_init(comp, conv_put, c, (int)zf) != TDEFL_STATUS_OKAY) return FULTA_ARC_ERR_CORRUPT;
+            c->comp = comp;
+            return FULTA_ARC_OK;
+        case FULTA_ARC_METHOD_BZIP2:
+            memset(&c->bz, 0, sizeof c->bz);
+            if (BZ2_bzCompressInit(&c->bz, l, 0, 0) != BZ_OK) return FULTA_ARC_ERR_NOMEM;
+            c->bz_on = true;
+            return FULTA_ARC_OK;
+        case FULTA_ARC_METHOD_ZSTD: {
+            /* the same level map as zip_encode_body: 1..9 onto zstd 1..19 */
+            static const int z_by_level[10] = {0, 1, 3, 6, 9, 12, 15, 17, 19, 19};
+            c->zs = ZSTD_createCCtx();
+            if (!c->zs) return FULTA_ARC_ERR_NOMEM;
+            if (ZSTD_isError(ZSTD_CCtx_setParameter(c->zs, ZSTD_c_compressionLevel, z_by_level[l])))
+                return FULTA_ARC_ERR_CORRUPT;
+            return FULTA_ARC_OK;
+        }
+        case FULTA_ARC_METHOD_PPMD: {
+            unsigned order, memMB, restore;
+            ppmd_params_for_level(level, &order, &memMB, &restore);
+            uint8_t h[2];
+            uint16_t v = (uint16_t)((order - 1) | ((memMB - 1) << 4) | (restore << 12));
+            h[0] = (uint8_t)(v & 0xFF); h[1] = (uint8_t)(v >> 8);
+            conv_emit(c, h, 2);
+            Ppmd8_Construct(&c->ppmd);
+            if (!Ppmd8_Alloc(&c->ppmd, (UInt32)memMB << 20, &SZ_ALLOC)) return FULTA_ARC_ERR_NOMEM;
+            c->ppmd_on = true;
+            c->pout.vt.Write = conv_ppmd_byte;
+            c->pout.c = c;
+            c->pout.len = 0;
+            c->ppmd.Stream.Out = &c->pout.vt;
+            Ppmd8_Init_RangeEnc(&c->ppmd);
+            Ppmd8_Init(&c->ppmd, order, restore);
+            return FULTA_ARC_OK;
+        }
+        default:                                         /* STORE */
+            return FULTA_ARC_OK;
+    }
+}
+
+/* Push `n` plaintext bytes through the entry's encoder (or store them). `finish` flushes the encoder's end. */
+static fulta_arc_err_t conv_code(conv_zip_t *c, const void *data, size_t n, bool finish) {
+    uint8_t outbuf[1 << 16];
+    switch (c->m) {
+        case FULTA_ARC_METHOD_DEFLATE: {
+            tdefl_status st = tdefl_compress_buffer(c->comp, data, n, finish ? TDEFL_FINISH : TDEFL_NO_FLUSH);
+            if (st != (finish ? TDEFL_STATUS_DONE : TDEFL_STATUS_OKAY))
+                return c->o->failed ? FULTA_ARC_ERR_IO : FULTA_ARC_ERR_CORRUPT;
+            break;
+        }
+        case FULTA_ARC_METHOD_BZIP2: {
+            c->bz.next_in = (char *)(uintptr_t)data;
+            c->bz.avail_in = 0;
+            const uint8_t *p = data;
+            size_t left = n;
+            for (;;) {                                   /* avail_in is 32-bit: feed at most 1 GiB a time */
+                if (!c->bz.avail_in && left) {
+                    unsigned k = left > (1u << 30) ? (1u << 30) : (unsigned)left;
+                    c->bz.next_in = (char *)(uintptr_t)p; c->bz.avail_in = k; p += k; left -= k;
+                }
+                c->bz.next_out = (char *)outbuf; c->bz.avail_out = sizeof outbuf;
+                bool last = finish && !left;
+                int rc = BZ2_bzCompress(&c->bz, last ? BZ_FINISH : BZ_RUN);
+                if (rc < 0) return FULTA_ARC_ERR_CORRUPT;
+                size_t produced = sizeof outbuf - c->bz.avail_out;
+                if (produced) conv_emit(c, outbuf, produced);
+                if (c->o->failed) return FULTA_ARC_ERR_IO;
+                if (last ? rc == BZ_STREAM_END : (!c->bz.avail_in && !left)) break;
+            }
+            break;
+        }
+        case FULTA_ARC_METHOD_ZSTD: {
+            ZSTD_inBuffer in = {data, n, 0};
+            for (;;) {
+                ZSTD_outBuffer out = {outbuf, sizeof outbuf, 0};
+                size_t rem = ZSTD_compressStream2(c->zs, &out, &in, finish ? ZSTD_e_end : ZSTD_e_continue);
+                if (ZSTD_isError(rem)) return FULTA_ARC_ERR_CORRUPT;
+                if (out.pos) conv_emit(c, outbuf, out.pos);
+                if (c->o->failed) return FULTA_ARC_ERR_IO;
+                if (finish ? rem == 0 : in.pos == in.size) break;
+            }
+            break;
+        }
+        case FULTA_ARC_METHOD_PPMD: {
+            const uint8_t *p = data;
+            for (size_t i = 0; i < n; i++) Ppmd8_EncodeSymbol(&c->ppmd, p[i]);
+            if (finish) {
+                Ppmd8_EncodeSymbol(&c->ppmd, -1);        /* end marker: 7-Zip's ZIP-PPMd decoder reads to it */
+                Ppmd8_Flush_RangeEnc(&c->ppmd);
+                if (c->pout.len) { conv_emit(c, c->pout.buf, c->pout.len); c->pout.len = 0; }
+            }
+            if (c->o->failed) return FULTA_ARC_ERR_IO;
+            break;
+        }
+        default:
+            if (n) conv_emit(c, data, n);
+            if (c->o->failed) return FULTA_ARC_ERR_IO;
+            break;
+    }
+    return FULTA_ARC_OK;
+}
+
+static void conv_end(conv_zip_t *c) {
+    if (c->bz_on) { BZ2_bzCompressEnd(&c->bz); c->bz_on = false; }
+    if (c->zs) { ZSTD_freeCCtx(c->zs); c->zs = NULL; }
+    if (c->ppmd_on) { Ppmd8_Free(&c->ppmd, &SZ_ALLOC); c->ppmd_on = false; }
+}
+
+/* Count `n` plaintext bytes into crc, size and progress; poll cancel. */
+static fulta_arc_err_t conv_account(conv_zip_t *c, const void *data, size_t n) {
+    if (n) {
+        c->crc = fa_crc32(c->crc, data, n);
+        c->usize += n;
+    }
+    if (c->opt && c->opt->progress) {
+        *c->done += n;
+        if (c->opt->progress(c->opt->progress_ctx, *c->done, c->total)) return c->err = FULTA_ARC_ERR_CANCELLED;
+    }
+    return FULTA_ARC_OK;
+}
+
+/* Feed `n` plaintext bytes: update crc, count, compress-or-store, poll progress/cancel. */
+static fulta_arc_err_t conv_feed(conv_zip_t *c, const void *data, size_t n) {
+    if (c->err) return c->err;
+    if (n) {
+        fulta_arc_err_t e = conv_code(c, data, n, false);
+        if (e) return c->err = e;
+    }
+    return conv_account(c, data, n);
+}
+
+/* fulta_arc_sink adaptor so a source entry's extraction pushes straight into conv_feed. */
+static fulta_arc_err_t conv_sink_write(void *ctx, const void *data, size_t n) {
+    return conv_feed((conv_zip_t *)ctx, data, n);
+}
+
+/* ZIP LZMA (method 14), pulled: from the add's reader, or from a spill the source entry was extracted into. */
+typedef struct conv_lzma_in {
+    ISeqInStream vt;
+    conv_zip_t *c;
+    const fulta_arc_reader_t *rd;   /* or NULL: read the spill */
+    sz_spill_r_t sp;
+} conv_lzma_in_t;
+
+static SRes conv_lzma_read(ISeqInStreamPtr pp, void *buf, size_t *size) {
+    conv_lzma_in_t *p = (conv_lzma_in_t *)(void *)pp;
+    size_t got = 0;
+    if (p->rd) {
+        fulta_arc_err_t e = p->rd->read(p->rd->ctx, buf, *size, &got);
+        if (e) { p->c->err = e; *size = 0; return SZ_ERROR_READ; }
+    } else {
+        got = *size;
+        if (sz_spill_read(&p->sp.vt, buf, &got)) { p->c->err = FULTA_ARC_ERR_IO; *size = 0; return SZ_ERROR_READ; }
+    }
+    if (conv_account(p->c, buf, got)) { *size = 0; return SZ_ERROR_READ; }
+    *size = got;
+    return SZ_OK;
+}
+
+typedef struct conv_lzma_out {
+    ISeqOutStream vt;
+    conv_zip_t *c;
+} conv_lzma_out_t;
+
+static size_t conv_lzma_write(ISeqOutStreamPtr pp, const void *data, size_t size) {
+    conv_lzma_out_t *w = (conv_lzma_out_t *)(void *)pp;
+    conv_emit(w->c, data, size);
+    return w->c->o->failed ? 0 : size;
+}
+
+/* A spill-side sink for a source entry: plaintext to the spill, cancel polled (progress counts at the encode). */
+typedef struct conv_spill_w {
+    proven_file_t f;
+    conv_zip_t *c;
+} conv_spill_w_t;
+
+static fulta_arc_err_t conv_spill_write(void *ctx, const void *data, size_t n) {
+    conv_spill_w_t *w = ctx;
+    if (n && proven_fs_write_all(w->f, (proven_mem_view_t){.ptr = data, .size = n})) return FULTA_ARC_ERR_IO;
+    const fulta_arc_write_options_t *opt = w->c->opt;
+    if (opt && opt->progress && opt->progress(opt->progress_ctx, *w->c->done, w->c->total)) return FULTA_ARC_ERR_CANCELLED;
+    return FULTA_ARC_OK;
+}
+
+static fulta_arc_err_t conv_lzma(conv_zip_t *c, const fa_edit_item_t *it, int level, uint64_t known_usize,
+                                 const char *spill_hint) {
+    spill_t spill = {0};
+    conv_lzma_in_t in = { .vt = { conv_lzma_read }, .c = c, .rd = it->is_copy ? NULL : &it->reader };
+    fulta_arc_err_t err = FULTA_ARC_OK;
+    if (it->is_copy) {
+        err = spill_open(spill_hint, &spill);
+        if (err) return err;
+        conv_spill_w_t w = { .f = spill.f, .c = c };
+        fulta_arc_sink_t s = { .ctx = &w, .write = conv_spill_write };
+        err = fulta_arc_extract(it->src, it->src_index, &s);
+        if (!err) err = spill_rewind(&spill);
+        in.sp.vt.Read = sz_spill_read;
+        in.sp.f = spill.f;
+    }
+    CLzmaEncHandle ench = err ? NULL : LzmaEnc_Create(&SZ_ALLOC);
+    if (!err && !ench) err = FULTA_ARC_ERR_NOMEM;
+    if (!err) {
+        CLzmaEncProps ep; LzmaEncProps_Init(&ep);
+        ep.level = level < 1 ? 1 : level > 9 ? 9 : level;
+        if (known_usize != UINT64_MAX) ep.reduceSize = known_usize;   /* no larger a dictionary than the data needs */
+        uint8_t head[4 + LZMA_PROPS_SIZE] = {9, 20, LZMA_PROPS_SIZE, 0};  /* [verMaj, verMin, propsLen LE16] props */
+        SizeT ps = LZMA_PROPS_SIZE;
+        SRes res = LzmaEnc_SetProps(ench, &ep);
+        if (res == SZ_OK) res = LzmaEnc_WriteProperties(ench, head + 4, &ps);
+        if (res == SZ_OK) conv_emit(c, head, sizeof head);
+        conv_lzma_out_t out = { .vt = { conv_lzma_write }, .c = c };
+        if (res == SZ_OK && !c->o->failed) res = LzmaEnc_Encode(ench, &out.vt, &in.vt, NULL, &SZ_ALLOC, &SZ_ALLOC);
+        if (c->err) err = c->err;
+        else if (c->o->failed) err = FULTA_ARC_ERR_IO;
+        else if (res == SZ_ERROR_MEM) err = FULTA_ARC_ERR_NOMEM;
+        else if (res != SZ_OK) err = FULTA_ARC_ERR_CORRUPT;
+    }
+    if (ench) LzmaEnc_Destroy(ench, &SZ_ALLOC, &SZ_ALLOC);
+    if (it->is_copy) spill_close(&spill);
+    return err;
+}
+
+/* What every streamed entry of one ZIP write shares. */
+typedef struct zip_stream_cfg {
+    fulta_arc_method_t m;          /* concrete (method_concrete) */
+    int level;
+    mz_uint zf;
+    tdefl_compressor *comp;        /* for DEFLATE; NULL when no entry deflates */
+    int enc_strength;              /* 0 = no encryption */
+    const char *pw;
+    size_t pwlen;
+    const fulta_arc_write_options_t *opt;
+    uint64_t *done, total;
+    const char *spill_hint;
+    bool force64;
+} zip_stream_cfg_t;
+
+/* Write one entry streamed: the local header from `r` (name, flags, times, attributes and offset already set), the
+ * body encoded from the item's plaintext, then the header patched with the crc and sizes. */
+static fulta_arc_err_t zip_stream_entry(out_t *o, zip_record_t *r, const fa_edit_item_t *it, uint64_t known_usize,
+                                        const zip_stream_cfg_t *k) {
+    bool dir = r->dir;
+    fulta_arc_method_t m = k->m;
+    if (dir || known_usize == 0 || (m == FULTA_ARC_METHOD_DEFLATE && k->level <= 0)) m = FULTA_ARC_METHOD_STORE;
+    static const uint16_t zip_id[] = {
+        [FULTA_ARC_METHOD_STORE] = 0, [FULTA_ARC_METHOD_DEFLATE] = 8, [FULTA_ARC_METHOD_BZIP2] = 12,
+        [FULTA_ARC_METHOD_LZMA] = 14, [FULTA_ARC_METHOD_PPMD] = 98, [FULTA_ARC_METHOD_ZSTD] = 93 };
+    r->crc = 0; r->size = 0; r->packed = 0;
+    r->method = zip_id[m];
+    if (k->enc_strength && !dir) zip_aes_mark(r, k->enc_strength);
+    /* Decide Zip64 before writing the header: force it when the size is unknown (we cannot rewind the decision),
+     * otherwise from the known uncompressed size, with a margin for what the encoder may add on incompressible data
+     * (deflate's stored blocks and the AES fields stay well under 1 MiB at 4 GiB; bzip2 and PPMd can grow ~1-3%). */
+    uint64_t lim = (m == FULTA_ARC_METHOD_STORE || m == FULTA_ARC_METHOD_DEFLATE) ? 0xFFF00000u : 0xF0000000u;
+    r->zip64 = k->force64 || known_usize == UINT64_MAX || known_usize >= lim;
+
+    uint64_t hdr_off = zip_local_header(o, r);
+    if (o->failed) return FULTA_ARC_ERR_IO;
+    if (dir) return FULTA_ARC_OK;
+
+    conv_zip_t c = { .o = o, .opt = k->opt, .done = k->done, .total = k->total };
+    fulta_arc_err_t err = FULTA_ARC_OK;
+    uint64_t aes_extra = 0;                              /* salt + verifier before the data, MAC after */
+    if (k->enc_strength) {
+        size_t sl = aes_salt_len[k->enc_strength], kl = aes_key_len[k->enc_strength];
+        uint8_t salt[16], key[66];
+        if (!zip_aes_keys(k->pw, k->pwlen, k->enc_strength, salt, key)) return FULTA_ARC_ERR_IO;   /* no entropy */
+        put(o, salt, sl);
+        put(o, key + 2 * kl, 2);                         /* 2-byte password verifier */
+        fa_aes_ctr_le1_begin(&c.ctr, key, kl);
+        fa_hmac_sha1_init(&c.mac, key + kl, kl);
+        memset(key, 0, sizeof key);
+        c.aes = true;
+        aes_extra = sl + 2 + 10;
+        if (o->failed) err = FULTA_ARC_ERR_IO;           /* fall through: the keys are wiped below */
+    }
+    if (!err && m == FULTA_ARC_METHOD_LZMA) {
+        err = conv_lzma(&c, it, k->level, known_usize, k->spill_hint);
+    } else if (!err) {
+        err = conv_begin(&c, m, k->level, k->comp, k->zf);
+        if (!err && it->is_copy) {
+            fulta_arc_sink_t s = { .ctx = &c, .write = conv_sink_write };
+            err = fulta_arc_extract(it->src, it->src_index, &s);
+            if (err == FULTA_ARC_OK) err = c.err;
+        } else if (!err && it->reader.read) {
+            uint8_t chunk[1 << 16];
+            for (;;) {
+                size_t got = 0;
+                err = it->reader.read(it->reader.ctx, chunk, sizeof chunk, &got);
+                if (err || got == 0) break;
+                err = conv_feed(&c, chunk, got);
+                if (err) break;
+            }
+        }
+        if (!err) err = conv_code(&c, NULL, 0, true);
+        conv_end(&c);
+    }
+    if (c.aes) {
+        uint8_t mac[20];
+        fa_hmac_sha1_final(&c.mac, mac);
+        if (err == FULTA_ARC_OK) put(o, mac, 10);        /* HMAC-SHA1 authentication, 10 bytes */
+        fa_aes_ctr_end(&c.ctr);
+        memset(&c.mac, 0, sizeof c.mac);
+        if (err == FULTA_ARC_OK && o->failed) err = FULTA_ARC_ERR_IO;
+    }
+    if (err) return err;
+    r->crc = c.aes ? 0 : c.crc;                          /* AE-2 stores no plaintext CRC */
+    r->size = c.usize;
+    r->packed = c.csize + aes_extra;
+    if (!r->zip64 && (r->size >= 0xFFFFFFFFu || r->packed >= 0xFFFFFFFFu)) return FULTA_ARC_ERR_LIMIT;
+    /* Patch the header now that crc and the sizes are known. */
+    err = patch_u32(o, hdr_off + 14, r->crc);
+    if (!err) {
+        if (r->zip64) {
+            uint64_t xoff = hdr_off + 30 + r->name_len;  /* the Zip64 extra is written first */
+            err = patch_u64(o, xoff + 4, r->size);
+            if (!err) err = patch_u64(o, xoff + 12, r->packed);
+        } else {
+            err = patch_u32(o, hdr_off + 18, (uint32_t)r->packed);
+            if (!err) err = patch_u32(o, hdr_off + 22, (uint32_t)r->size);
+        }
+    }
+    return err;
+}
+
+/* The shared set-up of a streamed ZIP write: method, encryption and the deflate state. */
+static fulta_arc_err_t zip_stream_cfg_init(zip_stream_cfg_t *k, int level, bool force64,
+                                           const fulta_arc_write_options_t *opt, const char *spill_hint) {
+    memset(k, 0, sizeof *k);
+    k->level = level; k->force64 = force64; k->opt = opt; k->spill_hint = spill_hint;
+    k->pw = opt ? opt->password : NULL;
+    k->pwlen = k->pw ? strlen(k->pw) : 0;
+    if (k->pw) {
+        k->enc_strength = zip_aes_strength(opt->encryption);
+        if (!k->enc_strength) return FULTA_ARC_ERR_INVALID_ARG;   /* a 7z scheme for a ZIP */
+    }
+    fulta_arc_err_t e = method_concrete(FULTA_ARC_FORMAT_ZIP, level, opt ? opt->method : FULTA_ARC_METHOD_DEFAULT, &k->m);
+    if (e) return e;                                     /* INVALID_ARG: LZMA2 is not a ZIP method */
+    k->zf = tdefl_create_comp_flags_from_zip_params(level > 0 ? level : 6, -15, MZ_DEFAULT_STRATEGY);
+    if (k->m == FULTA_ARC_METHOD_DEFLATE && level > 0) {
+        k->comp = malloc(sizeof *k->comp);
+        if (!k->comp) return FULTA_ARC_ERR_NOMEM;
+    }
+    return FULTA_ARC_OK;
+}
+
+fulta_arc_err_t fa_write_zip_convert(const fa_edit_item_t *items, size_t count, int level, bool force64,
+                                     const fulta_arc_write_options_t *opt, const fulta_arc_write_sink_t *sink,
+                                     const char *spill_hint) {
+    if (!sink || !sink->write || !sink->patch) return FULTA_ARC_ERR_INVALID_ARG;
+    zip_stream_cfg_t k;
+    uint64_t done = 0;
+    fulta_arc_err_t err = zip_stream_cfg_init(&k, level, force64, opt, spill_hint);
+    if (err) { free(k.comp); return err; }
+    out_t o = { .sink = sink };
+    zip_begin(&o);
+    zip_record_t *rec = calloc(count ? count : 1, sizeof *rec);
+    if (!rec) { free(k.comp); return FULTA_ARC_ERR_NOMEM; }
+
+    /* progress total: the sum of the plaintext sizes we know up front */
+    for (size_t i = 0; i < count; ++i) {
+        if (items[i].is_copy) {
+            const fulta_arc_entry_t *e = fulta_arc_entry(items[i].src, items[i].src_index);
+            if (e && !(e->flags & (FULTA_ARC_ENTRY_DIR | FULTA_ARC_ENTRY_UNKNOWN_SIZE))) k.total += e->size;
+        } else if (items[i].reader.read && items[i].reader.size != UINT64_MAX) {
+            k.total += items[i].reader.size;
+        }
+    }
+    k.done = &done;
+
+    for (size_t i = 0; i < count && err == FULTA_ARC_OK; ++i) {
+        const fa_edit_item_t *it = &items[i];
+        zip_record_t *r = &rec[i];
+        r->offset = o.at;
+
+        bool dir;
+        const char *uname;
+        int64_t mtime_sec = 0;
+        uint64_t known_usize = UINT64_MAX;
+        if (it->is_copy) {
+            const fulta_arc_entry_t *e = fulta_arc_entry(it->src, it->src_index);
+            if (!e) { err = FULTA_ARC_ERR_INVALID_ARG; break; }
+            dir = (e->flags & FULTA_ARC_ENTRY_DIR) != 0;
+            uname = it->name ? it->name : e->name;
+            mtime_sec = (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? e->mtime / 1000000000 : 0;
+            known_usize = dir ? 0 : ((e->flags & FULTA_ARC_ENTRY_UNKNOWN_SIZE) ? UINT64_MAX : e->size);
+        } else {
+            dir = name_is_dir(it->name);
+            uname = it->name;
+            mtime_sec = it->reader.mtime;                /* already seconds */
+            known_usize = dir ? 0 : (it->reader.read ? it->reader.size : 0);
+        }
+        if (!uname) { err = FULTA_ARC_ERR_INVALID_ARG; break; }
+        r->name = stored_name(uname, dir, true);
+        if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
+        r->name_len = strlen(r->name);
+        r->flags = ascii(r->name) ? 0 : 0x0800;
+        r->made_by_host = 0;
+        r->ext_attr = dir ? 0x10u : 0u;
+        r->dir = dir;
+        r->mtime = mtime_sec;
+        dos_time(mtime_sec, &r->time, &r->date);
+        err = zip_stream_entry(&o, r, it, known_usize, &k);
+    }
+    if (err == FULTA_ARC_OK) err = write_zip_central(&o, rec, count, force64);
+    for (size_t i = 0; i < count; ++i) free(rec[i].name);
+    free(rec);
+    free(k.comp);
+    return err;
+}
+
 fulta_arc_err_t fa_write_zip_edited(const fa_edit_item_t *items, size_t count, int level, bool force64,
                                     const fulta_arc_write_options_t *opt, const fulta_arc_write_sink_t *sink) {
     if (!sink || !sink->write || !sink->patch) return FULTA_ARC_ERR_INVALID_ARG;
     if (opt && opt->password) return FULTA_ARC_ERR_UNSUPPORTED;   /* encrypting write is D-016, not yet */
+    zip_stream_cfg_t k;                                /* added entries: streamed with the chosen method */
+    fulta_arc_err_t err = zip_stream_cfg_init(&k, level, force64, opt, NULL);
+    if (err) { free(k.comp); return err; }
     out_t o = { .sink = sink };
+    zip_begin(&o);
     zip_record_t *rec = calloc(count ? count : 1, sizeof *rec);
     fa_zip_copy_t *cis = calloc(count ? count : 1, sizeof *cis);
-    if (!rec || !cis) { free(rec); free(cis); return FULTA_ARC_ERR_NOMEM; }
-    fulta_arc_err_t err = FULTA_ARC_OK;
-    mz_uint zf = tdefl_create_comp_flags_from_zip_params(level, -15, MZ_DEFAULT_STRATEGY);
+    if (!rec || !cis) { free(rec); free(cis); free(k.comp); return FULTA_ARC_ERR_NOMEM; }
 
     /* total for progress: copied packed bytes + bytes to re-encode */
     uint64_t total = 0, done = 0;
@@ -627,6 +1246,7 @@ fulta_arc_err_t fa_write_zip_edited(const fa_edit_item_t *items, size_t count, i
         }
     }
 
+    k.done = &done; k.total = total;
     for (size_t i = 0; i < count && err == FULTA_ARC_OK; ++i) {
         const fa_edit_item_t *it = &items[i];
         zip_record_t *r = &rec[i];
@@ -674,270 +1294,13 @@ fulta_arc_err_t fa_write_zip_edited(const fa_edit_item_t *items, size_t count, i
             r->ext_attr = dir ? 0x10u : 0u;
             r->mtime = it->reader.mtime;
             dos_time(it->reader.mtime, &r->time, &r->date);
-            uint8_t *data = NULL; uint64_t dn = 0;
-            if (!dir && it->reader.read) { err = slurp_reader(&it->reader, &data, &dn); if (err) break; }
-            r->size = dn;
-            r->crc = dir ? 0 : crc32_of(data, dn);
-            void *packed = NULL; size_t packed_len = 0;
-            if (level > 0 && dn > 0 && dn <= SIZE_MAX) {
-                packed = tdefl_compress_mem_to_heap(data, (size_t)dn, &packed_len, (int)zf);
-                if (packed && packed_len >= dn) { free(packed); packed = NULL; }
-            }
-            r->method = packed ? 8 : 0;
-            r->packed = packed ? packed_len : dn;
-            r->zip64 = force64 || r->size >= 0xFFFFFFFFu || r->packed >= 0xFFFFFFFFu;
-            zip_local_header(&o, r);
-            if (packed) put(&o, packed, packed_len);
-            else if (dn) {
-                for (uint64_t a = 0; a < dn && !o.failed;) {
-                    size_t n = dn - a > (1u << 30) ? (1u << 30) : (size_t)(dn - a);
-                    put(&o, data + a, n); a += n;
-                }
-            }
-            free(packed); free(data);
-            done += dn;
-            if (opt && opt->progress && opt->progress(opt->progress_ctx, done, total)) err = FULTA_ARC_ERR_CANCELLED;
+            err = zip_stream_entry(&o, r, it, dir ? 0 : (it->reader.read ? it->reader.size : 0), &k);
         }
         if (!err && o.failed) err = FULTA_ARC_ERR_IO;
     }
     if (err == FULTA_ARC_OK) err = write_zip_central(&o, rec, count, force64);
     for (size_t i = 0; i < count; ++i) free(rec[i].name);
-    free(rec); free(cis);
-    return err;
-}
-
-/* ---- convert route: re-encode any open archive's entries into a fresh ZIP, streaming -------------------------
- * Each entry's plaintext is produced once (fulta_arc_extract pushes it for a source entry, or the item's reader is
- * pulled for an add/replace) and fed straight into an incremental deflate whose output goes to the sink; nothing is
- * held whole in memory, so a multi-GiB entry converts in bounded space. The local header is written with zeroed
- * crc/sizes, then patched (sink->patch) once the real values are known. With a password every file entry is
- * WinZip-AES (AE-2) encrypted on the way out, as fulta_arc_write does it but in pieces: AES-CTR and the HMAC run over
- * the compressed bytes as they leave the compressor, so memory stays bounded. Editing an encrypted source is refused
- * earlier (fulta_arc_editable). */
-
-static fulta_arc_err_t patch_u32(out_t *o, uint64_t off, uint32_t v) {
-    uint8_t b[4]; le32(b, v);
-    return o->sink->patch(o->sink->ctx, off, b, 4);
-}
-static fulta_arc_err_t patch_u64(out_t *o, uint64_t off, uint64_t v) {
-    uint8_t b[8]; le64(b, v);
-    return o->sink->patch(o->sink->ctx, off, b, 8);
-}
-
-/* The running state while one entry is pushed through deflate (or store) into the ZIP sink. */
-typedef struct conv_zip {
-    out_t *o;
-    tdefl_compressor *comp;    /* NULL => store */
-    uint32_t crc;
-    uint64_t usize, csize;
-    const fulta_arc_write_options_t *opt;
-    uint64_t *done, total;     /* progress across the whole convert */
-    fulta_arc_err_t err;
-    bool aes;                  /* WinZip AES: what goes out is encrypted and authenticated (csize counts ciphertext) */
-    fa_aes_ctr_t ctr;
-    fa_hmac_sha1_t mac;
-} conv_zip_t;
-
-/* The entry's packed bytes out: as they are, or AES-CTR encrypted and fed to the HMAC. */
-static void conv_emit(conv_zip_t *c, const void *data, size_t n) {
-    if (!c->aes) { put(c->o, data, n); c->csize += n; return; }
-    uint8_t tmp[4096];
-    const uint8_t *p = (const uint8_t *)data;
-    while (n && !c->o->failed) {
-        size_t k = n < sizeof tmp ? n : sizeof tmp;
-        memcpy(tmp, p, k);
-        fa_aes_ctr_xor(&c->ctr, tmp, k);
-        fa_hmac_sha1_update(&c->mac, tmp, k);
-        put(c->o, tmp, k);
-        c->csize += k; p += k; n -= k;
-    }
-    memset(tmp, 0, sizeof tmp);
-}
-
-/* miniz put-buf callback: the deflated bytes of the current entry. */
-static mz_bool conv_put(const void *buf, int len, void *user) {
-    conv_zip_t *c = (conv_zip_t *)user;
-    conv_emit(c, buf, (size_t)len);
-    return c->o->failed ? MZ_FALSE : MZ_TRUE;
-}
-
-/* Feed `n` plaintext bytes: update crc, count, compress-or-store, poll progress/cancel. */
-static fulta_arc_err_t conv_feed(conv_zip_t *c, const void *data, size_t n) {
-    if (c->err) return c->err;
-    if (n) {
-        c->crc = fa_crc32(c->crc, data, n);
-        c->usize += n;
-        if (c->comp) {
-            if (tdefl_compress_buffer(c->comp, data, n, TDEFL_NO_FLUSH) != TDEFL_STATUS_OKAY)
-                return c->err = (c->o->failed ? FULTA_ARC_ERR_IO : FULTA_ARC_ERR_CORRUPT);
-        } else {
-            conv_emit(c, data, n);
-        }
-        if (c->o->failed) return c->err = FULTA_ARC_ERR_IO;
-    }
-    if (c->opt && c->opt->progress) {
-        *c->done += n;
-        if (c->opt->progress(c->opt->progress_ctx, *c->done, c->total)) return c->err = FULTA_ARC_ERR_CANCELLED;
-    }
-    return FULTA_ARC_OK;
-}
-
-/* fulta_arc_sink adaptor so a source entry's extraction pushes straight into conv_feed. */
-static fulta_arc_err_t conv_sink_write(void *ctx, const void *data, size_t n) {
-    return conv_feed((conv_zip_t *)ctx, data, n);
-}
-
-fulta_arc_err_t fa_write_zip_convert(const fa_edit_item_t *items, size_t count, int level, bool force64,
-                                     const fulta_arc_write_options_t *opt, const fulta_arc_write_sink_t *sink) {
-    if (!sink || !sink->write || !sink->patch) return FULTA_ARC_ERR_INVALID_ARG;
-    const char *pw = opt ? opt->password : NULL;
-    size_t pwlen = pw ? strlen(pw) : 0;
-    int enc_strength = 0;
-    if (pw) {
-        enc_strength = zip_aes_strength(opt->encryption);
-        if (!enc_strength) return FULTA_ARC_ERR_INVALID_ARG;   /* a 7z scheme for a ZIP */
-    }
-    out_t o = { .sink = sink };
-    zip_record_t *rec = calloc(count ? count : 1, sizeof *rec);
-    if (!rec) return FULTA_ARC_ERR_NOMEM;
-    tdefl_compressor *comp = NULL;
-    if (level > 0) {
-        comp = malloc(sizeof *comp);
-        if (!comp) { free(rec); return FULTA_ARC_ERR_NOMEM; }
-    }
-    mz_uint zf = tdefl_create_comp_flags_from_zip_params(level > 0 ? level : 6, -15, MZ_DEFAULT_STRATEGY);
-    fulta_arc_err_t err = FULTA_ARC_OK;
-
-    /* progress total: the sum of the plaintext sizes we know up front */
-    uint64_t total = 0, done = 0;
-    for (size_t i = 0; i < count; ++i) {
-        if (items[i].is_copy) {
-            const fulta_arc_entry_t *e = fulta_arc_entry(items[i].src, items[i].src_index);
-            if (e && !(e->flags & (FULTA_ARC_ENTRY_DIR | FULTA_ARC_ENTRY_UNKNOWN_SIZE))) total += e->size;
-        } else if (items[i].reader.read && items[i].reader.size != UINT64_MAX) {
-            total += items[i].reader.size;
-        }
-    }
-
-    for (size_t i = 0; i < count && err == FULTA_ARC_OK; ++i) {
-        const fa_edit_item_t *it = &items[i];
-        zip_record_t *r = &rec[i];
-        r->offset = o.at;
-
-        bool dir;
-        const char *uname;
-        int64_t mtime_sec = 0;
-        uint32_t ext_attr = 0;
-        uint64_t known_usize = UINT64_MAX;
-        if (it->is_copy) {
-            const fulta_arc_entry_t *e = fulta_arc_entry(it->src, it->src_index);
-            if (!e) { err = FULTA_ARC_ERR_INVALID_ARG; break; }
-            dir = (e->flags & FULTA_ARC_ENTRY_DIR) != 0;
-            uname = it->name ? it->name : e->name;
-            mtime_sec = (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? e->mtime / 1000000000 : 0;
-            ext_attr = dir ? 0x10u : 0u;
-            known_usize = dir ? 0 : ((e->flags & FULTA_ARC_ENTRY_UNKNOWN_SIZE) ? UINT64_MAX : e->size);
-        } else {
-            dir = name_is_dir(it->name);
-            uname = it->name;
-            mtime_sec = it->reader.mtime;                /* already seconds */
-            ext_attr = dir ? 0x10u : 0u;
-            known_usize = dir ? 0 : (it->reader.read ? it->reader.size : 0);
-        }
-        if (!uname) { err = FULTA_ARC_ERR_INVALID_ARG; break; }
-        r->name = stored_name(uname, dir, true);
-        if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
-        r->name_len = strlen(r->name);
-        r->flags = ascii(r->name) ? 0 : 0x0800;
-        r->made_by_host = 0;
-        r->ext_attr = ext_attr;
-        r->dir = dir;
-        r->mtime = mtime_sec;
-        dos_time(mtime_sec, &r->time, &r->date);
-        r->crc = 0; r->size = 0; r->packed = 0;
-        bool store = dir || level <= 0 || known_usize == 0;
-        r->method = store ? 0 : 8;
-        if (enc_strength && !dir) zip_aes_mark(r, enc_strength);
-        /* Decide Zip64 before writing the header: force it when the size is unknown (we cannot rewind the
-         * decision), otherwise from the known uncompressed size, with a margin for what deflate's stored blocks and
-         * the AES salt, verifier and MAC add (well under 1 MiB at 4 GiB). */
-        r->zip64 = force64 || known_usize == UINT64_MAX || known_usize >= 0xFFF00000u;
-
-        uint64_t hdr_off = o.at;
-        zip_local_header(&o, r);
-        if (o.failed) { err = FULTA_ARC_ERR_IO; break; }
-
-        if (!dir) {
-            conv_zip_t c = { .o = &o, .comp = NULL, .opt = opt, .done = &done, .total = total };
-            uint64_t aes_extra = 0;                      /* salt + verifier before the data, MAC after */
-            if (enc_strength) {
-                size_t sl = aes_salt_len[enc_strength], kl = aes_key_len[enc_strength];
-                uint8_t salt[16], k[66];
-                if (!zip_aes_keys(pw, pwlen, enc_strength, salt, k)) { err = FULTA_ARC_ERR_IO; break; }   /* no entropy */
-                put(&o, salt, sl);
-                put(&o, k + 2 * kl, 2);                  /* 2-byte password verifier */
-                fa_aes_ctr_le1_begin(&c.ctr, k, kl);
-                fa_hmac_sha1_init(&c.mac, k + kl, kl);
-                memset(k, 0, sizeof k);
-                c.aes = true;
-                aes_extra = sl + 2 + 10;
-                if (o.failed) err = FULTA_ARC_ERR_IO;    /* fall through: the keys are wiped below */
-            }
-            if (!err && !store) {
-                if (tdefl_init(comp, conv_put, &c, (int)zf) != TDEFL_STATUS_OKAY) err = FULTA_ARC_ERR_CORRUPT;
-                else c.comp = comp;
-            }
-            if (!err && it->is_copy) {
-                fulta_arc_sink_t s = { .ctx = &c, .write = conv_sink_write };
-                err = fulta_arc_extract(it->src, it->src_index, &s);
-                if (err == FULTA_ARC_OK) err = c.err;
-            } else if (!err && it->reader.read) {
-                uint8_t chunk[1 << 16];
-                for (;;) {
-                    size_t got = 0;
-                    err = it->reader.read(it->reader.ctx, chunk, sizeof chunk, &got);
-                    if (err || got == 0) break;
-                    err = conv_feed(&c, chunk, got);
-                    if (err) break;
-                }
-            }
-            if (err == FULTA_ARC_OK && !store) {
-                if (tdefl_compress_buffer(comp, NULL, 0, TDEFL_FINISH) != TDEFL_STATUS_DONE)
-                    err = c.err ? c.err : (o.failed ? FULTA_ARC_ERR_IO : FULTA_ARC_ERR_CORRUPT);
-            }
-            if (err == FULTA_ARC_OK) err = c.err;
-            if (c.aes) {
-                uint8_t mac[20];
-                fa_hmac_sha1_final(&c.mac, mac);
-                if (err == FULTA_ARC_OK) put(&o, mac, 10);   /* HMAC-SHA1 authentication, 10 bytes */
-                fa_aes_ctr_end(&c.ctr);
-                memset(&c.mac, 0, sizeof c.mac);
-                if (err == FULTA_ARC_OK && o.failed) err = FULTA_ARC_ERR_IO;
-            }
-            if (err) break;
-            r->crc = c.aes ? 0 : c.crc;                  /* AE-2 stores no plaintext CRC */
-            r->size = c.usize;
-            r->packed = c.csize + aes_extra;
-            if (!r->zip64 && (r->size >= 0xFFFFFFFFu || r->packed >= 0xFFFFFFFFu)) { err = FULTA_ARC_ERR_LIMIT; break; }
-            /* Patch the header now that crc and the sizes are known. */
-            err = patch_u32(&o, hdr_off + 14, r->crc);
-            if (!err) {
-                if (r->zip64) {
-                    uint64_t xoff = hdr_off + 30 + r->name_len;   /* the Zip64 extra is written first */
-                    err = patch_u64(&o, xoff + 4, r->size);
-                    if (!err) err = patch_u64(&o, xoff + 12, r->packed);
-                } else {
-                    err = patch_u32(&o, hdr_off + 18, (uint32_t)r->packed);
-                    if (!err) err = patch_u32(&o, hdr_off + 22, (uint32_t)r->size);
-                }
-            }
-            if (err) break;
-        }
-    }
-    if (err == FULTA_ARC_OK) err = write_zip_central(&o, rec, count, force64);
-    for (size_t i = 0; i < count; ++i) free(rec[i].name);
-    free(rec);
-    free(comp);
+    free(rec); free(cis); free(k.comp);
     return err;
 }
 
@@ -1185,6 +1548,67 @@ typedef struct sz_desc {
     int64_t mtime;      /* seconds since 1970, 0 = none */
 } sz_desc_t;
 
+/* 7-Zip's -mhe=on: the header is LZMA-packed and 7zAES-encrypted as a packed stream of its own, and what the
+ * signature header points at is a kEncodedHeader record describing that stream (one folder: AES -> LZMA, the CRC of
+ * the plain header). Replaces `h` with that record; the packed stream is written at `o` now. */
+static void emit_folder_coders(buf_t *h, const fa_7z_copy_t *F);
+static fulta_arc_err_t encode_7z_header(out_t *o, buf_t *h) {
+    CLzmaEncProps ep; LzmaEncProps_Init(&ep);
+    ep.level = 5;
+    ep.reduceSize = h->len;
+    size_t cap = h->len + h->len / 2 + 4096;
+    uint8_t *c = malloc(cap + 16);
+    if (!c) return FULTA_ARC_ERR_NOMEM;
+    uint8_t props[LZMA_PROPS_SIZE]; SizeT ps = sizeof props;
+    SizeT clen = cap;
+    SRes res = LzmaEncode(c, &clen, h->p, h->len, &ep, props, &ps, 0, NULL, &SZ_ALLOC, &SZ_ALLOC);
+    if (res != SZ_OK || ps != LZMA_PROPS_SIZE) { free(c); return res == SZ_ERROR_MEM ? FULTA_ARC_ERR_NOMEM : FULTA_ARC_ERR_CORRUPT; }
+    uint8_t salt[16], iv[16], key[32], ivc[16];
+    if (!fa_random_bytes(salt, 16) || !fa_random_bytes(iv, 16)) { free(c); return FULTA_ARC_ERR_IO; }   /* no entropy */
+    fulta_arc_err_t err = fa_7z_derive_key(o->hdr_pw, salt, 16, 19, key);
+    if (err) { free(c); return err; }
+    size_t padded = ((size_t)clen + 15) & ~(size_t)15;
+    memset(c + clen, 0, padded - clen);
+    memcpy(ivc, iv, 16);
+    fa_aes_cbc_encrypt(key, 32, ivc, c, padded);
+    memset(key, 0, sizeof key);
+    uint64_t pack_pos = o->at - 32;
+    put(o, c, padded);
+    free(c);
+    if (o->failed) return FULTA_ARC_ERR_IO;
+
+    uint8_t aesprops[34];
+    aesprops[0] = (uint8_t)(0xC0 | 19);                  /* salt & iv present, NumCyclesPower = 19 */
+    aesprops[1] = 0xFF;                                  /* salt_len = iv_len = 16 */
+    memcpy(aesprops + 2, salt, 16);
+    memcpy(aesprops + 18, iv, 16);
+    fa_7z_copy_t F = { .has_folder = true, .ncoders = 2, .npacked = 1, .nbinds = 1 };
+    F.coders[0] = (fa_7z_coder_t){ .id = {0x03, 0x01, 0x01}, .idlen = 3, .nin = 1, .props = props, .nprops = LZMA_PROPS_SIZE };
+    F.coders[1] = (fa_7z_coder_t){ .id = {0x06, 0xF1, 0x07, 0x01}, .idlen = 4, .nin = 1, .props = aesprops, .nprops = 34 };
+    F.binds[0][0] = 0; F.binds[0][1] = 1;                /* LZMA.in0 <- AES.out */
+    F.unpack_sizes[0] = h->len; F.unpack_sizes[1] = clen;
+
+    buf_t e = {0};
+    b_byte(&e, 0x17);                                    /* kEncodedHeader */
+    b_byte(&e, 0x06);                                    /* kPackInfo */
+    b_num(&e, pack_pos);
+    b_num(&e, 1);
+    b_byte(&e, 0x09); b_num(&e, padded);
+    b_byte(&e, 0x00);
+    b_byte(&e, 0x07);                                    /* kUnPackInfo */
+    b_byte(&e, 0x0B); b_num(&e, 1); b_byte(&e, 0);
+    emit_folder_coders(&e, &F);
+    b_byte(&e, 0x0C); b_num(&e, F.unpack_sizes[0]); b_num(&e, F.unpack_sizes[1]);
+    b_byte(&e, 0x0A); b_byte(&e, 1); b_u32(&e, crc32_of(h->p, h->len));   /* the plain header's CRC */
+    b_byte(&e, 0x00);
+    b_byte(&e, 0x00);                                    /* end of StreamsInfo */
+    if (e.failed) { free(e.p); return FULTA_ARC_ERR_NOMEM; }
+    memset(h->p, 0, h->len);                             /* the names in the clear go */
+    free(h->p);
+    *h = e;
+    return FULTA_ARC_OK;
+}
+
 /* Append kFilesInfo for the `count` entries `d` to `h` (which already holds kHeader + StreamsInfo), end the header,
  * write it after the packed data at `o`, and patch the 32-byte signature header `sig`. Takes ownership of `h->p`
  * (frees it). `streams` is how many entries have a stream (size != 0 && !dir). */
@@ -1240,6 +1664,7 @@ static fulta_arc_err_t write_7z_tail(out_t *o, uint8_t *sig, buf_t *h, const sz_
     b_byte(h, 0x00);                                     /* end of Header */
     if (h->failed) err = FULTA_ARC_ERR_NOMEM;
 
+    if (err == FULTA_ARC_OK && o->hdr_pw) err = encode_7z_header(o, h);   /* names hidden: h becomes the stub */
     if (err == FULTA_ARC_OK) {
         uint64_t header_at = o->at;
         put(o, h->p, h->len);
@@ -1796,105 +2221,6 @@ static fulta_arc_err_t spill_sink_write(void *ctx, const void *data, size_t n) {
     return spill_feed((sz_spill_w_t *)ctx, data, n);
 }
 
-/* Pass 2: the spill file as the SDK's input stream, read sequentially. */
-typedef struct sz_spill_r {
-    ISeqInStream vt;
-    proven_file_t f;
-    bool io_err;
-} sz_spill_r_t;
-
-static SRes sz_spill_read(ISeqInStreamPtr pp, void *buf, size_t *size) {
-    sz_spill_r_t *p = (sz_spill_r_t *)(void *)pp;
-    proven_result_size_t r = proven_fs_read(p->f, (proven_mem_mut_t){.ptr = buf, .size = *size});
-    if (r.err == PROVEN_ERR_EOF) { *size = r.value; return SZ_OK; }   /* 0 bytes left -> EOF to the encoder */
-    if (r.err) { *size = 0; p->io_err = true; return SZ_ERROR_READ; }
-    *size = r.value;
-    return SZ_OK;
-}
-
-/* The spill directory's name: beside the output (`<hint>.d-<random>`) when a file path is known, else
- * `<temp>/fa7z-<random>`. */
-static fulta_arc_err_t spill_path(const char *hint, char **out) {
-    *out = NULL;
-    const char *pre = hint, *sep = ".d-";
-    if (!pre) {
-        pre = getenv("TMPDIR");
-        if (!pre || !*pre) pre = getenv("TMP");
-        if (!pre || !*pre) pre = getenv("TEMP");
-        if (!pre || !*pre) pre = "/tmp";
-        sep = "/fa7z-";
-    }
-    uint8_t rnd[12];
-    if (!fa_random_bytes(rnd, sizeof rnd)) return FULTA_ARC_ERR_IO;
-    size_t pn = strlen(pre), sn = strlen(sep);
-    char *s = malloc(pn + sn + 24 + 1);
-    if (!s) return FULTA_ARC_ERR_NOMEM;
-    static const char hexd[] = "0123456789abcdef";
-    char *q = s;
-    memcpy(q, pre, pn); q += pn;
-    memcpy(q, sep, sn); q += sn;
-    for (int i = 0; i < 12; ++i) { *q++ = hexd[rnd[i] >> 4]; *q++ = hexd[rnd[i] & 15]; }
-    *q = 0;
-    *out = s;
-    return FULTA_ARC_OK;
-}
-
-/* The spill: one handle, read and written; its names removed as soon as it is open (see the section comment). */
-typedef struct spill {
-    proven_file_t f;
-    bool open;
-    char *dir, *file;
-    bool dir_named, file_named;   /* still to be removed at the close */
-} spill_t;
-
-static void spill_close(spill_t *s) {
-    proven_allocator_t heap = proven_heap_allocator();
-    if (s->open) { proven_err_t ig = proven_fs_close(s->f); (void)ig; }
-    if (s->file_named) { proven_err_t ig = proven_fs_remove(heap, proven_u8str_view_from_cstr(s->file)); (void)ig; }
-    if (s->dir_named) { proven_err_t ig = proven_fs_rmdir(heap, proven_u8str_view_from_cstr(s->dir)); (void)ig; }
-    free(s->dir); free(s->file);
-    memset(s, 0, sizeof *s);
-}
-
-static fulta_arc_err_t spill_open(const char *hint, spill_t *s) {
-    memset(s, 0, sizeof *s);
-    proven_allocator_t heap = proven_heap_allocator();
-    fulta_arc_err_t err = spill_path(hint, &s->dir);
-    if (err) return err;
-    if (proven_fs_mkdir(heap, proven_u8str_view_from_cstr(s->dir))) { free(s->dir); s->dir = NULL; return FULTA_ARC_ERR_IO; }
-    s->dir_named = true;
-#ifndef _WIN32
-    if (proven_fs_chmod(heap, proven_u8str_view_from_cstr(s->dir),
-                        PROVEN_FS_PERM_OWNER_R | PROVEN_FS_PERM_OWNER_W | PROVEN_FS_PERM_OWNER_X)) {
-        spill_close(s);
-        return FULTA_ARC_ERR_IO;
-    }
-#endif
-    size_t dn = strlen(s->dir);
-    s->file = malloc(dn + 3);
-    if (!s->file) { spill_close(s); return FULTA_ARC_ERR_NOMEM; }
-    memcpy(s->file, s->dir, dn);
-    memcpy(s->file + dn, "/s", 3);
-    proven_result_file_t rf = proven_fs_open(heap, proven_u8str_view_from_cstr(s->file),
-                                             PROVEN_FS_READ | PROVEN_FS_WRITE | PROVEN_FS_CREATE_NEW);
-    if (rf.err) { spill_close(s); return FULTA_ARC_ERR_IO; }
-    s->f = rf.value; s->open = true; s->file_named = true;
-#ifndef _WIN32
-    if (proven_fs_chmod(heap, proven_u8str_view_from_cstr(s->file), PROVEN_FS_PERM_OWNER_R | PROVEN_FS_PERM_OWNER_W)) {
-        spill_close(s);
-        return FULTA_ARC_ERR_IO;
-    }
-#endif
-    if (!proven_fs_remove(heap, proven_u8str_view_from_cstr(s->file))) s->file_named = false;
-    if (!s->file_named && !proven_fs_rmdir(heap, proven_u8str_view_from_cstr(s->dir))) s->dir_named = false;
-    return FULTA_ARC_OK;
-}
-
-/* Back to the start of the spill for pass 2. */
-static fulta_arc_err_t spill_rewind(spill_t *s) {
-    return proven_fs_seek(s->f, 0, PROVEN_FS_SEEK_SET).err ? FULTA_ARC_ERR_IO : FULTA_ARC_OK;
-}
-
 /* Convert pass 2/3 for a non-default selector (step 2): read the spill into memory, present each streaming entry as
  * a synthetic in-memory entry, and reuse write_7z's folder machinery so method/filter/BCJ2/SOLID_OFF all apply. This
  * is where the convert route's "bounded memory" weakens to the total (solid) or the largest entry (SOLID_OFF),
@@ -2020,6 +2346,7 @@ fulta_arc_err_t fa_write_7z_convert(const fa_edit_item_t *items, size_t count, i
         if (desc[i].size && !desc[i].dir) { streams++; total_un += desc[i].size; }
 
     out_t o = { .sink = sink };
+    o.hdr_pw = opt && opt->password && opt->encrypt_names ? opt->password : NULL;   /* 7z -mhe */
     uint8_t props[LZMA_PROPS_SIZE];
     SizeT props_size = sizeof props;
     uint64_t packed = 0;
@@ -2250,6 +2577,7 @@ fulta_arc_err_t fa_write_7z_edited(const fa_edit_item_t *items, size_t count, in
     if (!fd || !fol || !scr) { free(fd); free(fol); free(scr); return FULTA_ARC_ERR_NOMEM; }
 
     out_t o = { .sink = sink };
+    o.hdr_pw = opt && opt->password && opt->encrypt_names ? opt->password : NULL;   /* 7z -mhe */
     uint8_t sig[32] = { '7', 'z', 0xBC, 0xAF, 0x27, 0x1C, 0, 4 };
     put(&o, sig, sizeof sig);
     fulta_arc_err_t err = o.failed ? FULTA_ARC_ERR_IO : FULTA_ARC_OK;
@@ -2304,8 +2632,8 @@ fulta_arc_err_t fa_write_7z_edited(const fa_edit_item_t *items, size_t count, in
     return err;
 }
 
-fulta_arc_err_t fulta_arc_write(fulta_arc_format_t format, const fulta_arc_write_entry_t *entries, size_t count,
-                                const fulta_arc_write_options_t *options, const fulta_arc_write_sink_t *sink) {
+static fulta_arc_err_t write_any(fulta_arc_format_t format, const fulta_arc_write_entry_t *entries, size_t count,
+                                 const fulta_arc_write_options_t *options, const fulta_arc_write_sink_t *sink) {
     if (!sink || !sink->write || !sink->patch || (count && !entries)) return FULTA_ARC_ERR_INVALID_ARG;
     for (size_t i = 0; i < count; ++i) {
         if (!entries[i].name) return FULTA_ARC_ERR_INVALID_ARG;
@@ -2315,9 +2643,46 @@ fulta_arc_err_t fulta_arc_write(fulta_arc_format_t format, const fulta_arc_write
     int level = options ? options->level : 6;
     if (level < 0 || level > 9) level = 6;
     out_t o = { .sink = sink };
+    o.hdr_pw = options && options->password && options->encrypt_names ? options->password : NULL;   /* 7z -mhe */
     switch (format) {
-        case FULTA_ARC_FORMAT_ZIP: return write_zip(entries, count, level, options && options->zip64, options, &o);
+        case FULTA_ARC_FORMAT_ZIP:
+            if (options && options->password && options->encrypt_names) return FULTA_ARC_ERR_INVALID_ARG;
+            return write_zip(entries, count, level, options && options->zip64, options, &o);
         case FULTA_ARC_FORMAT_7Z:  return write_7z(entries, count, level, options, &o);
         default:               return FULTA_ARC_ERR_INVALID_ARG;
     }
+}
+
+fulta_arc_err_t fulta_arc_write(fulta_arc_format_t format, const fulta_arc_write_entry_t *entries, size_t count,
+                                const fulta_arc_write_options_t *options, const fulta_arc_write_sink_t *sink) {
+    if (options && options->volume_size) return FULTA_ARC_ERR_INVALID_ARG;   /* one sink holds one file */
+    return write_any(format, entries, count, options, sink);
+}
+
+/* ---- split output (src/write/volumes.c does the cutting) ---- */
+
+typedef struct write_job {
+    fulta_arc_format_t format;
+    const fulta_arc_write_entry_t *entries;
+    size_t count;
+    const fulta_arc_write_options_t *options;
+} write_job_t;
+
+static fulta_arc_err_t write_job_run(void *ctx, const fulta_arc_write_sink_t *sink) {
+    const write_job_t *j = ctx;
+    return write_any(j->format, j->entries, j->count, j->options, sink);
+}
+
+fulta_arc_err_t fulta_arc_write_volumes(fulta_arc_format_t format, const fulta_arc_write_entry_t *entries,
+                                        size_t count, const fulta_arc_write_options_t *options,
+                                        const fulta_arc_volume_sink_t *volumes) {
+    if (!options) return FULTA_ARC_ERR_INVALID_ARG;
+    write_job_t j = {format, entries, count, options};
+    return fa_vol_run(format, options->volume_size, volumes, write_job_run, &j);
+}
+
+fulta_arc_err_t fa_write_file_split(const char *path, fulta_arc_format_t format, const fulta_arc_write_entry_t *entries,
+                                    size_t count, const fulta_arc_write_options_t *options) {
+    write_job_t j = {format, entries, count, options};
+    return fa_vol_files(path, format, options->volume_size, write_job_run, &j);
 }

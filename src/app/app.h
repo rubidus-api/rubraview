@@ -185,7 +185,7 @@ extern double g_gutter;
 #define GUTTER g_gutter
 #define KEYMAP_MAX_BYTES (256u * 1024u)
 #define FILMSTRIP_THUMB 120.0
-#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar;*.alz;*.egg"
+#define ARCHIVE_FILTER "*.cbz;*.zip;*.cb7;*.7z;*.cbr;*.rar;*.alz;*.egg;*.7z.0??"   /* D-263: a 7z set's volumes (the later ones go to the first) */
 /* RV-207: what can be extracted (FultaArc reads these too, though the viewer does not open them as books) */
 #define ARCHIVE_FILTER_ALL ARCHIVE_FILTER ";*.tar;*.tgz;*.tbz;*.tbz2;*.txz;*.tzst;*.gz;*.bz2;*.xz;*.zst;*.lz;*.cab;*.iso;*.lzh;*.lha;*.cpio;*.deb;*.udf"
 #define MAX_ARCHIVE_BYTES (2048u * 1024u * 1024u)  /* the whole CBZ, held in memory (§3.8.1) */

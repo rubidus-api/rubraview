@@ -121,38 +121,53 @@ static fulta_arc_err_t edit_write_to(fulta_arc_edit_t *edit, fulta_arc_format_t 
                                      const char *spill_hint) {
     if (!edit || !sink || !sink->write || !sink->patch) return FULTA_ARC_ERR_INVALID_ARG;
     if (format != FULTA_ARC_FORMAT_ZIP && format != FULTA_ARC_FORMAT_7Z) return FULTA_ARC_ERR_INVALID_ARG;
+    if (opts && opts->volume_size && !fa_vol_of(sink)) return FULTA_ARC_ERR_INVALID_ARG;   /* one sink, one file */
+    if (format == FULTA_ARC_FORMAT_ZIP && opts && opts->password && opts->encrypt_names) return FULTA_ARC_ERR_INVALID_ARG;
     fulta_arc_editable_t v = fulta_arc_editable(edit->arc);
     if (v == FULTA_ARC_EDIT_ENCRYPTED) return FULTA_ARC_ERR_UNSUPPORTED;   /* editing encrypted is refused (D-015) */
     int level = opts ? opts->level : 6;
     if (level < 0 || level > 9) level = 6;
     bool same_format = (format == fulta_arc_format(edit->arc));
-    bool sel = opts && (opts->method != FULTA_ARC_METHOD_DEFAULT ||
-                        (format == FULTA_ARC_FORMAT_7Z && opts->filter != FULTA_ARC_FILTER_NONE) ||
-                        (format == FULTA_ARC_FORMAT_7Z && opts->solid == FULTA_ARC_SOLID_OFF));
     bool encrypt = opts && opts->password;                   /* copied bytes cannot be encrypted: convert instead */
     if (same_format && v == FULTA_ARC_EDIT_OK && !encrypt) { /* copy route */
-        if (format == FULTA_ARC_FORMAT_ZIP) {
-            /* ZIP copy route does not yet honour an explicit method (RFC-0004 step 7b); reject, don't ignore */
-            if (sel) return FULTA_ARC_ERR_UNSUPPORTED;
+        if (format == FULTA_ARC_FORMAT_ZIP)   /* copied entries stay verbatim; added ones take opts->method */
             return fa_write_zip_edited(edit->items, edit->n, level, opts && opts->zip64, opts, sink);
-        }
         /* 7z copy route honours method/filter/BCJ2 on added/replaced entries (step 7b); copied folders stay verbatim.
            SOLID_OFF is moot here (the source is already non-solid) but a BCJ2+password mix is caught by write_7z. */
         return fa_write_7z_edited(edit->items, edit->n, level, opts, sink);
     }
     /* convert route: re-encode everything into the target format (also the same format when a password is given:
-       every entry is then encrypted, D-016). The 7z convert route honours method/filter/solid (step 2); the ZIP
-       convert route does not yet (step 3) and rejects an explicit non-default selector. */
-    if (format == FULTA_ARC_FORMAT_ZIP) {
-        if (sel) return FULTA_ARC_ERR_UNSUPPORTED;
-        return fa_write_zip_convert(edit->items, edit->n, level, opts && opts->zip64, opts, sink);
-    }
+       every entry is then encrypted, D-016). Both honour the method; the 7z route also filter and solid. */
+    if (format == FULTA_ARC_FORMAT_ZIP)
+        return fa_write_zip_convert(edit->items, edit->n, level, opts && opts->zip64, opts, sink, spill_hint);
     return fa_write_7z_convert(edit->items, edit->n, level, opts, sink, spill_hint);
 }
 
 fulta_arc_err_t fulta_arc_edit_write(fulta_arc_edit_t *edit, fulta_arc_format_t format,
                                      const fulta_arc_write_sink_t *sink, const fulta_arc_write_options_t *opts) {
     return edit_write_to(edit, format, sink, opts, NULL);
+}
+
+/* ---- split output: the edit written through a volume writer ---- */
+
+typedef struct edit_job {
+    fulta_arc_edit_t *edit;
+    fulta_arc_format_t format;
+    const fulta_arc_write_options_t *opts;
+    const char *spill_hint;
+} edit_job_t;
+
+static fulta_arc_err_t edit_job_run(void *ctx, const fulta_arc_write_sink_t *sink) {
+    const edit_job_t *j = ctx;
+    return edit_write_to(j->edit, j->format, sink, j->opts, j->spill_hint);
+}
+
+fulta_arc_err_t fulta_arc_edit_write_volumes(fulta_arc_edit_t *edit, fulta_arc_format_t format,
+                                             const fulta_arc_volume_sink_t *volumes,
+                                             const fulta_arc_write_options_t *opts) {
+    if (!edit || !opts) return FULTA_ARC_ERR_INVALID_ARG;
+    edit_job_t j = {edit, format, opts, NULL};
+    return fa_vol_run(format, opts->volume_size, volumes, edit_job_run, &j);
 }
 
 /* ---- to a file: temp beside `path`, renamed over it only on success ---- */
@@ -170,6 +185,10 @@ static fulta_arc_err_t ew_patch(void *ctx, uint64_t offset, const void *data, si
 fulta_arc_err_t fulta_arc_edit_write_file(fulta_arc_edit_t *edit, fulta_arc_format_t format, const char *path,
                                           const fulta_arc_write_options_t *opts) {
     if (!edit || !path) return FULTA_ARC_ERR_INVALID_ARG;
+    if (opts && opts->volume_size) {                         /* a split set: volumes.c names and renames */
+        edit_job_t j = {edit, format, opts, path};
+        return fa_vol_files(path, format, opts->volume_size, edit_job_run, &j);
+    }
     size_t pl = strlen(path);
     char *tmp = malloc(pl + 7);
     if (!tmp) return FULTA_ARC_ERR_NOMEM;

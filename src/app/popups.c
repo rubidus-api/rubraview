@@ -698,11 +698,16 @@ static void draw_pack_window(app_state_t *app, rubraview_pal_rect_t name_label, 
     const char *note = app->pack_pw_len[0] || app->pack_focus > 0 ? (sevenz ? T("Password: AES-256 (7-Zip's own)") : T("Password: AES-256 (WinZip's; Windows' own ZIP cannot open it)"))
                      : store ? T("Store: the files go in as they are, the codec unused")
                      : !sevenz && rubraview_pack_method_plain(format, lit) ? T("ZIP with Deflate: Windows opens it too")
-                     : sevenz ? T("7z: 7-Zip, Bandizip and this viewer open it") : "";
+                     : !sevenz ? T("ZIP with this codec: 7-Zip, Bandizip and this viewer open it, Windows' own does not")
+                     : T("7z: 7-Zip, Bandizip and this viewer open it");
+    /* D-263: the split set's names, or what the greyed chips are */
+    const char *note2 = app->pack_split > 0 ? (sevenz ? T("Split: name.7z.001, .002 ... (open the .001)") : T("Split: name.z01, .z02 ... name.zip (open the .zip)"))
+                      : app->pack_names_hidden && sevenz ? T("Hidden names: the archive is not even listed without its password")
+                      : !sevenz ? T("Greyed: ZIP packs each file on its own and keeps its names readable") : "";
     double ny = panel.y + title_h + row_h * PACK_ROWS;
     rubraview_pal_render_draw_text(app->renderer, cstr(note), (rubraview_pal_rect_t){ panel.x + pad, ny, panel.width - 2.0 * pad, note_h },
                                    13.0 * dpi, 0xC0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
-    rubraview_pal_render_draw_text(app->renderer, TU8("Greyed: not written by FultaArc yet (split volumes; ZIP's codecs but Deflate; hidden names)"),
+    rubraview_pal_render_draw_text(app->renderer, cstr(note2),
                                    (rubraview_pal_rect_t){ panel.x + pad, ny + note_h, panel.width - 2.0 * pad, note_h },
                                    13.0 * dpi, 0x90F0F0F0u, RUBRAVIEW_TEXT_LEFT);
 }

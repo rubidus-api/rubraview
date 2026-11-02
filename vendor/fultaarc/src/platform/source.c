@@ -124,6 +124,7 @@ fulta_arc_err_t fulta_arc_write_file(const char *path, fulta_arc_format_t format
                                      const fulta_arc_write_entry_t *entries, size_t count,
                                      const fulta_arc_write_options_t *options) {
     if (!path) return FULTA_ARC_ERR_INVALID_ARG;
+    if (options && options->volume_size) return fa_write_file_split(path, format, entries, count, options);
     proven_result_file_t r = proven_fs_open(proven_heap_allocator(), proven_u8str_view_from_cstr(path),
                                             PROVEN_FS_WRITE | PROVEN_FS_CREATE | PROVEN_FS_TRUNC);
     if (r.err) return FULTA_ARC_ERR_IO;

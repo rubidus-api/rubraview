@@ -416,10 +416,12 @@ fulta_arc_err_t fa_write_7z_edited(const fa_edit_item_t *items, size_t count, in
                                    const fulta_arc_write_options_t *opt, const fulta_arc_write_sink_t *sink);
 
 /* The convert route for ZIP output: re-encode every item (source entries decoded via fulta_arc_extract, adds/
- * replaces pulled from their reader) into a fresh ZIP, streamed; used when the target format differs from the
- * source, or the source is not editable in place (solid 7z, another format). force64 forces Zip64 records. */
+ * replaces pulled from their reader) into a fresh ZIP, streamed, with opt->method; used when the target format
+ * differs from the source, or the source is not editable in place (solid 7z, another format). force64 forces Zip64
+ * records. LZMA pulls its input, so a source entry is spilled first (`spill_hint` as for fa_write_7z_convert). */
 fulta_arc_err_t fa_write_zip_convert(const fa_edit_item_t *items, size_t count, int level, bool force64,
-                                     const fulta_arc_write_options_t *opt, const fulta_arc_write_sink_t *sink);
+                                     const fulta_arc_write_options_t *opt, const fulta_arc_write_sink_t *sink,
+                                     const char *spill_hint);
 
 /* The convert route for 7z output: re-encode every item into a fresh 7z. The LZMA encoder pulls its input, so each
  * entry's plaintext is spilled to a temp file (bounded memory, not bounded disk) and the encoder reads it back.
@@ -428,6 +430,28 @@ fulta_arc_err_t fa_write_zip_convert(const fa_edit_item_t *items, size_t count, 
 fulta_arc_err_t fa_write_7z_convert(const fa_edit_item_t *items, size_t count, int level,
                                     const fulta_arc_write_options_t *opt, const fulta_arc_write_sink_t *sink,
                                     const char *spill_hint);
+
+/* Split output (src/write/volumes.c). A writer's sink is a volume writer when fa_vol_of() says so; a ZIP writer then
+ * keeps headers whole (fa_vol_room/fa_vol_next), records disk numbers (fa_vol_disk, fa_vol_disk_offset) and settles
+ * the offset below which it patches no more (fa_vol_settle). */
+typedef struct fa_vol fa_vol_t;
+fulta_arc_err_t fa_vol_write(void *ctx, const void *data, size_t n);
+fa_vol_t *fa_vol_of(const fulta_arc_write_sink_t *sink);
+uint64_t fa_vol_room(const fa_vol_t *w);
+void fa_vol_next(fa_vol_t *w);
+uint32_t fa_vol_disk(const fa_vol_t *w);
+uint64_t fa_vol_disk_offset(const fa_vol_t *w);
+uint32_t fa_vol_count(const fa_vol_t *w);
+fulta_arc_err_t fa_vol_settle(fa_vol_t *w, uint64_t off);
+/* Run `body` with a volume writer over `vs` (fa_vol_run) or over files named after `path` (fa_vol_files). */
+fulta_arc_err_t fa_vol_run(fulta_arc_format_t format, uint64_t volume_size, const fulta_arc_volume_sink_t *vs,
+                           fulta_arc_err_t (*body)(void *ctx, const fulta_arc_write_sink_t *sink), void *ctx);
+fulta_arc_err_t fa_vol_files(const char *path, fulta_arc_format_t format, uint64_t volume_size,
+                             fulta_arc_err_t (*body)(void *ctx, const fulta_arc_write_sink_t *sink), void *ctx);
+
+/* fulta_arc_write_file with options->volume_size set (src/write/write.c). */
+fulta_arc_err_t fa_write_file_split(const char *path, fulta_arc_format_t format, const fulta_arc_write_entry_t *entries,
+                                    size_t count, const fulta_arc_write_options_t *options);
 
 /* Add an entry; strings are copied. Returns the new entry or NULL (no memory). */
 fa_entry_t *fa_add_entry(fulta_arc_t *arc, const uint8_t *raw_name, size_t raw_size, const char *utf8_name,
