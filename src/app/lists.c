@@ -781,7 +781,7 @@ bool recentwin_press(app_state_t *app, double x, double y) {
                 proven_u8str_view_t path = app->recent_rows[index].path;
                 if (!rubraview_pal_fs_exists(path)) { osd_say(app, TU8("that file is no longer there")); break; }
                 lw->open = false;
-                open_path(app, path);
+                open_path_or_tree(app, path);
             }
             break;
         default: break;   /* the bar's other places, a row's arrows: nothing here */
@@ -1019,7 +1019,7 @@ bool favwin_press(app_state_t *app, double x, double y) {
                     app->picker_open = app->picker_listing.count > 0;
                 } else {
                     app->picker_open = false;
-                    open_path(app, path);
+                    open_path_or_tree(app, path);
                 }
             }
             break;

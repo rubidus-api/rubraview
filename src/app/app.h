@@ -2033,6 +2033,8 @@ void archwork_compress_paths(app_state_t *app, const proven_u8str_view_t *paths,
 void archwork_extract_inside(app_state_t *app, int mode, bool choose_folder);
 bool picker_in_archive(const app_state_t *app);
 bool picker_enter_archive(app_state_t *app, proven_u8str_view_t path);
+bool open_archive_tree(app_state_t *app, proven_u8str_view_t path);
+void open_path_or_tree(app_state_t *app, proven_u8str_view_t path);
 void picker_leave_archive(app_state_t *app);
 bool picker_archive_rel(const app_state_t *app, proven_u8str_view_t path, char *out, size_t cap);
 void archwork_compress_quick(app_state_t *app);

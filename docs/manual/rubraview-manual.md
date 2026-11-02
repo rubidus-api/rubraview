@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.70.exe              the viewer, as built
-dist/rubraview-v1.39.70/                 the release bundle
-dist/rubraview-v1.39.70.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.71.exe              the viewer, as built
+dist/rubraview-v1.39.71/                 the release bundle
+dist/rubraview-v1.39.71.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1641,9 +1641,11 @@ level and an AES-256 password or none). The bar at the foot has **Extract**
 (the way Settings › Files › Extracting says) and **Compress**. **Look inside
 (an archive)** (or `Shift+Enter`) lists all of an archive's folders and
 files, as a folder is listed. Opening an archive opens it that way too: a ZIP,
-7z, RAR, ALZ or EGG; a comic (CBZ, CB7, CBR) opens as a book, unless it has
-no picture, film or song in it. One whose names are locked opens as a book
-and asks its password. Inside it, pick what you want and Extract it (a folder
+7z, RAR, ALZ or EGG, from here, Explorer, a drop on the window, Open, Recent or
+a favourite; a comic (CBZ, CB7, CBR) opens as a book, unless it has no
+picture, film or song in it. The next archive (`]`, the end of a book) opens
+as a book, a ZIP too. One whose names are locked opens as a book and asks its
+password. Inside it, pick what you want and Extract it (a folder
 brings all that is in it; nothing picked, the whole archive); a picture opens
 the book at that page; `..` leaves it. Copying, moving, renaming and
 recycling are for files on disk: extract first. Work goes on while the

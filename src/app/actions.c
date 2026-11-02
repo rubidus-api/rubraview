@@ -745,7 +745,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
                 .parent_window_handle = rubraview_pal_window_native_handle(app->window),
             };
             rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
-            if (picked.accepted && picked.count == 1) open_path(app, picked.paths[0]);
+            if (picked.accepted && picked.count == 1) open_path_or_tree(app, picked.paths[0]);
             else if (picked.accepted && picked.count > 1) open_paths_as_set(app, picked.paths, picked.count, T("files opened as one set"));
         } else {
             picker_open(app);
@@ -885,7 +885,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         if (rubraview_parse_i64((proven_u8str_view_t){ .ptr = action.ptr + 12, .size = action.size - 12 }, &index) &&
             index >= 0 && (size_t)index < app->recent.list.count) {
             proven_u8str_view_t path = app_keep(app, app->recent.list.entries[index].path);
-            if (rubraview_pal_fs_exists(path)) open_path(app, path);
+            if (rubraview_pal_fs_exists(path)) open_path_or_tree(app, path);
             else osd_say(app, TU8("that file is no longer there"));
         }
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("recent_clear"))) {

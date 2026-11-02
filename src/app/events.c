@@ -575,7 +575,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 } else if (from < app->favorites.count) {
                     rubraview_fs_entry_t st;   /* 1.24.0: a file among them opens in the viewer */
                     proven_u8str_view_t path = app_keep(app, app->favorites.paths[from]);
-                    if (rubraview_pal_fs_stat(app->arena, path, &st) && !st.is_directory) { app->picker_open = false; open_path(app, path); }
+                    if (rubraview_pal_fs_stat(app->arena, path, &st) && !st.is_directory) { app->picker_open = false; open_path_or_tree(app, path); }
                     else { picker_navigate(app, path); app->picker.focus = 0; }
                 }
                 app->fav_press = -1;

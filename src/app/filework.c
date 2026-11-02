@@ -351,7 +351,7 @@ static void picker_path_commit(app_state_t *app) {
         app->picker.focus = 0;
     } else {
         app->picker_open = false;
-        open_path(app, path);
+        open_path_or_tree(app, path);
     }
 }
 
@@ -949,7 +949,7 @@ static void explorer_open(app_state_t *app, const proven_u8str_view_t *paths, si
     for (size_t i = 0; i < count && listed; ++i) listed = path_is_listed_kind(paths[i]);
 
     if (!listed) {
-        if (count == 1) open_path(app, paths[0]);
+        if (count == 1) open_path_or_tree(app, paths[0]);
         else open_paths_as_set(app, paths, count, T("files opened as one set"));
         return;
     }
@@ -975,7 +975,7 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
             explorer_open(app, paths, count);
             break;
         case RUBRAVIEW_SHELL_VERB_OPEN_ONLY:
-            if (count == 1 && !path_is_listed_kind(paths[0])) open_path(app, paths[0]);   /* a book, a folder */
+            if (count == 1 && !path_is_listed_kind(paths[0])) open_path_or_tree(app, paths[0]);   /* a book, a folder */
             else open_paths_as_set(app, paths, count, count == 1 ? T("file opened on its own") : T("files opened as one set"));
             break;
         case RUBRAVIEW_SHELL_VERB_ADD:
@@ -1104,7 +1104,7 @@ void handle_drop(app_state_t *app, const rubraview_window_event_t *event) {
     switch (rubraview_drop_classify(items, count)) {
         case RUBRAVIEW_DROP_OPEN_FILE:
         case RUBRAVIEW_DROP_OPEN_FOLDER:
-            open_path(app, items[0].path);
+            open_path_or_tree(app, items[0].path);
             break;
         case RUBRAVIEW_DROP_PLAYLIST:
             /* §3.19.2: several things dropped together become a sequence

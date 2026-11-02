@@ -3031,3 +3031,17 @@ Do not store credentials, private infrastructure details, personal data, private
   book where the owner wants an archiver's view.
 - Consequences: a ZIP of a comic is read by picking a picture in its tree (or renaming it .cbz). Opening an archive
   from elsewhere (Explorer, a drop, the Open box, Recent, the next archive) is unchanged: a book.
+
+## 2026-11-02: D-257 An archive opened from anywhere lists its tree; the next archive stays a book (W-20261102-1600)
+
+- Status: Accepted (owner 2026-11-02: "위에 것들도 다 압축파일로 읽도록 합시다. 다만 다음 압축파일은 만화로 여는게 맞습니다.
+  최근 파일 목록은 그냥 압축파일로 여는게 맞아요.").
+- Decision: D-256's rule holds wherever the reader opens an archive: Explorer (a double click, Open, Open only), a
+  drop on the window, the Open box, Recent (the File menu and the list), a favourite and a path typed in the
+  open-file screen all go through `open_path_or_tree`: an archive that is not a comic (ZIP, 7z, RAR, ALZ, EGG ...)
+  lists its tree in the open-file screen, a comic opens as a book. The next and previous archive (`next_archive`,
+  `prev_archive`, the ends of a book) open the book beside, a comic or not.
+- Kept a book: the start's last file (General › On startup: last_file), a book reopened after its password, and
+  Explorer's Browse verb, which opens the book and its pages' screen.
+- Consequences: a ZIP read as a book is opened from its tree (a picture in it) or reached by the next-archive keys.
+  Supersedes D-256's "opening an archive from elsewhere is unchanged".

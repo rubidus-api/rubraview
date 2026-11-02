@@ -829,6 +829,24 @@ static void archive_open_entry(app_state_t *app, const rubraview_fs_entry_t *ent
     open_path(app, archive);
 }
 
+/* D-256 (owner, 2026-11-02: "cbz cb7 cbr 같은건 만화보기로, zip 7z rar 같은건 압축파일 보기로"; "위에 것들도 다
+   압축파일로 ... 다음 압축파일은 만화로"): an archive that is not a comic, opened by the reader, lists its tree in the
+   open-file screen; a comic (CBZ, CB7, CBR) is left to open_path, a book. False when it is not such an archive or its
+   tree cannot be read (its names locked): the caller opens it as a book, which asks the password. */
+bool open_archive_tree(app_state_t *app, proven_u8str_view_t path) {
+    proven_u8str_view_t name = rubraview_path_basename(path);
+    if (!rubraview_glob_match_list(name, PROVEN_LIT(ARCHIVE_FILTER_ALL)) ||
+        rubraview_shell_kind_of(rubraview_path_ext(name)) == RUBRAVIEW_SHELL_COMICS) return false;
+    if (app->picker_places.count == 0) app->picker_places = rubraview_pal_fs_list_places(app->arena);
+    return picker_enter_archive(app, app_keep(app, path));
+}
+
+/* What the reader opens (Explorer, a drop, the Open box, Recent, a favourite, a typed path): an archive's tree or
+   open_path. The next archive, a book's own reopening and the start's last file stay open_path. */
+void open_path_or_tree(app_state_t *app, proven_u8str_view_t path) {
+    if (!open_archive_tree(app, path)) open_path(app, path);
+}
+
 /* Activating a tile enters a folder or opens a file. */
 void picker_activate(app_state_t *app, size_t index) {
     if (index >= app->picker_listing.count) return;
@@ -841,13 +859,10 @@ void picker_activate(app_state_t *app, size_t index) {
     }
 
     if (picker_in_archive(app)) { archive_open_entry(app, entry); return; }   /* RV-207 */
-    /* D-256 (owner, 2026-11-02: "cbz cb7 cbr 같은건 만화보기로, zip 7z rar 같은건 압축파일 보기로"): a comic opens as a
-       book (its tree when it holds nothing the viewer shows), any other archive as its tree; a tree that cannot be
-       read (its names locked) opens as a book, which asks the password. */
-    if (rubraview_glob_match_list(entry->name, PROVEN_LIT(ARCHIVE_FILTER_ALL)) &&
-        (rubraview_shell_kind_of(rubraview_path_ext(entry->name)) != RUBRAVIEW_SHELL_COMICS ||
-         archive_has_nothing_to_show(app, entry->path)) &&
-        picker_enter_archive(app, entry->path)) return;
+    if (open_archive_tree(app, entry->path)) return;   /* D-256 */
+    /* D-254: a comic holding nothing the viewer shows, its tree too */
+    if (rubraview_shell_kind_of(rubraview_path_ext(entry->name)) == RUBRAVIEW_SHELL_COMICS &&
+        archive_has_nothing_to_show(app, entry->path) && picker_enter_archive(app, entry->path)) return;
     app->picker_open = false;
     if (app->picker_in_book && app->picker_page_of && index >= app->picker_page_skip) {
         size_t page = app->picker_page_of[index - app->picker_page_skip];
