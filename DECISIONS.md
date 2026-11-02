@@ -3017,3 +3017,17 @@ Do not store credentials, private infrastructure details, personal data, private
   registered by an older version keeps Windows' name until it is registered again (Settings › Explorer). A type
   whose default the reader gave another program (Default apps, `UserChoice`) shows that program's name, which is
   not ours to set (VM T329: .jpg with Photos stays "JPG 파일"; .cbz, ours, "CBZ Comic book").
+
+## 2026-11-02: D-256 A comic opens as a book, any other archive as its tree (W-20261102-1500)
+
+- Status: Accepted (owner 2026-11-02: "압축파일에 대해서는 열기를 했을 때 파일 브라우저에서 열게 해 주세요. 그러니까 cbz cb7
+  cbr 같은건 만화보기로, zip 7z rar 같은건 압축파일 보기로요").
+- Decision: in the open-file screen, opening an archive (Enter, a double click, Open) goes by its kind in the list of
+  types that can be registered (`SHELL_GROUPS`, `rubraview_shell_kind_of`): a comic (CBZ, CB7, CBR) opens as a book,
+  its tree only when it holds nothing the viewer shows (D-254); any other archive (ZIP, 7z, RAR, ALZ, EGG, and what
+  else FultaArc reads) lists its tree, where a picture opens the book at that page. One whose tree cannot be read
+  (its names locked) opens as a book, which asks the password.
+- Rejected: D-254's rule for every archive (a book unless it holds nothing to show): a ZIP of pictures opened as a
+  book where the owner wants an archiver's view.
+- Consequences: a ZIP of a comic is read by picking a picture in its tree (or renaming it .cbz). Opening an archive
+  from elsewhere (Explorer, a drop, the Open box, Recent, the next archive) is unchanged: a book.

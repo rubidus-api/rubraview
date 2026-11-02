@@ -841,7 +841,12 @@ void picker_activate(app_state_t *app, size_t index) {
     }
 
     if (picker_in_archive(app)) { archive_open_entry(app, entry); return; }   /* RV-207 */
-    if (rubraview_glob_match_list(entry->name, PROVEN_LIT(ARCHIVE_FILTER_ALL)) && archive_has_nothing_to_show(app, entry->path) &&
+    /* D-256 (owner, 2026-11-02: "cbz cb7 cbr 같은건 만화보기로, zip 7z rar 같은건 압축파일 보기로"): a comic opens as a
+       book (its tree when it holds nothing the viewer shows), any other archive as its tree; a tree that cannot be
+       read (its names locked) opens as a book, which asks the password. */
+    if (rubraview_glob_match_list(entry->name, PROVEN_LIT(ARCHIVE_FILTER_ALL)) &&
+        (rubraview_shell_kind_of(rubraview_path_ext(entry->name)) != RUBRAVIEW_SHELL_COMICS ||
+         archive_has_nothing_to_show(app, entry->path)) &&
         picker_enter_archive(app, entry->path)) return;
     app->picker_open = false;
     if (app->picker_in_book && app->picker_page_of && index >= app->picker_page_skip) {
