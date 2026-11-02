@@ -806,7 +806,7 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
         size_t sel_a = 0, sel_b = 0;
         bool has_selection = rubraview_textedit_has_selection(te);
         if (has_selection) rubraview_textedit_selection_range(te, &sel_a, &sel_b);
-        if (app->rename_is_password) {
+        if (app->rename_is_password && !app->password_shown) {   /* D-262: the eye shows it as typed */
             /* A dot a character (the IME's unfinished syllable too); the
                caret and the selection are counted in characters. */
             char plain[sizeof(app->rename_buffer) + sizeof(app->rename_composing)];
@@ -825,6 +825,8 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             comp = 0;
             sel_a = 3 * at_a;
             sel_b = 3 * at_b;
+        }
+        if (app->rename_is_password && !app->rename_is_pack) {
             rubraview_pal_rect_t label = { box.x, box.y - 30.0 * dpi, box.width, 26.0 * dpi };
             char title[1200];
             proven_u8str_view_t name = rubraview_path_basename((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->password_for, .size = app->password_for_len });
@@ -893,6 +895,17 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? COLOR_TILE_CURRENT : over ? 0x50FFFFFFu : COLOR_BOX_FILL, 3.0);
             rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 3.0);
             rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, 15.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
+        /* D-262 (owner, 2026-11-02: "눈알 버튼을 달아서 그걸로 보면서 입력할 때는 다른 문자도 입력 가능"): an unpacking
+           password's eye, at the box's right end: shown as typed, any letter through the IME; hidden, plain letters */
+        if (app->rename_is_password && !app->rename_is_pack && n < 4) {
+            rubraview_pal_rect_t eye = { box.x + box.width - box.height, box.y, box.height, box.height };
+            bool over = pal_rect_has(eye, app->pointer_x, app->pointer_y);
+            if (over || app->password_shown) rubraview_pal_render_fill_rect(app->renderer, eye, app->password_shown ? COLOR_TILE_CURRENT : 0x40FFFFFFu, 3.0);
+            draw_sign(app->renderer, app->password_shown ? RUBRAVIEW_ICON_HIDE : RUBRAVIEW_ICON_VIEW, app->password_shown ? "x" : "o", eye, 20.0 * dpi, COLOR_TEXT);
+            app->rename_btn[n] = eye;
+            app->rename_btn_kind[n] = RENAME_BTN_EYE;
+            app->rename_btn_n = n + 1;
         }
     }
 }

@@ -706,6 +706,25 @@ bool rubraview_pack_names_hidden_supported(rubraview_pack_format_t format) {
     return false;   /* FultaArc writes no encrypted 7z header yet; the request: D-261 */
 }
 
+static bool plain_byte(proven_byte_t c) { return c >= 0x21 && c <= 0x7E; }
+
+bool rubraview_pack_password_plain(proven_u8str_view_t password) {
+    for (size_t i = 0; i < password.size; ++i) if (!plain_byte(password.ptr[i])) return false;
+    return true;
+}
+
+size_t rubraview_password_keep_plain(proven_u8str_view_t in, char *out, size_t cap, bool *dropped) {
+    size_t n = 0;
+    bool lost = false;
+    for (size_t i = 0; i < in.size; ++i) {
+        if (plain_byte(in.ptr[i]) && n + 1 < cap) out[n++] = (char)in.ptr[i];
+        else lost = true;
+    }
+    if (cap) out[n] = '\0';
+    if (dropped) *dropped = lost;
+    return n;
+}
+
 static fulta_arc_method_t fulta_method(rubraview_pack_method_t m) {
     switch (m) {
         case RUBRAVIEW_PACK_METHOD_DEFLATE: return FULTA_ARC_METHOD_DEFLATE;
@@ -724,6 +743,11 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
     if (job->volume_bytes > 0 && !rubraview_pack_split_supported(job->format)) {
         job->result = RUBRAVIEW_ARCHIVE_CANNOT_WRITE;
         say(job->why, sizeof job->why, T("split volumes are not written yet"), "");
+        return;
+    }
+    if (job->password && !rubraview_pack_password_plain(proven_u8str_view_from_cstr(job->password))) {
+        job->result = RUBRAVIEW_ARCHIVE_CANNOT_WRITE;
+        say(job->why, sizeof job->why, T("a new archive's password takes English letters, digits and symbols only"), "");
         return;
     }
     if (job->names_hidden && !rubraview_pack_names_hidden_supported(job->format)) {

@@ -152,6 +152,9 @@ void rubraview_pal_window_accept_drops(rubraview_window_t *window, bool accept);
  * is using do not also arrive as KEY_DOWN. Off drops any unfinished text.
  */
 void rubraview_pal_window_text_input(rubraview_window_t *window, bool on);
+/* D-262: while text is taken, the IME attached (any language) or not (the keyboard's plain letters, a password's);
+   text_input(true) attaches it again. */
+void rubraview_pal_window_text_ime(rubraview_window_t *window, bool ime);
 
 /**
  * §3.19.3: register or remove this program's file associations under

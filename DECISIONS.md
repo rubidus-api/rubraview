@@ -3113,3 +3113,17 @@ Do not store credentials, private infrastructure details, personal data, private
   to hide names, so it is greyed there for good.
 - Rejected: the password box after Enter (the owner looked for the password in the window); a show-the-password
   switch (two fields catch a typing slip instead).
+
+## 2026-11-02: D-262 A new archive's password in plain letters; the unpacking box's eye takes any (W-20261102-2300)
+
+- Status: Accepted (owner 2026-11-02: "한글 암호는 금지합니다"; asked how far: "압축할 때는 영문 숫자 기호만 가능하고, 압축을
+  풀 때는 버튼을 넣어서 그냥 보이는 그대로 입력할 수도 있게 합시다 예를 들어 눈알 버튼을 달아서 그걸로 보면서 입력할 때는
+  다른 문자도 입력 가능한 것으로. 물론 압축 해제시에만 가능한 이야기 입니다.").
+- Decision: a new archive's password is `!` to `~` (no space): the Compress window's password fields type without
+  the IME (`rubraview_pal_window_text_ime`), text that arrives otherwise (a paste) loses the other characters and
+  the screen says so, and the job refuses a password with any (`rubraview_pack_password_plain`). The box that asks an
+  archive's password (opening or extracting) types the same way while hidden; the eye at its right end shows it as
+  typed and attaches the IME, so a Hangul password another program made can be typed; it hides again with the eye
+  and resets when the box closes.
+- Why plain: archivers store a non-ASCII password's bytes differently (UTF-8, a code page), so such an archive may
+  not open elsewhere; and dots hide what an IME composed.

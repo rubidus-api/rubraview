@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.74.exe              the viewer, as built
-dist/rubraview-v1.39.74/                 the release bundle
-dist/rubraview-v1.39.74.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.75.exe              the viewer, as built
+dist/rubraview-v1.39.75/                 the release bundle
+dist/rubraview-v1.39.75.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1651,8 +1651,9 @@ Maximum or Ultra, **Codec** (ZIP: Deflate, which Windows opens too; 7z: LZMA2,
 LZMA, PPMd, BZip2 or Deflate), **Solid** or file by file for a 7z, and
 **Split**, **Password** and **Again** (typed twice, shown as dots; `Tab` or
 a click moves between the name and them; empty for none) and **Names**
-readable or hidden by the password (7z); `Enter` compresses. The password is
-AES-256; a ZIP with one needs 7-Zip or Bandizip, not Windows' own. Greyed
+readable or hidden by the password (7z); `Enter` compresses. A new archive's
+password takes English letters, digits and symbols only (Hangul and other
+letters are dropped, and the screen says so). The password is AES-256; a ZIP with one needs 7-Zip or Bandizip, not Windows' own. Greyed
 chips are what FultaArc does not write yet: split volumes, ZIP's codecs other
 than Deflate, and a 7z's hidden names. The bar at the foot has **Extract** (the way Settings › Files ›
 Extracting says) and **Compress**, when they fit what is picked. **Look inside
@@ -1662,7 +1663,9 @@ files, as a folder is listed. Opening an archive opens it that way too: a ZIP,
 a favourite; a comic (CBZ, CB7, CBR) opens as a book, unless it has no
 picture, film or song in it. The next archive (`]`, the end of a book) opens
 as a book, a ZIP too. One whose names are locked opens as a book and asks its
-password. Inside it, pick what you want and Extract it (a folder
+password. A password box takes English letters, digits and
+symbols as dots; the eye at its right end shows the password as you type and
+then takes any letter, Hangul too, for an archive someone made that way. Inside it, pick what you want and Extract it (a folder
 brings all that is in it; nothing picked, the whole archive); a picture opens
 the book at that page; `..` leaves it. Copying, moving, renaming and
 recycling are for files on disk: extract first. Work goes on while the

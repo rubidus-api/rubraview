@@ -1151,6 +1151,7 @@ typedef struct app_state {
     bool                   rename_is_password;
     bool                   rename_is_pack;          /* RV-207: the Compress box (the new archive's place) */
     bool                   password_for_extract;    /* the password box asks for an archive being extracted */
+    bool                   password_shown;          /* D-262: the eye: an unpacking password shown, any letter taken */
     int32_t                pack_level;              /* the Compress window's level step: 0 store ... 5 ultra (D-260) */
     int32_t                pack_method;             /* its codec (rubraview_pack_method_t; DEFAULT = the format's first) */
     bool                   pack_solid_off;          /* 7z: one block a file */
@@ -1694,7 +1695,7 @@ extern double g_col_w[RUBRAVIEW_PICKER_SORT_COUNT];
 
 
 /* Moved from main.c: more than one file uses them (RV-163). */
-enum { RENAME_BTN_OK = 1, RENAME_BTN_CANCEL, RENAME_BTN_BROWSE, RENAME_BTN_BACK };
+enum { RENAME_BTN_OK = 1, RENAME_BTN_CANCEL, RENAME_BTN_BROWSE, RENAME_BTN_BACK, RENAME_BTN_EYE /* D-262 */ };
 /* D-260: the Compress window's rows; a chip's kind is its row * 16 + its place in the row */
 enum { PACK_ROW_FORMAT = 0, PACK_ROW_LEVEL, PACK_ROW_METHOD, PACK_ROW_SOLID, PACK_ROW_SPLIT,
        PACK_ROW_PASSWORD, PACK_ROW_AGAIN, PACK_ROW_NAMES,   /* D-261: the password typed twice, the names hidden or not */
@@ -2073,6 +2074,9 @@ void archwork_pack_typed(app_state_t *app);
 void archwork_pack_cancelled(app_state_t *app);
 bool archwork_pack_is_7z(const app_state_t *app);
 void archwork_pack_focus(app_state_t *app, int32_t to);
+bool password_plain_only(const app_state_t *app);              /* D-262: the box takes only `!` to `~` */
+void rename_take_text(app_state_t *app, proven_u8str_view_t text);
+void password_eye_toggle(app_state_t *app);
 void archwork_pack_set_format(app_state_t *app, bool sevenz);
 rubraview_pack_method_t archwork_pack_method(const app_state_t *app, bool sevenz);
 bool pack_window_press(app_state_t *app, double x, double y);   /* D-260: a chip of the Compress window */

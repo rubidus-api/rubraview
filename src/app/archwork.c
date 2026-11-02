@@ -401,6 +401,7 @@ void archwork_pack_focus(app_state_t *app, int32_t to) {
     rubraview_textedit_set(&app->rename_edit, v);
     app->pack_focus = to;
     app->rename_is_password = to > 0;   /* dots, never copied out, wiped when it ends */
+    rubraview_pal_window_text_ime(app->window, to == 0);   /* D-262: a new archive's password in plain letters */
 }
 
 /* The codec the window shows lit: the one chosen, or the format's first. */
@@ -552,6 +553,7 @@ void archwork_poll(app_state_t *app, bool quitting) {
         size_t pn = strlen(w->archives[w->at]);   /* the box says whose */
         if (pn < sizeof(app->password_for)) { memcpy(app->password_for, w->archives[w->at], pn); app->password_for_len = pn; }
         rubraview_pal_window_text_input(app->window, true);
+        rubraview_pal_window_text_ime(app->window, false);   /* D-262: hidden, plain letters; the eye brings the IME */
         proven_u8str_view_t name = rubraview_path_basename(proven_u8str_view_from_cstr(w->archives[w->at]));
         snprintf(line, sizeof line, r == RUBRAVIEW_ARCHIVE_PASSWORD_WRONG ? T("wrong password for %.*s: type it again, then Enter")
                                                                        : T("%.*s is locked: type its password, then Enter"),

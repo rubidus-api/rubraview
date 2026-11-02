@@ -290,10 +290,34 @@ void rename_end(app_state_t *app) {
     }
     app->rename_favorite = -1;
     app->rename_composing_length = 0;
+    app->password_shown = false;
     rubraview_pal_window_text_input(app->window, false);
 }
 
 /* Text typed or finished by the IME, and the IME's unfinished part. */
+/* D-262: a new archive's password, and an unpacking one while hidden, take English letters, digits and symbols only;
+   the eye shows an unpacking one and takes any letter (another program's archive may have Hangul in it). */
+bool password_plain_only(const app_state_t *app) {
+    return app->rename_is_password && (app->rename_is_pack || !app->password_shown);
+}
+
+void rename_take_text(app_state_t *app, proven_u8str_view_t text) {
+    if (!password_plain_only(app)) { rename_insert(app, text); return; }
+    char kept[1024];
+    bool dropped = false;
+    size_t n = rubraview_password_keep_plain(text, kept, sizeof kept, &dropped);
+    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)kept, .size = n });
+    secure_wipe(kept, sizeof kept);
+    if (dropped) osd_say(app, app->rename_is_pack ? TU8("a new archive's password takes English letters, digits and symbols only")
+                                                  : TU8("English letters, digits and symbols only: the eye shows the password and takes any letter"));
+}
+
+void password_eye_toggle(app_state_t *app) {
+    if (!app->rename_is_password || app->rename_is_pack) return;
+    app->password_shown = !app->password_shown;
+    rubraview_pal_window_text_ime(app->window, app->password_shown);
+}
+
 void rename_text(app_state_t *app, const rubraview_window_event_t *event) {
     if (app->ab_edit_open) {
         if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
@@ -310,8 +334,8 @@ void rename_text(app_state_t *app, const rubraview_window_event_t *event) {
     if (!app->rename_active) return;
     proven_u8str_view_t text = { .ptr = (const proven_byte_t *)event->text.utf8, .size = event->text.length };
     if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
-        rename_insert(app, text);
-    } else {
+        rename_take_text(app, text);
+    } else if (!password_plain_only(app)) {
         size_t n = text.size < sizeof(app->rename_composing) ? text.size : sizeof(app->rename_composing) - 1;
         memcpy(app->rename_composing, text.ptr, n);
         app->rename_composing_length = n;

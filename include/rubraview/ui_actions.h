@@ -120,6 +120,7 @@ void rubraview_confirm_clear(rubraview_confirm_t *confirm);
 #define RUBRAVIEW_ICON_SETTINGS   0xE713u   /* a gear */
 #define RUBRAVIEW_ICON_PIN        0xE840u   /* a pushpin: the title bar kept shown, the Toolbar kept open */
 #define RUBRAVIEW_ICON_HIDE       0xED1Au   /* an eye struck through */
+#define RUBRAVIEW_ICON_VIEW       0xE890u   /* an eye: a password shown (D-262) */
 #define RUBRAVIEW_ICON_ON_TOP     0xE81Eu   /* layers: always on top */
 #define RUBRAVIEW_ICON_FULLSCREEN 0xE740u   /* arrows out to two corners */
 #define RUBRAVIEW_ICON_MINIMIZE   0xE921u

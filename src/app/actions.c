@@ -1483,6 +1483,7 @@ bool rename_box_press(app_state_t *app, double x, double y) {
             case RENAME_BTN_CANCEL: rename_cancel(app); break;
             case RENAME_BTN_BROWSE: target_browse(app); break;
             case RENAME_BTN_BACK:   text_find_step(app, false); break;
+            case RENAME_BTN_EYE:    password_eye_toggle(app); break;   /* D-262 */
             case RENAME_BTN_OK + 100: rename_extension_apply(app); break;   /* Change extensions: all rows now */
             default: break;
         }
@@ -1519,6 +1520,13 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         /* A password is never copied out of its box. */
         if (app->rename_is_password && (combo.modifiers & RUBRAVIEW_MOD_CTRL) && (key_is(combo, "C") || key_is(combo, "X"))) return true;
         if (app->rename_is_target && (combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "O")) { target_browse(app); return true; }
+        if (password_plain_only(app) && (combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "V")) {   /* D-262: pasted, filtered */
+            char pasted[1024];
+            size_t n = rubraview_pal_clipboard_get_text(app->window, pasted, sizeof(pasted));
+            rename_take_text(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)pasted, .size = n });
+            secure_wipe(pasted, sizeof pasted);
+            return true;
+        }
         if (rename_edit_key(app, combo)) return true;
         /* The characters themselves arrive as text (rename_text), in
            either case and from the IME; the keys that make them are

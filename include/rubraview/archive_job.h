@@ -154,6 +154,12 @@ bool rubraview_pack_split_supported(rubraview_pack_format_t format);
 /* D-261: a 7z's names hidden behind its password (7-Zip's -mhe): FultaArc writes no encrypted header yet (asked for);
    ZIP has no standard way. A job asking is refused. */
 bool rubraview_pack_names_hidden_supported(rubraview_pack_format_t format);
+/* D-262 (owner, 2026-11-02: "압축할 때는 영문 숫자 기호만"): a new archive's password is English letters, digits and
+   symbols, `!` to `~`: no space, no Hangul, nothing other programs might encode another way. */
+bool rubraview_pack_password_plain(proven_u8str_view_t password);
+/* The characters of `in` that are, copied to `out` (cap bytes, NUL-ended); *dropped when any was not. Returns the
+   length kept. */
+size_t rubraview_password_keep_plain(proven_u8str_view_t in, char *out, size_t cap, bool *dropped);
 
 typedef struct rubraview_compress_job {
     /* given */

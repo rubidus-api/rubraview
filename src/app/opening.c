@@ -388,6 +388,7 @@ void password_ask(app_state_t *app, proven_u8str_view_t archive_path, bool wrong
     app->rename_is_password = true;
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, true);
+    rubraview_pal_window_text_ime(app->window, false);   /* D-262: hidden, plain letters; the eye brings the IME */
     osd_say(app, wrong ? TU8("wrong password") : TU8("this archive is locked: type its password, then Enter"));
 }
 

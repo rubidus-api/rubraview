@@ -1508,6 +1508,20 @@ void rubraview_pal_window_text_input(rubraview_window_t *window, bool on) {
     }
 }
 
+void rubraview_pal_window_text_ime(rubraview_window_t *window, bool ime) {
+    if (!window || !window->hwnd || !window->text_input) return;
+    if (ime) {
+        if (window->saved_imc) ImmAssociateContext(window->hwnd, window->saved_imc);
+        return;
+    }
+    HIMC imc = ImmGetContext(window->hwnd);
+    if (imc) {
+        ImmNotifyIME(imc, NI_COMPOSITIONSTR, CPS_CANCEL, 0);   /* a syllable half built goes, not into the password */
+        ImmReleaseContext(window->hwnd, imc);
+    }
+    ImmAssociateContext(window->hwnd, NULL);
+}
+
 void rubraview_pal_window_accept_drops(rubraview_window_t *window, bool accept) {
     if (!window || !window->hwnd) return;
     if (!accept) {
