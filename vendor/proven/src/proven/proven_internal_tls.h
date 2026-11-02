@@ -76,6 +76,17 @@ typedef struct {
     proven_u64 seq;
 } proven_tls_keys_t;
 
+/* A connection's two directions, in an allocation of their own; and what remakes one while a
+ * quiet connection has given that allocation back (proven_tls_compact_). */
+typedef struct { proven_tls_keys_t read, write; } proven_tls_live_keys_t;
+typedef struct {
+    proven_byte_t key[32];
+    proven_byte_t iv[12];
+    proven_u64 seq;
+    proven_u8 key_len;
+    bool active, chacha;
+} proven_tls_key_seed_t;
+
 /* Install the key and IV derived from a traffic secret, and start the sequence at zero. */
 void proven_tls13_set_keys(proven_tls_keys_t *keys, const proven_tls_suite_t *suite, const proven_byte_t *traffic_secret);
 
@@ -231,6 +242,10 @@ typedef struct {
  * as long as the freshness window could still let it in. Oldest first in a ring; full: refused. */
 #define PROVEN_TLS_EARLY_SEEN 4096
 #define PROVEN_TLS_EARLY_WINDOW_S 10              /* the freshness window: a ticket's age as the client says it and as the server knows it */
+/* Over TCP (RFC-0027): the most early data a ticket allows (its max_early_data_size). */
+#define PROVEN_TLS_EARLY_TCP_MAX 16384
+/* Where a connection's early data stands, over TCP or in QUIC mode. */
+enum { PROVEN_TLS_EARLY_NONE = 0, PROVEN_TLS_EARLY_OFFERED, PROVEN_TLS_EARLY_ACCEPTED, PROVEN_TLS_EARLY_REFUSED };
 typedef struct {
     proven_byte_t id[16];                         /* the ticket's key id and nonce: unique to it */
     proven_i64 until;
@@ -240,6 +255,26 @@ typedef struct {
     proven_size_t head, count, cap;               /* cap: PROVEN_TLS_EARLY_SEEN, smaller in a test */
     proven_tls_early_entry_t e[PROVEN_TLS_EARLY_SEEN];
 } proven_tls_early_seen_t;
+/* A client's sessions by server name, for the transport wrapper when it is given none
+ * (RFC-0027): resumption, and early data where a ticket allows it. The entries are allocated
+ * when the first session is kept. */
+#define PROVEN_TLS_CLIENT_SESSIONS 8
+typedef struct {
+    proven_u64 used;                              /* 0: free */
+    proven_u8 name_len;
+    proven_byte_t name[253];
+    proven_tls_session_t s;
+} proven_tls_client_entry_t;
+typedef struct proven_tls_client_cache {
+    atomic_flag lock;
+    proven_u64 clock;
+    proven_tls_client_entry_t *e;                 /* PROVEN_TLS_CLIENT_SESSIONS of them, or null */
+} proven_tls_client_cache_t;
+/* The session kept for `name`, copied to `out` (emptied when there is none). */
+void proven_tls_client_cache_load_(const proven_tls_config_t *config, proven_u8str_view_t name, proven_tls_session_t *out);
+/* Keep `s` as `name`'s newest; an empty one is not kept. */
+void proven_tls_client_cache_store_(const proven_tls_config_t *config, proven_u8str_view_t name, const proven_tls_session_t *s);
+
 /* Take a ticket's early data once: false when it was seen already, or the register is full. */
 [[nodiscard]] bool proven_tls_early_take_(const proven_tls_config_t *config, const proven_byte_t id[16], proven_i64 now);
 /* Tests: shrink a configuration's register (0 restores it). */
@@ -273,6 +308,7 @@ struct proven_tls_config {
     proven_u32 legacy;                            /* PROVEN_TLS_LEGACY_* */
     proven_tls_ticket_keys_t tickets;             /* the one part that changes: see the lock */
     proven_tls_early_seen_t *early_seen;          /* a server with early_data: the strike register (RFC-0021), which also changes under its lock */
+    struct proven_tls_client_cache *client_cache; /* a client: the newest session per server name (RFC-0027), under its own lock */
 };
 
 /* What a ticket holds, and what a client keeps of a session. */
@@ -291,6 +327,7 @@ typedef struct {
     proven_u32 age_add;
     proven_u8 alpn_index;
     proven_byte_t limits[8];
+    bool quic_v2;                                 /* made over QUIC version 2 (RFC-0036): taken only there */
 } proven_tls_ticket_state_t;
 
 #define PROVEN_TLS_TICKET_MAX 160
@@ -329,6 +366,12 @@ typedef struct {
      * the ticket: a new ticket leaves it, and it is used once. */
     proven_u16 token_len;
     proven_byte_t token[PROVEN_TLS_SESSION_TOKEN_MAX];
+    /* TCP (RFC-0027): the most early data the ticket allows (its max_early_data_size); 0: none.
+     * After every field before it, so that a record written before it reads as 0. */
+    proven_u32 early_max;
+    /* QUIC version 2 (RFC-0036): the ticket and the token came over it. After every field, so
+     * that an older record reads as version 1. */
+    proven_byte_t ticket_v2, token_v2;
 } proven_tls_session_data_t;
 #define PROVEN_TLS_SESSION_MAGIC ((proven_u32)0x70547333)      /* changed with the record's layout: an older record is simply empty */
 
@@ -353,7 +396,17 @@ void proven_tls_transport_close_now_(proven_transport_t tls);
 void proven_tls_transport_shutdown_now_(proven_transport_t tls);
 #endif
 
-/* ---- Issuing certificates: for proven_tls_self_signed, and for tests that need a chain ---- */
+/* ---- Issuing certificates: for tests that need an identity or a chain ---- */
+
+/* A self-signed Ed25519 certificate for `names` (DNS names or IP literals, 1 to 16), valid from
+ * `not_before` to `not_after`, for server and client authentication, and its key, as PEM. Public
+ * as proven_tls_self_signed until v0.78.0 (owner decision 2026-10-23: an identity comes from
+ * files). random NULL: the system's (hosted). PROVEN_ERR_INVALID_ARG, PROVEN_ERR_OUT_OF_BOUNDS. */
+proven_err_t proven_tls_self_signed_(const proven_u8str_view_t *names, proven_size_t name_count,
+                                     proven_i64 not_before, proven_i64 not_after,
+                                     proven_tls_random_fn random, void *random_ctx,
+                                     proven_mem_mut_t certificate_pem, proven_size_t *certificate_len,
+                                     proven_mem_mut_t private_key_pem, proven_size_t *private_key_len);
 
 typedef struct {
     const char *subject;                          /* the subject's common name */
@@ -383,8 +436,6 @@ proven_size_t proven_tls_rsa_key_der_(const proven_crypto_rsa_key_t *key, const 
  * RSASSA-PSS with a salt of 32 bytes, or - `pkcs1`, for TLS 1.2 peers that offer nothing
  * else - PKCS #1 v1.5. False when the config has no RSA key or the signature could not be made. */
 [[nodiscard]] bool proven_tls_config_rsa_sign_(const proven_tls_config_t *config, bool pkcs1, proven_mem_view_t digest, proven_byte_t *sig, proven_size_t *len);
-/* The premaster of a static-RSA ClientKeyExchange, or 48 random bytes when it is not one. */
-void proven_tls_config_rsa_decrypt_(const proven_tls_config_t *config, proven_mem_view_t cipher, proven_u16 version, proven_byte_t out[48]);
 /* PEM: the label between the dashes, the bytes in Base64, 64 to a line. */
 proven_err_t proven_tls_pem_write_(const char *label, proven_mem_view_t der, proven_mem_mut_t out, proven_size_t *len);
 /* 4 or 16 when `text` is an IP literal (cert.c). */
@@ -395,9 +446,49 @@ void proven_crypto_rsa_test_min_bits(proven_size_t bits);
 /* Put one suite first in both roles' order (0: the normal order), and make the server ignore
  * an X25519 key share so that it has to ask for P-256. */
 void proven_tls_test_knobs(proven_u16 suite_first, bool server_refuses_x25519);
-/* A client over TCP offers early data in its first ClientHello and sends none of it, so that a
- * test can put records of its own after that hello. */
-void proven_tls_test_early_tcp_(bool on);
+/* For tests: a server over TCP passes over quic_transport_parameters instead of refusing it, so
+ * that a QUIC-mode hello can be answered over TCP and the two key schedules compared. */
+void proven_tls_test_quic_tp_tcp_(bool on);
+/* 0-RTT over TCP (RFC-0027). Only a connection whose owner asks for it sends or takes early data:
+ * a client made by proven_tls_client_create_early_ offers it (with `early_data` in its
+ * configuration and a session whose ticket allows it); a server told proven_tls_server_take_early_
+ * before its first feed takes it (with `early_data`). Early data is written with proven_tls_write
+ * before the handshake, up to the ticket's allowance, and is read with proven_tls_read on the
+ * server, where proven_tls_pending_early_ says whether the bytes waiting arrived early. A server
+ * that took early data may write from its Finished on (0.5-RTT). */
+[[nodiscard]] proven_err_t proven_tls_client_create_early_(const proven_tls_config_t *config, proven_u8str_view_t server_name,
+                                                         proven_tls_session_t *session, proven_tls_conn_t **out);
+void proven_tls_server_take_early_(proven_tls_conn_t *c);
+/* PROVEN_TLS_EARLY_*: none offered; offered and not yet answered; accepted; refused (a client's
+ * early bytes did not arrive and are to be sent again). */
+int proven_tls_early_(const proven_tls_conn_t *c);
+/* Client: the bytes written as early data so far, and how many more the ticket allows. */
+proven_size_t proven_tls_early_written_(const proven_tls_conn_t *c);
+proven_size_t proven_tls_early_room_(const proven_tls_conn_t *c);
+/* Server: the application data waiting to be read arrived as early data. */
+bool proven_tls_pending_early_(const proven_tls_conn_t *c);
+/* Server: application bytes read so far that arrived early, and in all (held at its largest). */
+void proven_tls_read_counts_(const proven_tls_conn_t *c, proven_size_t *early, proven_size_t *total);
+/* Application data may be written now (established, or a server's 0.5-RTT). */
+bool proven_tls_writable_(const proven_tls_conn_t *c);
+bool proven_tls_is_server_(const proven_tls_conn_t *c);
+/* Client: this connection has kept a ticket from its peer since its handshake. */
+bool proven_tls_ticket_stored_(const proven_tls_conn_t *c);
+#if !defined(PROVEN_FREESTANDING) && !defined(PROVEN_NO_NET)
+/* What a transport made by the wrapper did with early data (PROVEN_TLS_EARLY_*), and: the next
+ * connection under its session is not to send early data (an HTTP 425 came, RFC 8470). */
+int proven_tls_transport_early_(proven_transport_t tls);
+void proven_tls_transport_no_early_next_(proven_transport_t tls);
+/* What is written next is not to go as early data: the handshake is completed first. */
+void proven_tls_transport_no_early_now_(proven_transport_t tls);
+#endif
+/* The protocol a stored session was made for is `name`. */
+bool proven_tls_session_alpn_is_(const proven_tls_session_t *session, proven_u8str_view_t name);
+/* A stored session whose ticket allows early data over TCP. */
+bool proven_tls_session_allows_early_(const proven_tls_session_t *session);
+/* A ticket that carried early data once is not offered for early data again (RFC 8446 section 8:
+ * the server's register refuses it); resumption with it goes on. */
+void proven_tls_session_early_off_(proven_tls_session_t *s);
 /* TLS 1.2 test knobs: bit 0, the server answers 1.2 whatever the client offers; bit 1, the
  * client omits the extended master secret; bit 2, the server omits it from its answer; bit 3,
  * the client adds the fallback signal of RFC 7507 to its suites. */
@@ -406,9 +497,8 @@ void proven_tls_test_knobs12(unsigned flags);
  * proven_tls_test_only_suite12 even when its configuration does not allow it; 32, the client
  * does not ask for encrypt_then_mac; 64, the server agrees to the oldest version the client
  * allows instead of the newest; 128, the server's Diffie-Hellman prime is not a known one;
- * 256, its value is 1; 512, the client's value is 1; 1024, the client's RSA premaster carries
- * another version; 2048, its ClientKeyExchange is no encryption of anything; 4096, the server
- * asks for a client certificate even on a connection without the extended master secret. */
+ * 256, its value is 1; 512, the client's value is 1; 4096, the server asks for a client
+ * certificate even on a connection without the extended master secret. */
 /* The client offers only this TLS 1.2-family suite (0: everything, as usual). */
 void proven_tls_test_only_suite12(proven_u16 id);
 /* How often an RSA key's blinding pair has been used, put where a test says; returns what it was. */
@@ -420,6 +510,30 @@ bool proven_tls_test_send_handshake(proven_tls_conn_t *conn, proven_byte_t type)
 /* A copy of a connection's sending keys and application secret, for a test that must forge the
  * next record a peer would send. */
 void proven_tls_test_peek_write(const proven_tls_conn_t *conn, proven_tls_keys_t *keys, proven_byte_t secret[48]);
+
+/* RFC-0025 step 3: a quiet connection gives back its record keys' memory - the two expanded
+ * contexts, about 850 bytes, wiped - and keeps the keys they were made from; the next call that
+ * needs them remakes them (on AES-NI in about a tenth of a microsecond each). False when it
+ * cannot: no keys yet, a handshake in progress, QUIC mode, a CBC suite, a dead connection, or
+ * compact already. For a driver that knows its connection is quiet (the event server, after a
+ * second). SECRET: what is kept is key material, wiped when remade and at destroy. */
+bool proven_tls_compact_(proven_tls_conn_t *conn);
+/* The two halves of it, for the constant-time check: what remakes one direction's keys, and
+ * the keys remade from it. SECRET: both. */
+void proven_tls_seed_take_(proven_tls_key_seed_t *seed, const proven_tls_keys_t *keys);
+void proven_tls_seed_give_(const proven_tls_key_seed_t *seed, proven_tls_keys_t *keys);
+bool proven_tls_is_compact_(const proven_tls_conn_t *conn);
+
+/* RFC-0025 step 3: application data sealed into records straight into `out` - a driver's send
+ * buffer - instead of the engine's own output. As many whole records as fit (a record is cut to
+ * the room left only when at least 256 bytes of it fit); `.value` is the plaintext taken and
+ * `*written` the bytes of records written. Takes nothing while the engine holds records of its own
+ * (proven_tls_pending_output: a KeyUpdate, an alert, a handshake message), which must leave first.
+ * PROVEN_ERR_UNSUPPORTED on a CBC suite (proven_tls_write instead); otherwise the errors of
+ * proven_tls_write. A record needs PROVEN_TLS_AEAD_MAX_RECORD_EXTRA bytes
+ * beyond its plaintext. */
+#define PROVEN_TLS_AEAD_MAX_RECORD_EXTRA (PROVEN_TLS_RECORD_HEADER + 8 + 16)
+proven_result_size_t proven_tls_seal_into_(proven_tls_conn_t *conn, proven_mem_view_t src, proven_mem_mut_t out, proven_size_t *written);
 /* A client whose first message and X25519 key are given, to replay a published handshake. */
 proven_err_t proven_tls_client_create_replay(const proven_tls_config_t *config, proven_u8str_view_t server_name,
                                              proven_mem_view_t hello, const proven_byte_t x25519_private[32], proven_tls_conn_t **out);

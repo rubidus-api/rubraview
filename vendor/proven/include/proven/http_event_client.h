@@ -86,6 +86,7 @@ typedef struct {
     proven_u32 response_timeout_ms;        /**< from the request being sent to the end of the response head. 0: 30 s */
     proven_u32 body_timeout_ms;            /**< between pieces of the response body. 0: 30 s */
     proven_u32 write_timeout_ms;           /**< output held with none of it accepted by the server. 0: 30 s */
+    proven_u32 expect_timeout_ms;          /**< for a request with `expect_continue`: how long to wait for the server's word before sending the body anyway. 0: 1 s */
     bool decompress;                       /**< ask for compressed responses (`Accept-Encoding: gzip`, unless the request has its own or a `Range`) and decode a body sent with `Content-Encoding: gzip` or `deflate`: `on_body` gets decoded pieces of at most 16 KiB, the head stays as the server sent it, and a damaged or unfinished stream ends the request with PROVEN_ERR_INVALID_FORMAT. A 206 and other codings are delivered as sent. Costs about 52 KiB while such a response is arriving (for `zstd` and `br`, see `decompress_zstd` and `decompress_brotli`). false: bodies arrive as sent */
     bool http2;                            /**< true: an `https` origin that agrees to it (ALPN `h2`) is spoken to in HTTP/2, on one connection the client keeps for that origin and shares between its requests. The TLS configuration must offer `h2` - and must not when this is false */
     bool http2_cleartext;                  /**< true: every `http` request of this client is HTTP/2 by prior knowledge - there is no way to ask a server in the clear, so say this only of servers known to speak it. A connection that was made and is then lost before the server's SETTINGS ends its requests with PROVEN_ERR_UNSUPPORTED */
@@ -101,8 +102,12 @@ typedef struct {
     proven_u32 http2_window_bytes;         /**< HTTP/2: response-body bytes a server may send on one stream, and on a connection as a whole, before `on_body` has taken them (flow control, RFC 9113 section 5.2). It is what a request that is paused can make a connection hold, and it bounds how fast a large body can arrive: the server must wait for room each time it has sent this much. 0: it starts at 65,535, the protocol's default, and grows - doubling while the bodies are read as fast as they come, up to 16 MiB per stream and 24 MiB per connection (since v0.75.0, as `http3_window_bytes`; RFC-0019); a body not read stops the growth. A value set here is fixed. At most 2^31-1 */
     bool decompress_zstd;                  /**< with `decompress`: ask for Zstandard too (`Accept-Encoding: zstd, gzip`) and decode a body sent with `Content-Encoding: zstd` in the same way. Its window may be up to 8 MiB (RFC 9659), so such a response costs up to that and about 400 KiB more while it is arriving, allocated as its output grows. Without `decompress`, PROVEN_ERR_INVALID_ARG. false: `zstd` is not asked for, and a body sent in it anyway is delivered as sent */
     bool decompress_brotli;                /**< with `decompress`: ask for Brotli too (`br` in `Accept-Encoding`) and decode a body sent with `Content-Encoding: br` in the same way. Its window may be up to 16 MiB, so such a response costs up to that and its codes (tens of KiB as encoders write them, 1.3 MiB at most) while it is arriving, allocated as its output grows. Without `decompress`, PROVEN_ERR_INVALID_ARG; in a build with PROVEN_NO_BROTLI, PROVEN_ERR_UNSUPPORTED. false: `br` is not asked for, and a body sent in it anyway is delivered as sent */
-    bool http3;                            /**< true: a request that asks for it (`http3` in its options) is sent over HTTP/3 (RFC 9114, over QUIC, RFC 9000) - never one that does not, and never by following a server's `Alt-Svc`: HTTP/2 is chosen by the TLS handshake, HTTP/3 only by the caller. The TLS configuration must offer `h3` - and must not when this is false. One QUIC connection, on a UDP socket of its own, is kept for each origin and shared by its requests, as an HTTP/2 connection is; it counts against `max_connections`. **There is no fallback**: a server that does not answer over UDP ends the request with PROVEN_ERR_TIMEOUT after `connect_timeout_ms`, one that refuses `h3` with PROVEN_ERR_UNSUPPORTED, an untrusted one with PROVEN_ERR_UNTRUSTED - and no TCP connection is tried. A write is bounded by QUIC's send buffer (256 KiB per stream, 1 MiB per connection of data not yet acknowledged), not by `max_buffered_output`. `retry_unsent` covers a request the server refused unprocessed (H3_REQUEST_REJECTED, or behind a GOAWAY). In a build with PROVEN_NO_HTTP3, proven_http_event_client_create returns PROVEN_ERR_UNSUPPORTED */
+    bool http3;                            /**< true: a request that asks for it (`http3` in its options) is sent over HTTP/3 (RFC 9114, over QUIC, RFC 9000) - never one that does not, and never by following a server's `Alt-Svc`: HTTP/2 is chosen by the TLS handshake, HTTP/3 only by the caller. The TLS configuration must offer `h3` - and must not when this is false. One QUIC connection, on a UDP socket of its own, is kept for each origin and shared by its requests, as an HTTP/2 connection is; it counts against `max_connections`. Without `http3_fallback` there is no fallback: a server that does not answer over UDP ends the request with PROVEN_ERR_TIMEOUT after `connect_timeout_ms`, one that refuses `h3` with PROVEN_ERR_UNSUPPORTED, an untrusted one with PROVEN_ERR_UNTRUSTED - and no TCP connection is tried. A write is bounded by QUIC's send buffer (256 KiB per stream, 1 MiB per connection of data not yet acknowledged), not by `max_buffered_output`. `retry_unsent` covers a request the server refused unprocessed (H3_REQUEST_REJECTED, or behind a GOAWAY). In a build with PROVEN_NO_HTTP3, proven_http_event_client_create returns PROVEN_ERR_UNSUPPORTED */
     proven_size_t http3_window_bytes;      /**< HTTP/3: response-body bytes a server may send on one stream, and on a connection as a whole, before `on_body` has taken them (QUIC's flow control) - as `http2_window_bytes` is for HTTP/2. 0: it starts at 256 KiB per stream and 1 MiB per connection and grows - doubling while the bodies are read as fast as they come, up to 16 MiB per stream and 24 MiB per connection (since v0.71.0, RFC-0019); a body not read stops the growth. A value set here is fixed, as before. At most 2^31-1 */
+    proven_size_t http3_header_table_bytes; /**< HTTP/3: the QPACK dynamic table a server's encoder may fill for this client's decoder (RFC 9204; RFC-0032), said in SETTINGS with 16 streams that may wait for its inserts. Made only when a server first uses it: then about twice this per connection. 0: 4,096. 32 to 1 MiB. The same size bounds the table the client's encoder fills for the server (since v0.96.0), when the server allows one: it refers only to entries the server has acknowledged, and never inserts a field marked sensitive or a short credential */
+    bool http3_no_header_table;          /**< HTTP/3: no such table in either direction: every head goes in full, as before v0.95.0 */
+    bool http3_fallback;                   /**< HTTP/3: true lets a request asked over HTTP/3 go over TCP instead when its QUIC connection does not come up (RFC-0031): after `http3_fallback_ms` without a handshake, or at once when the system reports the server's address unreachable or the port refused, or the server refuses `h3`. It goes as the request it would have been without `http3` - HTTP/2 when the client has `http2` and the server agrees, HTTP/1.1 otherwise - and the caller keeps the object it was given; proven_http_event_request_protocol then says 2 or 1. Every request waiting on that connection goes the same way, and for five minutes after, requests to that origin asked over HTTP/3 go over TCP at once (up to 64 origins remembered, the oldest forgotten first). Never on a certificate the client does not trust (that is the request's answer: TCP would show the same certificate), and never once the QUIC connection has come up: a connection lost after that is `retry_unsent`'s matter. The TLS configuration is used as it is, `h3` among what it offers. false: no fallback, as before */
+    proven_u32 http3_fallback_ms;          /**< with `http3_fallback`: how long a QUIC handshake may take before the requests waiting on it go over TCP, counted from the first packet. 0: 1 s. More than `connect_timeout_ms` is taken as that */
 } proven_http_event_client_config_t;
 
 /** @brief One request. Zero-initialise it and set `url` and `on.on_done`. Everything it points
@@ -117,18 +122,22 @@ typedef struct {
     proven_u64 body_length;                /**< when `body` is empty: 0 for no body; a length for a body written afterwards with proven_http_event_request_write; PROVEN_HTTP_EVENT_LENGTH_UNKNOWN to write it chunked */
     proven_http_event_client_callbacks_t on;
     void *ctx;                             /**< passed to every callback */
-    bool http3;                            /**< send this request over HTTP/3: an `https` URL, on a client with `http3` (otherwise PROVEN_ERR_INVALID_ARG). See `http3` in the client's configuration: no fallback */
+    bool http3;                            /**< send this request over HTTP/3: an `https` URL, on a client with `http3` (otherwise PROVEN_ERR_INVALID_ARG). See `http3` in the client's configuration: no fallback unless it has `http3_fallback` */
+    bool expect_continue;                  /**< for a request with a body, over HTTP/1.1 (since v0.106.0): send `Expect: 100-continue` and the head first, and the body - held, or written with proven_http_event_request_write meanwhile - only when the server says `100 Continue`, or says nothing for `expect_timeout_ms`. A server that answers at once instead - 401, 413, 417 - is not sent the body at all: that answer is the response, what is written of the body after it is dropped, and the connection is not kept. Do not set an `Expect` header of your own with it. Over HTTP/2 and HTTP/3 the flag is ignored and the body goes at once (a stream can be reset instead) */
 } proven_http_event_request_options_t;
 
 /** @return PROVEN_ERR_INVALID_ARG (no loop; a TLS configuration whose `h2` or `h3` does not
- *         match `http2` or `http3`; `http3` without TLS; a window out of range),
+ *         match `http2` or `http3`; `http3` without TLS; `http3_fallback` without `http3`; a
+ *         window out of range),
  *         PROVEN_ERR_UNSUPPORTED (`http3` in a build without it), PROVEN_ERR_NOMEM. */
 [[nodiscard]]
 proven_err_t proven_http_event_client_create(proven_loop_t *loop, const proven_http_event_client_config_t *config,
                                              proven_http_event_client_t **out);
 
 /** @brief End every request still in flight or waiting - each gets `on_done` with
- *         PROVEN_ERR_RESET - close the connections it kept, and free the client. The loop is not stopped or freed. Null is accepted. */
+ *         PROVEN_ERR_RESET - close the connections it kept, and free the client. The loop is not stopped or freed. Null is accepted.
+ *         Connections whose sockets the loop may still use keep their memory, and the client's struct, until the loop's next
+ *         round or proven_loop_destroy (chapter 15, section 5, rule 3). */
 void proven_http_event_client_destroy(proven_http_event_client_t *client);
 
 /** @brief Requests started and not ended: those in flight, and those waiting for a connection. */
@@ -158,7 +167,10 @@ proven_err_t proven_http_event_client_start(proven_http_event_client_t *client, 
  *        Keep the rest and offer it again when `on_writable` is called. It may be called
  *        before the connection is made: what is taken waits.
  * @return the number of bytes taken; PROVEN_ERR_INVALID_STATE when the request has no body to
- *         write, or it was ended; PROVEN_ERR_OUT_OF_BOUNDS for more than the length promised.
+ *         write, or it was ended; PROVEN_ERR_OUT_OF_BOUNDS for more than the length promised;
+ *         PROVEN_ERR_RESET when the request ended over it (its connection failed, or memory ran
+ *         out) - `on_done` has then been called, inside this call, so neither the request nor
+ *         what `on_done` freed may be used after it returns.
  */
 [[nodiscard]]
 proven_result_size_t proven_http_event_request_write(proven_http_event_request_t *request, proven_mem_view_t data);
@@ -171,6 +183,31 @@ proven_result_size_t proven_http_event_request_write(proven_http_event_request_t
  */
 [[nodiscard]]
 proven_err_t proven_http_event_request_end(proven_http_event_request_t *request);
+
+/**
+ * @brief Finish a body written with `body_length` PROVEN_HTTP_EVENT_LENGTH_UNKNOWN with trailer
+ *        fields after it (since v0.107.0): over HTTP/1.1 after the last chunk, over HTTP/2 and
+ *        HTTP/3 as a HEADERS frame that ends the stream - sent once the body before them has gone.
+ *        The fields are copied. A server that does not read trailers passes over them.
+ * @return PROVEN_ERR_INVALID_ARG for no fields, or one proven_http_trailer_allowed refuses (or not
+ *         a valid field); PROVEN_ERR_INVALID_STATE for a body with a length, or none to finish;
+ *         PROVEN_ERR_OUT_OF_BOUNDS past PROVEN_HTTP_MAX_TRAILER_BYTES; otherwise as
+ *         proven_http_event_request_end.
+ */
+[[nodiscard]]
+proven_err_t proven_http_event_request_end_trailers(proven_http_event_request_t *request, const proven_http_header_t *fields, proven_size_t count);
+
+/**
+ * @brief The response's trailer fields (since v0.107.0), once its body has ended - from `on_body`
+ *        with `last` (or, for a response with no body, `on_done`) until `on_done` returns: views
+ *        into the client's copy. None for an HTTP/1.1 response that was not chunked. A field that
+ *        may not be a trailer (proven_http_trailer_allowed) is left out. Over HTTP/1.1 a chunked
+ *        response holds a buffer of PROVEN_HTTP_MAX_TRAILER_BYTES for its trailer section.
+ * @return PROVEN_ERR_INVALID_STATE before the body's end; PROVEN_ERR_OUT_OF_BOUNDS for more fields
+ *         than `cap`.
+ */
+[[nodiscard]]
+proven_err_t proven_http_event_request_trailers(const proven_http_event_request_t *request, proven_http_header_t *fields, proven_size_t cap, proven_size_t *count);
 
 /** @brief Give up: the connection is closed at once and `on_done` is called with
  *         PROVEN_ERR_RESET, inside this call. */
@@ -187,8 +224,9 @@ void proven_http_event_request_set_user(proven_http_event_request_t *request, vo
 void *proven_http_event_request_user(const proven_http_event_request_t *request);
 
 /** @brief Which protocol carries this request: 3 for HTTP/3 (asked for, so known from the
- *         start), 2 for HTTP/2, 1 for HTTP/1.1 - which is also the answer while a request waits
- *         for a connection whose protocol is not yet known. */
+ *         start - until it falls back to TCP, `http3_fallback`), 2 for HTTP/2, 1 for HTTP/1.1 -
+ *         which is also the answer while a request waits for a connection whose protocol is not
+ *         yet known. */
 [[nodiscard]]
 int proven_http_event_request_protocol(const proven_http_event_request_t *request);
 

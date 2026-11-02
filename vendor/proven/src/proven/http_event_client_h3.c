@@ -17,10 +17,14 @@
  * A request that asks for HTTP/3 goes to the QUIC connection the client keeps for its origin
  * (c3conn_t), made the first time: a UDP socket of its own, the transport (quic_conn.c) and
  * HTTP/3 over it (h3_conn.c), neither of which does any I/O. A request is a small object on it
- * (c3req_t), whose first member is the head http_event_client.c reads.
+ * (proven_c3req_t), whose first member is the head http_event_client.c reads.
  *
- * There is no fallback: HTTP/3 is what the caller asked for, and a server that does not answer
- * over UDP, or refuses `h3`, ends the request with that reason. Nothing is tried over TCP.
+ * HTTP/3 is what the caller asked for: a server that does not answer over UDP, or refuses `h3`,
+ * ends the request with that reason - unless the client has `http3_fallback` (RFC-0031). Then
+ * the requests of a QUIC connection that did not come up start again over TCP, as requests of
+ * http_event_client.c, and each object the caller holds passes every call on to the request it
+ * became (`tcp`) and every callback of that one back as its own. The origin is remembered for
+ * five minutes, in which its requests go over TCP from the start.
  *
  * What the event server's driver learned holds here: events are taken from the engine only in a
  * round the loop runs - after a datagram, a timer, or a "call me back" - never inside a call
@@ -39,7 +43,7 @@
 typedef struct c3conn c3conn_t;
 
 typedef struct c3req {
-    cl_head_t h;                       /* first: what http_event_client.c reads */
+    proven_cl_head_t h;                       /* first: what http_event_client.c reads */
     c3conn_t *conn;                    /* null while it waits for a connection or a try */
     struct c3req *prev, *next;
     struct c3req *wnext;               /* in the client's list of those that wait for room */
@@ -66,14 +70,20 @@ typedef struct c3req {
     bool got_head, head_only, host_is_ipv6, query_alone, waiting_room, delayed;
     bool sent_early;                   /* submitted before the handshake was complete: early data (RFC-0021) */
     bool early_again;                  /* sent again once after a 425 or a refusal: never early, never a third time */
+    proven_http_event_request_t *tcp;  /* RFC-0031: the request over TCP this became; every call goes to it */
+    bool body_over;                    /* the response's end has arrived (proven_http_event_request_trailers) */
+    proven_http_trailers_t_ in_trailers;   /* the response's, until the struct goes - over TCP too, copied at its end */
+    proven_http_trailers_t_ out_trailers;  /* the request's, sent as the stream's end once `out` has drained */
     proven_byte_t host[256];
-} c3req_t;
+} proven_c3req_t;
 
 struct c3conn {
     proven_http_event_client_t *client;
     c3conn_t *prev, *next;
     proven_net_udp_t udp;
-    proven_loop_io_t io;
+    proven_loop_udp_t lu;              /* the socket as the loop knows it (RFC-0025) */
+    proven_byte_t *rbuf;               /* what one receive takes: the loop's while a receive is in flight */
+    proven_net_addr_t from;            /* and where it came from */
     proven_loop_timer_t timer;
     proven_loop_after_t after;
     proven_quic_conn_t *q;
@@ -81,18 +91,23 @@ struct c3conn {
     proven_tls_session_t session;
     proven_u64 session_mark;           /* what it was given (RFC-0020) */
     proven_u64 session_stored;         /* what it last stored, or was given */
-    c3req_t *reqs;
+    proven_c3req_t *reqs;
     proven_size_t count;
     proven_net_addr_t to;
     proven_time_t born, idle_since, write_since;
     proven_u32 depth, calls;
     proven_u16 port;
-    proven_u8 host_len, want;
-    bool dead, up, closed, over, registered, client_going, bye;
+    proven_u8 host_len;
+    bool attached, sock_closed, sock_gone, waiting;   /* given to the loop; closed; `closed` come; a send wait asked for */
+    bool dead, up, closed, over, client_going, bye;
     bool early;                        /* 0-RTT is open: requests that are safe to repeat may go before the handshake (RFC-0021) */
+    bool restarted;                    /* started again in the version a Version Negotiation named (RFC-0036) */
+    proven_err_t send_failed;          /* RFC-0031: the system said the server cannot be reached; the round ends the connection */
     proven_err_t closed_why;           /* what the close means for a request that was never answered */
     proven_size_t pend_len;            /* datagrams the socket would not take */
     proven_size_t pend_seg;            /* their size (the last may be shorter) */
+    bool ecn;                          /* the system reads and sets the ECN field on this socket (RFC-0035) */
+    proven_u8 pend_ecn;                /* the mark of the datagrams kept */
     proven_byte_t pend[C3_BATCH];
     proven_byte_t host[256];
 };
@@ -112,9 +127,9 @@ static void *c3_alloc(proven_allocator_t a, proven_size_t n) {
 
 static proven_u64 c3_now_us(void) { return (proven_u64)proven_time_monotonic_now() / 1000u; }
 
-static proven_http_event_request_t *c3_handle(c3req_t *r) { return (proven_http_event_request_t *)(void *)r; }
-static c3req_t *c3_of(proven_http_event_request_t *request) { return (c3req_t *)(void *)request; }
-static const c3req_t *c3_of_const(const proven_http_event_request_t *request) { return (const c3req_t *)(const void *)request; }
+static proven_http_event_request_t *c3_handle(proven_c3req_t *r) { return (proven_http_event_request_t *)(void *)r; }
+static proven_c3req_t *c3_of(proven_http_event_request_t *request) { return (proven_c3req_t *)(void *)request; }
+static const proven_c3req_t *c3_of_const(const proven_http_event_request_t *request) { return (const proven_c3req_t *)(const void *)request; }
 
 static bool c3_same_addr(const proven_net_addr_t *a, const proven_net_addr_t *b) {
     if (a->family != b->family || a->port != b->port) return false;
@@ -128,32 +143,40 @@ static bool c3_same_addr(const proven_net_addr_t *a, const proven_net_addr_t *b)
 
 static void c_round(c3conn_t *c);
 static void c_arm(c3conn_t *c);
-static void r_place(c3req_t *r);
+static void r_place(proven_c3req_t *r);
 
 static void c_enter(c3conn_t *c) { c->depth++; }
 
-static void c_leave(c3conn_t *c) {
-    if (--c->depth > 0 || !c->dead) return;
+static void c_free(c3conn_t *c) {
     proven_allocator_t a = c->client->alloc;
+    if (c->rbuf) a.free_fn(a.ctx, c->rbuf);
     a.free_fn(a.ctx, c);
 }
 
-static void r_enter(c3req_t *r) { r->h.depth++; }
+static void c_leave(c3conn_t *c) {
+    if (--c->depth > 0 || !c->dead) return;
+    if (c->attached && !c->sock_gone) return;     /* c_sock_closed frees it */
+    c_free(c);
+}
 
-static void r_leave(c3req_t *r) {
+static void r_enter(proven_c3req_t *r) { r->h.depth++; }
+
+static void r_leave(proven_c3req_t *r) {
     if (--r->h.depth > 0 || !r->dead) return;
     proven_allocator_t a = r->h.client->alloc;
+    proven_http_trailers_free_(a, &r->in_trailers);
+    proven_http_trailers_free_(a, &r->out_trailers);
     a.free_fn(a.ctx, r);
 }
 
-static void r_free_parts(c3req_t *r) {
+static void r_free_parts(proven_c3req_t *r) {
     proven_allocator_t a = r->h.client->alloc;
     if (r->copy) { a.free_fn(a.ctx, r->copy); r->copy = (void *)0; }
     if (r->out) { a.free_fn(a.ctx, r->out); r->out = (void *)0; r->out_len = r->out_off = 0; }
     if (r->dec) { proven_http_decoder_free_(r->dec); a.free_fn(a.ctx, r->dec); r->dec = (void *)0; }
 }
 
-static void r_unlink(c3req_t *r) {
+static void r_unlink(proven_c3req_t *r) {
     c3conn_t *c = r->conn;
     if (!c) return;
     if (r->prev) r->prev->next = r->next;
@@ -164,8 +187,8 @@ static void r_unlink(c3req_t *r) {
     r->conn = (void *)0;
 }
 
-static void r_attach(c3req_t *r, c3conn_t *c) {
-    c3req_t *last = c->reqs;
+static void r_attach(proven_c3req_t *r, c3conn_t *c) {
+    proven_c3req_t *last = c->reqs;
     while (last && last->next) last = last->next;
     r->conn = c;
     r->prev = last;
@@ -175,22 +198,22 @@ static void r_attach(c3req_t *r, c3conn_t *c) {
     c->count++;
 }
 
-static void r_undelay(c3req_t *r) {
+static void r_undelay(proven_c3req_t *r) {
     if (!r->delayed) return;
     proven_http_event_client_t *cl = r->h.client;
-    c3req_t *before = (void *)0;
-    for (c3req_t *i = cl->h3_delayed; i && i != r; i = i->wnext) before = i;
+    proven_c3req_t *before = (void *)0;
+    for (proven_c3req_t *i = cl->h3_delayed; i && i != r; i = i->wnext) before = i;
     if (before) before->wnext = r->wnext;
     else cl->h3_delayed = r->wnext;
     r->wnext = (void *)0;
     r->delayed = false;
 }
 
-static void r_unroom(c3req_t *r) {
+static void r_unroom(proven_c3req_t *r) {
     if (!r->waiting_room) return;
     proven_http_event_client_t *cl = r->h.client;
-    c3req_t *before = (void *)0;
-    for (c3req_t *i = cl->h3_roomless; i && i != r; i = i->wnext) before = i;
+    proven_c3req_t *before = (void *)0;
+    for (proven_c3req_t *i = cl->h3_roomless; i && i != r; i = i->wnext) before = i;
     if (before) before->wnext = r->wnext;
     else cl->h3_roomless = r->wnext;
     if (cl->h3_roomless_last == r) cl->h3_roomless_last = before;
@@ -199,8 +222,140 @@ static void r_unroom(c3req_t *r) {
     cl->h3_roomless_count--;
 }
 
+// -----------------------------------------------------------------------------
+// Fallback to TCP (RFC-0031)
+// -----------------------------------------------------------------------------
+
+#define C3_GONE 64u                                       /* origins remembered */
+#define C3_GONE_NS ((proven_time_t)300 * 1000000000)      /* for five minutes */
+
+typedef struct {
+    proven_u64 key;                    /* the origin's hash; 0: free */
+    proven_time_t until;
+} c3gone_t;
+
+static proven_u64 c3_origin_key(proven_u8str_view_t host, proven_u16 port) {
+    proven_u64 h = 1469598103934665603u;
+    for (proven_size_t i = 0; i < host.size; ++i) { h ^= c3_lower(host.ptr[i]); h *= 1099511628211u; }
+    h ^= port; h *= 1099511628211u;
+    return h | 1u;
+}
+
+/* Whether the origin's QUIC connection did not come up in the last five minutes. */
+static bool c3_gone(const proven_http_event_client_t *cl, proven_u8str_view_t host, proven_u16 port) {
+    const c3gone_t *g = cl->h3_gone;
+    if (!g) return false;
+    const proven_u64 k = c3_origin_key(host, port);
+    const proven_time_t now = proven_time_monotonic_now();
+    for (proven_size_t i = 0; i < C3_GONE; ++i) if (g[i].key == k && g[i].until > now) return true;
+    return false;
+}
+
+/* Remembered in its own place, a free one, or the oldest: they all last as long. */
+static void c3_remember(proven_http_event_client_t *cl, proven_u8str_view_t host, proven_u16 port) {
+    if (!cl->h3_gone) {
+        cl->h3_gone = c3_alloc(cl->alloc, C3_GONE * sizeof(c3gone_t));
+        if (!cl->h3_gone) return;                  /* not remembered: the next request waits for its handshake again */
+    }
+    c3gone_t *g = cl->h3_gone;
+    const proven_u64 k = c3_origin_key(host, port);
+    proven_size_t at = 0;
+    for (proven_size_t i = 0; i < C3_GONE; ++i) {
+        if (g[i].key == k) { at = i; break; }
+        if (g[i].until < g[at].until) at = i;
+    }
+    g[at] = (c3gone_t){ .key = k, .until = proven_time_monotonic_now() + C3_GONE_NS };
+}
+
+/* A connection that did not come up, for a reason TCP may not share: no answer in
+ * http3_fallback_ms, an unreachable address or a refused port, `h3` refused. Not a certificate,
+ * which TCP would show again; not a connection that came up and was lost. */
+static bool c_falls_back(const c3conn_t *c) {
+    const proven_http_event_client_t *cl = c->client;
+    if (!cl->cfg.http3_fallback || c->up || c->client_going || cl->closing) return false;
+    const proven_err_t why = c->closed_why;
+    return why == PROVEN_ERR_TIMEOUT || why == PROVEN_ERR_UNREACHABLE || why == PROVEN_ERR_REFUSED || why == PROVEN_ERR_UNSUPPORTED;
+}
+
+/* The request over TCP calls back as the object the caller holds. */
+static void x_response(void *ctx, proven_http_event_request_t *in, const proven_http_response_t *head) {
+    (void)in;
+    proven_c3req_t *r = ctx;
+    if (r->on.on_response) r->on.on_response(r->ctx, c3_handle(r), head);
+}
+static void x_body(void *ctx, proven_http_event_request_t *in, proven_mem_view_t piece, bool last) {
+    proven_c3req_t *r = ctx;
+    if (last) {
+        /* The trailers over TCP, copied: the request over TCP is gone by the time on_done returns. */
+        proven_http_header_t fields[64];
+        proven_size_t n = 0;
+        r->body_over = true;
+        if (proven_http_event_request_trailers(in, fields, 64, &n) != PROVEN_OK ||
+            proven_http_trailers_keep_(r->h.client->alloc, &r->in_trailers, fields, n, false, false) != PROVEN_OK) {
+            proven_http_event_request_abort(in);
+            return;
+        }
+    }
+    if (r->on.on_body) r->on.on_body(r->ctx, c3_handle(r), piece, last);
+}
+static void x_writable(void *ctx, proven_http_event_request_t *in) {
+    (void)in;
+    proven_c3req_t *r = ctx;
+    if (r->on.on_writable) r->on.on_writable(r->ctx, c3_handle(r));
+}
+static void x_done(void *ctx, proven_http_event_request_t *in, proven_err_t why) {
+    (void)in;
+    proven_c3req_t *r = ctx;
+    proven_loop_timer_cancel(r->h.client->loop, &r->wait_timer);
+    r->tcp = (void *)0;
+    r->dead = true;
+    r_enter(r);
+    r->on.on_done(r->ctx, c3_handle(r), why);
+    r_leave(r);
+}
+static const proven_http_event_client_callbacks_t x_relay = { x_response, x_body, x_writable, x_done };
+
+/* A body refused before the switch: the caller is told it may write, now to the request over TCP. */
+static void x_writable_fire(void *ctx) {
+    proven_c3req_t *r = ctx;
+    if (r->dead || !r->tcp || !r->on.on_writable) return;
+    r_enter(r);
+    r->on.on_writable(r->ctx, c3_handle(r));
+    r_leave(r);
+}
+
+static void r_finish(proven_c3req_t *r, proven_err_t why);
+
+/* Start the request again over TCP, as it was started; the caller keeps its object. Counted once:
+ * as the request it now is. */
+static void r_fallback(proven_c3req_t *r) {
+    proven_http_event_client_t *cl = r->h.client;
+    r_unlink(r);
+    r_unroom(r);
+    r_undelay(r);
+    proven_loop_timer_cancel(cl->loop, &r->wait_timer);
+    r->due = 0;
+    const proven_http_event_request_options_t o = {
+        .method = r->method, .url = r->url, .address = &r->to, .headers = r->headers, .header_count = r->header_count,
+        .body = r->body, .body_length = r->body_length, .on = x_relay, .ctx = r,
+    };
+    r_enter(r);
+    proven_http_event_request_t *made = (void *)0;
+    const proven_err_t e = proven_http_event_client_start(cl, &o, &made);
+    if (e != PROVEN_OK) { r_finish(r, e); r_leave(r); return; }
+    cl->request_count--;
+    r->tcp = made;
+    r_free_parts(r);                               /* what it was started with is the new request's now */
+    if (r->paused) proven_http_event_request_pause(made);
+    /* Ended with trailers before it had a stream: they end it over TCP instead. */
+    if (r->end_asked && r->out_trailers.count && proven_http_event_request_end_trailers(made, r->out_trailers.fields, r->out_trailers.count) != PROVEN_OK)
+        proven_http_event_request_abort(made);
+    if (r->streamed && r->want_writable) proven_loop_timer_set(cl->loop, &r->wait_timer, 0, x_writable_fire, r);
+    r_leave(r);
+}
+
 /* The end of a request, good or bad: once. */
-static void r_finish(c3req_t *r, proven_err_t why) {
+static void r_finish(proven_c3req_t *r, proven_err_t why) {
     if (r->dead) return;
     c3conn_t *c = r->conn;
     proven_http_event_client_t *cl = r->h.client;
@@ -230,7 +385,7 @@ static void c_call_back(c3conn_t *c);
  * the origin again: at once, or after retry_delay_ms; on another connection, made if need be. */
 static void r_wait_fire(void *ctx);
 
-static void r_unsent(c3req_t *r) {
+static void r_unsent(proven_c3req_t *r) {
     if (r->dead) return;
     proven_http_event_client_t *cl = r->h.client;
     if (cl->closing || r->streamed || r->got_head || r->tries >= cl->cfg.retry_unsent) { r_finish(r, PROVEN_ERR_AGAIN); return; }
@@ -249,7 +404,7 @@ static void r_unsent(c3req_t *r) {
 
 /* A request sent as early data and not answered as such: once more, never early. On this
  * connection when it is up, else on another. Not counted against retry_unsent. */
-static void r_again(c3req_t *r) {
+static void r_again(proven_c3req_t *r) {
     if (r->dead) return;
     proven_http_event_client_t *cl = r->h.client;
     if (cl->closing) { r_finish(r, PROVEN_ERR_AGAIN); return; }
@@ -273,9 +428,13 @@ static void c_end_requests(c3conn_t *c) {
         proven_tls_session_early_off_(&c->session);
         proven_http_event_client_session_keep_(c->client, (proven_u8str_view_t){ .ptr = c->host, .size = c->host_len }, c->port, true, &c->session, c->session_mark, &c->session_stored, false, false);
     }
+    /* Not come up for a reason TCP may not share: over TCP, and the origin remembered (RFC-0031). */
+    const bool fall = c_falls_back(c);
+    if (fall) c3_remember(c->client, (proven_u8str_view_t){ .ptr = c->host, .size = c->host_len }, c->port);
     while (c->reqs) {
-        c3req_t *r = c->reqs;
+        proven_c3req_t *r = c->reqs;
         if (refused && r->sent_early && !r->got_head && !r->early_again) { r_again(r); continue; }
+        if (fall && !r->got_head && (!r->streamed || !r->has_id)) { r_fallback(r); continue; }
         /* One the server never saw may go again elsewhere - but not when the connection never
          * came up: that is the answer for every request to this origin, and is theirs. */
         if (!r->has_id && c->up && !c->client_going) r_unsent(r);
@@ -287,7 +446,11 @@ static void c_close_socket(c3conn_t *c) {
     proven_http_event_client_t *cl = c->client;
     proven_loop_timer_cancel(cl->loop, &c->timer);
     proven_loop_after_cancel_(cl->loop, &c->after);
-    if (c->registered) { proven_loop_io_remove(cl->loop, &c->io); c->registered = false; }
+    if (c->attached && !c->sock_closed) {          /* the loop stops watching before the close */
+        c->sock_closed = true;
+        cl->ending++;
+        proven_loop_udp_close_(cl->loop, &c->lu);
+    }
     (void)proven_net_udp_close(&c->udp);
 }
 
@@ -317,10 +480,11 @@ static void c_kill(c3conn_t *c, proven_err_t why) {
 // Datagrams
 // -----------------------------------------------------------------------------
 
+/* Datagrams are always being received; when the socket would not take some, the loop is asked
+ * to say when it will. */
 static void c_watch(c3conn_t *c) {
-    if (c->dead || !c->registered) return;
-    const proven_u8 want = (proven_u8)(PROVEN_NET_READABLE | (c->pend_len > 0 ? PROVEN_NET_WRITABLE : 0));
-    if (want != c->want && proven_loop_io_set(c->client->loop, &c->io, want) == PROVEN_OK) c->want = want;
+    if (c->dead || !c->attached || c->sock_closed || c->pend_len == 0 || c->waiting) return;
+    if (proven_loop_udp_send_wait_(c->client->loop, &c->lu) == PROVEN_OK) c->waiting = true;
 }
 
 static void c_after(void *ctx) {
@@ -338,14 +502,16 @@ static void c_call_back(c3conn_t *c) {
 
 /* Datagrams of `seg` bytes (the last may be shorter) out in one call where the platform can;
  * what the socket will not take now is kept, and nothing more goes until it has. */
-static void c_send_batch(c3conn_t *c, const proven_byte_t *p, proven_size_t n, proven_size_t seg) {
+static void c_send_batch(c3conn_t *c, const proven_byte_t *p, proven_size_t n, proven_size_t seg, proven_u8 ecn) {
     if (c->pend_len > 0 || n == 0) return;
     proven_size_t sent = 0;
-    const proven_err_t e = proven_net_udp_send_segments_(&c->udp, c->to, (proven_mem_view_t){ .ptr = p, .size = n }, seg, &sent);
+    const proven_err_t e = proven_net_udp_send_marked_(&c->udp, c->to, (proven_mem_view_t){ .ptr = p, .size = n }, seg, ecn, &sent);
+    if ((e == PROVEN_ERR_UNREACHABLE || e == PROVEN_ERR_REFUSED) && !c->up) c->send_failed = e;     /* RFC-0031: the round ends it */
     if (e != PROVEN_ERR_TIMEOUT) return;          /* sent, or lost as UDP may lose it */
     proven_sys_mem_copy(c->pend, p + sent, n - sent);
     c->pend_len = n - sent;
     c->pend_seg = seg;
+    c->pend_ecn = ecn;
 }
 
 static void c_send(c3conn_t *c) {
@@ -355,27 +521,30 @@ static void c_send(c3conn_t *c) {
     proven_byte_t one[C3_OUT];
     proven_byte_t *buf = cl->h3_batch ? cl->h3_batch : one;     /* without it, one datagram a call */
     const proven_size_t cap = cl->h3_batch ? C3_BATCH : C3_OUT;
-    /* Gathered while they are one size (RFC-0018 S-3): a larger one (a PMTU probe) sends what is
-     * gathered first; a shorter one ends the batch; so do the platform's limits and the round. */
+    /* Gathered while they are one size and carry one ECN mark (RFC-0018 S-3, RFC-0035): a larger
+     * one (a PMTU probe) or another mark sends what is gathered first; a shorter one ends the
+     * batch; so do the platform's limits and the round. */
     proven_size_t at = 0, seg = 0;
+    proven_u8 bmark = 0;
     int count = 0, k = 0;
     for (; k < C3_SENDS; ++k) {
         if (at == 0 && c->pend_len > 0) break;
-        if (cap - at < C3_OUT) { c_send_batch(c, buf, at, seg); at = 0; count = 0; --k; continue; }
+        if (cap - at < C3_OUT) { c_send_batch(c, buf, at, seg, bmark); at = 0; count = 0; --k; continue; }
         proven_size_t len = 0;
         proven_quic_addr_t to;
-        if (proven_quic_conn_send(c->q, c3_now_us(), (proven_mem_mut_t){ .ptr = buf + at, .size = C3_OUT }, &len, &to) != PROVEN_OK || len == 0) break;
-        if (at > 0 && len > seg) {
-            c_send_batch(c, buf, at, seg);
+        proven_u8 mark = 0;
+        if (proven_quic_conn_send(c->q, c3_now_us(), (proven_mem_mut_t){ .ptr = buf + at, .size = C3_OUT }, &len, &to, c->ecn ? &mark : NULL) != PROVEN_OK || len == 0) break;
+        if (at > 0 && (len > seg || mark != bmark)) {
+            c_send_batch(c, buf, at, seg, bmark);
             if (c->pend_len > 0) { at = 0; break; }    /* this one is lost as UDP may lose it */
             proven_sys_mem_move(buf, buf + at, len);
             at = 0; count = 0;
         }
-        if (at == 0) seg = len;
+        if (at == 0) { seg = len; bmark = mark; }
         at += len;
-        if (len < seg || ++count == PROVEN_NET_UDP_BATCH_COUNT) { c_send_batch(c, buf, at, seg); at = 0; count = 0; }
+        if (len < seg || ++count == PROVEN_NET_UDP_BATCH_COUNT) { c_send_batch(c, buf, at, seg, bmark); at = 0; count = 0; }
     }
-    if (at > 0) c_send_batch(c, buf, at, seg);
+    if (at > 0) c_send_batch(c, buf, at, seg, bmark);
     if (k == C3_SENDS) c_call_back(c);            /* more, after the other connections have had theirs */
     c_watch(c);
 }
@@ -390,7 +559,7 @@ static bool c_over(const c3conn_t *c) {
 // Requests out
 // -----------------------------------------------------------------------------
 
-static void r_expect(c3req_t *r) {
+static void r_expect(proven_c3req_t *r) {
     const proven_http_event_client_config_t *cfg = &r->h.client->cfg;
     proven_u32 ms = 0;
     if (!r->has_id || r->paused) ms = 0;
@@ -400,31 +569,34 @@ static void r_expect(c3req_t *r) {
 }
 
 /* What a request holds of its body, towards the engine; its end when all of it has gone. */
-static void r_push(c3req_t *r) {
+static void r_push(proven_c3req_t *r) {
     if (r->dead || !r->has_id || r->engine_done) return;
     c3conn_t *c = r->conn;
     proven_http_event_client_t *cl = r->h.client;
     if (r->out_off < r->out_len && !r->blocked) {
         proven_size_t taken = 0;
-        const proven_err_t e = proven_h3_send_data(c->h3, r->id, (proven_mem_view_t){ .ptr = r->out + r->out_off, .size = r->out_len - r->out_off }, r->end_asked, &taken);
+        const bool fin = r->end_asked && r->out_trailers.count == 0;     /* with trailers, they end it */
+        const proven_err_t e = proven_h3_send_data(c->h3, r->id, (proven_mem_view_t){ .ptr = r->out + r->out_off, .size = r->out_len - r->out_off }, fin, &taken);
         if (e != PROVEN_OK) { r_finish(r, PROVEN_ERR_RESET); return; }
         r->out_off += taken;
         if (taken > 0) c->write_since = 0;
         if (r->out_off < r->out_len) { r->blocked = true; return; }
         cl->alloc.free_fn(cl->alloc.ctx, r->out);
         r->out = (void *)0; r->out_len = r->out_off = 0;
-        if (r->end_asked) { r->engine_done = true; r_expect(r); return; }
+        if (fin) { r->engine_done = true; r_expect(r); return; }
     }
     if (r->out_len == 0 && r->end_asked && !r->engine_done) {
         proven_size_t taken = 0;
-        if (proven_h3_send_data(c->h3, r->id, (proven_mem_view_t){ .ptr = (void *)0, .size = 0 }, true, &taken) != PROVEN_OK) { r_finish(r, PROVEN_ERR_RESET); return; }
+        const proven_err_t e = r->out_trailers.count ? proven_h3_send_trailers(c->h3, r->id, r->out_trailers.fields, r->out_trailers.count)
+                                                     : proven_h3_send_data(c->h3, r->id, (proven_mem_view_t){ .ptr = (void *)0, .size = 0 }, true, &taken);
+        if (e != PROVEN_OK) { r_finish(r, PROVEN_ERR_RESET); return; }
         r->engine_done = true;
         r_expect(r);
     }
 }
 
 /* Onto a stream. PROVEN_ERR_BUSY: the server's limit, or not up yet - it waits. */
-static proven_err_t r_submit(c3req_t *r) {
+static proven_err_t r_submit(proven_c3req_t *r) {
     c3conn_t *c = r->conn;
     proven_http_event_client_t *cl = c->client;
     if (r->query_alone) return PROVEN_ERR_INVALID_ARG;
@@ -509,7 +681,7 @@ static bool g_c3_early_any;
 void proven_http_event_client_h3_test_early_any_(bool on) { g_c3_early_any = on; }
 
 /* What may go as early data (RFC-0021 D-3): GET, HEAD or OPTIONS with no body, never twice. */
-static bool r_early_ok(const c3req_t *r) {
+static bool r_early_ok(const proven_c3req_t *r) {
     if (g_c3_early_any && !r->early_again && !r->streamed) return true;
     if (r->early_again || r->streamed || r->body.size != 0 || r->body_length != 0) return false;
     const proven_http_method_t m = proven_http_method_from_text(r->method);
@@ -520,7 +692,7 @@ static void c_submit_waiting(c3conn_t *c) {
     if (c->dead || c->closed || (!c->up && !c->early) || c->over) return;
     for (bool again = true; again && !c->dead;) {
         again = false;
-        for (c3req_t *r = c->reqs; r; r = r->next) {
+        for (proven_c3req_t *r = c->reqs; r; r = r->next) {
             if (r->has_id || r->dead) continue;
             if (!c->up && !r_early_ok(r)) continue;          /* the rest wait for the handshake */
             r->sent_early = !c->up;
@@ -537,7 +709,7 @@ static void c_submit_waiting(c3conn_t *c) {
 // Responses
 // -----------------------------------------------------------------------------
 
-static bool r_deliver(c3req_t *r, proven_mem_view_t piece, bool last) {
+static bool r_deliver(proven_c3req_t *r, proven_mem_view_t piece, bool last) {
     proven_http_event_client_t *cl = r->h.client;
     if (!r->dec) {
         r->got += piece.size;
@@ -579,7 +751,7 @@ static bool r_deliver(c3req_t *r, proven_mem_view_t piece, bool last) {
     return !r->dead;
 }
 
-static void c_response(c3conn_t *c, c3req_t *r, const proven_h3_event_t *ev) {
+static void c_response(c3conn_t *c, proven_c3req_t *r, const proven_h3_event_t *ev) {
     proven_http_event_client_t *cl = c->client;
     if (ev->status < 200 || r->got_head) return;          /* an interim response: not the answer, and not passed on */
     if (ev->status == 425 && r->sent_early && !r->early_again) {
@@ -604,19 +776,64 @@ static void c_response(c3conn_t *c, c3req_t *r, const proven_h3_event_t *ev) {
     r_enter(r);
     if (r->on.on_response) r->on.on_response(r->ctx, c3_handle(r), &res);
     if (!r->dead) {
-        if (ev->end_stream || r->head_only) r_finish(r, PROVEN_OK);
+        if (ev->end_stream || r->head_only) { r->body_over = true; r_finish(r, PROVEN_OK); }
         else r_expect(r);
     }
     r_leave(r);
 }
 
-static c3req_t *c_find_req(const c3conn_t *c, proven_u64 id) {
-    for (c3req_t *r = c->reqs; r; r = r->next) if (r->has_id && r->id == id) return r;
+static proven_c3req_t *c_find_req(const c3conn_t *c, proven_u64 id) {
+    for (proven_c3req_t *r = c->reqs; r; r = r->next) if (r->has_id && r->id == id) return r;
     return (void *)0;
 }
 
 /* What a QUIC close means for a request: a certificate the TLS engine would not take, `h3`
  * refused, or a connection lost. (Its alerts come as 0x100 and the alert's number.) */
+/* The QUIC configuration of a connection of this client's. */
+static proven_quic_config_t c_qconfig(const proven_http_event_client_t *cl) {
+    return (proven_quic_config_t){
+        .alloc = cl->alloc, .tls = cl->cfg.tls,
+        .alpn = { .ptr = (const proven_byte_t *)"h3", .size = 2 },   /* offered alone, whatever else the configuration offers over TCP (RFC 9114 section 3.1) */
+        .stream_window = (proven_u32)cl->cfg.http3_window_bytes, .conn_window = (proven_u32)cl->cfg.http3_window_bytes,
+        /* No window configured: it starts at the engine's and grows while bodies are read (RFC-0019 section 9). */
+        .stream_window_max = cl->cfg.http3_window_bytes ? 0u : PROVEN_QUIC_STREAM_WINDOW_MAX,
+        .conn_window_max = cl->cfg.http3_window_bytes ? 0u : PROVEN_QUIC_CONN_WINDOW_MAX,
+        .idle_timeout_ms = (cl->cfg.idle_timeout_ms > cl->cfg.connect_timeout_ms ? cl->cfg.idle_timeout_ms : cl->cfg.connect_timeout_ms) + 1000,
+    };
+}
+
+/* A Version Negotiation packet named a version this client speaks and not the one it started in
+ * (RFC 9368 section 2.1; RFC-0036): the attempt starts again in it, once, on the same socket -
+ * the same connection to its requests and to RFC-0031's fallback timer. Not when a request is
+ * on a stream already (early data): those end as the close says. */
+static bool c_restart(c3conn_t *c) {
+    proven_quic_stats_t st;
+    proven_quic_conn_stats(c->q, &st);
+    if (c->restarted || st.vn_version == 0 || st.vn_version == st.version) return false;
+    for (const proven_c3req_t *r = c->reqs; r; r = r->next) if (r->has_id) return false;
+    proven_http_event_client_t *cl = c->client;
+    proven_quic_config_t qc = c_qconfig(cl);
+    qc.version = st.vn_version;
+    qc.after_vn = true;
+    proven_quic_conn_t *q = (void *)0;
+    proven_h3_conn_t *h3 = (void *)0;
+    const proven_quic_addr_t qa = proven_quic_addr_of_(&c->to);
+    proven_err_t e = proven_quic_conn_client_create(&qc, (proven_u8str_view_t){ .ptr = c->host, .size = c->host_len }, &c->session, &qa, c3_now_us(), &q);
+    if (e == PROVEN_OK) {
+        const proven_u32 list = cl->cfg.max_head_bytes > ((proven_size_t)1 << 20) ? (proven_u32)1 << 20 : (proven_u32)cl->cfg.max_head_bytes;
+        const proven_h3_config_t hc = { .alloc = cl->alloc, .server = false, .max_field_section_bytes = list, .qpack_capacity = (proven_u32)cl->cfg.http3_header_table_bytes };
+        e = proven_h3_conn_create(&hc, q, &h3);
+    }
+    if (e != PROVEN_OK) { proven_quic_conn_destroy(q); return false; }
+    proven_h3_conn_destroy(c->h3);
+    proven_quic_conn_destroy(c->q);
+    c->q = q;
+    c->h3 = h3;
+    c->restarted = true;
+    c->early = false;
+    return true;
+}
+
 static proven_err_t c_close_reason(const proven_h3_event_t *ev) {
     if (!ev->app && ev->code >= 0x100 && ev->code <= 0x1ff) {
         const proven_u64 alert = ev->code - 0x100;
@@ -627,19 +844,21 @@ static proven_err_t c_close_reason(const proven_h3_event_t *ev) {
 }
 
 static void c_event(c3conn_t *c, const proven_h3_event_t *ev) {
-    c3req_t *r = ev->kind == PROVEN_H3_EV_HEADERS || ev->kind == PROVEN_H3_EV_DATA || ev->kind == PROVEN_H3_EV_TRAILERS || ev->kind == PROVEN_H3_EV_STREAM_RESET ||
+    proven_c3req_t *r = ev->kind == PROVEN_H3_EV_HEADERS || ev->kind == PROVEN_H3_EV_DATA || ev->kind == PROVEN_H3_EV_TRAILERS || ev->kind == PROVEN_H3_EV_STREAM_RESET ||
                  ev->kind == PROVEN_H3_EV_STOP_SENDING || ev->kind == PROVEN_H3_EV_STREAM_WRITABLE ? c_find_req(c, ev->stream_id) : (void *)0;
     switch (ev->kind) {
         case PROVEN_H3_EV_HEADERS: if (r) c_response(c, r, ev); break;
         case PROVEN_H3_EV_DATA:
             if (r && !r->head_only) {
                 r_enter(r);
+                if (ev->end_stream) r->body_over = true;
                 if (r_deliver(r, ev->data, ev->end_stream)) { if (ev->end_stream) r_finish(r, PROVEN_OK); else r_expect(r); }
                 r_leave(r);
             }
             break;
-        case PROVEN_H3_EV_TRAILERS:                    /* not passed on: the request's end */
-            if (r) { r_enter(r); if (r_deliver(r, (proven_mem_view_t){ .ptr = (void *)0, .size = 0 }, true)) r_finish(r, PROVEN_OK); r_leave(r); }
+        case PROVEN_H3_EV_TRAILERS:                    /* kept for proven_http_event_request_trailers, then the body's end */
+            if (r && proven_http_trailers_keep_(r->h.client->alloc, &r->in_trailers, ev->fields, ev->field_count, true, false) != PROVEN_OK) { r_finish(r, PROVEN_ERR_NOMEM); break; }
+            if (r) { r->body_over = true; r_enter(r); if (r_deliver(r, (proven_mem_view_t){ .ptr = (void *)0, .size = 0 }, true)) r_finish(r, PROVEN_OK); r_leave(r); }
             break;
         case PROVEN_H3_EV_STREAM_RESET:
             if (r) {
@@ -647,7 +866,7 @@ static void c_event(c3conn_t *c, const proven_h3_event_t *ev) {
                 r->has_id = false;                     /* the engine has let it go */
                 /* Not acted on: safe to send again (RFC 9114 section 4.1.1). */
                 if (ev->code == PROVEN_H3_REQUEST_REJECTED) r_unsent(r);
-                else r_finish(r, PROVEN_ERR_RESET);
+                else r_finish(r, ev->too_large ? PROVEN_ERR_OUT_OF_BOUNDS : PROVEN_ERR_RESET);   /* a head over max_head_bytes */
             }
             break;
         case PROVEN_H3_EV_STOP_SENDING:
@@ -670,7 +889,7 @@ static void c_event(c3conn_t *c, const proven_h3_event_t *ev) {
             c->over = true;
             for (bool again = true; again && !c->dead;) {
                 again = false;
-                for (c3req_t *w = c->reqs; w; w = w->next) if (!w->has_id) { r_unsent(w); again = true; break; }
+                for (proven_c3req_t *w = c->reqs; w; w = w->next) if (!w->has_id) { r_unsent(w); again = true; break; }
             }
             break;
         case PROVEN_H3_EV_QUIC:
@@ -678,6 +897,7 @@ static void c_event(c3conn_t *c, const proven_h3_event_t *ev) {
             else if (ev->quic.kind == PROVEN_QUIC_EV_EARLY) { c->early = true; c_submit_waiting(c); }
             break;
         case PROVEN_H3_EV_CLOSED:
+            if (!c->up && c_restart(c)) break;      /* the same attempt, in another version */
             c->closed = true;
             c->over = true;
             c->closed_why = c->up ? PROVEN_ERR_RESET : c_close_reason(ev);
@@ -698,7 +918,7 @@ static void c_check_time(c3conn_t *c) {
     const proven_time_t now = proven_time_monotonic_now();
     for (bool again = true; again && !c->dead;) {
         again = false;
-        for (c3req_t *r = c->reqs; r; r = r->next) {
+        for (proven_c3req_t *r = c->reqs; r; r = r->next) {
             if (r->due == 0 || r->due > now) continue;
             r_finish(r, PROVEN_ERR_TIMEOUT);
             again = true;
@@ -706,6 +926,9 @@ static void c_check_time(c3conn_t *c) {
         }
     }
     if (c->dead) return;
+    /* RFC-0031: what the system said, or the time a handshake may take before TCP is tried. */
+    if (!c->up && cfg->http3_fallback && c->send_failed != PROVEN_OK) { c_kill(c, c->send_failed); return; }
+    if (!c->up && cfg->http3_fallback && now >= c->born + (proven_time_t)cfg->http3_fallback_ms * 1000000) { c_kill(c, PROVEN_ERR_TIMEOUT); return; }
     if (!c->up && now >= c->born + (proven_time_t)cfg->connect_timeout_ms * 1000000) { c_kill(c, PROVEN_ERR_TIMEOUT); return; }
     if (c->write_since != 0 && now >= c->write_since + (proven_time_t)cfg->write_timeout_ms * 1000000) { c_kill(c, PROVEN_ERR_TIMEOUT); return; }
     if (c->up && c->count == 0 && !c->bye && c->idle_since != 0 && now >= c->idle_since + (proven_time_t)cfg->idle_timeout_ms * 1000000) {
@@ -732,9 +955,10 @@ static void c_arm(c3conn_t *c) {
     const proven_time_t now = proven_time_monotonic_now();
     proven_time_t due = 0;
     if (!c->closed) {
-        if (!c->up) due = c->born + (proven_time_t)cfg->connect_timeout_ms * 1000000;
+        if (!c->up) due = c->born + (proven_time_t)(cfg->http3_fallback ? cfg->http3_fallback_ms : cfg->connect_timeout_ms) * 1000000;
+        if (!c->up && cfg->http3_fallback && c->send_failed != PROVEN_OK) due = now;
         bool waiting = false;
-        for (const c3req_t *r = c->reqs; r; r = r->next) {
+        for (const proven_c3req_t *r = c->reqs; r; r = r->next) {
             if (r->due != 0) due = t_min(due, r->due);
             if (r->blocked) waiting = true;
         }
@@ -771,7 +995,7 @@ static void c_round(c3conn_t *c) {
              * any request: the walk starts again after each. */
             for (bool again = true; again && !c->dead;) {
                 again = false;
-                for (c3req_t *r = c->reqs; r; r = r->next) {
+                for (proven_c3req_t *r = c->reqs; r; r = r->next) {
                     if (r->dead || !r->has_id || !r->streamed || !r->want_writable || r->blocked || r->end_asked || r->engine_done) continue;
                     r->want_writable = false;
                     if (r->on.on_writable) { r_enter(r); r->on.on_writable(r->ctx, c3_handle(r)); r_leave(r); again = true; break; }
@@ -780,7 +1004,7 @@ static void c_round(c3conn_t *c) {
             /* Bodies that wait for nothing but a turn. r_push may end a request: the walk starts again. */
             for (bool again = true; again && !c->dead;) {
                 again = false;
-                for (c3req_t *r = c->reqs; r; r = r->next) {
+                for (proven_c3req_t *r = c->reqs; r; r = r->next) {
                     if (!r->has_id || r->blocked || r->engine_done || !(r->out_len > 0 || r->end_asked)) continue;
                     r_push(r);
                     again = true;
@@ -789,6 +1013,7 @@ static void c_round(c3conn_t *c) {
             }
         }
         if (!c->dead) c_send(c);
+        if (!c->dead && !c->up && c->client->cfg.http3_fallback && c->send_failed != PROVEN_OK) c_kill(c, c->send_failed);
         if (!c->dead && c->closed && c_over(c)) c_kill(c, c->closed_why);
         else if (!c->dead) c_arm(c);
     }
@@ -797,37 +1022,55 @@ static void c_round(c3conn_t *c) {
     c_leave(c);
 }
 
-static void c_on_io(void *ctx, proven_u8 got) {
+static void c_sock_received(void *ctx, proven_err_t err, proven_size_t n, proven_size_t seg, proven_u8 ecn) {
     c3conn_t *c = ctx;
+    if (err != PROVEN_OK && !c->dead && !c->up && c->client->cfg.http3_fallback && (err == PROVEN_ERR_UNREACHABLE || err == PROVEN_ERR_REFUSED)) {
+        c_kill(c, err);                            /* RFC-0031: the system says nobody is there */
+        return;
+    }
+    if (err != PROVEN_OK || c->dead) return;
     proven_http_event_client_t *cl = c->client;
     c_enter(c);
-    if ((got & PROVEN_NET_WRITABLE) && c->pend_len > 0) {
+    const proven_quic_addr_t qa = proven_quic_addr_of_(&c->from);
+    /* Several datagrams of one sender coalesced by the kernel (GRO): each as if alone. */
+    const proven_size_t step = seg ? seg : n;
+    bool failed = false;
+    for (proven_size_t off = 0; off < n && !c->dead; off += step) {
+        const proven_size_t k = n - off < step ? n - off : step;
+        if (proven_quic_conn_receive(c->q, (proven_mem_view_t){ .ptr = c->rbuf + off, .size = k }, &qa, ecn, c3_now_us()) != PROVEN_OK) { failed = true; break; }
+    }
+    if (failed) c_kill(c, PROVEN_ERR_NOMEM);
+    /* The next receive, armed from here: what waits already is taken without a new round. The
+     * connection's round comes when the datagrams that came together are in. */
+    if (!c->dead) (void)proven_loop_udp_recv_(cl->loop, &c->lu, (proven_mem_mut_t){ .ptr = c->rbuf, .size = CL_READ_BYTES }, &c->from);
+    c_call_back(c);
+    c_leave(c);
+}
+
+static void c_sock_writable(void *ctx, proven_err_t err) {
+    c3conn_t *c = ctx;
+    c->waiting = false;
+    if (err != PROVEN_OK || c->dead) return;
+    c_enter(c);
+    if (c->pend_len > 0) {
         proven_size_t sent = 0;
-        const proven_err_t e = proven_net_udp_send_segments_(&c->udp, c->to, (proven_mem_view_t){ .ptr = c->pend, .size = c->pend_len }, c->pend_seg, &sent);
+        const proven_err_t e = proven_net_udp_send_marked_(&c->udp, c->to, (proven_mem_view_t){ .ptr = c->pend, .size = c->pend_len }, c->pend_seg, c->pend_ecn, &sent);
         if (e != PROVEN_ERR_TIMEOUT) c->pend_len = 0;
         else if (sent > 0) { proven_sys_mem_move(c->pend, c->pend + sent, c->pend_len - sent); c->pend_len -= sent; }
-    }
-    if (got & (PROVEN_NET_READABLE | PROVEN_NET_FAILED)) {
-        for (int i = 0; i < C3_READS && !c->dead; ++i) {
-            proven_net_addr_t from;
-            proven_size_t seg = 0;
-            const proven_result_size_t r = proven_net_udp_recv_segments_(&c->udp, (proven_mem_mut_t){ .ptr = cl->rbuf, .size = CL_READ_BYTES }, &seg, &from);
-            if (r.err == PROVEN_ERR_OUT_OF_BOUNDS) continue;
-            if (r.err != PROVEN_OK) break;
-            const proven_quic_addr_t qa = proven_quic_addr_of_(&from);
-            /* Several datagrams of one sender coalesced by the kernel (GRO): each as if alone. */
-            const proven_size_t step = seg ? seg : r.value;
-            bool failed = false;
-            for (proven_size_t off = 0; off < r.value && !c->dead; off += step) {
-                const proven_size_t n = r.value - off < step ? r.value - off : step;
-                if (proven_quic_conn_receive(c->q, (proven_mem_view_t){ .ptr = cl->rbuf + off, .size = n }, &qa, c3_now_us()) != PROVEN_OK) { failed = true; break; }
-            }
-            if (failed) { c_kill(c, PROVEN_ERR_NOMEM); break; }
-        }
     }
     c_round(c);
     c_leave(c);
 }
+
+static void c_sock_closed(void *ctx) {
+    c3conn_t *c = ctx;
+    proven_http_event_client_t *cl = c->client;
+    c->sock_gone = true;
+    if (c->dead && c->depth == 0) c_free(c);
+    proven_http_event_client_ended_(cl);
+}
+
+static const proven_loop_udp_fns_t c_udp_fns = { .received = c_sock_received, .writable = c_sock_writable, .closed = c_sock_closed };
 
 // -----------------------------------------------------------------------------
 // Connections, and placing a request
@@ -854,17 +1097,9 @@ static proven_err_t c_open(proven_http_event_client_t *cl, proven_u8str_view_t h
     c->born = proven_time_monotonic_now();
     c->closed_why = PROVEN_ERR_RESET;
     proven_err_t e = proven_net_udp_open(proven_net_addr_any(to->family, 0), &c->udp, (void *)0);
-    if (e == PROVEN_OK) { (void)proven_net_udp_gro_(&c->udp); (void)proven_net_udp_dontfrag_(&c->udp); }
+    if (e == PROVEN_OK) { (void)proven_net_udp_gro_(&c->udp); (void)proven_net_udp_dontfrag_(&c->udp); c->ecn = proven_net_udp_ecn_(&c->udp); }
     if (e == PROVEN_OK) {
-        const proven_quic_config_t qc = {
-            .alloc = cl->alloc, .tls = cl->cfg.tls,
-            .alpn = { .ptr = (const proven_byte_t *)"h3", .size = 2 },   /* offered alone, whatever else the configuration offers over TCP (RFC 9114 section 3.1) */
-            .stream_window = (proven_u32)cl->cfg.http3_window_bytes, .conn_window = (proven_u32)cl->cfg.http3_window_bytes,
-            /* No window configured: it starts at the engine's and grows while bodies are read (RFC-0019 section 9). */
-            .stream_window_max = cl->cfg.http3_window_bytes ? 0u : PROVEN_QUIC_STREAM_WINDOW_MAX,
-            .conn_window_max = cl->cfg.http3_window_bytes ? 0u : PROVEN_QUIC_CONN_WINDOW_MAX,
-            .idle_timeout_ms = (cl->cfg.idle_timeout_ms > cl->cfg.connect_timeout_ms ? cl->cfg.idle_timeout_ms : cl->cfg.connect_timeout_ms) + 1000,
-        };
+        const proven_quic_config_t qc = c_qconfig(cl);
         const proven_quic_addr_t qa = proven_quic_addr_of_(to);
         /* An older connection to this origin, closing still, may have had a ticket since its last
          * request ended: it goes to the cache now, before this one is given what is there - a
@@ -879,20 +1114,35 @@ static proven_err_t c_open(proven_http_event_client_t *cl, proven_u8str_view_t h
         e = proven_quic_conn_client_create(&qc, host, &c->session, &qa, c3_now_us(), &c->q);
         if (e == PROVEN_OK) {
             const proven_u32 list = cl->cfg.max_head_bytes > ((proven_size_t)1 << 20) ? (proven_u32)1 << 20 : (proven_u32)cl->cfg.max_head_bytes;
-            const proven_h3_config_t hc = { .alloc = cl->alloc, .server = false, .max_field_section_bytes = list };
+            const proven_h3_config_t hc = { .alloc = cl->alloc, .server = false, .max_field_section_bytes = list, .qpack_capacity = (proven_u32)cl->cfg.http3_header_table_bytes };
             e = proven_h3_conn_create(&hc, c->q, &c->h3);
         }
-        if (e == PROVEN_OK) e = proven_loop_io_add(cl->loop, &c->io, proven_net_udp_handle(&c->udp), PROVEN_NET_READABLE, c_on_io, c);
+        if (e == PROVEN_OK) {
+            c->rbuf = c3_alloc(cl->alloc, CL_READ_BYTES);
+            if (!c->rbuf) e = PROVEN_ERR_NOMEM;
+        }
+        if (e == PROVEN_OK) e = proven_loop_udp_attach_(cl->loop, &c->lu, &c->udp, &c_udp_fns, c);
+        if (e == PROVEN_OK) {
+            c->attached = true;
+            e = proven_loop_udp_recv_(cl->loop, &c->lu, (proven_mem_mut_t){ .ptr = c->rbuf, .size = CL_READ_BYTES }, &c->from);
+        }
     }
     if (e != PROVEN_OK) {
         proven_h3_conn_destroy(c->h3);
         proven_quic_conn_destroy(c->q);
-        (void)proven_net_udp_close(&c->udp);
-        cl->alloc.free_fn(cl->alloc.ctx, c);
+        c->h3 = (void *)0; c->q = (void *)0;
+        if (c->attached) {                         /* the loop's `closed` frees it */
+            c->sock_closed = true;
+            cl->ending++;
+            proven_loop_udp_close_(cl->loop, &c->lu);
+            (void)proven_net_udp_close(&c->udp);
+            c->dead = true;
+        } else {
+            (void)proven_net_udp_close(&c->udp);
+            c_free(c);
+        }
         return e == PROVEN_ERR_NOMEM ? e : PROVEN_ERR_UNREACHABLE;
     }
-    c->registered = true;
-    c->want = PROVEN_NET_READABLE;
     c->next = cl->h3;
     if (c->next) c->next->prev = c;
     cl->h3 = c;
@@ -902,13 +1152,13 @@ static proven_err_t c_open(proven_http_event_client_t *cl, proven_u8str_view_t h
 }
 
 static void r_room_fire(void *ctx) {
-    c3req_t *r = ctx;
+    proven_c3req_t *r = ctx;
     if (r->dead) return;
     r_finish(r, PROVEN_ERR_TIMEOUT);               /* no room for a connection within connect_timeout_ms */
 }
 
 /* Onto the connection for its origin, made if need be; or, with no room for one, into the wait. */
-static void r_place(c3req_t *r) {
+static void r_place(proven_c3req_t *r) {
     proven_http_event_client_t *cl = r->h.client;
     const proven_u8str_view_t host = { .ptr = r->host, .size = r->host_len };
     c3conn_t *c = c_find(cl, host, r->port, &r->to);
@@ -917,7 +1167,7 @@ static void r_place(c3req_t *r) {
     if (e == PROVEN_ERR_BUSY && cl->cfg.max_connections != 0) {
         if (cl->h3_roomless_count >= cl->cfg.max_waiting_requests) { r_finish(r, PROVEN_ERR_BUSY); return; }
         r->waiting_room = true;
-        if (cl->h3_roomless_last) ((c3req_t *)cl->h3_roomless_last)->wnext = r;
+        if (cl->h3_roomless_last) ((proven_c3req_t *)cl->h3_roomless_last)->wnext = r;
         else cl->h3_roomless = r;
         cl->h3_roomless_last = r;
         cl->h3_roomless_count++;
@@ -930,7 +1180,7 @@ static void r_place(c3req_t *r) {
 }
 
 static void r_wait_fire(void *ctx) {
-    c3req_t *r = ctx;
+    proven_c3req_t *r = ctx;
     if (r->dead) return;
     r_undelay(r);
     r_place(r);
@@ -940,6 +1190,14 @@ static void r_wait_fire(void *ctx) {
 // What http_event_client.c calls
 // -----------------------------------------------------------------------------
 
+/* A request asked over HTTP/3 started over TCP at once: the caller gets that request. */
+static proven_err_t r_start_tcp(proven_http_event_client_t *cl, const proven_http_event_request_options_t *o, proven_net_addr_t to, proven_http_event_request_t **out) {
+    proven_http_event_request_options_t t = *o;
+    t.http3 = false;
+    t.address = &to;
+    return proven_http_event_client_start(cl, &t, out);
+}
+
 proven_err_t proven_http_event_client_h3_start_(proven_http_event_client_t *cl, const proven_http_event_request_options_t *o,
                                                 const proven_url_t *url, proven_net_addr_t to, proven_http_event_request_t **out) {
     if (out) *out = (void *)0;
@@ -948,22 +1206,24 @@ proven_err_t proven_http_event_client_h3_start_(proven_http_event_client_t *cl, 
     if (host.size == 0 || host.size > 255) return PROVEN_ERR_INVALID_ARG;
     const proven_u8str_view_t method = o->method.size ? o->method : c3_lit("GET");
     if (proven_u8str_view_eq_ascii_ci(method, c3_lit("CONNECT"))) return PROVEN_ERR_INVALID_ARG;
+    /* An origin whose QUIC connection did not come up lately: over TCP from the start (RFC-0031). */
+    if (cl->cfg.http3_fallback && c3_gone(cl, host, port)) return r_start_tcp(cl, o, to, out);
     c3conn_t *c = c_find(cl, host, port, &to);
     if (c) {
         proven_size_t waiting = 0;
-        for (const c3req_t *w = c->reqs; w; w = w->next) if (!w->has_id) waiting++;
+        for (const proven_c3req_t *w = c->reqs; w; w = w->next) if (!w->has_id) waiting++;
         if (waiting >= cl->cfg.max_waiting_requests) return PROVEN_ERR_BUSY;
     }
     proven_size_t bytes = o->url.size + method.size + o->header_count * sizeof(proven_http_header_t) + o->body.size;
     for (proven_size_t i = 0; i < o->header_count; ++i) bytes += o->headers[i].name.size + o->headers[i].value.size;
     const bool behind = bytes <= C3_COPY_BEHIND;
-    c3req_t *r = c3_alloc(cl->alloc, sizeof *r + (behind ? bytes : 0));
+    proven_c3req_t *r = c3_alloc(cl->alloc, sizeof *r + (behind ? bytes : 0));
     proven_byte_t *copy = !r ? (void *)0 : behind ? (proven_byte_t *)(r + 1) : c3_alloc(cl->alloc, bytes ? bytes : 1);
     if (!r || !copy) {
         if (r) cl->alloc.free_fn(cl->alloc.ctx, r);
         return PROVEN_ERR_NOMEM;
     }
-    r->h = (cl_head_t){ .client = cl, .kind = CL_KIND_H3 };
+    r->h = (proven_cl_head_t){ .client = cl, .kind = CL_KIND_H3 };
     r->on = o->on;
     r->ctx = o->ctx;
     r->copy = behind ? (void *)0 : copy;
@@ -1002,7 +1262,7 @@ proven_err_t proven_http_event_client_h3_start_(proven_http_event_client_t *cl, 
                 cl->request_count++;
                 if (out) *out = c3_handle(r);
                 r->waiting_room = true;
-                if (cl->h3_roomless_last) ((c3req_t *)cl->h3_roomless_last)->wnext = r;
+                if (cl->h3_roomless_last) ((proven_c3req_t *)cl->h3_roomless_last)->wnext = r;
                 else cl->h3_roomless = r;
                 cl->h3_roomless_last = r;
                 cl->h3_roomless_count++;
@@ -1013,6 +1273,7 @@ proven_err_t proven_http_event_client_h3_start_(proven_http_event_client_t *cl, 
         if (e != PROVEN_OK) {
             r_free_parts(r);
             cl->alloc.free_fn(cl->alloc.ctx, r);
+            if (e == PROVEN_ERR_UNREACHABLE && cl->cfg.http3_fallback) return r_start_tcp(cl, o, to, out);    /* no UDP socket to be had */
             return e;
         }
     }
@@ -1046,7 +1307,7 @@ void proven_http_event_client_h3_freed_(proven_http_event_client_t *cl) {
     if (cl->closing || cl->h3_room_busy) return;
     cl->h3_room_busy = true;
     while (cl->h3_roomless) {
-        c3req_t *r = cl->h3_roomless;
+        proven_c3req_t *r = cl->h3_roomless;
         const proven_u8str_view_t host = { .ptr = r->host, .size = r->host_len };
         c3conn_t *c = c_find(cl, host, r->port, &r->to);
         if (!c) {
@@ -1074,20 +1335,40 @@ void proven_http_event_client_h3_destroy_(proven_http_event_client_t *cl) {
         c_kill(c, PROVEN_ERR_RESET);
     }
     if (cl->h3_batch) { cl->alloc.free_fn(cl->alloc.ctx, cl->h3_batch); cl->h3_batch = (void *)0; }
+    if (cl->h3_gone) { cl->alloc.free_fn(cl->alloc.ctx, cl->h3_gone); cl->h3_gone = (void *)0; }
 }
 
-static void call_begin(c3req_t *r) { r_enter(r); if (r->conn) { c_enter(r->conn); r->conn->calls++; } }
-static void call_end(c3req_t *r, c3conn_t *c) {
+void proven_http_event_client_h3_test_forget_(proven_http_event_client_t *client) {
+    if (client && client->h3_gone) proven_sys_mem_set(client->h3_gone, 0, C3_GONE * sizeof(c3gone_t));
+}
+
+int proven_http_event_client_h3_protocol_(const proven_http_event_request_t *request) {
+    const proven_c3req_t *r = c3_of_const(request);
+    return r->tcp ? proven_http_event_request_protocol(r->tcp) : 3;
+}
+
+static void call_begin(proven_c3req_t *r) { r_enter(r); if (r->conn) { c_enter(r->conn); r->conn->calls++; } }
+/* True when the request is still there after the call's sending, which can end it (on_done has
+ * then been called): read before the leave, which may free it. */
+static bool call_end(proven_c3req_t *r, c3conn_t *c) {
     if (c) { c->calls--; if (!c->dead) { c_send(c); c_call_back(c); } c_leave(c); }
+    const bool alive = !r->dead;
     r_leave(r);
+    return alive;
 }
 
 void proven_http_event_client_h3_test_retire_(proven_http_event_client_t *client) {
     for (c3conn_t *c = client->h3; c; c = c->next) c->over = true;
 }
 
+bool proven_http_event_client_h3_test_ticket_new_(proven_http_event_client_t *client) {
+    const c3conn_t *c = client->h3;                    /* the newest first */
+    return c && !c->dead && proven_quic_conn_ticket_stored_(c->q);
+}
+
 int proven_http_event_client_h3_early_(proven_http_event_request_t *request) {
-    c3req_t *r = c3_of(request);
+    proven_c3req_t *r = c3_of(request);
+    if (r->tcp) return 0;
     if (r->early_again) return 3;
     if (!r->sent_early || !r->conn || !r->conn->q) return 0;
     proven_quic_stats_t st;
@@ -1096,12 +1377,14 @@ int proven_http_event_client_h3_early_(proven_http_event_request_t *request) {
 }
 
 bool proven_http_event_client_h3_resumed_(proven_http_event_request_t *request) {
-    c3req_t *r = c3_of(request);
+    proven_c3req_t *r = c3_of(request);
+    if (r->tcp) return proven_http_event_request_resumed_(r->tcp);
     return r->conn && r->conn->q && proven_quic_conn_resumed(r->conn->q);
 }
 
 proven_result_size_t proven_http_event_client_h3_write_(proven_http_event_request_t *request, proven_mem_view_t data) {
-    c3req_t *r = c3_of(request);
+    proven_c3req_t *r = c3_of(request);
+    if (r->tcp) return proven_http_event_request_write(r->tcp, data);
     if (r->dead || !r->streamed || r->end_asked) return (proven_result_size_t){ .err = PROVEN_ERR_INVALID_STATE, .value = 0 };
     if (r->body_length != PROVEN_HTTP_EVENT_LENGTH_UNKNOWN && data.size > (r->has_id ? r->send_left : r->body_length)) return (proven_result_size_t){ .err = PROVEN_ERR_OUT_OF_BOUNDS, .value = 0 };
     if (!r->has_id || r->blocked || r->engine_done) { r->want_writable = true; return (proven_result_size_t){ .err = PROVEN_OK, .value = 0 }; }
@@ -1116,13 +1399,37 @@ proven_result_size_t proven_http_event_client_h3_write_(proven_http_event_reques
         if (r->body_length != PROVEN_HTTP_EVENT_LENGTH_UNKNOWN) r->send_left -= taken;
         if (taken < data.size) { r->blocked = true; r->want_writable = true; }
     }
-    call_end(r, c);
+    if (!call_end(r, c)) alive = false;
     return alive ? (proven_result_size_t){ .err = PROVEN_OK, .value = taken } : (proven_result_size_t){ .err = PROVEN_ERR_RESET, .value = 0 };
 }
 
-proven_err_t proven_http_event_client_h3_end_(proven_http_event_request_t *request) {
-    c3req_t *r = c3_of(request);
+proven_err_t proven_http_event_client_h3_trailers_(const proven_http_event_request_t *request, proven_http_header_t *fields, proven_size_t cap, proven_size_t *count) {
+    const proven_c3req_t *r = (const proven_c3req_t *)(const void *)request;
+    if (!r->body_over) return PROVEN_ERR_INVALID_STATE;
+    return proven_http_trailers_give_(&r->in_trailers, fields, cap, count);
+}
+
+proven_err_t proven_http_event_client_h3_end_(proven_http_event_request_t *request, const proven_http_header_t *trailers, proven_size_t count) {
+    proven_c3req_t *r = c3_of(request);
+    if (r->tcp) {
+        r_enter(r);
+        const proven_err_t e = count > 0 ? proven_http_event_request_end_trailers(r->tcp, trailers, count) : proven_http_event_request_end(r->tcp);
+        r_leave(r);
+        return e;
+    }
     if (r->dead || !r->streamed || r->end_asked) return PROVEN_ERR_INVALID_STATE;
+    if (count > 0) {
+        /* As over HTTP/1.1: after a body written with no length. Kept until the body has gone. */
+        if (r->body_length != PROVEN_HTTP_EVENT_LENGTH_UNKNOWN) return PROVEN_ERR_INVALID_STATE;
+        if (!proven_http_trailers_valid_(trailers, count)) return PROVEN_ERR_INVALID_ARG;
+        const proven_err_t e = proven_http_trailers_keep_(r->h.client->alloc, &r->out_trailers, trailers, count, false, true);
+        if (e != PROVEN_OK) return e;
+        if (!r->has_id) {
+            /* Not on a stream yet: its HEADERS go without the end, and the trailers after them. */
+            r->end_asked = true;
+            return PROVEN_OK;
+        }
+    }
     if (r->body_length != PROVEN_HTTP_EVENT_LENGTH_UNKNOWN && (r->has_id ? r->send_left : r->body_length) != 0) {
         r_finish(r, PROVEN_ERR_INVALID_FORMAT);
         return PROVEN_ERR_INVALID_FORMAT;
@@ -1143,7 +1450,8 @@ proven_err_t proven_http_event_client_h3_end_(proven_http_event_request_t *reque
 }
 
 void proven_http_event_client_h3_abort_(proven_http_event_request_t *request) {
-    c3req_t *r = c3_of(request);
+    proven_c3req_t *r = c3_of(request);
+    if (r->tcp) { r_enter(r); proven_http_event_request_abort(r->tcp); r_leave(r); return; }
     if (r->dead) return;
     c3conn_t *c = r->conn;
     call_begin(r);
@@ -1152,7 +1460,8 @@ void proven_http_event_client_h3_abort_(proven_http_event_request_t *request) {
 }
 
 void proven_http_event_client_h3_pause_(proven_http_event_request_t *request) {
-    c3req_t *r = c3_of(request);
+    proven_c3req_t *r = c3_of(request);
+    if (r->tcp) { proven_http_event_request_pause(r->tcp); return; }
     if (r->dead || r->paused) return;
     r->paused = true;
     r->due = 0;
@@ -1160,7 +1469,8 @@ void proven_http_event_client_h3_pause_(proven_http_event_request_t *request) {
 }
 
 void proven_http_event_client_h3_resume_(proven_http_event_request_t *request) {
-    c3req_t *r = c3_of(request);
+    proven_c3req_t *r = c3_of(request);
+    if (r->tcp) { proven_http_event_request_resume(r->tcp); return; }
     if (r->dead || !r->paused) return;
     r->paused = false;
     r_expect(r);

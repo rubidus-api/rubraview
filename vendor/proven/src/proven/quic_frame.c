@@ -52,13 +52,15 @@ bool proven_quic_hdr_parse(proven_mem_view_t d, proven_size_t short_dcid_len, pr
         h->len = d.size;
         return true;
     }
-    if (h->version != PROVEN_QUIC_VERSION_1) {
+    if (h->version != PROVEN_QUIC_VERSION_1 && h->version != PROVEN_QUIC_VERSION_2) {
         h->type = PROVEN_QUIC_PKT_OTHER_VERSION;
         h->len = d.size;
         return true;
     }
     if (!(first & 0x40)) return false;
-    const unsigned type = (unsigned)(first >> 4) & 3;
+    /* Version 2 moves every type up by one (RFC 9369 section 3.2): read as version 1's. */
+    const unsigned bits = (unsigned)(first >> 4) & 3;
+    const unsigned type = h->version == PROVEN_QUIC_VERSION_2 ? (bits + 3) & 3 : bits;
     if (type == 3) {
         /* Retry: a token, then the 16-byte integrity tag. A Retry with no token is discarded. */
         if (r.n <= 16) return false;
@@ -88,14 +90,23 @@ proven_size_t proven_quic_vn_build(const proven_quic_cid_t *dcid, const proven_q
     proven_quic_wr_uint(&w, dcid->len, 1); proven_quic_wr_bytes(&w, dcid->id, dcid->len);
     proven_quic_wr_uint(&w, scid->len, 1); proven_quic_wr_bytes(&w, scid->id, scid->len);
     proven_quic_wr_uint(&w, PROVEN_QUIC_VERSION_1, 4);
+    proven_quic_wr_uint(&w, PROVEN_QUIC_VERSION_2, 4);
     return w.ok ? w.n : 0;
 }
 
+/* Version 1's type bits (Initial 0, 0-RTT 1, Handshake 2, Retry 3) in `version`'s place. */
+static unsigned type_bits(proven_u32 version, unsigned v1_bits) { return version == PROVEN_QUIC_VERSION_2 ? (v1_bits + 1) & 3 : v1_bits; }
+
 proven_size_t proven_quic_retry_build(const proven_quic_cid_t *odcid, const proven_quic_cid_t *dcid, const proven_quic_cid_t *scid,
                                       proven_mem_view_t token, proven_byte_t random_bits, proven_mem_mut_t out) {
+    return proven_quic_retry_build_v(PROVEN_QUIC_VERSION_1, odcid, dcid, scid, token, random_bits, out);
+}
+
+proven_size_t proven_quic_retry_build_v(proven_u32 version, const proven_quic_cid_t *odcid, const proven_quic_cid_t *dcid, const proven_quic_cid_t *scid,
+                                        proven_mem_view_t token, proven_byte_t random_bits, proven_mem_mut_t out) {
     proven_quic_wr_t w = { out.ptr, 0, out.size, true };
-    proven_quic_wr_uint(&w, 0xf0u | (random_bits & 0x0fu), 1);
-    proven_quic_wr_uint(&w, PROVEN_QUIC_VERSION_1, 4);
+    proven_quic_wr_uint(&w, 0xc0u | (type_bits(version, 3) << 4) | (random_bits & 0x0fu), 1);
+    proven_quic_wr_uint(&w, version, 4);
     proven_quic_wr_uint(&w, dcid->len, 1); proven_quic_wr_bytes(&w, dcid->id, dcid->len);
     proven_quic_wr_uint(&w, scid->len, 1); proven_quic_wr_bytes(&w, scid->id, scid->len);
     proven_quic_wr_bytes(&w, token.ptr, token.size);
@@ -114,12 +125,18 @@ proven_size_t proven_quic_pn_len(proven_u64 pn, proven_u64 largest_acked_plus_on
 proven_size_t proven_quic_long_header_put(proven_quic_pkt_type_t type, const proven_quic_cid_t *dcid, const proven_quic_cid_t *scid,
                                           proven_mem_view_t token, proven_u64 pn, proven_size_t pn_len, proven_size_t payload_len,
                                           proven_mem_mut_t out) {
+    return proven_quic_long_header_put_v(PROVEN_QUIC_VERSION_1, type, dcid, scid, token, pn, pn_len, payload_len, out);
+}
+
+proven_size_t proven_quic_long_header_put_v(proven_u32 version, proven_quic_pkt_type_t type, const proven_quic_cid_t *dcid, const proven_quic_cid_t *scid,
+                                            proven_mem_view_t token, proven_u64 pn, proven_size_t pn_len, proven_size_t payload_len,
+                                            proven_mem_mut_t out) {
     const unsigned bits = type == PROVEN_QUIC_PKT_INITIAL ? 0 : type == PROVEN_QUIC_PKT_0RTT ? 1 : type == PROVEN_QUIC_PKT_HANDSHAKE ? 2 : 4;
     const proven_size_t length = pn_len + payload_len + 16;
     if (bits == 4 || pn_len < 1 || pn_len > 4 || length >= 16384) return 0;
     proven_quic_wr_t w = { out.ptr, 0, out.size, true };
-    proven_quic_wr_uint(&w, 0xc0u | (bits << 4) | (unsigned)(pn_len - 1), 1);
-    proven_quic_wr_uint(&w, PROVEN_QUIC_VERSION_1, 4);
+    proven_quic_wr_uint(&w, 0xc0u | (type_bits(version, bits) << 4) | (unsigned)(pn_len - 1), 1);
+    proven_quic_wr_uint(&w, version, 4);
     proven_quic_wr_uint(&w, dcid->len, 1); proven_quic_wr_bytes(&w, dcid->id, dcid->len);
     proven_quic_wr_uint(&w, scid->len, 1); proven_quic_wr_bytes(&w, scid->id, scid->len);
     if (type == PROVEN_QUIC_PKT_INITIAL) { proven_quic_wr_varint(&w, token.size); proven_quic_wr_bytes(&w, token.ptr, token.size); }
@@ -357,10 +374,15 @@ bool proven_quic_ack_next(proven_quic_ack_iter_t *it, proven_u64 *lo, proven_u64
 }
 
 proven_size_t proven_quic_ack_put(proven_quic_wr_t *w, const proven_u64 (*ranges)[2], proven_size_t count, proven_u64 ack_delay) {
+    return proven_quic_ack_put_ecn(w, ranges, count, ack_delay, NULL);
+}
+
+proven_size_t proven_quic_ack_put_ecn(proven_quic_wr_t *w, const proven_u64 (*ranges)[2], proven_size_t count, proven_u64 ack_delay, const proven_u64 ecn[3]) {
     if (count == 0 || !w->ok) return 0;
     const proven_u64 largest = ranges[0][1], first = ranges[0][1] - ranges[0][0];
     const proven_size_t room = w->cap - w->n;
     proven_size_t need = 1 + proven_quic_varint_len(largest) + proven_quic_varint_len(ack_delay) + proven_quic_varint_len(first);
+    if (ecn) for (int i = 0; i < 3; ++i) need += proven_quic_varint_len(ecn[i]);
     /* As many further ranges as fit, with the count's own length counted. */
     proven_size_t k = 0, pairs = 0;
     for (proven_size_t i = 1; i < count; ++i) {
@@ -370,7 +392,7 @@ proven_size_t proven_quic_ack_put(proven_quic_wr_t *w, const proven_u64 (*ranges
         pairs += add; ++k;
     }
     if (need + proven_quic_varint_len(k) + pairs > room) return 0;
-    proven_quic_wr_varint(w, PROVEN_QUIC_FT_ACK);
+    proven_quic_wr_varint(w, ecn ? PROVEN_QUIC_FT_ACK_ECN : PROVEN_QUIC_FT_ACK);
     proven_quic_wr_varint(w, largest);
     proven_quic_wr_varint(w, ack_delay);
     proven_quic_wr_varint(w, k);
@@ -379,6 +401,7 @@ proven_size_t proven_quic_ack_put(proven_quic_wr_t *w, const proven_u64 (*ranges
         proven_quic_wr_varint(w, ranges[i - 1][0] - ranges[i][1] - 2);
         proven_quic_wr_varint(w, ranges[i][1] - ranges[i][0]);
     }
+    if (ecn) for (int i = 0; i < 3; ++i) proven_quic_wr_varint(w, ecn[i]);
     return w->ok ? k + 1 : 0;
 }
 

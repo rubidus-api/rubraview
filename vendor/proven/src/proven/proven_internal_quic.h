@@ -11,6 +11,7 @@
 #ifndef PROVEN_NO_HTTP3
 
 #define PROVEN_QUIC_VERSION_1 ((proven_u32)0x00000001)
+#define PROVEN_QUIC_VERSION_2 ((proven_u32)0x6b3343cf)         /* RFC 9369 (RFC-0036) */
 #define PROVEN_QUIC_MAX_CID 20                     /* bytes in a version 1 connection ID */
 #define PROVEN_QUIC_VARINT_MAX ((((proven_u64)1) << 62) - 1)
 
@@ -54,19 +55,24 @@ typedef struct {
     bool chacha;
     proven_size_t key_len;                        /* 16 or 32 */
     proven_crypto_aes_gcm_t aead;                 /* AES: the context. ChaCha20: its key, in the first 32 bytes of aead.rk */
-    proven_crypto_aes_gcm_t hp;                   /* the same for the header protection key */
+    proven_crypto_aes_t hp;                       /* the same for the header protection key: AES with no GHASH key */
     proven_byte_t iv[12];
 } proven_quic_keys_t;
 
 /* The Initial secrets from the client's first Destination Connection ID (RFC 9001 section
  * 5.2): 32 bytes each, for TLS_AES_128_GCM_SHA256. */
 void proven_quic_initial_secrets(proven_mem_view_t dcid, proven_byte_t client[32], proven_byte_t server[32]);
+/* The same for `version` (1 or 2: RFC 9369's salt). */
+void proven_quic_initial_secrets_v(proven_mem_view_t dcid, proven_u32 version, proven_byte_t client[32], proven_byte_t server[32]);
 /* The suite of the Initial packets. */
 const proven_tls_suite_t *proven_quic_initial_suite(void);
 /* Key, IV and header protection key from a secret of `suite` ("quic key", "quic iv", "quic hp"). */
 void proven_quic_keys_set(proven_quic_keys_t *keys, const proven_tls_suite_t *suite, const proven_byte_t *secret);
 /* The secret of the next key phase (RFC 9001 section 6.1, "quic ku"), in place. */
 void proven_quic_secret_update(const proven_tls_suite_t *suite, proven_byte_t *secret);
+/* The same for `version`: version 2 labels them "quicv2 key", "quicv2 iv", "quicv2 hp", "quicv2 ku". */
+void proven_quic_keys_set_v(proven_quic_keys_t *keys, const proven_tls_suite_t *suite, const proven_byte_t *secret, proven_u32 version);
+void proven_quic_secret_update_v(const proven_tls_suite_t *suite, proven_byte_t *secret, proven_u32 version);
 /* Five bytes of header protection mask from a 16-byte sample. */
 void proven_quic_hp_mask(const proven_quic_keys_t *keys, const proven_byte_t sample[16], proven_byte_t mask[5]);
 
@@ -86,9 +92,14 @@ proven_size_t proven_quic_protect(const proven_quic_keys_t *keys, proven_byte_t 
  * packet is too short or does not decrypt; its bytes are then not to be used. */
 [[nodiscard]] bool proven_quic_unprotect(const proven_quic_keys_t *keys, proven_byte_t *packet, proven_size_t pn_offset, proven_size_t packet_len,
                                          proven_u64 largest_plus_one, proven_u64 *pn, proven_size_t *header_len, proven_mem_mut_t *payload);
+/* The same with the header protection mask already made from this packet's sample under these
+ * keys' header protection key - which a key update does not change. */
+[[nodiscard]] bool proven_quic_unprotect_masked(const proven_quic_keys_t *keys, proven_byte_t *packet, proven_size_t pn_offset, proven_size_t packet_len,
+                                                proven_u64 largest_plus_one, const proven_byte_t mask[5], proven_u64 *pn, proven_size_t *header_len, proven_mem_mut_t *payload);
 
 /* The Retry integrity tag (RFC 9001 section 5.8): over the Original Destination Connection ID
- * and the Retry packet without its tag. */
+ * and the Retry packet without its tag; the key and nonce of the version the packet's own
+ * Version field names (RFC 9369 section 3.3.3 for version 2). */
 void proven_quic_retry_tag(proven_mem_view_t odcid, proven_mem_view_t retry, proven_byte_t tag[16]);
 /* True when a whole Retry packet's last 16 bytes are its tag. */
 [[nodiscard]] bool proven_quic_retry_check(proven_mem_view_t odcid, proven_mem_view_t retry_packet);
@@ -128,6 +139,13 @@ typedef struct {
     proven_quic_cid_t retry_scid;                 /* server only */
     proven_byte_t reset_token[16];                /* server only */
     proven_quic_preferred_address_t preferred_address;  /* server only; never sent by this library */
+    /* version_information (RFC 9368 section 3, id 0x11): the chosen version and the available
+     * ones (a client's in descending preference; a server's, its fully deployed versions). */
+    bool has_version_info;
+    proven_u32 chosen_version;
+    proven_u8 available_n;
+#define PROVEN_QUIC_TP_VERSIONS 8
+    proven_u32 available[PROVEN_QUIC_TP_VERSIONS];
 } proven_quic_tp_t;
 
 /* Every field at the default RFC 9000 gives it when absent; nothing present. */
@@ -140,7 +158,9 @@ proven_size_t proven_quic_tp_encode(const proven_quic_tp_t *tp, bool server, pro
  * PROVEN_QUIC_TRANSPORT_PARAMETER_ERROR for a malformed list, a value out of range, a
  * parameter repeated, one a client may not send, or one that must be there and is not
  * (initial_source_connection_id from either side, original_destination_connection_id from a
- * server). Parameters this library does not know are skipped. */
+ * server), and a version_information that RFC 9368 section 4 calls a parsing failure (not a
+ * whole number of versions, a zero version, more than PROVEN_QUIC_TP_VERSIONS, or from a client
+ * a chosen version missing from its list). Parameters this library does not know are skipped. */
 proven_u64 proven_quic_tp_decode(proven_mem_view_t in, bool from_server, proven_quic_tp_t *tp);
 
 /* ---- TLS 1.3 in QUIC mode (RFC 9001 sections 4 and 8): tls13.c ----
@@ -168,6 +188,18 @@ proven_err_t proven_tls_quic_server_create_(const proven_tls_config_t *config, p
 proven_err_t proven_tls_quic_client_create_for_(const proven_tls_config_t *config, proven_u8str_view_t server_name, proven_tls_session_t *session,
                                                 proven_mem_view_t transport_params, proven_u8str_view_t alpn, proven_tls_conn_t **out);
 proven_err_t proven_tls_quic_server_create_for_(const proven_tls_config_t *config, proven_mem_view_t transport_params, proven_u8str_view_t alpn, proven_tls_conn_t **out);
+/* The same in QUIC `version` (RFC-0036): a session ticket made in the other version is not
+ * offered by a client nor taken by a server (RFC 9369 section 5). A server given `upgrade_to`
+ * (0: none) moves to that version when the client's version_information lists it, and says so
+ * in its own transport parameters' version_information (compatible negotiation, RFC 9368 section
+ * 2.3); proven_tls_quic_version_ then answers it. */
+proven_err_t proven_tls_quic_client_create_v_(const proven_tls_config_t *config, proven_u8str_view_t server_name, proven_tls_session_t *session,
+                                              proven_mem_view_t transport_params, proven_u8str_view_t alpn, proven_u32 version, proven_tls_conn_t **out);
+proven_err_t proven_tls_quic_server_create_v_(const proven_tls_config_t *config, proven_mem_view_t transport_params, proven_u8str_view_t alpn,
+                                              proven_u32 version, proven_u32 upgrade_to, proven_tls_conn_t **out);
+proven_u32 proven_tls_quic_version_(const proven_tls_conn_t *c);
+/* A client that has learned the negotiated version: the tickets that come are of it. */
+void proven_tls_quic_set_version_(proven_tls_conn_t *c, proven_u32 version);
 
 /* Handshake bytes the peer sent at `level`, in order and each once (the QUIC layer puts CRYPTO
  * frames in order). Bytes at a level other than the one being read end the connection with
@@ -195,7 +227,6 @@ proven_u64 proven_tls_quic_error_(const proven_tls_conn_t *c);
 
 /* 0-RTT (RFC-0021). Early data is offered by a client whose configuration has `early_data` and
  * whose session allows it, and accepted by a server only as RFC-0021 section 10.1 P-5 lists. */
-enum { PROVEN_TLS_EARLY_NONE = 0, PROVEN_TLS_EARLY_OFFERED, PROVEN_TLS_EARLY_ACCEPTED, PROVEN_TLS_EARLY_REFUSED };
 int proven_tls_quic_early_(const proven_tls_conn_t *c);
 /* The early traffic secret: a client's for writing from its ClientHello on, a server's for
  * reading once it accepted. Its length and the suite it belongs to (the ticket's), or 0 when
@@ -210,8 +241,12 @@ bool proven_tls_quic_early_limits_(const proven_tls_conn_t *c, proven_u64 out[7]
  * when the server sends one. A token longer than 255 bytes is not kept. */
 proven_size_t proven_tls_session_token_take_(proven_tls_session_t *s, proven_byte_t *out, proven_size_t cap);
 void proven_tls_session_token_keep_(proven_tls_session_t *s, proven_mem_view_t token);
+/* The same for QUIC `version` (RFC-0036): a token is taken only by a connection of the version it
+ * was kept for; and whether the session's ticket came over version 2 (a client starts there). */
+proven_size_t proven_tls_session_token_take_v_(proven_tls_session_t *s, proven_u32 version, proven_byte_t *out, proven_size_t cap);
+void proven_tls_session_token_keep_v_(proven_tls_session_t *s, proven_u32 version, proven_mem_view_t token);
+bool proven_tls_session_quic_v2_(const proven_tls_session_t *s);
 /* A session whose next connection must not send early data: the ticket stays, its allowance goes. */
-void proven_tls_session_early_off_(proven_tls_session_t *s);
 
 /* ---- Packets and frames (RFC 9000 sections 12, 17 and 19): quic_frame.c ----
  *
@@ -230,6 +265,7 @@ void proven_tls_session_early_off_(proven_tls_session_t *s);
 #define PROVEN_QUIC_INVALID_TOKEN             0x0b
 #define PROVEN_QUIC_APPLICATION_ERROR         0x0c
 #define PROVEN_QUIC_KEY_UPDATE_ERROR          0x0e
+#define PROVEN_QUIC_VERSION_NEGOTIATION_ERROR 0x11            /* RFC 9368 */
 #define PROVEN_QUIC_AEAD_LIMIT_REACHED        0x0f
 #define PROVEN_QUIC_NO_VIABLE_PATH            0x10
 
@@ -259,12 +295,15 @@ typedef struct {
 [[nodiscard]] bool proven_quic_hdr_parse(proven_mem_view_t d, proven_size_t short_dcid_len, proven_quic_hdr_t *h);
 
 /* Version negotiation (RFC 9000 section 17.2.1): an answer to a client's long header of
- * another version, listing version 1. `dcid` and `scid` are the client's scid and dcid, as
- * the answer swaps them. Returns its length, 0 when `out` is too small. */
+ * another version, listing versions 1 and 2. `dcid` and `scid` are the client's scid and dcid,
+ * as the answer swaps them. Returns its length, 0 when `out` is too small. */
 proven_size_t proven_quic_vn_build(const proven_quic_cid_t *dcid, const proven_quic_cid_t *scid, proven_byte_t random_bits, proven_mem_mut_t out);
 /* A Retry packet (RFC 9000 section 17.2.5) with its integrity tag over `odcid`. */
 proven_size_t proven_quic_retry_build(const proven_quic_cid_t *odcid, const proven_quic_cid_t *dcid, const proven_quic_cid_t *scid,
                                       proven_mem_view_t token, proven_byte_t random_bits, proven_mem_mut_t out);
+/* The same in `version` (1 or 2). */
+proven_size_t proven_quic_retry_build_v(proven_u32 version, const proven_quic_cid_t *odcid, const proven_quic_cid_t *dcid, const proven_quic_cid_t *scid,
+                                        proven_mem_view_t token, proven_byte_t random_bits, proven_mem_mut_t out);
 
 /* A long header of `type` up to and including its packet number field of `pn_len` bytes,
  * with a two-byte Length field counting `pn_len + payload_len + 16` - what
@@ -273,6 +312,10 @@ proven_size_t proven_quic_retry_build(const proven_quic_cid_t *odcid, const prov
 proven_size_t proven_quic_long_header_put(proven_quic_pkt_type_t type, const proven_quic_cid_t *dcid, const proven_quic_cid_t *scid,
                                           proven_mem_view_t token, proven_u64 pn, proven_size_t pn_len, proven_size_t payload_len,
                                           proven_mem_mut_t out);
+/* The same in `version` (1 or 2: RFC 9369's type bits). */
+proven_size_t proven_quic_long_header_put_v(proven_u32 version, proven_quic_pkt_type_t type, const proven_quic_cid_t *dcid, const proven_quic_cid_t *scid,
+                                            proven_mem_view_t token, proven_u64 pn, proven_size_t pn_len, proven_size_t payload_len,
+                                            proven_mem_mut_t out);
 /* A short header: the key phase bit, the connection ID, the packet number field. */
 proven_size_t proven_quic_short_header_put(const proven_quic_cid_t *dcid, bool key_phase, proven_u64 pn, proven_size_t pn_len, proven_mem_mut_t out);
 /* The packet number field's length for `pn` when the peer has acknowledged up to `largest_acked`
@@ -334,6 +377,9 @@ bool proven_quic_ack_next(proven_quic_ack_iter_t *it, proven_u64 *lo, proven_u64
  * fit (at least the first); `ack_delay` already scaled down by the exponent. Returns the
  * ranges written, 0 when not even the first fits. */
 proven_size_t proven_quic_ack_put(proven_quic_wr_t *w, const proven_u64 (*ranges)[2], proven_size_t count, proven_u64 ack_delay);
+/* The same as ACK_ECN (0x03) with the counts ECT(0), ECT(1), ECN-CE after the ranges (RFC 9000
+ * section 19.3.2); `ecn` NULL writes a plain ACK. */
+proven_size_t proven_quic_ack_put_ecn(proven_quic_wr_t *w, const proven_u64 (*ranges)[2], proven_size_t count, proven_u64 ack_delay, const proven_u64 ecn[3]);
 
 /* What a frame type is: allowed in Initial and Handshake packets (PADDING, PING, ACK, CRYPTO,
  * CONNECTION_CLOSE 0x1c); ack-eliciting (all but ACK, PADDING, CONNECTION_CLOSE); probing
@@ -361,6 +407,7 @@ typedef struct {
     const proven_tls_config_t *tls;                /* required: names a protocol (ALPN); its random source is this connection's */
     proven_u8str_view_t alpn;                      /* the one protocol of `tls`'s list the connection may agree (HTTP/3: "h3"); empty: any of them */
     proven_u32 max_streams_bidi;                   /* streams the peer may open, each kind. 0: 100 */
+    proven_u32 streams_bidi_now;                   /* of those, bidirectional ones it may open at first: 1 to max_streams_bidi, which stays the ceiling for proven_quic_conn_set_max_streams_. 0: max_streams_bidi */
     proven_u32 max_streams_uni;                    /* 0: 100 */
     proven_u32 stream_window;                      /* bytes a stream may receive ahead of the reader. 0: 256 KiB */
     proven_u32 conn_window;                        /* the same for all streams together. 0: 1 MiB */
@@ -376,8 +423,30 @@ typedef struct {
     proven_u32 granularity_us;                     /* RFC 9002's timer granularity: the clock's tick. 0: 1,000 */
     proven_u32 max_ack_ranges;                     /* received packet ranges kept per space. 0: 64 */
     proven_u32 key_update_packets;                 /* 1-RTT packets sent under one key before this side updates it (RFC 9001 section 6.6: AES-GCM's limit is 2^23). 0: 2^22 */
+    proven_u32 pmtu_raise_ms;                      /* after a search that stopped below the largest size, how long before a larger one is tried again (RFC 8899's PMTU_RAISE_TIMER). 0: 600,000 */
     proven_byte_t static_key[32];                  /* a server: one key for all its connections (Retry tokens, stateless reset tokens). All zero: drawn per connection */
+    bool newreno;                                  /* RFC 9002's NewReno instead of CUBIC (RFC 9438; RFC-0033): for tests and measurement only */
+    bool no_ecn;                                   /* nothing marked and no counts reported (RFC-0035): for tests and measurement only */
+    /* QUIC versions (RFC-0036). A client starts in `version` (0: the version its session's ticket
+     * came over, else 1), lists it then the other in its version_information, and follows a
+     * server that moves it (compatible negotiation). `after_vn`: a client starting again after a
+     * Version Negotiation packet, which then holds the server's version_information to RFC 9368
+     * section 4. `prefer_v2`: a client lists 2 first (tests and the private checks). A server
+     * answers in the client's version; `upgrade_v2` moves a client that lists 2 there (tests only). */
+    proven_u32 version;
+    bool after_vn, prefer_v2, upgrade_v2;
+    /* A server that is one of `cid_loops` loops on one port (RFC-0037; 0 or 1: alone): every
+     * connection ID a connection issues - its first, NEW_CONNECTION_ID - has its first byte
+     * equal to `cid_loop` modulo `cid_loops`, which is what the port's program routes by. (Not a
+     * Retry's: the Initial that follows may reach any loop, and the group's key opens its token.) */
+    proven_u8 cid_loops, cid_loop;
 } proven_quic_config_t;
+
+/* The ECN field of a datagram (RFC 3168), as the IP header carries it. */
+#define PROVEN_QUIC_ECN_NOT_ECT 0
+#define PROVEN_QUIC_ECN_ECT1 1
+#define PROVEN_QUIC_ECN_ECT0 2
+#define PROVEN_QUIC_ECN_CE 3
 
 typedef struct proven_quic_conn proven_quic_conn_t;
 
@@ -415,10 +484,11 @@ typedef struct {
     proven_quic_cid_t retry_scid;                  /* when `retried`: the Source Connection ID of the Retry */
     bool retried;                                  /* the token was a valid Retry token: the address is validated */
     bool validated;                                /* the token was a valid NEW_TOKEN token (RFC 9000 section 8.1.3): the address is validated, no Retry */
+    proven_u32 version;                            /* the client's Initial's version (RFC-0036) */
 } proven_quic_accept_t;
 
 /* A server's look at a datagram that matched no connection. Version negotiation for a long
- * header of another version (in a datagram of at least 1,200 bytes); a client's Initial in a
+ * header of a version other than 1 and 2 (in a datagram of at least 1,200 bytes); a client's Initial in a
  * datagram of at least 1,200 bytes is to be accepted - validated when it carries a NEW_TOKEN
  * token of this server's for its IP address, at most a day old. With `require_retry`, a Retry
  * for an Initial without a valid token of either kind, and a Retry token checked (address, age
@@ -435,15 +505,17 @@ proven_err_t proven_quic_conn_client_create(const proven_quic_config_t *cfg, pro
                                            const proven_quic_addr_t *server, proven_u64 now, proven_quic_conn_t **out);
 /* A server's connection for an ACCEPTed datagram, which it then reads. */
 proven_err_t proven_quic_conn_server_create(const proven_quic_config_t *cfg, const proven_quic_accept_t *accept, proven_mem_view_t datagram,
-                                           const proven_quic_addr_t *from, proven_u64 now, proven_quic_conn_t **out);
+                                           const proven_quic_addr_t *from, proven_u8 ecn, proven_u64 now, proven_quic_conn_t **out);
 void proven_quic_conn_destroy(proven_quic_conn_t *c);
 
-/* A datagram from `from`. A packet that does not open or breaks no rule worth closing over is
+/* A datagram from `from`, with the ECN field it arrived with (PROVEN_QUIC_ECN_*; NOT_ECT when the
+ * system does not say). A packet that does not open or breaks no rule worth closing over is
  * dropped; a rule broken closes the connection (an event). PROVEN_ERR_NOMEM only. */
-proven_err_t proven_quic_conn_receive(proven_quic_conn_t *c, proven_mem_view_t datagram, const proven_quic_addr_t *from, proven_u64 now);
-/* The next datagram to send now, into `out` (at least 1,452 bytes), and where: `*len` 0 when
- * nothing may go now (call again after the deadline or after receiving). */
-proven_err_t proven_quic_conn_send(proven_quic_conn_t *c, proven_u64 now, proven_mem_mut_t out, proven_size_t *len, proven_quic_addr_t *to);
+proven_err_t proven_quic_conn_receive(proven_quic_conn_t *c, proven_mem_view_t datagram, const proven_quic_addr_t *from, proven_u8 ecn, proven_u64 now);
+/* The next datagram to send now, into `out` (at least 1,452 bytes), where, and with which ECN
+ * mark (`ecn` may be NULL: the caller cannot mark): `*len` 0 when nothing may go now (call again
+ * after the deadline or after receiving). */
+proven_err_t proven_quic_conn_send(proven_quic_conn_t *c, proven_u64 now, proven_mem_mut_t out, proven_size_t *len, proven_quic_addr_t *to, proven_u8 *ecn);
 /* When to call proven_quic_conn_timeout next; UINT64 max when nothing is waiting. */
 proven_u64 proven_quic_conn_deadline(const proven_quic_conn_t *c);
 void proven_quic_conn_timeout(proven_quic_conn_t *c, proven_u64 now);
@@ -469,22 +541,49 @@ typedef struct {
     proven_u64 cwnd, bytes_in_flight, srtt_us, min_rtt_us, pto_count;
     proven_size_t streams, memory;                 /* streams held; bytes of buffers held */
     bool established, confirmed, closed, path_validated;
+    proven_u64 path_validations;                   /* new peer addresses a server began to validate */
     proven_u64 key_updates, spurious_losses;
     proven_size_t datagram_size;                   /* what a datagram may take on this path now */
     proven_u64 pmtu_probes, pmtu_probes_lost;      /* PMTU probes sent, and not acknowledged in time */
     proven_u8 early;                               /* 0-RTT (RFC-0021): 0 none, 1 accepted, 2 refused */
+    proven_u8 ecn_state;                           /* RFC-0035, this path: 0 testing, 1 unknown, 2 capable, 3 failed */
+    proven_u64 ecn_marked;                         /* packets sent marked ECT(0) */
+    proven_u64 ecn_received[3];                    /* packets received ECT(0), ECT(1), CE, all spaces */
+    proven_u64 ecn_ce_events;                      /* increases of the peer's CE count acted on */
+    proven_u32 version;                            /* the version in use (RFC-0036) */
+    proven_u32 vn_version;                         /* a client closed by a Version Negotiation packet: the version to start again in; 0: none */
 } proven_quic_stats_t;
 void proven_quic_conn_stats(const proven_quic_conn_t *c, proven_quic_stats_t *s);
 /* Tests only: `payload` read as the frames of a packet that opened at `lvl` (3: a 0-RTT packet;
  * its result: the close code, or 0), and a key update started by this side. */
+/* For tests (RFC-0033): the congestion controller alone, on a model of the path - every round
+ * trip of `rtt_us` acknowledges the whole window in packets of `mss` bytes, the sender never short
+ * of data. Once the window reaches `w_loss` one loss is declared; `*after` is the window just after
+ * it, `*recover_us` the time until the window is `w_loss` again (0: not within 600 s of model time). */
+void proven_quic_cc_model_(bool newreno, proven_u32 mss, proven_u64 rtt_us, proven_u64 w_loss, proven_u64 *after, proven_u64 *recover_us);
+/* For tests: CUBIC's remembered maximum after a loss at `w1` and then one at `w2` (RFC 9438
+ * section 4.7, fast convergence: below the last maximum it is taken lower still). */
+proven_u64 proven_quic_cc_fast_convergence_(proven_u32 mss, proven_u64 w1, proven_u64 w2);
 proven_u64 proven_quic_conn_test_frames_(proven_quic_conn_t *c, int lvl, proven_mem_view_t payload, proven_u64 now);
+/* Tests (RFC-0036): the chosen version a client or a server says in its version_information from
+ * now on (0: its own) - to see the other side refuse it. */
+void proven_quic_test_chosen_(bool server, proven_u32 version);
 bool proven_quic_conn_test_key_update_(proven_quic_conn_t *c);
+proven_u64 proven_quic_conn_test_tx_max_(const proven_quic_conn_t *c, proven_u64 id);
+/* The peer's bidirectional streams open at once from now on: at most the configured number;
+ * credit already granted stands (RFC 9000, section 4.6), and a raise is granted at once. For the
+ * event server (RFC-0024). */
+void proven_quic_conn_set_max_streams_(proven_quic_conn_t *c, proven_u64 n);
+/* RFC-0026: a ceiling on credit from now on (MAX_STREAM_DATA, MAX_DATA, growth), 0 for none. */
+void proven_quic_conn_cap_window_(proven_quic_conn_t *c, proven_u64 n);
 /* Whether the handshake resumed a session the client offered (RFC-0020). */
 bool proven_quic_conn_resumed(const proven_quic_conn_t *c);
 /* The protocol agreed (ALPN), as proven_tls_alpn: empty before the handshake has agreed one. */
 proven_u8str_view_t proven_quic_conn_alpn_(const proven_quic_conn_t *c);
 /* Whether the handshake is complete: before it, streams carry early data (RFC-0021). */
 bool proven_quic_conn_complete_(const proven_quic_conn_t *c);
+/* Client: whether a ticket has come on this connection (for tests). */
+bool proven_quic_conn_ticket_stored_(const proven_quic_conn_t *c);
 
 #endif /* PROVEN_NO_HTTP3 */
 #endif

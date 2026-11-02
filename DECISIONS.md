@@ -3144,3 +3144,16 @@ Do not store credentials, private infrastructure details, personal data, private
   `.zNN` was taken for RAR's old numbering before and sent to a `.rar` that is not there).
 - Rejected: waiting for FultaArc's next snapshot (proven v0.107.x, announced): the owner asked to finish once it was
   written; that one is resynced when it comes.
+
+## 2026-11-03: D-264 proven_c_lib v0.108.0 vendored (W-20261103-0100)
+
+- Status: Accepted (owner 2026-11-03: "proven c lib 재벤더링").
+- Decision: `vendor/proven` resynced from v0.76.0 (`2e5a35f`) to the newest tag, v0.108.0 (`1d9989c4`), unmodified
+  (`git archive v0.108.0 include src platform LICENSE THIRD_PARTY_NOTICES.md`). The viewer's code and FultaArc
+  (`1bc526c`, built on this copy) compile against it unchanged: no source of ours needed a change for the 36
+  tags between (their removals, `proven_loop_io_t` among them, touch nothing here). Every host test passes under
+  ASan and UBSan, the Windows build too, and the VM smoke compares it with the 1.39.76 release (T341). Its notices gained the Brotli static dictionary's (RFC 7932 tables, the IETF Trust's
+  BSD-style text): `notices_text.c` regenerated (`scripts/gen-notices.py`), so the program's licence page carries it.
+- Not done: FultaArc's own move to proven v0.107.x and its allocators (asked of it by the owner; it waits on the
+  owner's decisions there); its next snapshot is resynced when it comes. LZMA SDK 26.05 (FultaArc `3ca96f0`) not
+  taken with it: the owner had not decided (the higher levels' memory).

@@ -25,6 +25,10 @@
 #define PROVEN_CRYPTO_AEAD_NONCE   12
 #define PROVEN_CRYPTO_AEAD_TAG     16
 
+/* Tests: true makes P-256 use the general field code instead of its own (the results are the
+ * same values); false gives it its own back. */
+void proven_crypto_ec_force_general_(bool on);
+
 /* ---- ChaCha20 and Poly1305 (RFC 8439) ---- */
 
 /* XOR `len` bytes of keystream into `out` from `in` (they may be the same), starting at block
@@ -32,6 +36,23 @@
 void proven_crypto_chacha20(const proven_byte_t key[32], proven_u32 counter, const proven_byte_t nonce[12],
                             const proven_byte_t *in, proven_byte_t *out, proven_size_t len);
 
+/* Tests: 0 forces the portable ChaCha20, 4 or 8 at most that many blocks a call on the vector
+ * path (never more than the processor has), -1 the processor's widest again. The width in use. */
+int proven_crypto_chacha_force_width(int width);
+
+/* Poly1305's state: three limbs of 44, 44 and 42 bits where the compiler has 128-bit products,
+ * five of 26 bits elsewhere - and in the build with 32-bit limbs (PROVEN_CRYPTO_MP_LIMB_BITS=32),
+ * so that its gates run the 26-bit code on a 64-bit machine too. */
+#if defined(__SIZEOF_INT128__) && !(defined(PROVEN_CRYPTO_MP_LIMB_BITS) && PROVEN_CRYPTO_MP_LIMB_BITS == 32)
+#define PROVEN_CRYPTO_POLY1305_64 1
+typedef struct {
+    proven_u64 r[3];
+    proven_u64 h[3];
+    proven_u64 pad[2];
+    proven_byte_t buf[16];
+    proven_size_t buf_len;
+} proven_crypto_poly1305_t;
+#else
 typedef struct {
     proven_u32 r[5];
     proven_u32 h[5];
@@ -39,6 +60,7 @@ typedef struct {
     proven_byte_t buf[16];
     proven_size_t buf_len;
 } proven_crypto_poly1305_t;
+#endif
 
 void proven_crypto_poly1305_init(proven_crypto_poly1305_t *st, const proven_byte_t key[32]);
 void proven_crypto_poly1305_update(proven_crypto_poly1305_t *st, const proven_byte_t *m, proven_size_t len);
@@ -115,6 +137,8 @@ proven_crypto_limb_t proven_crypto_mp_eq(const proven_crypto_limb_t *a, const pr
 void proven_crypto_mp_select(proven_crypto_limb_t *out, const proven_crypto_limb_t *a, const proven_crypto_limb_t *b, proven_crypto_limb_t mask, proven_size_t limbs);
 /* out = a * b / R mod n. Inputs below n; `out` may be either input. */
 void proven_crypto_mp_montmul(const proven_crypto_mp_mod_t *mod, proven_crypto_limb_t *out, const proven_crypto_limb_t *a, const proven_crypto_limb_t *b);
+/* out = a * a / R mod n, as montmul(a, a) with about three quarters of its multiplications. */
+void proven_crypto_mp_montsqr(const proven_crypto_mp_mod_t *mod, proven_crypto_limb_t *out, const proven_crypto_limb_t *a);
 void proven_crypto_mp_to_mont(const proven_crypto_mp_mod_t *mod, proven_crypto_limb_t *out, const proven_crypto_limb_t *a);
 void proven_crypto_mp_from_mont(const proven_crypto_mp_mod_t *mod, proven_crypto_limb_t *out, const proven_crypto_limb_t *a);
 void proven_crypto_mp_add(const proven_crypto_mp_mod_t *mod, proven_crypto_limb_t *out, const proven_crypto_limb_t *a, const proven_crypto_limb_t *b);
@@ -223,9 +247,22 @@ void proven_sha512_compress_(proven_u64 state[8], const proven_byte_t block[128]
 typedef struct {
     int rounds;                                  /* 10 or 14 */
     bool hw;
+    bool one_pass;                               /* the hardware path seals and opens in one pass (RFC-0023) */
     proven_byte_t rk[240];                       /* round keys as bytes */
     proven_byte_t h[16];                         /* the GHASH key */
+    proven_byte_t hpow[112];                     /* H^2..H^8 in the one-pass code's form, when one_pass; zeros otherwise */
 } proven_crypto_aes_gcm_t;
+
+/* The block cipher alone, with no GHASH key: QUIC's header protection. */
+typedef struct {
+    int rounds;
+    bool hw;
+    proven_byte_t rk[240];
+} proven_crypto_aes_t;
+
+/* key_len is 16 or 32. False otherwise. SECRET: key. */
+[[nodiscard]] bool proven_crypto_aes_init(proven_crypto_aes_t *ctx, const proven_byte_t *key, proven_size_t key_len);
+void proven_crypto_aes_block(const proven_crypto_aes_t *ctx, const proven_byte_t in[16], proven_byte_t out[16]);
 
 /* key_len is 16 or 32. False otherwise. SECRET: key. */
 [[nodiscard]] bool proven_crypto_aes_gcm_init(proven_crypto_aes_gcm_t *ctx, const proven_byte_t *key, proven_size_t key_len);
@@ -274,6 +311,10 @@ bool proven_crypto_aes_hw_available(void);
  * infinity on either side - against the complete formulas, for P = k G with k in [1, n-1]. */
 [[nodiscard]] bool proven_crypto_ec_test_mul2(proven_crypto_ec_curve_t curve, const proven_byte_t *k1_be, const proven_byte_t *k2_be, proven_mem_view_t pub);
 [[nodiscard]] bool proven_crypto_ec_test_vartime_add(proven_crypto_ec_curve_t curve, const proven_byte_t *k_be);
+/* P-256's own reduction of t[0..8) (least significant word first; t / 2^256 mod p for a t whose
+ * upper four words are below p) against the general code: 1 the same, 0 not, -1 where the build
+ * has no field of P-256's own or t is not such a value. */
+[[nodiscard]] int proven_crypto_ec_test_p256_reduce(const proven_u64 t[8]);
 
 /* ---- RSA signing (RFC 8017). Everything in a key but n and e is SECRET. ---- */
 
@@ -339,14 +380,6 @@ typedef void (*proven_crypto_random_fn)(void *ctx, proven_byte_t *out, proven_si
  * is as many unpredictable bytes as the modulus has. `out` receives the modulus's length. */
 [[nodiscard]] bool proven_crypto_rsa_encrypt_pkcs1(proven_mem_view_t n, proven_mem_view_t e, proven_mem_view_t msg, const proven_byte_t *random,
                                                    proven_byte_t *out, proven_size_t *out_len);
-/* The server's half: decrypt a ClientKeyExchange and give back the 48-byte premaster - or, if
- * anything at all is wrong with what came out, `fallback` instead (48 random bytes drawn
- * BEFORE this call). There is no return value on purpose: nothing may be done differently for
- * a bad ciphertext than for a good one, or the key can be used by anyone who can ask
- * (Bleichenbacher 1998; ROBOT, 2017). The selection is by mask; `version` is the one the
- * ClientHello carried. SECRET: the key, the blinding pair, `fallback`, `out`. */
-void proven_crypto_rsa_decrypt_premaster(const proven_crypto_rsa_key_t *key, const proven_crypto_rsa_blind_t *blind, proven_mem_view_t cipher,
-                                         proven_u16 version, const proven_byte_t fallback[48], proven_byte_t out[48]);
 [[nodiscard]] bool proven_crypto_rsa_generate(proven_size_t bits, proven_crypto_random_fn random, void *ctx,
                                               proven_crypto_rsa_key_t *out, proven_byte_t *d);
 

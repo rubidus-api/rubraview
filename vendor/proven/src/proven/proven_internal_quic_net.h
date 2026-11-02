@@ -22,7 +22,20 @@ proven_err_t proven_net_udp_send_segments_(proven_net_udp_t *udp, proven_net_add
 proven_result_size_t proven_net_udp_recv_segments_(proven_net_udp_t *udp, proven_mem_mut_t dest, proven_size_t *seg, proven_net_addr_t *from);
 bool proven_net_udp_gro_(proven_net_udp_t *udp);
 bool proven_net_udp_dontfrag_(proven_net_udp_t *udp);   /* the don't-fragment bit, nothing fragmented here (RFC-0018 11) */
+/* ECN (RFC-0035): the same with the ECN field of every datagram sent (0: none), and of what one
+ * receive took (0 when the system did not say); ecn: ask the system to say. False where it cannot:
+ * nothing is to be marked there either. */
+proven_err_t proven_net_udp_send_marked_(proven_net_udp_t *udp, proven_net_addr_t to, proven_mem_view_t data, proven_size_t seg, proven_u8 ecn, proven_size_t *sent);
+proven_result_size_t proven_net_udp_recv_marked_(proven_net_udp_t *udp, proven_mem_mut_t dest, proven_size_t *seg, proven_u8 *ecn, proven_net_addr_t *from);
+bool proven_net_udp_ecn_(proven_net_udp_t *udp);
 void proven_net_udp_segments_off_for_test_(bool off);
+/* Several loops on one port (RFC-0037), Linux only - PROVEN_ERR_UNSUPPORTED elsewhere: a listener
+ * or a UDP socket opened with SO_REUSEPORT, so that others opened the same way share its address;
+ * steer: give the group of `n` UDP sockets (1 to 255, opened in turn) the program that picks one
+ * by the first byte of a QUIC packet's destination connection ID, modulo `n`. */
+proven_err_t proven_net_listen_shared_(proven_net_addr_t at, int backlog, proven_net_listener_t *out, proven_net_addr_t *bound);
+proven_err_t proven_net_udp_open_shared_(proven_net_addr_t at, proven_net_udp_t *out, proven_net_addr_t *bound);
+proven_err_t proven_net_udp_steer_(proven_net_udp_t *udp, proven_size_t n);
 #endif
 
 #if !defined(PROVEN_FREESTANDING) && !defined(PROVEN_NO_NET) && !defined(PROVEN_NO_HTTP3)

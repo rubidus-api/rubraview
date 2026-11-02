@@ -17,9 +17,13 @@
  * written only for as many bytes as the stream takes now (proven_quic_stream_room), so a
  * frame is never begun that its payload cannot follow.
  *
- * The QPACK dynamic table has capacity 0 (RFC-0017 B-4), so this side opens no encoder or
- * decoder stream (RFC 9204 section 4.2) and takes the peer's only for what a table of
- * capacity 0 allows. There is no server push: MAX_PUSH_ID is never sent, so every push is
+ * QPACK's dynamic table (RFC-0032), when configured: as an encoder, once the peer's SETTINGS
+ * allow one, this side opens its encoder stream, inserts the fields it sends and refers to an
+ * entry only once the peer has acknowledged it, so the peer never waits. As a decoder it says the capacity in
+ * SETTINGS, opens its decoder stream to acknowledge sections and inserts, feeds the peer's
+ * encoder stream to the table, and holds a request stream whose field section needs inserts not
+ * yet made - the stream is not read until they come. Without one (RFC-0017 B-4) it opens no
+ * decoder stream and takes the peer's streams only for what a table of capacity 0 allows. There is no server push: MAX_PUSH_ID is never sent, so every push is
  * beyond the maximum (H3_ID_ERROR).
  */
 
@@ -57,7 +61,9 @@ typedef struct {
     bool known;                             /* the application has heard of it */
     bool dead;                              /* ended by an error of its own: let go after the step that found it */
     bool ev_rejected;                       /* a client: STREAM_RESET with H3_REQUEST_REJECTED owed (GOAWAY) */
-} h3s_t;
+    int qwait;                              /* its held field section waits for inserts: 1 a head, 2 trailers */
+    proven_u64 qric;                        /* how many */
+} proven_h3s_t;
 
 struct proven_h3_conn {
     proven_allocator_t alloc;
@@ -65,7 +71,7 @@ struct proven_h3_conn {
     proven_quic_conn_t *q;
     bool server;
     proven_u32 cfg_list, cfg_debt;
-    h3s_t **st;
+    proven_h3s_t **st;
     proven_size_t nst, cap_st, cursor;
     /* This side's control stream */
     bool ctl_open;
@@ -91,6 +97,21 @@ struct proven_h3_conn {
     proven_size_t stale_cap;
     const bool *sensitive;
     bool failed, closed, close_reported, oom;
+    /* QPACK's dynamic table as a decoder (RFC-0032) */
+    proven_qpack_dec_t *qdec;
+    proven_u32 cfg_qcap, cfg_qblocked, nblocked;
+    proven_u64 qknown;                      /* inserts the peer's encoder knows this side has: acknowledged or counted */
+    bool dec_open;
+    proven_u64 dec_id;
+    proven_byte_t *dec_out;
+    proven_size_t dec_off, dec_n, dec_cap;
+    /* ... and as an encoder */
+    proven_u64 peer_qcap;                   /* the peer's QPACK_MAX_TABLE_CAPACITY */
+    proven_qpack_enc_t *qenc;
+    bool enc_open;
+    proven_u64 enc_id;
+    proven_byte_t *enc_out;
+    proven_size_t enc_off, enc_n, enc_cap;
 };
 
 // -----------------------------------------------------------------------------
@@ -147,28 +168,38 @@ static void h3_fail(proven_h3_conn_t *h, proven_u64 code) {
 // Streams
 // -----------------------------------------------------------------------------
 
-static h3s_t *st_find(const proven_h3_conn_t *h, proven_u64 id) {
+static proven_h3s_t *st_find(const proven_h3_conn_t *h, proven_u64 id) {
     for (proven_size_t i = 0; i < h->nst; ++i) if (h->st[i]->id == id) return h->st[i];
     return NULL;
 }
 
-static h3s_t *st_add(proven_h3_conn_t *h, proven_u64 id, int kind) {
+static proven_h3s_t *st_add(proven_h3_conn_t *h, proven_u64 id, int kind) {
     if (h->nst == h->cap_st) {
         const proven_size_t want = h->cap_st ? h->cap_st * 2 : 8;
-        h3s_t **n = (h3s_t **)h3_alloc(h, want * sizeof *n, alignof(h3s_t *));
+        proven_h3s_t **n = (proven_h3s_t **)h3_alloc(h, want * sizeof *n, alignof(proven_h3s_t *));
         if (!n) return NULL;
         for (proven_size_t i = 0; i < h->nst; ++i) n[i] = h->st[i];
         h3_free(h, h->st, h->cap_st * sizeof *n);
         h->st = n; h->cap_st = want;
     }
-    h3s_t *s = (h3s_t *)h3_alloc(h, sizeof *s, alignof(h3s_t));
+    proven_h3s_t *s = (proven_h3s_t *)h3_alloc(h, sizeof *s, alignof(proven_h3s_t));
     if (!s) return NULL;
-    *s = (h3s_t){ .id = id, .kind = kind, .length = H3_NO_LENGTH };
+    *s = (proven_h3s_t){ .id = id, .kind = kind, .length = H3_NO_LENGTH };
     h->st[h->nst++] = s;
     return s;
 }
 
-static void st_free(proven_h3_conn_t *h, h3s_t *s) {
+static void dec_put(proven_h3_conn_t *h, const proven_byte_t *p, proven_size_t n);
+static void dec_flush(proven_h3_conn_t *h);
+
+static void st_free(proven_h3_conn_t *h, proven_h3s_t *s) {
+    /* A section of it not decoded, which may refer to the table: the encoder is told
+     * (RFC 9204 section 4.4.2), so that the entries can be evicted. */
+    if (h->qdec && s->kind == K_REQ) {
+        const bool unread = s->qwait != 0 || (s->ftype == PROVEN_H3_FRAME_HEADERS && s->rd == RD_PAYLOAD && s->fmode == 1) || (s->rq == RQ_TRAILERS && s->fbuf);
+        if (s->qwait) h->nblocked--;
+        if (unread && !h->closed) { proven_byte_t b[12]; dec_put(h, b, proven_qpack_put_stream_cancel(b, s->id)); }
+    }
     for (proven_size_t i = 0; i < h->nst; ++i) {
         if (h->st[i] != s) continue;
         h->st[i] = h->st[--h->nst];
@@ -188,7 +219,7 @@ static void h3_debt(proven_h3_conn_t *h) {
 }
 
 /* A stream that has ended both ways is let go. */
-static void st_maybe_free(proven_h3_conn_t *h, h3s_t *s) {
+static void st_maybe_free(proven_h3_conn_t *h, proven_h3s_t *s) {
     if (s->dead) { st_free(h, s); return; }
     if (s->kind != K_REQ || !s->rx_done || !s->tx_done || s->ev_rejected) return;
     if (s->rq == RQ_DONE && h->debt > 0) h->debt--;
@@ -196,7 +227,7 @@ static void st_maybe_free(proven_h3_conn_t *h, h3s_t *s) {
 }
 
 /* Write what is held for a stream, then its end when that is owed. */
-static void st_flush(proven_h3_conn_t *h, h3s_t *s) {
+static void st_flush(proven_h3_conn_t *h, proven_h3s_t *s) {
     if (s->tx_done) return;
     while (s->out_off < s->out_n) {
         proven_size_t taken = 0;
@@ -217,7 +248,7 @@ static void st_flush(proven_h3_conn_t *h, h3s_t *s) {
 
 /* This side's half has been ended. A server whose response is complete wants no more of the
  * request (RFC 9114 section 4.1). */
-static void st_tx_ended(proven_h3_conn_t *h, h3s_t *s) {
+static void st_tx_ended(proven_h3_conn_t *h, proven_h3s_t *s) {
     if (h->server && !s->rx_done && s->ws == WS_END) {
         (void)proven_quic_stream_stop(h->q, s->id, PROVEN_H3_NO_ERROR);
         s->rx_done = true;
@@ -227,7 +258,7 @@ static void st_tx_ended(proven_h3_conn_t *h, h3s_t *s) {
 
 /* An error of one request stream: both halves end with `code`, and the application is told if
  * it knew the stream. The stream is let go by the caller of the step (st_maybe_free). */
-static bool st_fault(proven_h3_conn_t *h, h3s_t *s, proven_u64 code, proven_h3_event_t *ev) {
+static bool st_fault(proven_h3_conn_t *h, proven_h3s_t *s, proven_u64 code, proven_h3_event_t *ev) {
     if (!s->rx_done) (void)proven_quic_stream_stop(h->q, s->id, code);
     if (!s->tx_done) (void)proven_quic_stream_reset(h->q, s->id, code);
     s->rx_done = s->tx_done = true;
@@ -242,7 +273,7 @@ static bool st_fault(proven_h3_conn_t *h, h3s_t *s, proven_u64 code, proven_h3_e
 // -----------------------------------------------------------------------------
 
 /* Read into `p` at most `n` bytes of a stream. */
-static proven_size_t st_read(proven_h3_conn_t *h, h3s_t *s, proven_byte_t *p, proven_size_t n) {
+static proven_size_t st_read(proven_h3_conn_t *h, proven_h3s_t *s, proven_byte_t *p, proven_size_t n) {
     proven_size_t got = 0;
     bool fin = false;
     if (n == 0 && s->fin) return 0;
@@ -253,7 +284,7 @@ static proven_size_t st_read(proven_h3_conn_t *h, h3s_t *s, proven_byte_t *p, pr
 }
 
 /* A varint, gathered across reads: 1 complete, 0 not yet. */
-static int st_varint(proven_h3_conn_t *h, h3s_t *s, proven_u64 *v) {
+static int st_varint(proven_h3_conn_t *h, proven_h3s_t *s, proven_u64 *v) {
     for (;;) {
         const proven_size_t need = s->vn == 0 ? 1 : (proven_size_t)1 << (s->vb[0] >> 6);
         if (s->vn == need) {
@@ -297,8 +328,9 @@ static bool is_head(const proven_http_header_t *f, proven_size_t count) {
 }
 
 /* Decode a field section into the connection's header buffer: 1, 0 too large (a stream
- * error), -1 malformed (QPACK_DECOMPRESSION_FAILED, the connection's). */
-static int h3_decode(proven_h3_conn_t *h, proven_mem_view_t section, proven_size_t *count) {
+ * error), -1 malformed (QPACK_DECOMPRESSION_FAILED, the connection's). A section that referred to
+ * the table is acknowledged. */
+static int h3_decode(proven_h3_conn_t *h, proven_u64 stream_id, proven_mem_view_t section, proven_size_t *count) {
     if (!h->hbuf) {
         h->hcap = h->cfg_list / PROVEN_QPACK_ENTRY_OVERHEAD + 1;
         h->hbuf_size = h->hcap * sizeof(proven_http_header_t) + h->cfg_list;
@@ -307,13 +339,33 @@ static int h3_decode(proven_h3_conn_t *h, proven_mem_view_t section, proven_size
     }
     proven_http_header_t *fields = (proven_http_header_t *)(void *)h->hbuf;
     const proven_mem_mut_t scratch = { .ptr = h->hbuf + h->hcap * sizeof(proven_http_header_t), .size = h->cfg_list };
-    const proven_err_t e = proven_qpack_decode(section, fields, NULL, h->hcap, scratch, h->cfg_list, count);
+    proven_u64 ric = 0;
+    const proven_err_t e = proven_qpack_decode_dyn(h->qdec, section, fields, NULL, h->hcap, scratch, h->cfg_list, count, &ric);
+    if ((e == PROVEN_OK || e == PROVEN_ERR_OUT_OF_BOUNDS) && ric > 0) {
+        proven_byte_t b[12];
+        dec_put(h, b, proven_qpack_put_section_ack(b, stream_id));
+        if (ric > h->qknown) h->qknown = ric;
+    }
     if (e == PROVEN_OK) return 1;
     return e == PROVEN_ERR_OUT_OF_BOUNDS ? 0 : -1;
 }
 
+/* Whether the stream's held field section needs inserts not yet made: then it is kept, and
+ * the stream is not read until they come (`which`: 1 a head, 2 trailers). More such streams
+ * than this side allowed is QPACK_DECOMPRESSION_FAILED (RFC 9204 section 2.1.2). */
+static bool st_qblock(proven_h3_conn_t *h, proven_h3s_t *s, int which) {
+    proven_u64 ric = 0;
+    if (!h->qdec || proven_qpack_dec_required(h->qdec, (proven_mem_view_t){ .ptr = s->fbuf, .size = s->fbuf_n }, &ric) != PROVEN_OK) return false;
+    if (ric <= proven_qpack_dec_inserts(h->qdec)) return false;
+    if (h->nblocked >= h->cfg_qblocked) { h3_fail(h, PROVEN_QPACK_DECOMPRESSION_FAILED); return true; }
+    s->qwait = which;
+    s->qric = ric;
+    h->nblocked++;
+    return true;
+}
+
 /* The stream's buffered payload is now the event's: kept until the next poll. */
-static proven_mem_view_t st_take_payload(proven_h3_conn_t *h, h3s_t *s) {
+static proven_mem_view_t st_take_payload(proven_h3_conn_t *h, proven_h3s_t *s) {
     h3_free(h, h->stale, h->stale_cap);
     h->stale = s->fbuf; h->stale_cap = s->fbuf_cap;
     const proven_mem_view_t v = { .ptr = s->fbuf, .size = s->fbuf_n };
@@ -322,7 +374,7 @@ static proven_mem_view_t st_take_payload(proven_h3_conn_t *h, h3s_t *s) {
 }
 
 /* The peer's side of a request stream ended at a frame boundary. */
-static bool req_end(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev) {
+static bool req_end(proven_h3_conn_t *h, proven_h3s_t *s, proven_h3_event_t *ev) {
     if (s->rq == RQ_HEAD) {
         /* Ended before a request, or before a final response (RFC 9114 section 4.1). */
         return st_fault(h, s, PROVEN_H3_REQUEST_INCOMPLETE, ev);
@@ -330,12 +382,13 @@ static bool req_end(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev) {
     if (s->rq == RQ_DONE) { s->rx_done = true; return false; }
     if (!s->no_body && s->length != H3_NO_LENGTH && s->received != s->length) return st_fault(h, s, PROVEN_H3_MESSAGE_ERROR, ev);
     if (s->rq == RQ_TRAILERS) {
+        if (st_qblock(h, s, 2)) return false;
         proven_size_t count = 0;
         const proven_mem_view_t section = st_take_payload(h, s);
-        const int d = h3_decode(h, section, &count);
+        const int d = h3_decode(h, s->id, section, &count);
         if (d < 0) { h3_fail(h, PROVEN_QPACK_DECOMPRESSION_FAILED); return false; }
         const proven_http_header_t *fields = (const proven_http_header_t *)(void *)h->hbuf;
-        if (d == 0 || proven_h2_trailers_check(fields, count) != PROVEN_OK) return st_fault(h, s, PROVEN_H3_MESSAGE_ERROR, ev);
+        if (d == 0 || proven_h2_trailers_check(fields, count) != PROVEN_OK) { const bool known = st_fault(h, s, PROVEN_H3_MESSAGE_ERROR, ev); if (known) ev->too_large = d == 0; return known; }
         *ev = (proven_h3_event_t){ .kind = PROVEN_H3_EV_TRAILERS, .stream_id = s->id, .end_stream = true, .fields = fields, .field_count = count };
     } else {
         *ev = (proven_h3_event_t){ .kind = PROVEN_H3_EV_DATA, .stream_id = s->id, .end_stream = true };
@@ -359,20 +412,21 @@ static bool has_authority(const proven_h2_request_head_t *head) {
     return false;
 }
 
-static bool req_headers(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev) {
+static bool req_headers(proven_h3_conn_t *h, proven_h3s_t *s, proven_h3_event_t *ev) {
     if (s->rq == RQ_BODY) {
         /* Trailers: checked and given out when the stream ends, as nothing may follow them. */
         if (!s->no_body && s->length != H3_NO_LENGTH && s->received != s->length) return st_fault(h, s, PROVEN_H3_MESSAGE_ERROR, ev);
         s->rq = RQ_TRAILERS;
         return s->fin ? req_end(h, s, ev) : false;
     }
+    if (st_qblock(h, s, 1)) return false;
     proven_size_t count = 0;
     const proven_mem_view_t section = st_take_payload(h, s);
-    const int d = h3_decode(h, section, &count);
+    const int d = h3_decode(h, s->id, section, &count);
     if (d < 0) { h3_fail(h, PROVEN_QPACK_DECOMPRESSION_FAILED); return false; }
     if (h->oom) return false;
     const proven_http_header_t *fields = (const proven_http_header_t *)(void *)h->hbuf;
-    if (d == 0) return st_fault(h, s, PROVEN_H3_MESSAGE_ERROR, ev);
+    if (d == 0) { const bool known = st_fault(h, s, PROVEN_H3_MESSAGE_ERROR, ev); if (known) ev->too_large = true; return known; }
     if (h->server) {
         proven_h2_request_head_t head;
         proven_u64 length = H3_NO_LENGTH;
@@ -407,7 +461,7 @@ static bool req_headers(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev) {
 }
 
 /* A frame's header was read on a request stream: is the frame allowed, and how is it read? */
-static int req_frame_start(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev, bool *told) {
+static int req_frame_start(proven_h3_conn_t *h, proven_h3s_t *s, proven_h3_event_t *ev, bool *told) {
     switch (s->ftype) {
     case PROVEN_H3_FRAME_DATA:
         if (s->rq != RQ_BODY) { h3_fail(h, PROVEN_H3_FRAME_UNEXPECTED); return -1; }
@@ -433,7 +487,7 @@ static int req_frame_start(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev,
 }
 
 /* Read a payload that is buffered whole: true when it is complete. */
-static bool st_fill(proven_h3_conn_t *h, h3s_t *s) {
+static bool st_fill(proven_h3_conn_t *h, proven_h3s_t *s) {
     if (!s->fbuf && s->fleft > 0) {
         s->fbuf = (proven_byte_t *)h3_alloc(h, (proven_size_t)s->fleft, 1);
         if (!s->fbuf) return false;
@@ -450,9 +504,20 @@ static bool st_fill(proven_h3_conn_t *h, h3s_t *s) {
 }
 
 /* Advance a request stream: true with an event. */
-static bool req_step(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev) {
+static bool req_step(proven_h3_conn_t *h, proven_h3s_t *s, proven_h3_event_t *ev) {
     for (;;) {
         if (h->failed || h->oom) return false;
+        if (s->qwait) {
+            /* A held section: decoded once its inserts have come, the stream read on after it. */
+            if (s->qric > proven_qpack_dec_inserts(h->qdec)) return false;
+            const int which = s->qwait;
+            s->qwait = 0;
+            h->nblocked--;
+            if (which == 2) return req_end(h, s, ev);
+            const bool got_event = req_headers(h, s, ev);
+            if (got_event || s->dead || s->rx_done || h->failed || h->oom || s->qwait) return got_event;
+            continue;
+        }
         if (s->rd == RD_TYPE || s->rd == RD_LEN) {
             proven_u64 v = 0;
             if (!st_varint(h, s, &v)) {
@@ -530,14 +595,42 @@ static bool h3_settings(proven_h3_conn_t *h, proven_mem_view_t p) {
         if (seen[k]) { h3_fail(h, PROVEN_H3_SETTINGS_ERROR); return false; }
         seen[k] = true;
         if (k == 1) h->peer_list = value;
+        if (k == 0) h->peer_qcap = value;
     }
     return true;
+}
+
+static void enc_flush(proven_h3_conn_t *h) {
+    while (h->enc_open && h->enc_off < h->enc_n) {
+        proven_size_t taken = 0;
+        const proven_err_t e = proven_quic_stream_write(h->q, h->enc_id, (proven_mem_view_t){ .ptr = h->enc_out + h->enc_off, .size = h->enc_n - h->enc_off }, false, &taken);
+        if (e == PROVEN_ERR_NOMEM) { h->oom = true; return; }
+        if (e != PROVEN_OK || taken == 0) return;
+        h->enc_off += taken;
+    }
+}
+
+/* The peer allows a table: this side's encoder uses the smaller of the two sizes, on an encoder
+ * stream of its own (RFC-0032). */
+static void h3_start_encoder(proven_h3_conn_t *h) {
+    /* The section prefix is encoded with the peer's exact maximum (RFC 9204 section 4.5.1.1): one
+     * past 32 bits is not one this side can describe, and its table is not used. */
+    if (h->qenc || h->cfg_qcap == 0 || h->peer_qcap < 32 || h->peer_qcap > 0xffffffffu || h->failed) return;
+    const proven_u32 cap = h->cfg_qcap < h->peer_qcap ? h->cfg_qcap : (proven_u32)h->peer_qcap;
+    if (proven_qpack_enc_create(h->alloc, cap, (proven_u32)h->peer_qcap, &h->qenc) != PROVEN_OK) { h->qenc = NULL; return; }
+    const proven_err_t e = proven_quic_stream_open(h->q, false, &h->enc_id);
+    if (e == PROVEN_ERR_NOMEM) { h->oom = true; return; }
+    if (e != PROVEN_OK) { proven_qpack_enc_destroy(h->qenc); h->qenc = NULL; return; }   /* no stream for it: the table is not used */
+    h->enc_open = true;
+    const proven_byte_t type = PROVEN_H3_STREAM_QPACK_ENCODER;
+    if (!buf_put(h, &h->enc_out, &h->enc_off, &h->enc_n, &h->enc_cap, &type, 1)) return;
+    enc_flush(h);
 }
 
 /* Every request stream at or above a server's GOAWAY was not acted on. */
 static void h3_rejected_from(proven_h3_conn_t *h, proven_u64 id) {
     for (proven_size_t i = 0; i < h->nst; ++i) {
-        h3s_t *s = h->st[i];
+        proven_h3s_t *s = h->st[i];
         if (s->kind != K_REQ || s->id < id || s->ev_rejected) continue;
         if (!s->rx_done) (void)proven_quic_stream_stop(h->q, s->id, PROVEN_H3_REQUEST_CANCELLED);
         if (!s->tx_done) (void)proven_quic_stream_reset(h->q, s->id, PROVEN_H3_REQUEST_CANCELLED);
@@ -547,7 +640,7 @@ static void h3_rejected_from(proven_h3_conn_t *h, proven_u64 id) {
 }
 
 /* A complete control frame. */
-static bool ctl_frame(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev) {
+static bool ctl_frame(proven_h3_conn_t *h, proven_h3s_t *s, proven_h3_event_t *ev) {
     const proven_mem_view_t p = { .ptr = s->fbuf, .size = s->fbuf_n };
     proven_u64 v = 0;
     if (s->ftype != PROVEN_H3_FRAME_SETTINGS) {
@@ -558,7 +651,7 @@ static bool ctl_frame(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev) {
     }
     switch (s->ftype) {
     case PROVEN_H3_FRAME_SETTINGS:
-        (void)h3_settings(h, p);
+        if (h3_settings(h, p)) h3_start_encoder(h);
         return false;
     case PROVEN_H3_FRAME_CANCEL_PUSH:
         h3_fail(h, PROVEN_H3_ID_ERROR);                    /* no push ID was ever allowed */
@@ -582,7 +675,7 @@ static bool ctl_frame(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev) {
 }
 
 /* Advance the peer's control stream: true with an event. */
-static bool ctl_step(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev) {
+static bool ctl_step(proven_h3_conn_t *h, proven_h3s_t *s, proven_h3_event_t *ev) {
     for (;;) {
         if (h->failed || h->oom) return false;
         if (s->rd == RD_TYPE || s->rd == RD_LEN) {
@@ -648,7 +741,7 @@ static bool ctl_step(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev) {
 }
 
 /* Advance one of the peer's QPACK streams. */
-static void qpack_step(proven_h3_conn_t *h, h3s_t *s) {
+static void qpack_step(proven_h3_conn_t *h, proven_h3s_t *s) {
     for (;;) {
         const proven_size_t got = st_read(h, s, h->rbuf, H3_READ_BUF);
         if (got == 0) {
@@ -656,14 +749,21 @@ static void qpack_step(proven_h3_conn_t *h, h3s_t *s) {
             return;
         }
         const proven_mem_view_t in = { .ptr = h->rbuf, .size = got };
-        const proven_u64 code = s->kind == K_QENC ? proven_qpack_encoder_stream_feed(&s->qs, in) : proven_qpack_decoder_stream_feed(&s->qs, in);
+        const proven_u64 code = s->kind == K_QDEC ? (h->qenc ? proven_qpack_enc_feed(h->qenc, in) : proven_qpack_decoder_stream_feed(&s->qs, in))
+                              : h->qdec ? proven_qpack_dec_feed(h->qdec, in) : proven_qpack_encoder_stream_feed(&s->qs, in);
         if (code != 0) { h3_fail(h, code); return; }
+        if (s->kind == K_QENC && h->qdec) {
+            /* New entries: counted to the encoder, and the streams that waited for them read. */
+            const proven_u64 have = proven_qpack_dec_inserts(h->qdec);
+            if (have > h->qknown) { proven_byte_t b[12]; dec_put(h, b, proven_qpack_put_insert_count(b, have - h->qknown)); h->qknown = have; }
+            for (proven_size_t i = 0; i < h->nst; ++i) if (h->st[i]->qwait && h->st[i]->qric <= have) h->st[i]->readable = true;
+        }
         if (s->fin) { h3_fail(h, PROVEN_H3_CLOSED_CRITICAL_STREAM); return; }
     }
 }
 
 /* A unidirectional stream of the peer's, its type not yet known. */
-static void uni_step(proven_h3_conn_t *h, h3s_t *s) {
+static void uni_step(proven_h3_conn_t *h, proven_h3s_t *s) {
     proven_u64 type = 0;
     if (!st_varint(h, s, &type)) {
         /* Ended before its type: tolerated (RFC 9114 section 6.2). */
@@ -699,7 +799,7 @@ static void uni_step(proven_h3_conn_t *h, h3s_t *s) {
 }
 
 /* Advance a stream that may be read: true with an event. */
-static bool st_step(proven_h3_conn_t *h, h3s_t *s, proven_h3_event_t *ev) {
+static bool st_step(proven_h3_conn_t *h, proven_h3s_t *s, proven_h3_event_t *ev) {
     for (;;) {
         const int kind = s->kind;
         switch (kind) {
@@ -750,11 +850,55 @@ static void h3_open_control(proven_h3_conn_t *h) {
     /* A peer must let each side open three (RFC 9114 section 6.2). */
     if (e != PROVEN_OK) { h3_fail(h, PROVEN_H3_GENERAL_PROTOCOL_ERROR); return; }
     h->ctl_open = true;
-    proven_byte_t type = PROVEN_H3_STREAM_CONTROL, settings[16];
+    proven_byte_t type = PROVEN_H3_STREAM_CONTROL, settings[48];
     proven_size_t n = proven_quic_varint_put(PROVEN_H3_SETTING_MAX_FIELD_SECTION_SIZE, settings);
     n += proven_quic_varint_put(h->cfg_list, settings + n);
+    if (h->qdec) {
+        n += proven_quic_varint_put(PROVEN_H3_SETTING_QPACK_MAX_TABLE_CAPACITY, settings + n);
+        n += proven_quic_varint_put(h->cfg_qcap, settings + n);
+        n += proven_quic_varint_put(PROVEN_H3_SETTING_QPACK_BLOCKED_STREAMS, settings + n);
+        n += proven_quic_varint_put(h->cfg_qblocked, settings + n);
+    }
     if (!buf_put(h, &h->ctl_out, &h->ctl_off, &h->ctl_n, &h->ctl_cap, &type, 1) || !ctl_put_frame(h, PROVEN_H3_FRAME_SETTINGS, settings, n)) return;
     ctl_flush(h);
+    if (h->qdec) {
+        /* The decoder stream, for what the table's encoder must hear. */
+        const proven_err_t d = proven_quic_stream_open(h->q, false, &h->dec_id);
+        if (d == PROVEN_ERR_NOMEM) { h->oom = true; return; }
+        if (d != PROVEN_OK) { h3_fail(h, PROVEN_H3_GENERAL_PROTOCOL_ERROR); return; }
+        h->dec_open = true;
+        /* Instructions owed before the stream could be opened (0-RTT) go after its type. */
+        proven_byte_t *held = h->dec_out;
+        const proven_size_t held_off = h->dec_off, held_n = h->dec_n, held_cap = h->dec_cap;
+        h->dec_out = NULL; h->dec_off = h->dec_n = h->dec_cap = 0;
+        const proven_byte_t dtype = PROVEN_H3_STREAM_QPACK_DECODER;
+        if (buf_put(h, &h->dec_out, &h->dec_off, &h->dec_n, &h->dec_cap, &dtype, 1) && held_n > held_off)
+            (void)buf_put(h, &h->dec_out, &h->dec_off, &h->dec_n, &h->dec_cap, held + held_off, held_n - held_off);
+        h3_free(h, held, held_cap);
+        dec_flush(h);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// This side's QPACK decoder stream (RFC-0032)
+// -----------------------------------------------------------------------------
+
+static void dec_flush(proven_h3_conn_t *h) {
+    while (h->dec_open && h->dec_off < h->dec_n) {
+        proven_size_t taken = 0;
+        const proven_err_t e = proven_quic_stream_write(h->q, h->dec_id, (proven_mem_view_t){ .ptr = h->dec_out + h->dec_off, .size = h->dec_n - h->dec_off }, false, &taken);
+        if (e == PROVEN_ERR_NOMEM) { h->oom = true; return; }
+        if (e != PROVEN_OK || taken == 0) return;
+        h->dec_off += taken;
+    }
+}
+
+/* An instruction for the peer's encoder: held until the stream is open and takes it. The type
+ * byte goes first, as the stream is opened with the control stream. */
+static void dec_put(proven_h3_conn_t *h, const proven_byte_t *p, proven_size_t n) {
+    if (!h->qdec || h->failed) return;
+    if (!buf_put(h, &h->dec_out, &h->dec_off, &h->dec_n, &h->dec_cap, p, n)) return;
+    dec_flush(h);
 }
 
 // -----------------------------------------------------------------------------
@@ -762,7 +906,7 @@ static void h3_open_control(proven_h3_conn_t *h) {
 // -----------------------------------------------------------------------------
 
 static bool h3_quic_event(proven_h3_conn_t *h, const proven_quic_event_t *q, proven_h3_event_t *ev) {
-    h3s_t *s = NULL;
+    proven_h3s_t *s = NULL;
     switch (q->kind) {
     case PROVEN_QUIC_EV_ESTABLISHED:
     case PROVEN_QUIC_EV_EARLY:          /* 0-RTT (RFC-0021): streams may be used before the handshake ends */
@@ -793,6 +937,8 @@ static bool h3_quic_event(proven_h3_conn_t *h, const proven_quic_event_t *q, pro
         return false;
     case PROVEN_QUIC_EV_STREAM_WRITABLE:
         if (h->ctl_open && q->stream_id == h->ctl_id) { ctl_flush(h); return false; }
+        if (h->dec_open && q->stream_id == h->dec_id) { dec_flush(h); return false; }
+        if (h->enc_open && q->stream_id == h->enc_id) { enc_flush(h); return false; }
         s = st_find(h, q->stream_id);
         if (!s || s->kind != K_REQ) return false;
         st_flush(h, s);
@@ -819,7 +965,7 @@ static bool h3_quic_event(proven_h3_conn_t *h, const proven_quic_event_t *q, pro
             return told;
         }
     case PROVEN_QUIC_EV_STOP_SENDING:
-        if (h->ctl_open && q->stream_id == h->ctl_id) { h3_fail(h, PROVEN_H3_CLOSED_CRITICAL_STREAM); return false; }
+        if ((h->ctl_open && q->stream_id == h->ctl_id) || (h->dec_open && q->stream_id == h->dec_id) || (h->enc_open && q->stream_id == h->enc_id)) { h3_fail(h, PROVEN_H3_CLOSED_CRITICAL_STREAM); return false; }
         s = st_find(h, q->stream_id);
         if (!s || s->kind != K_REQ || s->tx_done) return false;
         s->tx_done = true;
@@ -861,7 +1007,7 @@ bool proven_h3_conn_poll(proven_h3_conn_t *h, proven_h3_event_t *ev) {
         if (h->oom) h3_fail(h, PROVEN_H3_INTERNAL_ERROR);
         if (!h->failed) {
             for (proven_size_t i = 0; i < h->nst; ++i) {
-                h3s_t *s = h->st[i];
+                proven_h3s_t *s = h->st[i];
                 if (!s->ev_rejected) continue;
                 s->ev_rejected = false;
                 *ev = (proven_h3_event_t){ .kind = PROVEN_H3_EV_STREAM_RESET, .stream_id = s->id, .code = PROVEN_H3_REQUEST_REJECTED };
@@ -873,11 +1019,11 @@ bool proven_h3_conn_poll(proven_h3_conn_t *h, proven_h3_event_t *ev) {
             /* Streams with something to read, in turn. */
             for (proven_size_t k = 0; k < h->nst && !h->failed; ++k) {
                 const proven_size_t i = (h->cursor + k) % h->nst;
-                h3s_t *s = h->st[i];
+                proven_h3s_t *s = h->st[i];
                 if (!s->readable || s->paused) continue;
                 const proven_u64 id = s->id;
                 const bool got = st_step(h, s, ev);
-                h3s_t *still = st_find(h, id);
+                proven_h3s_t *still = st_find(h, id);
                 if (still && !got) still->readable = false;
                 if (still) st_maybe_free(h, still);
                 if (got) {
@@ -902,17 +1048,35 @@ bool proven_h3_conn_poll(proven_h3_conn_t *h, proven_h3_event_t *ev) {
 // -----------------------------------------------------------------------------
 
 /* A HEADERS frame for `headers` into the stream's held bytes. */
-static proven_err_t h3_put_headers(proven_h3_conn_t *h, h3s_t *s, const proven_http_header_t *headers, proven_size_t count) {
+/* `*ric` and `*low`: what the section refers to in the table, for proven_qpack_enc_sent once its
+ * stream is known. */
+static proven_err_t h3_put_headers(proven_h3_conn_t *h, proven_h3s_t *s, const proven_http_header_t *headers, proven_size_t count, proven_u64 *ric, proven_u64 *low) {
     const bool *sensitive = h->sensitive;
     h->sensitive = NULL;
+    *ric = *low = 0;
     proven_u64 list = 0;
     for (proven_size_t i = 0; i < count; ++i) list += (proven_u64)headers[i].name.size + headers[i].value.size + PROVEN_QPACK_ENTRY_OVERHEAD;
     if (list > h->peer_list) return PROVEN_ERR_OUT_OF_BOUNDS;
-    const proven_size_t bound = proven_qpack_encode_bound(headers, count);
+    const proven_size_t bound = proven_qpack_encode_bound(headers, count) + 8;
     proven_byte_t *tmp = (proven_byte_t *)h3_alloc(h, bound + 9, 1);
     if (!tmp) { h->oom = false; return PROVEN_ERR_NOMEM; }
     proven_size_t len = 9;
-    proven_err_t e = proven_qpack_encode(headers, count, sensitive, (proven_mem_mut_t){ .ptr = tmp, .size = bound + 9 }, &len);
+    proven_err_t e;
+    if (h->qenc) {
+        /* The inserts go on the encoder stream; the section refers only to what the peer has. */
+        const proven_size_t ibound = proven_qpack_enc_ins_bound(headers, count);
+        proven_byte_t *ins = (proven_byte_t *)h3_alloc(h, ibound, 1);
+        if (!ins) { h->oom = false; h3_free(h, tmp, bound + 9); return PROVEN_ERR_NOMEM; }
+        proven_size_t il = 0;
+        e = proven_qpack_encode_dyn(h->qenc, headers, count, sensitive, (proven_mem_mut_t){ .ptr = tmp, .size = bound + 9 }, &len, (proven_mem_mut_t){ .ptr = ins, .size = ibound }, &il, ric, low);
+        if (e == PROVEN_OK && il > 0) {
+            if (buf_put(h, &h->enc_out, &h->enc_off, &h->enc_n, &h->enc_cap, ins, il)) enc_flush(h);
+            else h->oom = true;            /* the peer's table would no longer match this one's: the connection goes */
+        }
+        h3_free(h, ins, ibound);
+    } else {
+        e = proven_qpack_encode(headers, count, sensitive, (proven_mem_mut_t){ .ptr = tmp, .size = bound + 9 }, &len);
+    }
     if (e == PROVEN_OK) {
         proven_byte_t hd[16];
         proven_size_t at = proven_quic_varint_put(PROVEN_H3_FRAME_HEADERS, hd);
@@ -932,13 +1096,14 @@ proven_err_t proven_h3_submit_request(proven_h3_conn_t *h, const proven_http_hea
     proven_h2_request_head_t head;
     if (proven_h2_request_head(headers, count, &head) != PROVEN_OK || head.protocol.size > 0) { h->sensitive = NULL; return PROVEN_ERR_INVALID_ARG; }
     if (h->failed || h->closed || h->goaway_recv || h->goaway_sent || !h->ctl_open) { h->sensitive = NULL; return PROVEN_ERR_INVALID_STATE; }
-    h3s_t probe = { 0 };
-    proven_err_t e = h3_put_headers(h, &probe, headers, count);
+    proven_h3s_t probe = { 0 };
+    proven_u64 ric = 0, low = 0;
+    proven_err_t e = h3_put_headers(h, &probe, headers, count, &ric, &low);
     if (e != PROVEN_OK) { h3_free(h, probe.out, probe.out_cap); return e; }
     proven_u64 id = 0;
     e = proven_quic_stream_open(h->q, true, &id);
     if (e != PROVEN_OK) { h3_free(h, probe.out, probe.out_cap); return e; }
-    h3s_t *s = st_add(h, id, K_REQ);
+    proven_h3s_t *s = st_add(h, id, K_REQ);
     if (!s) {
         h->oom = false;
         h3_free(h, probe.out, probe.out_cap);
@@ -946,6 +1111,7 @@ proven_err_t proven_h3_submit_request(proven_h3_conn_t *h, const proven_http_hea
         return PROVEN_ERR_NOMEM;
     }
     s->out = probe.out; s->out_off = probe.out_off; s->out_n = probe.out_n; s->out_cap = probe.out_cap;
+    if (!proven_qpack_enc_sent(h->qenc, id, ric, low)) h->oom = true;
     s->known = true;
     s->no_body = is_head(headers, count);
     s->ws = end_stream ? WS_END : WS_HEAD;
@@ -955,8 +1121,8 @@ proven_err_t proven_h3_submit_request(proven_h3_conn_t *h, const proven_http_hea
     return PROVEN_OK;
 }
 
-static h3s_t *h3_sendable(proven_h3_conn_t *h, proven_u64 id, proven_err_t *e) {
-    h3s_t *s = st_find(h, id);
+static proven_h3s_t *h3_sendable(proven_h3_conn_t *h, proven_u64 id, proven_err_t *e) {
+    proven_h3s_t *s = st_find(h, id);
     if (!s || s->kind != K_REQ || s->ev_rejected) { *e = PROVEN_ERR_NOT_FOUND; return NULL; }
     if (h->failed || h->closed || s->tx_done || s->out_fin) { *e = PROVEN_ERR_INVALID_STATE; return NULL; }
     return s;
@@ -973,11 +1139,13 @@ proven_err_t proven_h3_submit_response(proven_h3_conn_t *h, proven_u64 stream_id
         return PROVEN_ERR_INVALID_ARG;
     }
     proven_err_t e = PROVEN_OK;
-    h3s_t *s = h3_sendable(h, stream_id, &e);
+    proven_h3s_t *s = h3_sendable(h, stream_id, &e);
     if (!s) { h->sensitive = NULL; return e; }
     if (s->ws != WS_NONE || !s->known) { h->sensitive = NULL; return PROVEN_ERR_INVALID_STATE; }
-    e = h3_put_headers(h, s, headers, count);
+    proven_u64 ric = 0, low = 0;
+    e = h3_put_headers(h, s, headers, count, &ric, &low);
     if (e != PROVEN_OK) return e;
+    if (!proven_qpack_enc_sent(h->qenc, s->id, ric, low)) h->oom = true;
     if (status >= 200) {
         s->ws = end_stream ? WS_END : WS_HEAD;
         s->out_fin = end_stream;
@@ -992,7 +1160,7 @@ proven_err_t proven_h3_send_data(proven_h3_conn_t *h, proven_u64 stream_id, prov
     if (!h || !taken || (data.size > 0 && !data.ptr)) return PROVEN_ERR_INVALID_ARG;
     *taken = 0;
     proven_err_t e = PROVEN_OK;
-    h3s_t *s = h3_sendable(h, stream_id, &e);
+    proven_h3s_t *s = h3_sendable(h, stream_id, &e);
     if (!s) return e;
     if (s->ws != WS_HEAD) return PROVEN_ERR_INVALID_STATE;
     st_flush(h, s);
@@ -1038,11 +1206,13 @@ proven_err_t proven_h3_send_trailers(proven_h3_conn_t *h, proven_u64 stream_id, 
     if (!h || (count > 0 && !headers)) return PROVEN_ERR_INVALID_ARG;
     if (proven_h2_trailers_check(headers, count) != PROVEN_OK) { h->sensitive = NULL; return PROVEN_ERR_INVALID_ARG; }
     proven_err_t e = PROVEN_OK;
-    h3s_t *s = h3_sendable(h, stream_id, &e);
+    proven_h3s_t *s = h3_sendable(h, stream_id, &e);
     if (!s) { h->sensitive = NULL; return e; }
     if (s->ws != WS_HEAD) { h->sensitive = NULL; return PROVEN_ERR_INVALID_STATE; }
-    e = h3_put_headers(h, s, headers, count);
+    proven_u64 ric = 0, low = 0;
+    e = h3_put_headers(h, s, headers, count, &ric, &low);
     if (e != PROVEN_OK) return e;
+    if (!proven_qpack_enc_sent(h->qenc, s->id, ric, low)) h->oom = true;
     s->ws = WS_END;
     s->out_fin = true;
     st_flush(h, s);
@@ -1057,7 +1227,7 @@ void proven_h3_next_sensitive(proven_h3_conn_t *h, const bool *sensitive) {
 
 proven_err_t proven_h3_stream_reset(proven_h3_conn_t *h, proven_u64 stream_id, proven_u64 code) {
     if (!h || code > PROVEN_QUIC_VARINT_MAX) return PROVEN_ERR_INVALID_ARG;
-    h3s_t *s = st_find(h, stream_id);
+    proven_h3s_t *s = st_find(h, stream_id);
     if (!s || s->kind != K_REQ) return PROVEN_ERR_NOT_FOUND;
     if (code == 0) code = PROVEN_H3_REQUEST_CANCELLED;
     if (!s->rx_done) (void)proven_quic_stream_stop(h->q, s->id, code);
@@ -1067,7 +1237,7 @@ proven_err_t proven_h3_stream_reset(proven_h3_conn_t *h, proven_u64 stream_id, p
 }
 
 void proven_h3_stream_pause(proven_h3_conn_t *h, proven_u64 stream_id, bool paused) {
-    h3s_t *s = h ? st_find(h, stream_id) : NULL;
+    proven_h3s_t *s = h ? st_find(h, stream_id) : NULL;
     if (s) { s->paused = paused; if (!paused) s->readable = true; }
 }
 
@@ -1098,9 +1268,16 @@ proven_size_t proven_h3_conn_memory(const proven_h3_conn_t *h) { return h ? h->h
 // Making and freeing
 // -----------------------------------------------------------------------------
 
+void proven_h3_conn_test_qpack_(const proven_h3_conn_t *h, proven_u64 *enc_inserts, proven_u64 *enc_known, proven_u64 *dec_inserts) {
+    *enc_inserts = proven_qpack_enc_inserts(h->qenc);
+    *enc_known = proven_qpack_enc_known(h->qenc);
+    *dec_inserts = proven_qpack_dec_inserts(h->qdec);
+}
+
 proven_err_t proven_h3_conn_create(const proven_h3_config_t *config, proven_quic_conn_t *quic, proven_h3_conn_t **out) {
     if (out) *out = NULL;
-    if (!config || !quic || !out || !proven_alloc_is_valid(config->alloc) || config->max_field_section_bytes > ((proven_u32)1 << 20)) return PROVEN_ERR_INVALID_ARG;
+    if (!config || !quic || !out || !proven_alloc_is_valid(config->alloc) || config->max_field_section_bytes > ((proven_u32)1 << 20) ||
+        (config->qpack_capacity != 0 && (config->qpack_capacity < 32 || config->qpack_capacity > ((proven_u32)1 << 20))) || config->qpack_blocked_streams > 65535u) return PROVEN_ERR_INVALID_ARG;
     proven_result_mem_mut_t m = config->alloc.alloc_fn(config->alloc.ctx, sizeof(proven_h3_conn_t), alignof(proven_h3_conn_t));
     if (m.err != PROVEN_OK) return PROVEN_ERR_NOMEM;
     proven_h3_conn_t *h = (proven_h3_conn_t *)(void *)m.value.ptr;
@@ -1110,6 +1287,11 @@ proven_err_t proven_h3_conn_create(const proven_h3_config_t *config, proven_quic
                              .peer_list = ~(proven_u64)0 };
     h->rbuf = (proven_byte_t *)h3_alloc(h, H3_READ_BUF, 1);
     if (!h->rbuf) { config->alloc.free_fn(config->alloc.ctx, h); return PROVEN_ERR_NOMEM; }
+    if (config->qpack_capacity != 0) {
+        h->cfg_qcap = config->qpack_capacity;
+        h->cfg_qblocked = config->qpack_blocked_streams ? config->qpack_blocked_streams : 16;
+        if (proven_qpack_dec_create(config->alloc, h->cfg_qcap, &h->qdec) != PROVEN_OK) { proven_h3_conn_destroy(h); return PROVEN_ERR_NOMEM; }
+    }
     *out = h;
     return PROVEN_OK;
 }
@@ -1117,8 +1299,14 @@ proven_err_t proven_h3_conn_create(const proven_h3_config_t *config, proven_quic
 void proven_h3_conn_destroy(proven_h3_conn_t *h) {
     if (!h) return;
     while (h->nst > 0) st_free(h, h->st[h->nst - 1]);
-    h3_free(h, h->st, h->cap_st * sizeof(h3s_t *));
+    h3_free(h, h->st, h->cap_st * sizeof(proven_h3s_t *));
     h3_free(h, h->ctl_out, h->ctl_cap);
+    h3_free(h, h->dec_out, h->dec_cap);
+    proven_qpack_dec_destroy(h->qdec);
+    h->qdec = NULL;
+    h3_free(h, h->enc_out, h->enc_cap);
+    proven_qpack_enc_destroy(h->qenc);
+    h->qenc = NULL;
     h3_free(h, h->rbuf, H3_READ_BUF);
     h3_free(h, h->hbuf, h->hbuf_size);
     h3_free(h, h->stale, h->stale_cap);

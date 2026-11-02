@@ -19,6 +19,7 @@
  * by the next eight bits of input and a second-level table for each longer prefix. */
 
 #define ROOT_BITS 8
+#define DIST_CODES_MAX (16 + 120 + (48 << 3))   /* NDIRECT at most 15 << 3, NPOSTFIX at most 3 */
 #define MAX_ALPHABET 704                /* the insert-and-copy code's; the others are smaller */
 /* The most entries a meta-block's codes can need: for each category a block type code (at most
  * 632 entries) and a block count code (396), the two context maps' codes (646 each), and 256
@@ -63,7 +64,7 @@ typedef struct {
     proven_u32 type, prev;              /* the current one and the one before */
     proven_u32 count;                   /* symbols left in the current block, or NO_SWITCH */
     proven_u32 type_code, count_code;   /* offsets into the table */
-} category_t;
+} proven_category_t;
 
 struct proven_brotli_decoder {
     proven_allocator_t alloc;
@@ -86,8 +87,12 @@ struct proven_brotli_decoder {
     bool last;
     proven_u32 left;                    /* bytes of it still to come (or metadata to skip) */
     int cat;                            /* the category whose block types are being read: 0 literal, 1 command, 2 distance */
-    category_t c[3];
+    proven_category_t c[3];
     proven_u32 npostfix, ndirect, dist_alphabet;
+    /* Per distance code from 16 on, for the meta-block's NPOSTFIX and NDIRECT: its extra bits,
+     * and the distance with extra bits of zero - the distance is base + (extra << NPOSTFIX). */
+    proven_u8 dx_bits[DIST_CODES_MAX];
+    proven_u32 dx_base[DIST_CODES_MAX];
     proven_u32 index;                   /* progress through a list: context modes, a map, codes */
     proven_u32 ntrees, rlemax;          /* the map being read */
     bool map_distance;                  /* which map that is */
@@ -124,7 +129,7 @@ typedef struct {
     proven_size_t in_len, in_at;
     proven_byte_t *out;
     proven_size_t out_len, out_at;
-} io_t;
+} proven_io_t;
 
 static proven_err_t bad(proven_brotli_decoder_t *b, proven_err_t e) {
     b->error = e;
@@ -133,7 +138,7 @@ static proven_err_t bad(proven_brotli_decoder_t *b, proven_err_t e) {
 
 /* --- bits --- */
 
-static bool load(proven_brotli_decoder_t *b, io_t *io) {
+static bool load(proven_brotli_decoder_t *b, proven_io_t *io) {
     if (io->in_at == io->in_len) return false;
     b->bitbuf |= (proven_u64)io->in[io->in_at++] << b->bitcnt;
     b->bitcnt += 8;
@@ -141,7 +146,7 @@ static bool load(proven_brotli_decoder_t *b, io_t *io) {
 }
 
 /* At least `n` bits there (n at most 56). False when the input ran out first. */
-static bool need(proven_brotli_decoder_t *b, io_t *io, unsigned n) {
+static bool need(proven_brotli_decoder_t *b, proven_io_t *io, unsigned n) {
     while (b->bitcnt < n) if (!load(b, io)) return false;
     return true;
 }
@@ -168,7 +173,7 @@ static inline unsigned lookup(const proven_u16 *t, proven_u64 bits, unsigned *le
 }
 
 /* One symbol of the code at `t`, taken; false when its bits have not all arrived. */
-static bool symbol(proven_brotli_decoder_t *b, io_t *io, const proven_u16 *t, unsigned *sym) {
+static bool symbol(proven_brotli_decoder_t *b, proven_io_t *io, const proven_u16 *t, unsigned *sym) {
     for (;;) {
         unsigned len;
         const unsigned s = lookup(t, b->bitbuf, &len);
@@ -179,10 +184,28 @@ static bool symbol(proven_brotli_decoder_t *b, io_t *io, const proven_u16 *t, un
 
 /* --- prefix codes --- */
 
+/* The low `len` bits of `code` (len at most 15) in reverse order, a byte at a time. */
+static const proven_u8 REV8[256] = {
+    0, 128, 64, 192, 32, 160, 96, 224, 16, 144, 80, 208, 48, 176, 112, 240,
+    8, 136, 72, 200, 40, 168, 104, 232, 24, 152, 88, 216, 56, 184, 120, 248,
+    4, 132, 68, 196, 36, 164, 100, 228, 20, 148, 84, 212, 52, 180, 116, 244,
+    12, 140, 76, 204, 44, 172, 108, 236, 28, 156, 92, 220, 60, 188, 124, 252,
+    2, 130, 66, 194, 34, 162, 98, 226, 18, 146, 82, 210, 50, 178, 114, 242,
+    10, 138, 74, 202, 42, 170, 106, 234, 26, 154, 90, 218, 58, 186, 122, 250,
+    6, 134, 70, 198, 38, 166, 102, 230, 22, 150, 86, 214, 54, 182, 118, 246,
+    14, 142, 78, 206, 46, 174, 110, 238, 30, 158, 94, 222, 62, 190, 126, 254,
+    1, 129, 65, 193, 33, 161, 97, 225, 17, 145, 81, 209, 49, 177, 113, 241,
+    9, 137, 73, 201, 41, 169, 105, 233, 25, 153, 89, 217, 57, 185, 121, 249,
+    5, 133, 69, 197, 37, 165, 101, 229, 21, 149, 85, 213, 53, 181, 117, 245,
+    13, 141, 77, 205, 45, 173, 109, 237, 29, 157, 93, 221, 61, 189, 125, 253,
+    3, 131, 67, 195, 35, 163, 99, 227, 19, 147, 83, 211, 51, 179, 115, 243,
+    11, 139, 75, 203, 43, 171, 107, 235, 27, 155, 91, 219, 59, 187, 123, 251,
+    7, 135, 71, 199, 39, 167, 103, 231, 23, 151, 87, 215, 55, 183, 119, 247,
+    15, 143, 79, 207, 47, 175, 111, 239, 31, 159, 95, 223, 63, 191, 127, 255,
+};
 static unsigned reverse(unsigned code, unsigned len) {
-    unsigned r = 0;
-    for (unsigned i = 0; i < len; ++i) { r = (r << 1) | (code & 1u); code >>= 1; }
-    return r;
+    const unsigned r16 = ((unsigned)REV8[code & 0xffu] << 8) | REV8[(code >> 8) & 0xffu];
+    return r16 >> (16 - len);
 }
 
 /* Build the table of a complete code from the lengths of `n` symbols into `t`, or with `t`
@@ -273,7 +296,7 @@ static unsigned bits_for(unsigned alphabet) {
 
 /* Read a prefix code over `pc_alphabet` symbols, from where the last call stopped. 1 when it
  * is in the table (pc_result), 0 when the input ran out, -1 on an error. */
-static int prefix_code(proven_brotli_decoder_t *b, io_t *io) {
+static int prefix_code(proven_brotli_decoder_t *b, proven_io_t *io) {
     const unsigned alphabet = b->pc_alphabet;
     switch (b->pc) {
         case PC_START: {
@@ -402,7 +425,7 @@ static void code_begin(proven_brotli_decoder_t *b, unsigned alphabet) {
 /* --- small fields --- */
 
 /* NBLTYPES and NTREES (section 9.2): 1 to 256. */
-static bool var_count(proven_brotli_decoder_t *b, io_t *io, proven_u32 *v) {
+static bool var_count(proven_brotli_decoder_t *b, proven_io_t *io, proven_u32 *v) {
     if (!need(b, io, 1)) return false;
     if (peek(b, 0, 1) == 0) { drop(b, 1); *v = 1; return true; }
     if (!need(b, io, 4)) return false;
@@ -415,7 +438,7 @@ static bool var_count(proven_brotli_decoder_t *b, io_t *io, proven_u32 *v) {
 }
 
 /* A block count: its code and extra bits, together. */
-static bool block_count(proven_brotli_decoder_t *b, io_t *io, const proven_u16 *t, proven_u32 *v) {
+static bool block_count(proven_brotli_decoder_t *b, proven_io_t *io, const proven_u16 *t, proven_u32 *v) {
     for (;;) {
         unsigned len;
         const unsigned s = lookup(t, b->bitbuf, &len);
@@ -429,7 +452,7 @@ static bool block_count(proven_brotli_decoder_t *b, io_t *io, const proven_u16 *
 }
 
 /* A block switch: the type and the count, together (at most 15 + 15 + 24 bits). */
-static bool block_switch(proven_brotli_decoder_t *b, io_t *io, category_t *c) {
+static bool block_switch(proven_brotli_decoder_t *b, proven_io_t *io, proven_category_t *c) {
     const proven_u16 *tt = b->tab + c->type_code, *ct = b->tab + c->count_code;
     for (;;) {
         unsigned l1, l2;
@@ -452,7 +475,7 @@ static bool block_switch(proven_brotli_decoder_t *b, io_t *io, category_t *c) {
 /* --- output --- */
 
 /* Hand over what is decoded and not yet taken. */
-static void flush(proven_brotli_decoder_t *b, io_t *io) {
+static void flush(proven_brotli_decoder_t *b, proven_io_t *io) {
     while (b->flushed < b->pos && io->out_at < io->out_len) {
         const proven_size_t at = (proven_size_t)(b->flushed & (b->cap - 1));
         proven_size_t n = (proven_size_t)(b->pos - b->flushed);
@@ -467,7 +490,7 @@ static void flush(proven_brotli_decoder_t *b, io_t *io) {
 /* Room in the history for `n` more bytes (n at most 64): grown while it is not yet full size,
  * else what the caller has not taken handed over. 1 there is, 0 there is not until the caller
  * takes more, -1 when memory ran out. */
-static int room(proven_brotli_decoder_t *b, io_t *io, proven_size_t n) {
+static int room(proven_brotli_decoder_t *b, proven_io_t *io, proven_size_t n) {
     if (b->cap < b->full) {
         if (b->pos + n <= b->cap) return 1;
         proven_size_t cap = b->cap ? b->cap : 4096;
@@ -512,7 +535,7 @@ static unsigned ferment(proven_byte_t *w, unsigned len, unsigned at) {
 
 /* Section 8: word `index` of length `len`, changed by transform `id`, into b->word. */
 static void dictionary_word(proven_brotli_decoder_t *b, unsigned len, proven_u32 index, unsigned id) {
-    const brotli_transform_t *t = &brotli_transforms[id];
+    const proven_brotli_transform_t *t = &brotli_transforms[id];
     const unsigned char *w = brotli_words[len] + (proven_size_t)index * (len + 1);
     unsigned n = 0;
     for (unsigned i = 0; i < t->prefix_len; ++i) b->word[n++] = (proven_byte_t)t->prefix[i];
@@ -576,7 +599,7 @@ void proven_brotli_decoder_reset(proven_brotli_decoder_t *b) {
 }
 
 /* The window (section 9.1), checked against the limit before anything is allocated for it. */
-static int stream_header(proven_brotli_decoder_t *b, io_t *io) {
+static int stream_header(proven_brotli_decoder_t *b, proven_io_t *io) {
     if (!need(b, io, 1)) return 0;
     unsigned wbits, used;
     if (peek(b, 0, 1) == 0) { wbits = 16; used = 1; }
@@ -607,7 +630,7 @@ static int stream_header(proven_brotli_decoder_t *b, io_t *io) {
 }
 
 /* The meta-block header up to the block types (section 9.2), read whole: at most 31 bits. */
-static int meta_header(proven_brotli_decoder_t *b, io_t *io) {
+static int meta_header(proven_brotli_decoder_t *b, proven_io_t *io) {
     if (!need(b, io, 1)) return 0;
     unsigned at = 0;
     const bool last = peek(b, at++, 1) != 0;
@@ -660,7 +683,7 @@ static int meta_header(proven_brotli_decoder_t *b, io_t *io) {
 }
 
 /* Whole bytes: from the bit buffer first (it holds whole bytes after a byte boundary). */
-static bool next_byte(proven_brotli_decoder_t *b, io_t *io, proven_byte_t *v) {
+static bool next_byte(proven_brotli_decoder_t *b, proven_io_t *io, proven_byte_t *v) {
     if (b->bitcnt >= 8) { *v = (proven_byte_t)b->bitbuf; drop(b, 8); return true; }
     if (io->in_at == io->in_len) return false;
     *v = io->in[io->in_at++];
@@ -683,24 +706,32 @@ static unsigned context(const proven_brotli_decoder_t *b, unsigned mode) {
     }
 }
 
+/* The distance codes from 16 on for the meta-block's NPOSTFIX and NDIRECT (section 4): their
+ * extra bits, and their distance with extra bits of zero. Made once a meta-block. */
+static void distance_codes(proven_brotli_decoder_t *b) {
+    for (unsigned code = 16; code < b->dist_alphabet; ++code) {
+        if (code < 16 + b->ndirect) { b->dx_bits[code] = 0; b->dx_base[code] = code - 15; continue; }
+        const unsigned c = code - b->ndirect - 16;
+        const unsigned nbits = 1 + (c >> (b->npostfix + 1));
+        const proven_u32 offset = ((2u + ((c >> b->npostfix) & 1u)) << nbits) - 4;
+        b->dx_bits[code] = (proven_u8)nbits;
+        b->dx_base[code] = (offset << b->npostfix) + (c & ((1u << b->npostfix) - 1u)) + b->ndirect + 1;
+    }
+}
+
 /* The distance of the command (section 4) from its code and extra bits; 0 if invalid. */
-static proven_u32 distance_of(proven_brotli_decoder_t *b, unsigned code, proven_u32 extra) {
+static inline proven_u32 distance_of(const proven_brotli_decoder_t *b, unsigned code, proven_u32 extra) {
     if (code < 16) {
         static const proven_u8 WHICH[16] = { 0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1 };
         static const proven_i8 DELTA[16] = { 0, 0, 0, 0, -1, 1, -2, 2, -3, 3, -1, 1, -2, 2, -3, 3 };
         const proven_i64 d = (proven_i64)b->dist[(b->dist_at - 1 - WHICH[code]) & 3u] + DELTA[code];
         return d > 0 ? (proven_u32)d : 0;
     }
-    if (code < 16 + b->ndirect) return code - 15;
-    const unsigned c = code - b->ndirect - 16;
-    const unsigned nbits = 1 + (c >> (b->npostfix + 1));
-    const proven_u32 offset = ((2u + ((c >> b->npostfix) & 1u)) << nbits) - 4;
-    return ((offset + extra) << b->npostfix) + (c & ((1u << b->npostfix) - 1u)) + b->ndirect + 1;
+    return b->dx_base[code] + (extra << b->npostfix);
 }
 
-static unsigned distance_extra(const proven_brotli_decoder_t *b, unsigned code) {
-    if (code < 16 + b->ndirect) return 0;
-    return 1 + ((code - b->ndirect - 16) >> (b->npostfix + 1));
+static inline unsigned distance_extra(const proven_brotli_decoder_t *b, unsigned code) {
+    return code < 16 ? 0u : b->dx_bits[code];
 }
 
 /* --- the fast path --- */
@@ -716,27 +747,29 @@ HOT proven_u64 get64(const proven_byte_t *p) {
     return (proven_u64)p[0] | ((proven_u64)p[1] << 8) | ((proven_u64)p[2] << 16) | ((proven_u64)p[3] << 24) |
            ((proven_u64)p[4] << 32) | ((proven_u64)p[5] << 40) | ((proven_u64)p[6] << 48) | ((proven_u64)p[7] << 56);
 }
-HOT void put64(proven_byte_t *p, proven_u64 v) {
-    for (unsigned i = 0; i < 8; ++i) p[i] = (proven_byte_t)(v >> (8 * i));
-}
+/* Bytes moved as they are, eight and sixteen at once: one load and one store each (a loop of
+ * byte stores was left a loop at -O2). */
+HOT void copy8(proven_byte_t *d, const proven_byte_t *s) { __builtin_memcpy(d, s, 8); }
+HOT void copy16(proven_byte_t *d, const proven_byte_t *s) { __builtin_memcpy(d, s, 16); }
 
 /* The bit reader of the fast path, in locals: the bits, how many, and where the input is. */
 typedef struct {
     proven_u64 bits;
     unsigned n;
     const proven_byte_t *p;
-} reader_t;
+} proven_brotli_reader_t;
 
-/* At least 56 bits, from eight bytes of input that are there. Zero above `n`. */
-HOT void fill(reader_t *r) {
+/* At least 56 bits, from eight bytes of input that are there. Above `n` the bits are those of
+ * the input bytes from `p` on - what the next fill ORs in again, unchanged - so they need not
+ * be cleared here; sync_out clears them for the step-by-step path, which keeps zeros there. */
+HOT void fill(proven_brotli_reader_t *r) {
     const unsigned k = (63u - r->n) >> 3;
     r->bits |= get64(r->p) << r->n;
     r->n += 8 * k;
     r->p += k;
-    r->bits &= ((proven_u64)1 << r->n) - 1u;
 }
 
-HOT unsigned take_sym(reader_t *r, const proven_u16 *t) {
+HOT unsigned take_sym(proven_brotli_reader_t *r, const proven_u16 *t) {
     unsigned len;
     const unsigned s = lookup(t, r->bits, &len);
     r->bits >>= len;
@@ -744,7 +777,7 @@ HOT unsigned take_sym(reader_t *r, const proven_u16 *t) {
     return s;
 }
 
-HOT proven_u32 take_bits(reader_t *r, unsigned n) {
+HOT proven_u32 take_bits(proven_brotli_reader_t *r, unsigned n) {
     const proven_u32 v = (proven_u32)(r->bits & (((proven_u64)1 << n) - 1u));
     r->bits >>= n;
     r->n -= n;
@@ -752,12 +785,12 @@ HOT proven_u32 take_bits(reader_t *r, unsigned n) {
 }
 
 /* The reader into the decoder and the call's input, and back. */
-static void sync_out(proven_brotli_decoder_t *b, io_t *io, const reader_t *r) {
-    b->bitbuf = r->bits;
+static void sync_out(proven_brotli_decoder_t *b, proven_io_t *io, const proven_brotli_reader_t *r) {
+    b->bitbuf = r->n < 64 ? r->bits & (((proven_u64)1 << r->n) - 1u) : r->bits;
     b->bitcnt = r->n;
     io->in_at = (proven_size_t)(r->p - io->in);
 }
-static void sync_in(const proven_brotli_decoder_t *b, const io_t *io, reader_t *r) {
+static void sync_in(const proven_brotli_decoder_t *b, const proven_io_t *io, proven_brotli_reader_t *r) {
     r->bits = b->bitbuf;
     r->n = b->bitcnt;
     r->p = io->in + io->in_at;
@@ -768,14 +801,27 @@ static void sync_in(const proven_brotli_decoder_t *b, const io_t *io, reader_t *
  * written past its end (into them, or into the SLACK after the history's last byte). */
 static proven_u64 copy_back(proven_byte_t *ring, proven_size_t cap, proven_u64 pos, proven_u64 d, proven_u32 n, bool spare) {
     const proven_size_t mask = cap - 1;
-    if (spare && d >= 16 && n <= 48) {
+    if (spare) {
         const proven_size_t to = (proven_size_t)(pos & mask), from = (proven_size_t)((pos - d) & mask);
         if (to + n <= cap && from + n <= cap) {
-            /* Sixteen at a time: each sixteen read were written at least sixteen bytes before. */
-            for (proven_size_t i = 0; i < n; i += 16) {
-                put64(ring + to + i, get64(ring + from + i));
-                put64(ring + to + i + 8, get64(ring + from + i + 8));
+            proven_byte_t *dst = ring + to;
+            const proven_byte_t *src = ring + from;
+            if (d >= 16) {
+                /* Sixteen at a time: each sixteen read were written at least sixteen bytes before. */
+                for (proven_size_t i = 0; i < n; i += 16) copy16(dst + i, src + i);
+                return pos + n;
             }
+            if (d >= 8) {
+                for (proven_size_t i = 0; i < n; i += 8) copy8(dst + i, src + i);
+                return pos + n;
+            }
+            /* Closer than eight: the first bytes one at a time until the pattern of period `d`
+             * is written out to `step`, the smallest multiple of `d` that is at least eight;
+             * then eight at a time from `step` back, which repeats it. */
+            const proven_size_t step = (proven_size_t)d * ((8 + (proven_size_t)d - 1) / (proven_size_t)d);
+            proven_size_t i = 0;
+            for (; i < step && i < n; ++i) dst[i] = src[i];
+            for (; i < n; i += 8) copy8(dst + i, dst + i - step);
             return pos + n;
         }
     }
@@ -789,7 +835,7 @@ static proven_u64 copy_back(proven_byte_t *ring, proven_size_t cap, proven_u64 p
         proven_size_t i = 0;
         if (d >= 8) {
             /* Eight at a time: each eight read were written at least eight bytes before. */
-            for (; i + 8 <= k; i += 8) put64(dst + i, get64(src + i));
+            for (; i + 8 <= k; i += 8) copy8(dst + i, src + i);
         }
         for (; i < k; ++i) dst[i] = src[i];
         pos += k;
@@ -815,14 +861,14 @@ static const proven_u16 *single_code(const proven_u16 *const *codes) {
  * without its checks for input, with the reader and the position in locals. It leaves the
  * state at an item the other path can go on from, and gives back the whole bytes it read
  * ahead. */
-static void fast(proven_brotli_decoder_t *b, io_t *io) {
+static void fast(proven_brotli_decoder_t *b, proven_io_t *io) {
     const proven_size_t start = io->in_at;
     const proven_byte_t *end = io->in + io->in_len;
-    category_t *ci = &b->c[1], *cl = &b->c[0], *cd = &b->c[2];
+    proven_category_t *ci = &b->c[1], *cl = &b->c[0], *cd = &b->c[2];
     const proven_u16 *codes[64];
     literal_codes(b, codes);
     const proven_u16 *one = single_code(codes);
-    reader_t r;
+    proven_brotli_reader_t r;
     sync_in(b, io, &r);
     while (b->state == S_COMMAND && end - r.p >= 64) {
         if (b->left == 0) { meta_end(b); break; }
@@ -858,7 +904,10 @@ static void fast(proven_brotli_decoder_t *b, io_t *io) {
         proven_byte_t *ring = b->ring;
         const proven_size_t mask = b->cap - 1;
         proven_u64 pos = b->pos;
-        unsigned p1 = pos >= 1 ? ring[(pos - 1) & mask] : 0, p2 = pos >= 2 ? ring[(pos - 2) & mask] : 0;
+        /* The last two bytes, for the literals' contexts: read only when there are literals and
+         * their code depends on them. */
+        unsigned p1 = 0, p2 = 0;
+        if (insert > 0 && !one) { p1 = pos >= 1 ? ring[(pos - 1) & mask] : 0; p2 = pos >= 2 ? ring[(pos - 2) & mask] : 0; }
         proven_u32 n = insert, count = cl->count;
         unsigned mode = b->cmode[cl->type];
         while (n > 0) {
@@ -963,7 +1012,7 @@ proven_err_t proven_brotli_decode(proven_brotli_decoder_t *b, proven_mem_view_t 
     if (done) *done = false;
     if (!b || !consumed || !produced || !done || (in.size > 0 && !in.ptr) || (out.size > 0 && !out.ptr)) return PROVEN_ERR_INVALID_ARG;
     if (b->error != PROVEN_OK) return b->error;
-    io_t io = { .in = in.ptr, .in_len = in.size, .in_at = 0, .out = out.ptr, .out_len = out.size, .out_at = 0 };
+    proven_io_t io = { .in = in.ptr, .in_len = in.size, .in_at = 0, .out = out.ptr, .out_len = out.size, .out_at = 0 };
     proven_err_t result = PROVEN_OK;
     bool going = true;
     while (going && result == PROVEN_OK) {
@@ -1012,7 +1061,7 @@ proven_err_t proven_brotli_decode(proven_brotli_decoder_t *b, proven_mem_view_t 
                 if (r > 0) meta_end(b);
                 break;
             case S_NBLTYPES: {
-                category_t *c = &b->c[b->cat];
+                proven_category_t *c = &b->c[b->cat];
                 if (!var_count(b, &io, &c->n)) { r = 0; break; }
                 c->type = 0;
                 c->prev = 1;
@@ -1041,7 +1090,7 @@ proven_err_t proven_brotli_decode(proven_brotli_decoder_t *b, proven_mem_view_t 
                 }
                 break;
             case S_BCOUNT: {
-                category_t *c = &b->c[b->cat];
+                proven_category_t *c = &b->c[b->cat];
                 if (!block_count(b, &io, b->tab + c->count_code, &c->count)) { r = 0; break; }
                 b->state = b->cat == 2 ? S_DIST_PARAMS : S_NBLTYPES;
                 b->cat++;
@@ -1052,6 +1101,7 @@ proven_err_t proven_brotli_decode(proven_brotli_decoder_t *b, proven_mem_view_t 
                 b->ndirect = peek(b, 2, 4) << b->npostfix;
                 drop(b, 6);
                 b->dist_alphabet = 16 + b->ndirect + (48u << b->npostfix);
+                distance_codes(b);
                 b->index = 0;
                 b->state = S_CMODES;
                 break;
@@ -1162,7 +1212,7 @@ proven_err_t proven_brotli_decode(proven_brotli_decoder_t *b, proven_mem_view_t 
                     if (b->state != S_COMMAND || io.in_len - io.in_at >= 64) break;
                 }
                 if (b->left == 0) { meta_end(b); break; }
-                category_t *c = &b->c[1];
+                proven_category_t *c = &b->c[1];
                 if (c->count == 0 && !block_switch(b, &io, c)) { r = 0; break; }
                 /* The insert-and-copy code and the insert length's extra bits, together. */
                 const proven_u16 *t = b->tab + b->code_i[c->type];
@@ -1191,7 +1241,7 @@ proven_err_t proven_brotli_decode(proven_brotli_decoder_t *b, proven_mem_view_t 
                 b->state = S_LITERALS;
                 break;
             case S_LITERALS: {
-                category_t *c = &b->c[0];
+                proven_category_t *c = &b->c[0];
                 while (b->insert > 0) {
                     const int k = room(b, &io, 1);
                     if (k <= 0) { r = k; break; }
@@ -1213,7 +1263,7 @@ proven_err_t proven_brotli_decode(proven_brotli_decoder_t *b, proven_mem_view_t 
                 unsigned code = 0;
                 proven_u32 extra = 0;
                 if (!b->implicit_zero) {
-                    category_t *c = &b->c[2];
+                    proven_category_t *c = &b->c[2];
                     if (c->count == 0 && !block_switch(b, &io, c)) { r = 0; break; }
                     const unsigned ctx = b->copy > 4 ? 3u : b->copy - 2;
                     const proven_u16 *t = b->tab + b->code_d[b->cmap_d[4 * c->type + ctx]];

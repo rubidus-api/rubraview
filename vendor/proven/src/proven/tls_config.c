@@ -47,8 +47,8 @@ proven_u8str_view_t proven_tls_config_alpn(const proven_tls_config_t *config, pr
 #define OID_RSA "\x2a\x86\x48\x86\xf7\x0d\x01\x01\x01"
 
 /* ECPrivateKey ::= SEQUENCE { version INTEGER 1, privateKey OCTET STRING, [0] parameters, [1] publicKey } */
-static proven_err_t cfg_sec1(der_t in, bool need_curve, proven_byte_t key[32]) {
-    der_t seq, d, f, curve;
+static proven_err_t cfg_sec1(proven_der_t in, bool need_curve, proven_byte_t key[32]) {
+    proven_der_t seq, d, f, curve;
     proven_u32 version = 0;
     if (!der_expect(&in, DER_SEQUENCE, &seq, NULL) || in.n != 0) return PROVEN_ERR_INVALID_FORMAT;
     if (!der_small_uint(&seq, &version) || version != 1 || !der_expect(&seq, DER_OCTETS, &d, NULL)) return PROVEN_ERR_INVALID_FORMAT;
@@ -66,7 +66,7 @@ static proven_err_t cfg_sec1(der_t in, bool need_curve, proven_byte_t key[32]) {
 
 /* An RSAPrivateKey: the key goes into a block of its own. Only its shape is checked here;
  * cfg_match_key signs with it before the config is given out. */
-static proven_err_t cfg_rsa(proven_tls_config_t *c, der_t in) {
+static proven_err_t cfg_rsa(proven_tls_config_t *c, proven_der_t in) {
     proven_allocator_t a = c->alloc;
     proven_result_mem_mut_t m = a.alloc_fn(a.ctx, sizeof(proven_tls_rsa_t), 16);
     if (m.err != PROVEN_OK) return m.err;
@@ -79,22 +79,22 @@ static proven_err_t cfg_rsa(proven_tls_config_t *c, der_t in) {
 }
 
 /* PrivateKeyInfo ::= SEQUENCE { version INTEGER, algorithm AlgorithmIdentifier, privateKey OCTET STRING, ... } */
-static proven_err_t cfg_pkcs8(proven_tls_config_t *c, der_t in, proven_tls_key_kind_t *kind, proven_byte_t key[32]) {
-    der_t seq, alg, oid, priv;
+static proven_err_t cfg_pkcs8(proven_tls_config_t *c, proven_der_t in, proven_tls_key_kind_t *kind, proven_byte_t key[32]) {
+    proven_der_t seq, alg, oid, priv;
     proven_u32 version = 9;
     if (!der_expect(&in, DER_SEQUENCE, &seq, NULL) || in.n != 0) return PROVEN_ERR_INVALID_FORMAT;
     if (!der_small_uint(&seq, &version) || version > 1) return PROVEN_ERR_INVALID_FORMAT;
     if (!der_expect(&seq, DER_SEQUENCE, &alg, NULL) || !der_expect(&alg, DER_OID, &oid, NULL)) return PROVEN_ERR_INVALID_FORMAT;
     if (!der_expect(&seq, DER_OCTETS, &priv, NULL)) return PROVEN_ERR_INVALID_FORMAT;
     if (DER_IS(&oid, OID_ED25519)) {
-        der_t seed;
+        proven_der_t seed;
         if (alg.n != 0 || !der_expect(&priv, DER_OCTETS, &seed, NULL) || priv.n != 0 || seed.n != 32) return PROVEN_ERR_INVALID_FORMAT;
         for (int i = 0; i < 32; ++i) key[i] = seed.p[i];
         *kind = PROVEN_TLS_KEY_ED25519;
         return PROVEN_OK;
     }
     if (DER_IS(&oid, OID_EC_KEY)) {
-        der_t curve;
+        proven_der_t curve;
         if (!der_expect(&alg, DER_OID, &curve, NULL) || alg.n != 0) return PROVEN_ERR_INVALID_FORMAT;
         if (!DER_IS(&curve, OID_P256)) return PROVEN_ERR_UNSUPPORTED;
         *kind = PROVEN_TLS_KEY_P256;
@@ -122,7 +122,7 @@ static proven_err_t cfg_load_key(proven_tls_config_t *c, proven_mem_view_t pem) 
         if (e == PROVEN_ERR_NOT_FOUND) break;
         if (e == PROVEN_ERR_OUT_OF_BOUNDS) { result = PROVEN_ERR_UNSUPPORTED; break; }     /* larger than any key read here */
         if (e != PROVEN_OK) break;
-        der_t in = { der, len };
+        proven_der_t in = { der, len };
         if (label_is(label, "PRIVATE KEY")) { result = cfg_pkcs8(c, in, &c->key_kind, c->key); break; }
         if (label_is(label, "EC PRIVATE KEY")) { c->key_kind = PROVEN_TLS_KEY_P256; result = cfg_sec1(in, true, c->key); break; }
         if (label_is(label, "RSA PRIVATE KEY")) { result = cfg_rsa(c, in); break; }
@@ -264,6 +264,18 @@ proven_err_t proven_tls_config_create(const proven_tls_options_t *o, proven_tls_
             c->early_seen->cap = PROVEN_TLS_EARLY_SEEN;
         }
     }
+    /* A client that asks for early data keeps its sessions for the transport wrapper (RFC-0027):
+     * without one there is nothing to resume, and no early data. Nobody else's connections change. */
+    if (e == PROVEN_OK && o->early_data) {
+        m = a.alloc_fn(a.ctx, sizeof(proven_tls_client_cache_t), 16);
+        if (m.err != PROVEN_OK) e = m.err;
+        else {
+            c->client_cache = (proven_tls_client_cache_t *)m.value.ptr;
+            c->client_cache->clock = 0;
+            c->client_cache->e = NULL;
+            atomic_flag_clear(&c->client_cache->lock);
+        }
+    }
     if (o->pin_count > 0) {
         if (o->pin_count > 64) e = PROVEN_ERR_INVALID_ARG;
         else {
@@ -313,6 +325,13 @@ void proven_tls_config_destroy(proven_tls_config_t *c) {
     if (c->chain_mem) a.free_fn(a.ctx, c->chain_mem);
     if (c->rsa) { cfg_wipe(c->rsa, sizeof *c->rsa); a.free_fn(a.ctx, c->rsa); }
     if (c->early_seen) a.free_fn(a.ctx, c->early_seen);
+    if (c->client_cache) {
+        if (c->client_cache->e) {
+            cfg_wipe(c->client_cache->e, PROVEN_TLS_CLIENT_SESSIONS * sizeof(proven_tls_client_entry_t));
+            a.free_fn(a.ctx, c->client_cache->e);
+        }
+        a.free_fn(a.ctx, c->client_cache);
+    }
     cfg_wipe(c, sizeof *c);
     a.free_fn(a.ctx, c);
 }
@@ -358,23 +377,6 @@ proven_u32 proven_tls_config_test_rsa_uses_(const proven_tls_config_t *c, proven
     r->uses = uses;
     atomic_flag_clear_explicit(&r->lock, memory_order_release);
     return was;
-}
-
-/* The premaster secret of a static-RSA key exchange. Takes a blinding pair exactly as signing
- * does. Always "succeeds": see proven_crypto_rsa_decrypt_premaster. */
-void proven_tls_config_rsa_decrypt_(const proven_tls_config_t *c, proven_mem_view_t cipher, proven_u16 version, proven_byte_t out[48]) {
-    proven_byte_t fallback[48];
-    proven_tls_config_random(c, fallback, sizeof fallback);          /* before anything is known about the ciphertext */
-    if (!c->rsa) { for (int i = 0; i < 48; ++i) out[i] = fallback[i]; cfg_wipe(fallback, sizeof fallback); return; }
-    proven_tls_rsa_t *r = c->rsa;
-    proven_crypto_rsa_blind_t mine;
-    while (atomic_flag_test_and_set_explicit(&r->lock, memory_order_acquire)) { }
-    mine = r->blind;
-    ++r->uses;                                                       /* the next signature renews the pair when it is due */
-    proven_crypto_rsa_blind_next(&r->key, &r->blind);
-    atomic_flag_clear_explicit(&r->lock, memory_order_release);
-    proven_crypto_rsa_decrypt_premaster(&r->key, &mine, cipher, version, fallback, out);
-    cfg_wipe(&mine, sizeof mine); cfg_wipe(fallback, sizeof fallback);
 }
 
 /* ---- Tickets ----
@@ -466,7 +468,7 @@ proven_size_t proven_tls_ticket_seal(const proven_tls_config_t *config, const pr
     ticket_keys(config, cur, &cur_id, prev, &prev_id, &have_prev);
     proven_size_t n = 0;
     /* The layout's number, which also says which old version a session belongs to. */
-    plain[n++] = state->version == 0x0302 ? 2 : state->version == 0x0301 ? 3 : 1;
+    plain[n++] = state->version == 0x0302 ? 2 : state->version == 0x0301 ? 3 : state->quic_v2 ? 4 : 1;
     plain[n++] = (proven_byte_t)(state->suite >> 8); plain[n++] = (proven_byte_t)state->suite;
     put64(plain + n, (proven_u64)state->issued_at); n += 8;
     plain[n++] = (proven_byte_t)state->psk_len;
@@ -497,8 +499,9 @@ bool proven_tls_ticket_open(const proven_tls_config_t *config, proven_mem_view_t
                                                  (proven_mem_view_t){ .ptr = ticket.ptr + 16, .size = TICKET_PLAIN },
                                                  ticket.ptr + 16 + TICKET_PLAIN, plain);
     }
-    if (ok && plain[0] >= 1 && plain[0] <= 3) {
+    if (ok && plain[0] >= 1 && plain[0] <= 4) {
         state->version = plain[0] == 2 ? 0x0302 : plain[0] == 3 ? 0x0301 : 0;
+        state->quic_v2 = plain[0] == 4;               /* TLS 1.3 over QUIC version 2 (RFC-0036) */
         proven_size_t n = 1;
         state->suite = (proven_u16)(((proven_u16)plain[n] << 8) | plain[n + 1]); n += 2;
         state->issued_at = (proven_i64)get64(plain + n); n += 8;
@@ -518,4 +521,63 @@ bool proven_tls_ticket_open(const proven_tls_config_t *config, proven_mem_view_t
     }
     cfg_wipe(cur, sizeof cur); cfg_wipe(prev, sizeof prev); cfg_wipe(plain, sizeof plain);
     return ok;
+}
+
+/* ---- A client's sessions by server name (RFC-0027) ---- */
+
+static bool cache_name_is(const proven_tls_client_entry_t *x, proven_u8str_view_t name) {
+    if (x->used == 0 || x->name_len != name.size) return false;
+    for (proven_size_t i = 0; i < name.size; ++i) {
+        proven_byte_t a = x->name[i], b = name.ptr[i];
+        if (a >= 'A' && a <= 'Z') a = (proven_byte_t)(a + 32);
+        if (b >= 'A' && b <= 'Z') b = (proven_byte_t)(b + 32);
+        if (a != b) return false;
+    }
+    return true;
+}
+
+void proven_tls_client_cache_load_(const proven_tls_config_t *config, proven_u8str_view_t name, proven_tls_session_t *out) {
+    cfg_wipe(out->opaque, sizeof out->opaque);
+    proven_tls_client_cache_t *k = config ? config->client_cache : NULL;
+    if (!k || name.size == 0 || name.size > 253) return;
+    while (atomic_flag_test_and_set_explicit(&k->lock, memory_order_acquire)) { }
+    for (proven_size_t i = 0; k->e && i < PROVEN_TLS_CLIENT_SESSIONS; ++i) {
+        if (!cache_name_is(&k->e[i], name)) continue;
+        *out = k->e[i].s;
+        k->e[i].used = ++k->clock;
+        break;
+    }
+    atomic_flag_clear_explicit(&k->lock, memory_order_release);
+}
+
+void proven_tls_client_cache_store_(const proven_tls_config_t *config, proven_u8str_view_t name, const proven_tls_session_t *s) {
+    proven_tls_client_cache_t *k = config ? config->client_cache : NULL;
+    if (!k || !s || name.size == 0 || name.size > 253) return;
+    const proven_tls_session_data_t *d = (const proven_tls_session_data_t *)(const void *)s->opaque;
+    if (d->magic != PROVEN_TLS_SESSION_MAGIC) return;
+    proven_tls_client_entry_t *fresh = NULL;
+    /* Whether the entries exist is read under the lock - another thread may be making them - and
+     * they are allocated outside it; a thread that got there second gives its own back. */
+    while (atomic_flag_test_and_set_explicit(&k->lock, memory_order_acquire)) { }
+    const bool need = !k->e;
+    atomic_flag_clear_explicit(&k->lock, memory_order_release);
+    if (need) {
+        proven_result_mem_mut_t m = config->alloc.alloc_fn(config->alloc.ctx, PROVEN_TLS_CLIENT_SESSIONS * sizeof(proven_tls_client_entry_t), 16);
+        if (m.err != PROVEN_OK) return;
+        fresh = (proven_tls_client_entry_t *)(void *)m.value.ptr;
+        cfg_wipe(fresh, PROVEN_TLS_CLIENT_SESSIONS * sizeof *fresh);
+    }
+    while (atomic_flag_test_and_set_explicit(&k->lock, memory_order_acquire)) { }
+    if (!k->e && fresh) { k->e = fresh; fresh = NULL; }
+    proven_tls_client_entry_t *at = &k->e[0];
+    for (proven_size_t i = 0; i < PROVEN_TLS_CLIENT_SESSIONS; ++i) {
+        if (cache_name_is(&k->e[i], name)) { at = &k->e[i]; break; }
+        if (k->e[i].used < at->used) at = &k->e[i];
+    }
+    at->s = *s;
+    at->name_len = (proven_u8)name.size;
+    for (proven_size_t i = 0; i < name.size; ++i) at->name[i] = name.ptr[i];
+    at->used = ++k->clock;
+    atomic_flag_clear_explicit(&k->lock, memory_order_release);
+    if (fresh) { cfg_wipe(fresh, PROVEN_TLS_CLIENT_SESSIONS * sizeof *fresh); config->alloc.free_fn(config->alloc.ctx, fresh); }
 }

@@ -34,44 +34,43 @@
 #define WSC_READ_BYTES 16384u
 #define WSC_FINISH_MS 1000u
 
-typedef enum { WSC_CONNECTING, WSC_HANDSHAKE, WSC_UPGRADE, WSC_OPEN, WSC_FINISHING } wsc_state_t;
+typedef enum { WSC_CONNECTING, WSC_HANDSHAKE, WSC_UPGRADE, WSC_OPEN, WSC_FINISHING } proven_wsc_state_t;
 
 typedef struct {
     proven_byte_t *p;
     proven_size_t len, off, cap;
-} wsc_buf_t;
+} proven_wsc_buf_t;
 
 typedef struct wsc {
     proven_loop_t *loop;
     proven_allocator_t alloc;
     proven_ws_stream_t *ws;            /* the protocol's object; null once it has let go, or has been told the end */
     proven_net_conn_t sock;
-    proven_loop_io_t io;
+    proven_loop_sock_t ls;             /* the connection as the loop knows it (RFC-0025) */
     proven_loop_timer_t timer;
     proven_tls_conn_t *tls;
-    wsc_buf_t out;                     /* bytes for the peer that the transport has not taken: the request head, then frames */
-    wsc_buf_t in;                      /* the answer's head while it arrives; then input the protocol would not take yet */
+    proven_wsc_buf_t out;                     /* bytes for the peer that the transport has not taken: the request head, then frames */
+    proven_wsc_buf_t in;                      /* the answer's head while it arrives; then input the protocol would not take yet */
     proven_byte_t *rbuf;               /* what one read holds (and, for TLS, what it decrypts to) */
     void (*on_open)(void *ctx, proven_ws_stream_t *ws, proven_u8str_view_t protocol);
     void *ctx;
     proven_size_t max_head;
     proven_u32 depth;
-    wsc_state_t state;
-    bool registered, connected_at_start, dead, paused, more_out, peer_eof, offered_deflate;
+    proven_wsc_state_t state;
+    bool attached, sock_gone, recv_armed, dead, paused, more_out, peer_eof, offered_deflate, offered_takeover, offered_peer_none;
     proven_byte_t key[PROVEN_WS_KEY_SIZE];
     proven_size_t protocols_len;
     proven_byte_t protocols[256];      /* the offer, to check the answer against */
-} wsc_t;
+} proven_wsc_t;
 
 static proven_u8str_view_t wsc_lit_n(const char *s, proven_size_t n) { return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = n }; }
 #define wsc_lit(s) wsc_lit_n((s), sizeof(s) - 1)
 
-static const proven_http_event_raw_ops_t *wsc_ops(const wsc_t *c) { return *(const proven_http_event_raw_ops_t *const *)(const void *)c->ws; }
+static const proven_http_event_raw_ops_t *wsc_ops(const proven_wsc_t *c) { return *(const proven_http_event_raw_ops_t *const *)(const void *)c->ws; }
 
-static void wsc_enter(wsc_t *c) { c->depth++; }
+static void wsc_enter(proven_wsc_t *c) { c->depth++; }
 
-static void wsc_leave(wsc_t *c) {
-    if (--c->depth > 0 || !c->dead) return;
+static void wsc_free(proven_wsc_t *c) {
     proven_allocator_t a = c->alloc;
     if (c->out.p) a.free_fn(a.ctx, c->out.p);
     if (c->in.p) a.free_fn(a.ctx, c->in.p);
@@ -79,7 +78,13 @@ static void wsc_leave(wsc_t *c) {
     a.free_fn(a.ctx, c);
 }
 
-static bool wsc_append(wsc_t *c, wsc_buf_t *b, const proven_byte_t *p, proven_size_t n) {
+static void wsc_leave(proven_wsc_t *c) {
+    if (--c->depth > 0 || !c->dead) return;
+    if (c->attached && !c->sock_gone) return;      /* wsc_sock_closed frees it */
+    wsc_free(c);
+}
+
+static bool wsc_append(proven_wsc_t *c, proven_wsc_buf_t *b, const proven_byte_t *p, proven_size_t n) {
     if (n == 0) return true;
     if (b->off > 0 && b->off == b->len) b->off = b->len = 0;
     if (b->len + n > b->cap) {
@@ -98,20 +103,20 @@ static bool wsc_append(wsc_t *c, wsc_buf_t *b, const proven_byte_t *p, proven_si
     return true;
 }
 
-static proven_size_t wsc_pending(const wsc_buf_t *b) { return b->len - b->off; }
+static proven_size_t wsc_pending(const proven_wsc_buf_t *b) { return b->len - b->off; }
 
 /* The socket and everything on the loop go; the record stays until the stack has left it. */
-static void wsc_shut(wsc_t *c) {
+static void wsc_shut(proven_wsc_t *c) {
     if (c->dead) return;
     c->dead = true;
     proven_loop_timer_cancel(c->loop, &c->timer);
-    if (c->registered) { proven_loop_io_remove(c->loop, &c->io); c->registered = false; }      /* before the close */
+    if (c->attached) proven_loop_close(c->loop, &c->ls);      /* the loop stops watching before the close */
     if (c->tls) { proven_tls_conn_destroy(c->tls); c->tls = (void *)0; }
     if (proven_net_conn_is_open(&c->sock)) (void)proven_net_close(&c->sock);
 }
 
 /* The connection is gone without the protocol having let go of it: the protocol is told, once. */
-static void wsc_gone(wsc_t *c, proven_err_t why) {
+static void wsc_gone(proven_wsc_t *c, proven_err_t why) {
     if (c->dead) return;
     proven_ws_stream_t *ws = c->ws;
     const bool open = c->state == WSC_OPEN;
@@ -125,43 +130,58 @@ static void wsc_gone(wsc_t *c, proven_err_t why) {
     wsc_leave(c);
 }
 
-static void wsc_watch(wsc_t *c) {
-    if (c->dead || !c->registered) return;
-    proven_u8 want = 0;
-    if (c->state == WSC_CONNECTING) want = PROVEN_NET_WRITABLE;
-    else {
-        /* Not read while the protocol is paused, or while it holds input it has not taken:
-         * what the peer sends then waits in the socket, and the peer is told so by TCP. */
-        if (!c->peer_eof && !(c->state == WSC_OPEN && (c->paused || wsc_pending(&c->in) > 0))) want |= PROVEN_NET_READABLE;
-        if (c->more_out || wsc_pending(&c->out) > 0 || (c->tls && proven_tls_pending_output(c->tls).size > 0)) want |= PROVEN_NET_WRITABLE;
-    }
-    (void)proven_loop_io_set(c->loop, &c->io, want);
+/* How much the loop may hold for the connection before the queue here gives it no more. */
+#define WSC_HOLD ((proven_size_t)32 * 1024)
+
+/* Ask the loop for input (a receive of zero bytes, left in flight once armed and ignored when
+ * it comes while reading is off), and to be told when what it holds has gone - or, with more
+ * waiting here, when half the hold has. */
+static bool wsc_reading(const proven_wsc_t *c) {
+    /* Not read while the protocol is paused, or while it holds input it has not taken: what
+     * the peer sends then waits in the socket, and the peer is told so by TCP. */
+    return !c->peer_eof && !(c->state == WSC_OPEN && (c->paused || wsc_pending(&c->in) > 0));
 }
 
-/* What TLS holds, towards the socket. False when the connection ended. */
-static bool wsc_flush_tls(wsc_t *c) {
+static void wsc_gone(proven_wsc_t *c, proven_err_t why);
+
+static void wsc_watch(proven_wsc_t *c) {
+    if (c->dead || !c->attached || c->state == WSC_CONNECTING) return;     /* connecting: the loop says when */
+    if (wsc_reading(c) && !c->recv_armed) {
+        if (proven_loop_recv(c->loop, &c->ls, (proven_mem_mut_t){ .ptr = (void *)0, .size = 0 }) != PROVEN_OK) { wsc_gone(c, PROVEN_ERR_RESET); return; }
+        c->recv_armed = true;
+    }
+    if (proven_loop_send_queued(&c->ls) == 0 && !c->more_out) return;
+    if (proven_loop_send_wait(c->loop, &c->ls, c->more_out ? WSC_HOLD / 2 : 0) != PROVEN_OK) wsc_gone(c, PROVEN_ERR_RESET);
+}
+
+/* Bytes to the loop, which takes them whole. False when the connection ended. */
+static bool wsc_put(proven_wsc_t *c, const proven_byte_t *p, proven_size_t n) {
+    proven_result_size_t w = proven_loop_send(c->loop, &c->ls, (proven_mem_view_t){ .ptr = p, .size = n });
+    if (w.err == PROVEN_OK && w.value == n) return true;
+    wsc_gone(c, w.err == PROVEN_ERR_NOMEM ? PROVEN_ERR_NOMEM : PROVEN_ERR_RESET);
+    return false;
+}
+
+/* What TLS holds, to the loop. False when the connection ended. */
+static bool wsc_flush_tls(proven_wsc_t *c) {
     while (c->tls && !c->dead) {
         proven_mem_view_t pending = proven_tls_pending_output(c->tls);
         if (pending.size == 0) break;
-        proven_result_size_t w = proven_net_write(&c->sock, pending, PROVEN_NET_DONT_WAIT);
-        if (w.err == PROVEN_ERR_TIMEOUT || w.err == PROVEN_ERR_AGAIN) { c->more_out = true; break; }
-        if (w.err != PROVEN_OK) { wsc_gone(c, PROVEN_ERR_RESET); return false; }
-        proven_tls_output_sent(c->tls, w.value);
-        if (w.value == 0) { c->more_out = true; break; }
+        if (!wsc_put(c, pending.ptr, pending.size)) return false;
+        proven_tls_output_sent(c->tls, pending.size);
     }
     return !c->dead;
 }
 
-/* As much of the queue as the transport takes now. False when the connection ended. */
-static bool wsc_flush(wsc_t *c) {
+/* As much of the queue as the loop takes now: while it holds less than WSC_HOLD for the
+ * connection - straight to the socket when nothing waits there. False when the connection
+ * ended. */
+static bool wsc_flush(proven_wsc_t *c) {
     if (c->dead) return false;
-    c->more_out = false;
     if (c->tls && c->state != WSC_HANDSHAKE && c->state != WSC_CONNECTING) {
-        /* A record's worth at a time, and only when the last has left: TLS's own queue stays
-         * one record long whatever waits here. */
-        while (wsc_pending(&c->out) > 0) {
+        /* A record's worth at a time. */
+        while (wsc_pending(&c->out) > 0 && proven_loop_send_queued(&c->ls) < WSC_HOLD) {
             if (!wsc_flush_tls(c)) return false;
-            if (proven_tls_pending_output(c->tls).size > 0) break;
             const proven_size_t n = wsc_pending(&c->out) < 16384 ? wsc_pending(&c->out) : 16384;
             proven_result_size_t w = proven_tls_write(c->tls, (proven_mem_view_t){ .ptr = c->out.p + c->out.off, .size = n });
             if (w.err != PROVEN_OK) { wsc_gone(c, PROVEN_ERR_RESET); return false; }
@@ -170,25 +190,28 @@ static bool wsc_flush(wsc_t *c) {
         }
         if (!wsc_flush_tls(c)) return false;
     } else if (!c->tls) {
-        while (wsc_pending(&c->out) > 0) {
-            proven_result_size_t w = proven_net_write(&c->sock, (proven_mem_view_t){ .ptr = c->out.p + c->out.off, .size = wsc_pending(&c->out) }, PROVEN_NET_DONT_WAIT);
-            if (w.err == PROVEN_ERR_TIMEOUT || w.err == PROVEN_ERR_AGAIN) { c->more_out = true; break; }
-            if (w.err != PROVEN_OK) { wsc_gone(c, PROVEN_ERR_RESET); return false; }
-            c->out.off += w.value;
-            if (w.value == 0) { c->more_out = true; break; }
+        const proven_size_t held = proven_loop_send_queued(&c->ls);
+        if (wsc_pending(&c->out) > 0 && held < WSC_HOLD) {
+            proven_size_t n = WSC_HOLD - held;
+            if (n > wsc_pending(&c->out)) n = wsc_pending(&c->out);
+            if (!wsc_put(c, c->out.p + c->out.off, n)) return false;
+            c->out.off += n;
         }
     } else if (!wsc_flush_tls(c)) return false;
+    /* More to give - but not before TLS is up: the handshake's own reads move it, and a wait
+     * for room then would be answered every round. */
+    c->more_out = wsc_pending(&c->out) > 0 && !(c->tls && (c->state == WSC_HANDSHAKE || c->state == WSC_CONNECTING));
     if (c->out.off == c->out.len) c->out.off = c->out.len = 0;
     return true;
 }
 
-static proven_size_t wsc_queued(const wsc_t *c) {
-    return wsc_pending(&c->out) + (c->tls ? proven_tls_pending_output(c->tls).size : 0);
+static proven_size_t wsc_queued(const proven_wsc_t *c) {
+    return wsc_pending(&c->out) + (c->tls ? proven_tls_pending_output(c->tls).size : 0) + (c->attached ? proven_loop_send_queued(&c->ls) : 0);
 }
 
 /* After the protocol let go politely: when everything has left, say that no more will come,
  * and wait a moment for the peer to close. */
-static void wsc_finishing(wsc_t *c) {
+static void wsc_finishing(proven_wsc_t *c) {
     if (c->dead || c->state != WSC_FINISHING) return;
     if (wsc_queued(c) > 0) { wsc_watch(c); return; }
     if (!c->peer_eof) (void)proven_net_shutdown_write(&c->sock);
@@ -201,7 +224,7 @@ static void wsc_finishing(wsc_t *c) {
 // -----------------------------------------------------------------------------
 
 static bool wsc_tr_send(void *conn, proven_mem_view_t a, proven_mem_view_t b) {
-    wsc_t *c = conn;
+    proven_wsc_t *c = conn;
     if (c->dead) return false;
     wsc_enter(c);
     bool ok = wsc_append(c, &c->out, a.ptr, a.size) && wsc_append(c, &c->out, b.ptr, b.size);
@@ -215,16 +238,16 @@ static bool wsc_tr_send(void *conn, proven_mem_view_t a, proven_mem_view_t b) {
 static void wsc_on_timer(void *ctx);
 
 static void wsc_tr_timer(void *conn, proven_u32 ms) {
-    wsc_t *c = conn;
+    proven_wsc_t *c = conn;
     if (c->dead) return;
     if (ms == 0) proven_loop_timer_cancel(c->loop, &c->timer);
     else proven_loop_timer_set(c->loop, &c->timer, ms, wsc_on_timer, c);
 }
 
-static void wsc_deliver(wsc_t *c);
+static void wsc_deliver(proven_wsc_t *c);
 
 static void wsc_tr_pause(void *conn, bool paused) {
-    wsc_t *c = conn;
+    proven_wsc_t *c = conn;
     if (c->dead || c->paused == paused) return;
     c->paused = paused;
     wsc_enter(c);
@@ -234,7 +257,7 @@ static void wsc_tr_pause(void *conn, bool paused) {
 }
 
 static void wsc_tr_close(void *conn) {
-    wsc_t *c = conn;
+    proven_wsc_t *c = conn;
     if (c->dead) return;
     c->ws = (void *)0;
     c->state = WSC_FINISHING;
@@ -246,7 +269,7 @@ static void wsc_tr_close(void *conn) {
 }
 
 static void wsc_tr_kill(void *conn) {
-    wsc_t *c = conn;
+    proven_wsc_t *c = conn;
     if (c->dead) return;
     c->ws = (void *)0;
     wsc_enter(c);
@@ -255,7 +278,7 @@ static void wsc_tr_kill(void *conn) {
 }
 
 static proven_size_t wsc_tr_buffered(const void *conn) {
-    const wsc_t *c = conn;
+    const proven_wsc_t *c = conn;
     return c->dead ? 0 : wsc_queued(c);
 }
 
@@ -266,7 +289,7 @@ static const proven_ws_transport_t_ wsc_transport = { wsc_tr_send, wsc_tr_timer,
 // -----------------------------------------------------------------------------
 
 /* Input that is waiting, to the protocol: as much as it takes. */
-static void wsc_deliver(wsc_t *c) {
+static void wsc_deliver(proven_wsc_t *c) {
     while (!c->dead && c->ws && c->state == WSC_OPEN && !c->paused && wsc_pending(&c->in) > 0) {
         const proven_size_t n = wsc_pending(&c->in);
         const proven_size_t used = wsc_ops(c)->on_input(c->ws, (proven_mem_mut_t){ .ptr = c->in.p + c->in.off, .size = n });
@@ -278,7 +301,7 @@ static void wsc_deliver(wsc_t *c) {
 }
 
 /* The answer to the upgrade, when all of its head is here. */
-static void wsc_answer(wsc_t *c) {
+static void wsc_answer(proven_wsc_t *c) {
     proven_http_header_t headers[64];
     proven_http_response_t head;
     proven_size_t head_size = 0;
@@ -290,8 +313,11 @@ static void wsc_answer(wsc_t *c) {
     if (head.status != 101) { wsc_gone(c, PROVEN_ERR_REFUSED); return; }
     proven_u8str_view_t chosen = { 0 };
     bool deflate = false;
+    proven_ws_deflate_terms_t terms = { .server_window_bits = 15, .client_window_bits = 15 };
     const proven_u8str_view_t key = { .ptr = c->key, .size = sizeof c->key }, offered = { .ptr = c->protocols, .size = c->protocols_len };
-    if (c->offered_deflate) e = proven_ws_check_response_deflate(&head, key, offered, &chosen, &deflate);
+    if (c->offered_peer_none) e = proven_ws_check_response_peer_no_takeover(&head, key, offered, &chosen, &deflate, &terms);
+    else if (c->offered_takeover) e = proven_ws_check_response_takeover(&head, key, offered, &chosen, &deflate, &terms);
+    else if (c->offered_deflate) e = proven_ws_check_response_deflate(&head, key, offered, &chosen, &deflate);
     else e = proven_ws_check_response(&head, key, offered, &chosen);
     if (e != PROVEN_OK) { wsc_gone(c, PROVEN_ERR_INVALID_FORMAT); return; }
     /* Open. The timer is the protocol's from here; what came behind the head is frames. */
@@ -303,13 +329,13 @@ static void wsc_answer(wsc_t *c) {
     c->in.off = head_size;
     if (c->in.off == c->in.len) c->in.off = c->in.len = 0;
     proven_ws_stream_t *ws = c->ws;
-    proven_ws_event_client_opened_(ws, deflate);
+    proven_ws_event_client_opened_(ws, deflate ? &terms : (void *)0);
     if (c->on_open && !c->dead && c->ws) c->on_open(c->ctx, ws, (proven_u8str_view_t){ .ptr = name, .size = name_len });
     if (!c->dead && c->ws) wsc_deliver(c);
 }
 
 /* Bytes in the clear, from the socket or out of TLS. */
-static void wsc_plain(wsc_t *c, proven_byte_t *p, proven_size_t n) {
+static void wsc_plain(proven_wsc_t *c, proven_byte_t *p, proven_size_t n) {
     if (c->dead || n == 0) return;
     if (c->state == WSC_UPGRADE) {
         if (c->in.len + n > c->max_head + WSC_READ_BYTES) { wsc_gone(c, PROVEN_ERR_INVALID_FORMAT); return; }
@@ -327,22 +353,22 @@ static void wsc_plain(wsc_t *c, proven_byte_t *p, proven_size_t n) {
     if (!wsc_append(c, &c->in, p, n)) wsc_gone(c, PROVEN_ERR_NOMEM);
 }
 
-static void wsc_send_request(wsc_t *c) {
+static void wsc_send_request(proven_wsc_t *c) {
     c->state = WSC_UPGRADE;
     if (wsc_flush(c)) wsc_watch(c);
 }
 
-static void wsc_eof(wsc_t *c) {
+static void wsc_eof(proven_wsc_t *c) {
     c->peer_eof = true;
     if (c->state == WSC_FINISHING) { wsc_shut(c); return; }
     /* An end with no close frame - or before the upgrade was answered. */
     wsc_gone(c, c->state == WSC_OPEN ? PROVEN_ERR_EOF : PROVEN_ERR_RESET);
 }
 
-static void wsc_readable(wsc_t *c) {
+static void wsc_readable(proven_wsc_t *c) {
     for (int rounds = 0; rounds < 8 && !c->dead && !c->peer_eof; ++rounds) {
         if (c->state == WSC_OPEN && (c->paused || wsc_pending(&c->in) > 0)) break;
-        proven_result_size_t rd = proven_net_read(&c->sock, (proven_mem_mut_t){ .ptr = c->rbuf, .size = WSC_READ_BYTES }, PROVEN_NET_DONT_WAIT);
+        proven_result_size_t rd = proven_loop_read(c->loop, &c->ls, (proven_mem_mut_t){ .ptr = c->rbuf, .size = WSC_READ_BYTES });
         if (rd.err == PROVEN_ERR_TIMEOUT || rd.err == PROVEN_ERR_AGAIN) break;
         if (rd.err == PROVEN_ERR_EOF) { wsc_eof(c); break; }
         if (rd.err != PROVEN_OK) { wsc_gone(c, rd.err == PROVEN_ERR_REFUSED || rd.err == PROVEN_ERR_UNREACHABLE ? rd.err : PROVEN_ERR_RESET); break; }
@@ -379,40 +405,66 @@ static void wsc_readable(wsc_t *c) {
     }
 }
 
-static void wsc_on_io(void *ctx, proven_u8 got) {
-    wsc_t *c = ctx;
+/* What reading made due - a pong, the answer to a close - leaves now; then the watch. */
+static void wsc_after_io(proven_wsc_t *c) {
+    if (c->dead || c->state == WSC_CONNECTING) return;
+    const proven_size_t before = wsc_queued(c);
+    if (before > 0 && wsc_flush(c) && c->ws && c->state == WSC_OPEN && wsc_queued(c) < before) wsc_ops(c)->on_progress(c->ws);
+    if (!c->dead && c->state == WSC_FINISHING) wsc_finishing(c);
+    else if (!c->dead) wsc_watch(c);
+}
+
+static void wsc_sock_connected(void *ctx, proven_err_t err) {
+    proven_wsc_t *c = ctx;
+    if (err == PROVEN_ERR_CANCELLED || c->dead || c->state != WSC_CONNECTING) return;
     wsc_enter(c);
-    if (!c->dead && c->state == WSC_CONNECTING) {
-        proven_err_t e = c->connected_at_start ? PROVEN_OK : proven_net_connect_finish(&c->sock);
-        if (e == PROVEN_OK) {
-            (void)proven_net_conn_set_nodelay(&c->sock, true);
-            if (c->tls) { c->state = WSC_HANDSHAKE; if (wsc_flush_tls(c)) wsc_watch(c); }
-            else wsc_send_request(c);
-        } else if (e != PROVEN_ERR_AGAIN) {
-            wsc_gone(c, e);
-        }
-    } else if (!c->dead) {
-        if (got & PROVEN_NET_WRITABLE) {
-            const proven_size_t before = wsc_queued(c);
-            if (wsc_flush(c)) {
-                if (c->state == WSC_FINISHING) wsc_finishing(c);
-                else if (c->ws && c->state == WSC_OPEN && wsc_queued(c) < before) wsc_ops(c)->on_progress(c->ws);
-            }
-        }
-        if (!c->dead && (got & (PROVEN_NET_READABLE | PROVEN_NET_FAILED))) wsc_readable(c);
-        if (!c->dead && c->state != WSC_CONNECTING) {
-            /* What reading made due - a pong, the answer to a close - leaves now. */
-            const proven_size_t before = wsc_queued(c);
-            if (before > 0 && wsc_flush(c) && c->ws && c->state == WSC_OPEN && wsc_queued(c) < before) wsc_ops(c)->on_progress(c->ws);
-            if (!c->dead && c->state == WSC_FINISHING) wsc_finishing(c);
-            else if (!c->dead) wsc_watch(c);
-        }
+    if (err == PROVEN_OK) {
+        (void)proven_net_conn_set_nodelay(&c->sock, true);
+        if (c->tls) { c->state = WSC_HANDSHAKE; if (wsc_flush_tls(c)) wsc_watch(c); }
+        else wsc_send_request(c);
+    } else {
+        wsc_gone(c, err);
     }
     wsc_leave(c);
 }
 
+static void wsc_sock_received(void *ctx, proven_err_t err, proven_size_t n) {
+    proven_wsc_t *c = ctx;
+    (void)n;
+    c->recv_armed = false;
+    if (err == PROVEN_ERR_CANCELLED || c->dead) return;
+    wsc_enter(c);
+    if (wsc_reading(c)) wsc_readable(c);          /* reading was turned off since: it waits in the socket */
+    wsc_after_io(c);
+    wsc_leave(c);
+}
+
+static void wsc_sock_writable(void *ctx, proven_err_t err) {
+    proven_wsc_t *c = ctx;
+    if (err == PROVEN_ERR_CANCELLED || c->dead) return;
+    wsc_enter(c);
+    if (err != PROVEN_OK) wsc_gone(c, PROVEN_ERR_RESET);
+    else {
+        const proven_size_t before = wsc_queued(c);
+        if (wsc_flush(c)) {
+            if (c->state == WSC_FINISHING) wsc_finishing(c);
+            else if (c->ws && c->state == WSC_OPEN && wsc_queued(c) < before) wsc_ops(c)->on_progress(c->ws);
+        }
+        wsc_after_io(c);
+    }
+    wsc_leave(c);
+}
+
+static void wsc_sock_closed(void *ctx) {
+    proven_wsc_t *c = ctx;
+    c->sock_gone = true;
+    if (c->dead && c->depth == 0) wsc_free(c);
+}
+
+static const proven_loop_sock_fns_t wsc_sock_fns = { .received = wsc_sock_received, .writable = wsc_sock_writable, .connected = wsc_sock_connected, .closed = wsc_sock_closed };
+
 static void wsc_on_timer(void *ctx) {
-    wsc_t *c = ctx;
+    proven_wsc_t *c = ctx;
     if (c->dead) return;
     wsc_enter(c);
     if (c->state == WSC_FINISHING) wsc_shut(c);                          /* the peer did not close: this side does */
@@ -445,9 +497,9 @@ proven_err_t proven_ws_event_connect(proven_loop_t *loop, const proven_ws_event_
     else if (proven_net_addr_parse(u.host, port, &to) != PROVEN_OK) return PROVEN_ERR_INVALID_ARG;
 
     proven_allocator_t alloc = proven_alloc_is_valid(o->alloc) ? o->alloc : proven_loop_allocator(loop);
-    proven_result_mem_mut_t m = alloc.alloc_fn(alloc.ctx, sizeof(wsc_t), 16);
+    proven_result_mem_mut_t m = alloc.alloc_fn(alloc.ctx, sizeof(proven_wsc_t), 16);
     if (m.err != PROVEN_OK) return PROVEN_ERR_NOMEM;
-    wsc_t *c = (wsc_t *)(void *)m.value.ptr;
+    proven_wsc_t *c = (proven_wsc_t *)(void *)m.value.ptr;
     for (proven_size_t i = 0; i < sizeof *c; ++i) ((proven_byte_t *)c)[i] = 0;
     c->loop = loop;
     c->alloc = alloc;
@@ -455,6 +507,8 @@ proven_err_t proven_ws_event_connect(proven_loop_t *loop, const proven_ws_event_
     c->ctx = o->ws.ctx;
     c->max_head = o->max_head_bytes ? o->max_head_bytes : 16384;
     c->offered_deflate = o->ws.compress;
+    c->offered_takeover = o->ws.compress && !o->ws.compress_no_takeover;
+    c->offered_peer_none = c->offered_takeover && o->ws.compress_peer_no_takeover;
     c->protocols_len = o->protocols.size;
     for (proven_size_t i = 0; i < o->protocols.size; ++i) c->protocols[i] = o->protocols.ptr[i];
     c->depth = 1;                                  /* this call: wsc_leave at the end frees it if it died */
@@ -504,7 +558,11 @@ proven_err_t proven_ws_event_connect(proven_loop_t *loop, const proven_ws_event_
         if (e == PROVEN_OK) e = proven_http_write_header(text, &len, wsc_lit("Sec-WebSocket-Key"), (proven_u8str_view_t){ .ptr = c->key, .size = sizeof c->key });
         if (e == PROVEN_OK) e = proven_http_write_header(text, &len, wsc_lit("Sec-WebSocket-Version"), wsc_lit("13"));
         if (e == PROVEN_OK && o->protocols.size > 0) e = proven_http_write_header(text, &len, wsc_lit("Sec-WebSocket-Protocol"), o->protocols);
-        if (e == PROVEN_OK && o->ws.compress) e = proven_http_write_header(text, &len, wsc_lit("Sec-WebSocket-Extensions"), wsc_lit(PROVEN_WS_DEFLATE_OFFER));
+        if (e == PROVEN_OK && o->ws.compress) {
+            e = proven_http_write_header(text, &len, wsc_lit("Sec-WebSocket-Extensions"),
+                                         c->offered_peer_none ? wsc_lit(PROVEN_WS_DEFLATE_OFFER_PEER_NO_TAKEOVER)
+                                         : c->offered_takeover ? wsc_lit(PROVEN_WS_DEFLATE_OFFER_TAKEOVER) : wsc_lit(PROVEN_WS_DEFLATE_OFFER));
+        }
         for (proven_size_t i = 0; i < o->header_count && e == PROVEN_OK; ++i) {
             /* The seven this call writes are not the caller's to write as well. */
             static const char *const mine[] = { "host", "upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-protocol", "sec-websocket-extensions" };
@@ -526,13 +584,11 @@ proven_err_t proven_ws_event_connect(proven_loop_t *loop, const proven_ws_event_
     if (e == PROVEN_OK && secure) e = proven_tls_client_create(o->tls, u.host, (void *)0, &c->tls);
     if (e == PROVEN_OK) {
         c->ws = ws;
-        e = proven_net_connect_start(to, &c->sock);
-        if (e == PROVEN_OK) c->connected_at_start = true;
-        else if (e == PROVEN_ERR_AGAIN) e = PROVEN_OK;
+        /* The loop makes the connection and says how it went from the loop, so that nothing is
+         * reported from inside the call that began it. */
+        e = proven_loop_connect(loop, &c->ls, to, &c->sock, &wsc_sock_fns, c);
+        if (e == PROVEN_OK) proven_loop_send_limit_(&c->ls, (proven_size_t)-1);     /* WSC_HOLD bounds what it gives */
     }
-    /* The socket is watched for writing either way: what follows happens from the loop, so
-     * that nothing is reported from inside the call that began it. */
-    if (e == PROVEN_OK) e = proven_loop_io_add(loop, &c->io, proven_net_conn_handle(&c->sock), PROVEN_NET_WRITABLE, wsc_on_io, c);
     if (e != PROVEN_OK) {
         /* Not started: nothing is told, and nothing is left. */
         if (ws) proven_ws_event_client_discard_(ws);
@@ -543,7 +599,7 @@ proven_err_t proven_ws_event_connect(proven_loop_t *loop, const proven_ws_event_
         wsc_leave(c);
         return e;
     }
-    c->registered = true;
+    c->attached = true;
     c->state = WSC_CONNECTING;
     proven_loop_timer_set(loop, &c->timer, o->connect_timeout_ms ? o->connect_timeout_ms : 10000, wsc_on_timer, c);
     *out = ws;

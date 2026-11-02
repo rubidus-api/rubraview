@@ -18,7 +18,7 @@
  * in and out, time, and the handler's callbacks.
  *
  * A handler is given the same `proven_http_stream_t *` it gets for HTTP/1.1, but for HTTP/2
- * that pointer is to an h2s_t below - one stream of many - which shares only its first member
+ * that pointer is to an proven_h2s_t below - one stream of many - which shares only its first member
  * with the HTTP/1.1 struct. http_event.c reads `kind` there and sends every call here.
  *
  * Re-entrancy, as in http_event.c: a callback may respond, end, abort, pause or resume, and
@@ -40,7 +40,7 @@
 typedef struct h2d h2d_t;
 
 typedef struct h2s {
-    ev_head_t h;                       /* first: what http_event.c reads */
+    proven_ev_head_t h;                       /* first: what http_event.c reads */
     h2d_t *d;                          /* not to be followed once `dead` */
     struct h2s *prev, *next;
     void *user;
@@ -65,6 +65,7 @@ typedef struct h2s {
     bool engine_done;                  /* the engine has seen this side's end already (a response with no body) */
     bool window_shut;                  /* the engine took less than it was offered: the peer's window, and only the engine knows when it opens */
     bool tunnel;                       /* an extended CONNECT (RFC 8441): what follows the head is a protocol's, not a body */
+    bool early;                        /* its request arrived in early data (RFC-0027) */
     /* A WebSocket on this stream, once its handler accepted the extended CONNECT: its object,
      * whose first member is its operations (proven_internal_http_event.h), and its timer. Null
      * when there is none, and from the moment it let go of the stream (close, kill). */
@@ -72,15 +73,17 @@ typedef struct h2s {
     proven_loop_timer_t timer;
     bool told_drain;                   /* the WebSocket was told the server is ending */
     proven_size_t held_off;            /* a WebSocket's: how much of `held` it has taken */
-} h2s_t;
+    proven_http_trailers_t_ in_trailers;   /* the request's, from its end until on_done (proven_http_stream_trailers) */
+    proven_http_trailers_t_ out_trailers;  /* the response's, sent in place of END_STREAM once `out` has drained */
+} proven_h2s_t;
 
 struct h2d {
     const proven_http_event_raw_ops_t *ops;      /* first: http_event.c finds the operations here */
     proven_http_stream_t *conn;        /* the transport; not to be followed once `dead` */
     proven_http_event_server_t *server;
     proven_h2_conn_t *engine;
-    h2s_t *streams;
-    h2s_t *turn;                       /* the stream whose output was moved last in a round: the next round goes on behind it */
+    proven_h2s_t *streams;
+    proven_h2s_t *turn;                       /* the stream whose output was moved last in a round: the next round goes on behind it */
     proven_size_t share;               /* while `sharing`: how much more the stream whose turn it is may move */
     bool sharing;
     proven_size_t stream_count;
@@ -94,6 +97,7 @@ struct h2d {
     bool over;                         /* nothing more will be taken: write what is owed and close */
     bool eof;                          /* the peer closed its sending side */
     bool held;                         /* input is left where it is - the connection is not read - until the engine's output is under its bound again */
+    bool early_now;                    /* everything the engine has taken so far arrived as early data (RFC-0027) */
 };
 
 /* The engine's clock for growing windows: microseconds. */
@@ -143,9 +147,9 @@ static void d_leave(h2d_t *d) {
     a.free_fn(a.ctx, d);
 }
 
-static void s_enter(h2s_t *s) { s->h.depth++; }
+static void s_enter(proven_h2s_t *s) { s->h.depth++; }
 
-static void s_leave(h2s_t *s) {
+static void s_leave(proven_h2s_t *s) {
     if (--s->h.depth > 0 || !s->dead) return;
     proven_allocator_t a = s->h.server->alloc;
     a.free_fn(a.ctx, s);
@@ -153,7 +157,7 @@ static void s_leave(h2s_t *s) {
 
 /* The exchange is over: tell the handler, once, and let go of everything but the struct,
  * which goes when the outermost entry leaves. */
-static void s_finish(h2s_t *s, proven_err_t why) {
+static void s_finish(proven_h2s_t *s, proven_err_t why) {
     if (s->dead) return;
     proven_http_event_server_t *sv = s->h.server;
     proven_allocator_t a = sv->alloc;
@@ -174,6 +178,8 @@ static void s_finish(h2s_t *s, proven_err_t why) {
         s->active = false;
         if (sv->cfg.on.on_done) sv->cfg.on.on_done(sv->cfg.ctx, (proven_http_stream_t *)(void *)s, why);
     }
+    proven_http_trailers_free_(a, &s->in_trailers);
+    proven_http_trailers_free_(a, &s->out_trailers);
     if (s->raw) {
         void *raw = s->raw;
         s->raw = (void *)0;
@@ -183,7 +189,7 @@ static void s_finish(h2s_t *s, proven_err_t why) {
 }
 
 /* Give up on a stream from this side: the peer is told, the handler is told why. */
-static void s_reset(h2s_t *s, proven_h2_error_t code, proven_err_t why) {
+static void s_reset(proven_h2s_t *s, proven_h2_error_t code, proven_err_t why) {
     if (s->dead) return;
     if (!s->d->dead && !s->engine_done) (void)proven_h2_conn_reset(s->d->engine, s->id, code);
     s_finish(s, why);
@@ -214,7 +220,7 @@ static proven_size_t d_queued(const h2d_t *d) {
 }
 
 /* A request's body is owed from now: it has `body_timeout_ms` to say something. */
-static void s_expect_body(h2s_t *s) {
+static void s_expect_body(proven_h2s_t *s) {
     s->body_due = s->in_done || s->paused || s->tunnel ? 0 : proven_time_monotonic_now() + (proven_time_t)s->h.server->cfg.body_timeout_ms * 1000000;
 }
 
@@ -232,7 +238,7 @@ static void d_arm(h2d_t *d) {
     const proven_time_t now = proven_time_monotonic_now();
     d->quiet_due = ms ? now + (proven_time_t)ms * 1000000 : 0;
     proven_time_t due = 0;
-    for (const h2s_t *s = d->streams; s; s = s->next)
+    for (const proven_h2s_t *s = d->streams; s; s = s->next)
         if (s->body_due != 0 && (due == 0 || s->body_due < due)) due = s->body_due;
     if (due != 0) {
         const proven_time_t left = due > now ? (due - now) / 1000000 + 1 : 1;
@@ -246,7 +252,7 @@ static void d_arm(h2d_t *d) {
 // A stream's output
 // -----------------------------------------------------------------------------
 
-static proven_size_t s_out_pending(const h2s_t *s) { return s->out_len - s->out_off; }
+static proven_size_t s_out_pending(const proven_h2s_t *s) { return s->out_len - s->out_off; }
 
 /* How much more body the engine may be given before it holds `max_buffered_output`. */
 /* What one stream moves towards the engine in its turn of a round. Streams that hold output
@@ -265,7 +271,7 @@ static proven_size_t d_room(const h2d_t *d) {
 
 /* Move what a stream has made towards the engine; send its end when all of it has gone; tell
  * a handler that was refused that it may write again. */
-static void s_push(h2s_t *s) {
+static void s_push(proven_h2s_t *s) {
     if (s->dead || !s->response_begun) return;
     h2d_t *d = s->d;
     proven_http_event_server_t *sv = s->h.server;
@@ -284,8 +290,9 @@ static void s_push(h2s_t *s) {
     if (!s->dead && s_out_pending(s) == 0) {
         if (s->out) { sv->alloc.free_fn(sv->alloc.ctx, s->out); s->out = (void *)0; s->out_len = s->out_off = s->out_cap = 0; }
         if (s->end_asked) {
-            proven_result_size_t r = s->engine_done ? (proven_result_size_t){ .err = PROVEN_OK, .value = 0 }
-                                                    : proven_h2_conn_send_data(d->engine, s->id, (proven_mem_view_t){ .ptr = (void *)0, .size = 0 }, true);
+            proven_result_size_t r = s->engine_done            ? (proven_result_size_t){ .err = PROVEN_OK, .value = 0 }
+                                     : s->out_trailers.count ? (proven_result_size_t){ .err = proven_h2_conn_send_trailers(d->engine, s->id, s->out_trailers.fields, s->out_trailers.count) }
+                                                             : proven_h2_conn_send_data(d->engine, s->id, (proven_mem_view_t){ .ptr = (void *)0, .size = 0 }, true);
             s_finish(s, r.err == PROVEN_OK ? PROVEN_OK : PROVEN_ERR_RESET);
         } else if (s->want_writable && !s->window_shut && d_room(d) > 0) {
             if (d->calls > 0) {
@@ -337,6 +344,13 @@ static void d_request(h2d_t *d, const proven_h2_event_t *ev) {
     }
     d->asked = true;
     if (bad) { (void)proven_h2_conn_reset(d->engine, ev->stream_id, PROVEN_H2_PROTOCOL_ERROR); return; }
+    /* A request that arrived in early data and is not safe to repeat: 425 Too Early, from here
+     * (RFC 8470); the client sends it again after the handshake. */
+    const proven_http_method_t m = proven_http_method_from_text(rq->method);
+    if (d->early_now && !(ev->end_stream && !tunnel && (m == PROVEN_HTTP_GET || m == PROVEN_HTTP_HEAD || m == PROVEN_HTTP_OPTIONS))) {
+        d_refuse(d, ev->stream_id, "425");
+        return;
+    }
     const proven_size_t add_host = !has_host && rq->authority.size > 0 ? 1 : 0;
     /* A handler tells whether a body is coming from the fields, as HTTP/1.1 taught it to:
      * a length, or "chunked". HTTP/2 may send a body with neither - the frames say where it
@@ -346,7 +360,7 @@ static void d_request(h2d_t *d, const proven_h2_event_t *ev) {
     if (rq->field_count + add_host + add_chunked + add_protocol > sv->cfg.max_headers) { d_refuse(d, ev->stream_id, "431"); return; }
     if (length > sv->cfg.max_body_bytes) { d_refuse(d, ev->stream_id, "413"); return; }
 
-    h2s_t *s = h2_alloc(sv->alloc, sizeof *s);
+    proven_h2s_t *s = h2_alloc(sv->alloc, sizeof *s);
     if (!s) { d_refuse(d, ev->stream_id, "503"); return; }
     for (proven_size_t i = 0; i < sizeof *s; ++i) ((proven_byte_t *)s)[i] = 0;
     proven_size_t n = 0;
@@ -360,7 +374,7 @@ static void d_request(h2d_t *d, const proven_h2_event_t *ev) {
         .version_minor = 1,                        /* what a handler branches on is 1.0 against 1.1: HTTP/2 is not the older one */
         .headers = sv->headers, .header_count = n,
     };
-    s->h = (ev_head_t){ .server = sv, .version_minor = 1, .kind = EV_KIND_H2 };
+    s->h = (proven_ev_head_t){ .server = sv, .version_minor = 1, .kind = EV_KIND_H2 };
     s->d = d;
     s->id = ev->stream_id;
     s->method = req.method;
@@ -368,6 +382,7 @@ static void d_request(h2d_t *d, const proven_h2_event_t *ev) {
     s->compress_coding = (proven_u8)proven_http_compress_choose_(sv->headers, n, sv->cfg.compress_zstd);
     s->in_done = ev->end_stream;
     s->tunnel = tunnel;
+    s->early = d->early_now;
     s_expect_body(s);
     s->active = true;
     s->next = d->streams;
@@ -387,9 +402,9 @@ static void d_request(h2d_t *d, const proven_h2_event_t *ev) {
 }
 
 /* A piece of a request body, or its end. */
-static void s_raw_in(h2s_t *s, proven_mem_view_t piece, bool last);
+static void s_raw_in(proven_h2s_t *s, proven_mem_view_t piece, bool last);
 
-static void d_body(h2d_t *d, h2s_t *s, proven_mem_view_t piece, bool last) {
+static void d_body(h2d_t *d, proven_h2s_t *s, proven_mem_view_t piece, bool last) {
     proven_http_event_server_t *sv = d->server;
     if (s->raw) { s_raw_in(s, piece, last); return; }
     if (s->tunnel) {
@@ -427,14 +442,18 @@ static void d_body(h2d_t *d, h2s_t *s, proven_mem_view_t piece, bool last) {
 }
 
 static void d_event(h2d_t *d, const proven_h2_event_t *ev) {
-    h2s_t *s = ev->user;
+    proven_h2s_t *s = ev->user;
     switch (ev->kind) {
         case PROVEN_H2_EVENT_HEADERS: d_request(d, ev); break;
         case PROVEN_H2_EVENT_DATA:
             if (s) d_body(d, s, ev->data, ev->end_stream);
             else proven_h2_conn_consumed(d->engine, ev->stream_id, ev->data.size);
             break;
-        case PROVEN_H2_EVENT_TRAILERS:             /* the fields are not passed on: the event server has no trailers */
+        case PROVEN_H2_EVENT_TRAILERS:             /* kept for proven_http_stream_trailers, then the body's end */
+            if (s && proven_http_trailers_keep_(d->server->alloc, &s->in_trailers, ev->fields, ev->field_count, true, false) != PROVEN_OK) {
+                s_reset(s, PROVEN_H2_INTERNAL_ERROR, PROVEN_ERR_NOMEM);
+                break;
+            }
             if (s) d_body(d, s, (proven_mem_view_t){ .ptr = (void *)0, .size = 0 }, true);
             break;
         case PROVEN_H2_EVENT_STREAM_RESET: if (s) { s->engine_done = true; s_finish(s, PROVEN_ERR_RESET); } break;
@@ -457,9 +476,12 @@ static proven_size_t h2_engine_bound(const proven_http_event_server_t *sv) {
          : sv->cfg.max_buffered_output > ((proven_size_t)1 << 29) ? (proven_size_t)1 << 30 : sv->cfg.max_buffered_output * 2;
 }
 
-/* Whether the engine holds as much output as it may: the transport is not taking it. */
+/* Whether this side holds as much output as it may - the engine's and what the loop holds for
+ * the connection: the transport is not taking it. (The loop's share counts too: on io_uring every
+ * send waits in the loop until the next entry into the kernel, and the engine alone would then stop
+ * at its room for bodies, short of the bound, while requests kept being taken - RFC-0030 D-3.) */
 static bool d_full(const h2d_t *d) {
-    return proven_h2_conn_pending_output(d->engine).size >= h2_engine_bound(d->server);
+    return d_queued(d) >= h2_engine_bound(d->server);
 }
 
 static void d_pump(h2d_t *d) {
@@ -501,9 +523,9 @@ static void d_pump(h2d_t *d) {
         d->round++;
         for (bool again = true; again && !d->dead;) {
             again = false;
-            h2s_t *const first = d->turn && d->turn->next ? d->turn->next : d->streams;
-            for (h2s_t *s = first; s; ) {
-                h2s_t *const after = s->next ? s->next : d->streams;
+            proven_h2s_t *const first = d->turn && d->turn->next ? d->turn->next : d->streams;
+            for (proven_h2s_t *s = first; s; ) {
+                proven_h2s_t *const after = s->next ? s->next : d->streams;
                 if (!(s->mark == d->round || s->window_shut || !(s_out_pending(s) > 0 || s->end_asked || s->want_writable))) {
                     s->mark = d->round;
                     if (!(d_room(d) == 0 && !(s->end_asked && s_out_pending(s) == 0))) {
@@ -551,6 +573,8 @@ static proven_size_t h2_on_input(void *raw, proven_mem_mut_t in) {
     h2d_t *d = raw;
     d_enter(d);
     proven_size_t pos = 0;
+    /* How much of this input arrived early: a request whose HEADERS ended inside it did. */
+    const proven_size_t early = proven_http_event_early_ahead_(d->conn);
     for (;;) {
         d->reading = true;
         /* Nothing is taken while the engine's output is at its bound - which is while the
@@ -564,6 +588,7 @@ static proven_size_t h2_on_input(void *raw, proven_mem_mut_t in) {
             proven_err_t e = proven_h2_conn_feed(d->engine, (proven_mem_view_t){ .ptr = in.ptr + pos, .size = in.size - pos }, &used, &ev);
             if (e != PROVEN_OK) { d_kill(d, e == PROVEN_ERR_NOMEM ? PROVEN_ERR_NOMEM : PROVEN_ERR_RESET); break; }
             pos += used;
+            d->early_now = used > 0 ? pos <= early : d->early_now;
             if (ev.kind != PROVEN_H2_EVENT_NONE) d_event(d, &ev);
             else if (pos == in.size) break;
         }
@@ -581,18 +606,18 @@ static proven_size_t h2_on_input(void *raw, proven_mem_mut_t in) {
     return dead || over ? in.size : pos;           /* what was not taken is offered again when the connection is read again */
 }
 
-static void s_raw_feed(h2s_t *s);
+static void s_raw_feed(proven_h2s_t *s);
 
 /* Each WebSocket stream that has input it can take now - after a resume, or input that came
  * before it was accepted. A callback may end any stream: while the one fed is still open its
  * `next` is live, otherwise the walk starts again from the head. */
 static void d_raw_feed_all(h2d_t *d) {
-    for (h2s_t *s = d->streams; s && !d->dead;) {
+    for (proven_h2s_t *s = d->streams; s && !d->dead;) {
         if (s->dead || !s->raw || s->paused || s->held_off == s->held_len) { s = s->next; continue; }
         s_enter(s);
         s_raw_feed(s);
         const bool open = !s->dead;
-        h2s_t *next = open ? s->next : (void *)0;
+        proven_h2s_t *next = open ? s->next : (void *)0;
         s_leave(s);
         s = open ? next : d->streams;
     }
@@ -602,6 +627,11 @@ static void h2_on_progress(void *raw) {
     h2d_t *d = raw;
     if (d->dead) return;
     d_enter(d);
+    /* The connection's output moved: a WebSocket that counts it (proven_http_event_h2_buffered_)
+     * and was refused is asked again in this round's turns. With sends through io_uring the
+     * output stays in the loop until the next round, so a stream's own output having moved
+     * earlier is not the last news it needs. */
+    for (proven_h2s_t *s = d->streams; s; s = s->next) if (s->raw && !s->dead) s->want_writable = true;
     d_raw_feed_all(d);
     d_pump(d);
     d_leave(d);
@@ -615,7 +645,7 @@ static void h2_on_timer(void *raw) {
     const proven_time_t now = proven_time_monotonic_now();
     for (bool again = true; again;) {
         again = false;
-        for (h2s_t *s = d->streams; s; s = s->next) {
+        for (proven_h2s_t *s = d->streams; s; s = s->next) {
             if (s->body_due == 0 || s->body_due > now) continue;
             s_reset(s, PROVEN_H2_CANCEL, PROVEN_ERR_TIMEOUT);
             again = true;
@@ -654,7 +684,7 @@ static bool h2_on_eof(void *raw) {
     d->eof = true;
     for (bool again = true; again;) {
         again = false;
-        for (h2s_t *s = d->streams; s; s = s->next) {
+        for (proven_h2s_t *s = d->streams; s; s = s->next) {
             if (s->in_done) continue;
             s_reset(s, PROVEN_H2_CANCEL, PROVEN_ERR_RESET);
             again = true;
@@ -682,7 +712,7 @@ static void h2_on_drain(void *raw) {
     h2d_t *d = raw;
     if (d->dead) return;
     d_enter(d);
-    for (h2s_t *s = d->streams; s && !d->dead;) {
+    for (proven_h2s_t *s = d->streams; s && !d->dead;) {
         if (s->dead || !s->raw || s->told_drain) { s = s->next; continue; }
         s->told_drain = true;
         const proven_http_event_raw_ops_t *ops = *(const proven_http_event_raw_ops_t *const *)s->raw;
@@ -690,7 +720,7 @@ static void h2_on_drain(void *raw) {
         s_enter(s);
         ops->on_drain(s->raw);
         const bool open = !s->dead;
-        h2s_t *next = open ? s->next : (void *)0;
+        proven_h2s_t *next = open ? s->next : (void *)0;
         s_leave(s);
         s = open ? next : d->streams;
     }
@@ -738,8 +768,10 @@ proven_err_t proven_http_event_h2_take_(proven_http_stream_t *conn) {
         .set_header_table = true, .header_table_bytes = (proven_u32)sv->cfg.http2_header_table_bytes,
     };
     if (proven_h2_conn_create(&cfg, &d->engine) != PROVEN_OK) { sv->alloc.free_fn(sv->alloc.ctx, d); return PROVEN_ERR_NOMEM; }
+    if (sv->streams_now < cfg.max_concurrent_streams) proven_h2_conn_open_with_streams_(d->engine, sv->streams_now);
     /* No window configured: it starts at the protocol's and grows while bodies are read, to HTTP/3's caps (RFC-0019 section 10). */
     if (sv->cfg.http2_window_bytes == 0) proven_h2_conn_grow_(d->engine, 16384, 24576, h2_now_us);
+    if (sv->window_now) proven_h2_conn_cap_window_(d->engine, sv->window_now);   /* proven_http_event_server_set_window */
     proven_h2_conn_heads_past_bound_(d->engine);
     d->ops = &h2_ops;
     d->conn = conn;
@@ -758,11 +790,11 @@ proven_err_t proven_http_event_h2_take_(proven_http_stream_t *conn) {
 // What a handler calls, for a stream of an HTTP/2 connection
 // -----------------------------------------------------------------------------
 
-static h2s_t *h2s_of(proven_http_stream_t *stream) { return (h2s_t *)(void *)stream; }
-static const h2s_t *h2s_of_const(const proven_http_stream_t *stream) { return (const h2s_t *)(const void *)stream; }
+static proven_h2s_t *h2s_of(proven_http_stream_t *stream) { return (proven_h2s_t *)(void *)stream; }
+static const proven_h2s_t *h2s_of_const(const proven_http_stream_t *stream) { return (const proven_h2s_t *)(const void *)stream; }
 
 void proven_http_event_h2_compress_(proven_http_stream_t *stream) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (!s->dead && s->active && !s->response_begun) s->compress_asked = true;
 }
 
@@ -778,7 +810,7 @@ static bool h2_is_hop_header(proven_u8str_view_t name) {
 }
 
 /* The response head, to the engine. `length`: the body's size on the wire, or LENGTH_UNKNOWN. */
-static proven_err_t s_head(h2s_t *s, proven_u16 status, const proven_http_header_t *headers, proven_size_t header_count,
+static proven_err_t s_head(proven_h2s_t *s, proven_u16 status, const proven_http_header_t *headers, proven_size_t header_count,
                            proven_u64 length, bool vary, proven_http_coding_t coding, bool end_stream) {
     proven_http_event_server_t *sv = s->h.server;
     h2d_t *d = s->d;
@@ -833,7 +865,7 @@ static proven_err_t s_head(h2s_t *s, proven_u16 status, const proven_http_header
     return PROVEN_OK;
 }
 
-static void s_compress_plan(const h2s_t *s, proven_u16 status, const proven_http_header_t *headers, proven_size_t header_count, bool *vary,
+static void s_compress_plan(const proven_h2s_t *s, proven_u16 status, const proven_http_header_t *headers, proven_size_t header_count, bool *vary,
                             proven_http_coding_t *coding) {
     *vary = false;
     *coding = PROVEN_HTTP_CODING_IDENTITY;
@@ -844,7 +876,7 @@ static void s_compress_plan(const h2s_t *s, proven_u16 status, const proven_http
 
 proven_err_t proven_http_event_h2_begin_(proven_http_stream_t *stream, proven_u16 status, const proven_http_header_t *headers, proven_size_t header_count,
                                          proven_u64 content_length) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead || !s->active || s->response_begun) return PROVEN_ERR_INVALID_STATE;
     proven_http_event_server_t *sv = s->h.server;
     h2d_t *d = s->d;
@@ -869,6 +901,9 @@ proven_err_t proven_http_event_h2_begin_(proven_http_stream_t *stream, proven_u1
         s->response_left = s->bodiless ? PROVEN_HTTP_EVENT_LENGTH_UNKNOWN : content_length;
     }
     d_pump(d);
+    /* The stream may have ended in there (on_done has then been called): the caller must not
+     * go on to write to it. */
+    if (e == PROVEN_OK && s->dead) e = PROVEN_ERR_RESET;
     d->calls--;
     d_leave(d);
     s_leave(s);
@@ -876,7 +911,7 @@ proven_err_t proven_http_event_h2_begin_(proven_http_stream_t *stream, proven_u1
 }
 
 /* Body bytes through the compressor into the stream's own queue. False when there is no memory. */
-static bool s_zip(h2s_t *s, const proven_byte_t *p, proven_size_t n, proven_deflate_flush_t flush) {
+static bool s_zip(proven_h2s_t *s, const proven_byte_t *p, proven_size_t n, proven_deflate_flush_t flush) {
     proven_http_event_server_t *sv = s->h.server;
     for (;;) {
         proven_size_t used = 0, made = 0;
@@ -893,7 +928,7 @@ static bool s_zip(h2s_t *s, const proven_byte_t *p, proven_size_t n, proven_defl
 }
 
 proven_result_size_t proven_http_event_h2_write_(proven_http_stream_t *stream, proven_mem_view_t data) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead || !s->active || !s->response_begun || s->response_ended) return (proven_result_size_t){ .err = PROVEN_ERR_INVALID_STATE, .value = 0 };
     if (s->bodiless) return (proven_result_size_t){ .err = PROVEN_OK, .value = data.size };     /* counted, not sent */
     if (s->response_left != PROVEN_HTTP_EVENT_LENGTH_UNKNOWN && data.size > s->response_left) return (proven_result_size_t){ .err = PROVEN_ERR_OUT_OF_BOUNDS, .value = 0 };
@@ -933,8 +968,8 @@ proven_result_size_t proven_http_event_h2_write_(proven_http_stream_t *stream, p
         if (s_out_pending(s) > 0) s_push(s);
         if (!s->dead && done < data.size) s->want_writable = true;
     }
-    alive = alive && !s->dead;
     d_pump(d);
+    alive = alive && !s->dead;                     /* after the pump, which may end the stream */
     d->calls--;
     d_leave(d);
     s_leave(s);
@@ -942,7 +977,7 @@ proven_result_size_t proven_http_event_h2_write_(proven_http_stream_t *stream, p
 }
 
 proven_err_t proven_http_event_h2_flush_(proven_http_stream_t *stream) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead || !s->active || !s->response_begun || s->response_ended) return PROVEN_ERR_INVALID_STATE;
     if (!s->zip) return PROVEN_OK;
     h2d_t *d = s->d;
@@ -950,17 +985,30 @@ proven_err_t proven_http_event_h2_flush_(proven_http_stream_t *stream) {
     d_enter(d);
     d->calls++;
     if (!s_zip(s, (void *)0, 0, PROVEN_DEFLATE_FLUSH_SYNC)) s_reset(s, PROVEN_H2_INTERNAL_ERROR, PROVEN_ERR_NOMEM);
-    const bool alive = !s->dead;
     d_pump(d);
+    const bool alive = !s->dead;
     d->calls--;
     d_leave(d);
     s_leave(s);
     return alive ? PROVEN_OK : PROVEN_ERR_RESET;
 }
 
-proven_err_t proven_http_event_h2_end_(proven_http_stream_t *stream) {
-    h2s_t *s = h2s_of(stream);
+proven_err_t proven_http_event_h2_trailers_(const proven_http_stream_t *stream, proven_http_header_t *fields, proven_size_t cap, proven_size_t *count) {
+    const proven_h2s_t *s = (const proven_h2s_t *)(const void *)stream;
+    if (!s->in_done) return PROVEN_ERR_INVALID_STATE;
+    return proven_http_trailers_give_(&s->in_trailers, fields, cap, count);
+}
+
+proven_err_t proven_http_event_h2_end_(proven_http_stream_t *stream, const proven_http_header_t *trailers, proven_size_t count) {
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead || !s->active || !s->response_begun || s->response_ended) return PROVEN_ERR_INVALID_STATE;
+    if (count > 0) {
+        /* As over HTTP/1.1: after a body begun with no length, and not to HEAD. */
+        if (s->response_left != PROVEN_HTTP_EVENT_LENGTH_UNKNOWN || s->bodiless || s->engine_done) return PROVEN_ERR_INVALID_STATE;
+        if (!proven_http_trailers_valid_(trailers, count)) return PROVEN_ERR_INVALID_ARG;
+        const proven_err_t e = proven_http_trailers_keep_(s->h.server->alloc, &s->out_trailers, trailers, count, false, true);
+        if (e != PROVEN_OK) return e;
+    }
     h2d_t *d = s->d;
     proven_err_t result = PROVEN_OK;
     s_enter(s);
@@ -990,7 +1038,7 @@ proven_err_t proven_http_event_h2_end_(proven_http_stream_t *stream) {
 
 proven_err_t proven_http_event_h2_respond_(proven_http_stream_t *stream, proven_u16 status, const proven_http_header_t *headers, proven_size_t header_count,
                                            proven_mem_view_t body) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead || !s->active || s->response_begun) return PROVEN_ERR_INVALID_STATE;
     proven_http_event_server_t *sv = s->h.server;
     h2d_t *d = s->d;
@@ -1035,7 +1083,7 @@ proven_err_t proven_http_event_h2_respond_(proven_http_stream_t *stream, proven_
 }
 
 void proven_http_event_h2_abort_(proven_http_stream_t *stream) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead) return;
     h2d_t *d = s->d;
     s_enter(s);
@@ -1049,12 +1097,12 @@ void proven_http_event_h2_abort_(proven_http_stream_t *stream) {
 }
 
 proven_u32 proven_http_event_h2_test_window_(proven_http_stream_t *stream) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     return s->dead || !s->d->engine ? 0 : proven_h2_conn_test_window_(s->d->engine, PROVEN_H2_TEST_CAP);
 }
 
 void proven_http_event_h2_pause_(proven_http_stream_t *stream) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead || !s->active) return;
     s->paused = true;
     s_expect_body(s);
@@ -1062,7 +1110,7 @@ void proven_http_event_h2_pause_(proven_http_stream_t *stream) {
 }
 
 void proven_http_event_h2_resume_(proven_http_stream_t *stream) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead || !s->paused) return;
     proven_http_event_server_t *sv = s->h.server;
     h2d_t *d = s->d;
@@ -1092,12 +1140,12 @@ void proven_http_event_h2_resume_(proven_http_stream_t *stream) {
 void proven_http_event_h2_set_user_(proven_http_stream_t *stream, void *user) { h2s_of(stream)->user = user; }
 void *proven_http_event_h2_user_(const proven_http_stream_t *stream) { return h2s_of_const(stream)->user; }
 proven_net_addr_t proven_http_event_h2_peer_(const proven_http_stream_t *stream) {
-    const h2s_t *s = h2s_of_const(stream);
+    const proven_h2s_t *s = h2s_of_const(stream);
     return s->dead || s->d->dead ? (proven_net_addr_t){ 0 } : s->d->conn->peer;      /* the connection's: a stream has none of its own */
 }
 
 proven_size_t proven_http_event_h2_buffered_(const proven_http_stream_t *stream) {
-    const h2s_t *s = h2s_of_const(stream);
+    const proven_h2s_t *s = h2s_of_const(stream);
     if (s->dead) return 0;
     return s_out_pending(s) + d_queued(s->d);
 }
@@ -1109,7 +1157,7 @@ proven_size_t proven_http_event_h2_buffered_(const proven_http_stream_t *stream)
 /* What arrived for the WebSocket, offered to it - all of it, unless it pauses. Input goes into
  * `held` first: the WebSocket unmasks in place, and an event's data is the engine's. What it
  * took is reported as consumed, so the peer's window opens by that much and no more. */
-static void s_raw_feed(h2s_t *s) {
+static void s_raw_feed(proven_h2s_t *s) {
     h2d_t *d = s->d;
     s_enter(s);
     while (s->raw && !s->dead && !s->paused && s->held_off < s->held_len) {
@@ -1141,14 +1189,14 @@ static void s_raw_feed(h2s_t *s) {
     s_leave(s);
 }
 
-static void s_raw_in(h2s_t *s, proven_mem_view_t piece, bool last) {
+static void s_raw_in(proven_h2s_t *s, proven_mem_view_t piece, bool last) {
     if (!h2_append(s->h.server->alloc, &s->held, &s->held_len, &s->held_cap, piece.ptr, piece.size)) { s_reset(s, PROVEN_H2_INTERNAL_ERROR, PROVEN_ERR_NOMEM); return; }
     if (last) s->in_done = true;
     s_raw_feed(s);
 }
 
 proven_err_t proven_http_event_h2_raw_begin_(proven_http_stream_t *stream, void *raw, const proven_http_header_t *headers, proven_size_t count) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (!raw || count > 6 || (count > 0 && !headers)) return PROVEN_ERR_INVALID_ARG;
     if (s->dead || s->d->dead || !s->active || !s->tunnel || s->response_begun) return PROVEN_ERR_INVALID_STATE;
     h2d_t *d = s->d;
@@ -1169,9 +1217,12 @@ proven_err_t proven_http_event_h2_raw_begin_(proven_http_stream_t *stream, void 
         if (s->dead || d->dead) e = PROVEN_ERR_RESET;
         else {
             s->user = (void *)0;
-            s->raw = raw;
-            /* Input that came before this is fed from the loop, once the caller has the object. */
+            /* Input that came before this is fed from the loop, once the caller has the object.
+             * Asked before the owner is set: asking can end the connection, and then the caller
+             * learns it from the return, not from the owner's on_closed as well. */
             if (s->held_len > 0 || s->in_done) proven_http_event_raw_again_(d->conn);
+            if (s->dead || d->dead) e = PROVEN_ERR_RESET;
+            else s->raw = raw;
         }
     } else {
         e = e == PROVEN_ERR_NOMEM ? PROVEN_ERR_NOMEM : PROVEN_ERR_RESET;
@@ -1183,7 +1234,7 @@ proven_err_t proven_http_event_h2_raw_begin_(proven_http_stream_t *stream, void 
 }
 
 bool proven_http_event_h2_raw_send_(proven_http_stream_t *stream, proven_mem_view_t a, proven_mem_view_t b) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead || s->d->dead) return false;
     h2d_t *d = s->d;
     proven_allocator_t al = s->h.server->alloc;
@@ -1203,7 +1254,7 @@ bool proven_http_event_h2_raw_send_(proven_http_stream_t *stream, proven_mem_vie
 }
 
 static void s_raw_timer(void *ctx) {
-    h2s_t *s = ctx;
+    proven_h2s_t *s = ctx;
     if (s->dead || !s->raw) return;
     h2d_t *d = s->d;
     s_enter(s);
@@ -1215,14 +1266,14 @@ static void s_raw_timer(void *ctx) {
 }
 
 void proven_http_event_h2_raw_timer_(proven_http_stream_t *stream, proven_u32 ms) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead) return;
     if (ms == 0) proven_loop_timer_cancel(s->h.server->loop, &s->timer);
     else proven_loop_timer_set(s->h.server->loop, &s->timer, ms, s_raw_timer, s);
 }
 
 void proven_http_event_h2_raw_pause_(proven_http_stream_t *stream, bool paused) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead || s->paused == paused) return;
     s->paused = paused;
     if (paused || s->held_off == s->held_len) return;
@@ -1239,7 +1290,7 @@ void proven_http_event_h2_raw_pause_(proven_http_stream_t *stream, bool paused) 
 /* The WebSocket lets go: politely - its output, then END_STREAM - or at once, with a reset.
  * Nothing is called on it after either. */
 void proven_http_event_h2_raw_close_(proven_http_stream_t *stream) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead) return;
     s->raw = (void *)0;
     proven_loop_timer_cancel(s->h.server->loop, &s->timer);
@@ -1256,7 +1307,7 @@ void proven_http_event_h2_raw_close_(proven_http_stream_t *stream) {
 }
 
 void proven_http_event_h2_raw_kill_(proven_http_stream_t *stream) {
-    h2s_t *s = h2s_of(stream);
+    proven_h2s_t *s = h2s_of(stream);
     if (s->dead) return;
     s->raw = (void *)0;
     proven_loop_timer_cancel(s->h.server->loop, &s->timer);
@@ -1269,6 +1320,39 @@ void proven_http_event_h2_raw_kill_(proven_http_stream_t *stream) {
     d->calls--;
     d_leave(d);
     s_leave(s);
+}
+
+void proven_http_event_h2_set_window_(proven_http_event_server_t *sv, proven_u32 n) {
+    for (proven_http_stream_t *conn = sv->conns, *next; conn; conn = next) {
+        next = conn->next;
+        if (conn->h.state != EV_RAW || !conn->raw || *(const proven_http_event_raw_ops_t *const *)conn->raw != &h2_ops) continue;
+        h2d_t *d = conn->raw;
+        if (d->dead) continue;
+        d_enter(d);
+        proven_h2_conn_cap_window_(d->engine, n);
+        d_pump(d);
+        d_leave(d);
+    }
+}
+
+void proven_http_event_h2_set_max_streams_(proven_http_event_server_t *sv, proven_u32 n) {
+    for (proven_http_stream_t *conn = sv->conns, *next; conn; conn = next) {
+        next = conn->next;                         /* a connection that ends while it is told leaves the list */
+        if (conn->h.state != EV_RAW || !conn->raw || *(const proven_http_event_raw_ops_t *const *)conn->raw != &h2_ops) continue;
+        h2d_t *d = conn->raw;
+        if (d->dead) continue;
+        d_enter(d);
+        /* After a goodbye there is nothing to change; and a connection that cannot say it keeps
+         * the number it has. */
+        (void)proven_h2_conn_set_max_streams(d->engine, n);
+        d_pump(d);
+        d_leave(d);
+    }
+}
+
+bool proven_http_event_h2_early_(const proven_http_stream_t *stream) {
+    const proven_h2s_t *s = (const proven_h2s_t *)(const void *)stream;
+    return s && s->early;
 }
 
 #endif
