@@ -128,6 +128,30 @@ size_t rubraview_archive_index_under(const rubraview_archive_index_t *index, pro
 
 typedef enum rubraview_pack_format { RUBRAVIEW_PACK_ZIP = 0, RUBRAVIEW_PACK_7Z } rubraview_pack_format_t;
 
+/* D-260: the Compress window's codec. DEFAULT is FultaArc's (ZIP Deflate, 7z LZMA); a level of 0 stores. */
+typedef enum rubraview_pack_method {
+    RUBRAVIEW_PACK_METHOD_DEFAULT = 0,
+    RUBRAVIEW_PACK_METHOD_DEFLATE,
+    RUBRAVIEW_PACK_METHOD_BZIP2,
+    RUBRAVIEW_PACK_METHOD_LZMA,
+    RUBRAVIEW_PACK_METHOD_LZMA2,      /* 7z only */
+    RUBRAVIEW_PACK_METHOD_PPMD,
+    RUBRAVIEW_PACK_METHOD_ZSTD,       /* ZIP only (stock 7-Zip has no zstd in 7z) */
+} rubraview_pack_method_t;
+
+/* The codecs a format takes, its default first, as the window lists them. Returns how many (at most 6). */
+size_t rubraview_pack_methods(rubraview_pack_format_t format, rubraview_pack_method_t *out, size_t cap);
+bool rubraview_pack_method_fits(rubraview_pack_format_t format, rubraview_pack_method_t method);
+/* Whether FultaArc writes it yet: in ZIP only Deflate (its ZIP writer takes no other codec yet, asked for, D-260). */
+bool rubraview_pack_method_ready(rubraview_pack_format_t format, rubraview_pack_method_t method);
+/* Whether Windows' own ZIP folders read it too (Deflate, or stored); the others need 7-Zip or Bandizip. */
+bool rubraview_pack_method_plain(rubraview_pack_format_t format, rubraview_pack_method_t method);
+/* The window's level steps (store, fastest, fast, normal, maximum, ultra) as FultaArc's 0..9. */
+enum { RUBRAVIEW_PACK_LEVEL_STEPS = 6, RUBRAVIEW_PACK_LEVEL_NORMAL = 3 };
+int rubraview_pack_level_of(int step);
+/* Split volumes: FultaArc writes none yet (asked for, D-260), so no format splits; a job asking is refused. */
+bool rubraview_pack_split_supported(rubraview_pack_format_t format);
+
 typedef struct rubraview_compress_job {
     /* given */
     const char *const *sources;        /* files and folders, UTF-8 full paths; each goes in by its own name */
@@ -135,6 +159,9 @@ typedef struct rubraview_compress_job {
     const char *output;                /* the archive wanted; a free name next to it when one is there */
     rubraview_pack_format_t format;
     int level;                         /* 0 store ... 9 smallest */
+    rubraview_pack_method_t method;    /* D-260: DEFAULT, or one rubraview_pack_method_fits and _ready */
+    bool solid_off;                    /* D-260, 7z: one block a file (the default packs them together) */
+    uint64_t volume_bytes;             /* D-260: 0 one file; otherwise volumes of this size (not written yet) */
     const char *password;              /* NULL or "": none. ZIP: WinZip AES-256; 7z: AES-256 (its names stay readable) */
     /* while it runs */
     _Atomic bool cancel;

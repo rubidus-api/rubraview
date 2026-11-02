@@ -302,6 +302,20 @@ char *rubraview_shape_cache_serialize(const rubraview_shape_cache_t *cache, size
                                       bool (*kept_out)(void *context, proven_u8str_view_t path), void *context, size_t *out_size);
 void rubraview_shape_cache_free(rubraview_shape_cache_t *cache);
 
+/* D-260: the bottom row by place and by what is picked. Cancel and Open (OK) always show; these the rest. Nothing
+   picked on disk shows none of them; in a book none; inside an archive only Extract (all of it when nothing is picked). */
+enum {
+    RUBRAVIEW_PICKER_SHOW_LIST     = 1u << 0,   /* Add to the list: something the viewer opens is picked */
+    RUBRAVIEW_PICKER_SHOW_EXTRACT  = 1u << 1,   /* an archive is picked, or the screen is inside one */
+    RUBRAVIEW_PICKER_SHOW_COMPRESS = 1u << 2,   /* files or folders of the disk are picked */
+    RUBRAVIEW_PICKER_SHOW_FILES    = 1u << 3,   /* Recycle, Move to, Copy to: the same */
+};
+typedef struct rubraview_picker_place {
+    bool in_book, in_archive, add_mode;
+    size_t picked, picked_archives, picked_viewer;   /* the up entry never counted */
+} rubraview_picker_place_t;
+uint32_t rubraview_picker_bottom_shows(const rubraview_picker_place_t *place);
+
 #ifdef __cplusplus
 }
 #endif

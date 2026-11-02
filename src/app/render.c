@@ -1067,9 +1067,11 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     rubraview_pal_rect_t bar = { 0.0, win_h - action_h, win_w, action_h };
     rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_BAR_FILL, 0.0);
 
-    for (int32_t i = 0; i < PICKER_BOTTOM_COUNT; ++i) {
-        picker_button_t b = PICKER_BOTTOM[i];
-        rubraview_pal_rect_t rect = picker_button_rect(win_w, win_h, dpi, i);
+    picker_button_t shown[PICKER_BOTTOM_COUNT];
+    int32_t shown_n = picker_bottom_list(app, shown);   /* D-260 */
+    for (int32_t i = 0; i < shown_n; ++i) {
+        picker_button_t b = shown[i];
+        rubraview_pal_rect_t rect = picker_button_rect(win_w, win_h, dpi, picker_bottom_slot(i, shown_n));
         bool over = pal_rect_has(rect, app->pointer_x, app->pointer_y);
         rubraview_pal_render_fill_rect(app->renderer, rect, b == PICKER_BTN_OPEN ? COLOR_TILE_CURRENT : over ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, rect, COLOR_BOX_BORDER, 1.0, 3.0);

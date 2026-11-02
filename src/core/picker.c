@@ -349,6 +349,16 @@ void rubraview_picker_toggle(rubraview_picker_t *picker, size_t index) {
     picker->selected[index] = !picker->selected[index];
 }
 
+uint32_t rubraview_picker_bottom_shows(const rubraview_picker_place_t *place) {
+    if (!place || place->add_mode || place->in_book) return 0;
+    if (place->in_archive) return RUBRAVIEW_PICKER_SHOW_EXTRACT;
+    uint32_t shows = 0;
+    if (place->picked_viewer > 0) shows |= RUBRAVIEW_PICKER_SHOW_LIST;
+    if (place->picked_archives > 0) shows |= RUBRAVIEW_PICKER_SHOW_EXTRACT;
+    if (place->picked > 0) shows |= RUBRAVIEW_PICKER_SHOW_COMPRESS | RUBRAVIEW_PICKER_SHOW_FILES;
+    return shows;
+}
+
 void rubraview_picker_selection_metrics(const rubraview_picker_t *picker,
                                         size_t *out_count, uint64_t *out_total_bytes) {
     size_t count = 0;

@@ -661,9 +661,72 @@ static bool check_written(const char *path, pack_list_t *list, rubraview_compres
     return ok;
 }
 
+/* D-260: the Compress window's choices */
+static const rubraview_pack_method_t ZIP_METHODS[] = { RUBRAVIEW_PACK_METHOD_DEFLATE, RUBRAVIEW_PACK_METHOD_BZIP2, RUBRAVIEW_PACK_METHOD_LZMA,
+                                                       RUBRAVIEW_PACK_METHOD_PPMD, RUBRAVIEW_PACK_METHOD_ZSTD };
+static const rubraview_pack_method_t SZ_METHODS[] = { RUBRAVIEW_PACK_METHOD_LZMA2, RUBRAVIEW_PACK_METHOD_LZMA, RUBRAVIEW_PACK_METHOD_PPMD,
+                                                      RUBRAVIEW_PACK_METHOD_BZIP2, RUBRAVIEW_PACK_METHOD_DEFLATE };
+
+size_t rubraview_pack_methods(rubraview_pack_format_t format, rubraview_pack_method_t *out, size_t cap) {
+    const rubraview_pack_method_t *m = format == RUBRAVIEW_PACK_7Z ? SZ_METHODS : ZIP_METHODS;
+    size_t n = format == RUBRAVIEW_PACK_7Z ? sizeof SZ_METHODS / sizeof *SZ_METHODS : sizeof ZIP_METHODS / sizeof *ZIP_METHODS;
+    for (size_t i = 0; out && i < n && i < cap; ++i) out[i] = m[i];
+    return n;
+}
+
+bool rubraview_pack_method_fits(rubraview_pack_format_t format, rubraview_pack_method_t method) {
+    if (method == RUBRAVIEW_PACK_METHOD_DEFAULT) return true;
+    rubraview_pack_method_t m[8];
+    size_t n = rubraview_pack_methods(format, m, 8);
+    for (size_t i = 0; i < n; ++i) if (m[i] == method) return true;
+    return false;
+}
+
+bool rubraview_pack_method_ready(rubraview_pack_format_t format, rubraview_pack_method_t method) {
+    if (!rubraview_pack_method_fits(format, method)) return false;
+    return format == RUBRAVIEW_PACK_7Z || method == RUBRAVIEW_PACK_METHOD_DEFAULT || method == RUBRAVIEW_PACK_METHOD_DEFLATE;
+}
+
+bool rubraview_pack_method_plain(rubraview_pack_format_t format, rubraview_pack_method_t method) {
+    return format == RUBRAVIEW_PACK_ZIP && (method == RUBRAVIEW_PACK_METHOD_DEFAULT || method == RUBRAVIEW_PACK_METHOD_DEFLATE);
+}
+
+int rubraview_pack_level_of(int step) {
+    static const int LEVELS[RUBRAVIEW_PACK_LEVEL_STEPS] = { 0, 1, 3, 5, 7, 9 };
+    return LEVELS[step >= 0 && step < RUBRAVIEW_PACK_LEVEL_STEPS ? step : RUBRAVIEW_PACK_LEVEL_NORMAL];
+}
+
+bool rubraview_pack_split_supported(rubraview_pack_format_t format) {
+    (void)format;
+    return false;   /* FultaArc writes no volumes yet; the request: D-260 */
+}
+
+static fulta_arc_method_t fulta_method(rubraview_pack_method_t m) {
+    switch (m) {
+        case RUBRAVIEW_PACK_METHOD_DEFLATE: return FULTA_ARC_METHOD_DEFLATE;
+        case RUBRAVIEW_PACK_METHOD_BZIP2:   return FULTA_ARC_METHOD_BZIP2;
+        case RUBRAVIEW_PACK_METHOD_LZMA:    return FULTA_ARC_METHOD_LZMA;
+        case RUBRAVIEW_PACK_METHOD_LZMA2:   return FULTA_ARC_METHOD_LZMA2;
+        case RUBRAVIEW_PACK_METHOD_PPMD:    return FULTA_ARC_METHOD_PPMD;
+        case RUBRAVIEW_PACK_METHOD_ZSTD:    return FULTA_ARC_METHOD_ZSTD;
+        default:                            return FULTA_ARC_METHOD_DEFAULT;
+    }
+}
+
 void rubraview_compress_run(rubraview_compress_job_t *job) {
     if (!job) return;
     job->result = RUBRAVIEW_ARCHIVE_DONE;
+    if (job->volume_bytes > 0 && !rubraview_pack_split_supported(job->format)) {
+        job->result = RUBRAVIEW_ARCHIVE_CANNOT_WRITE;
+        say(job->why, sizeof job->why, T("split volumes are not written yet"), "");
+        return;
+    }
+    if (!rubraview_pack_method_ready(job->format, job->method)) {
+        job->result = RUBRAVIEW_ARCHIVE_CANNOT_WRITE;
+        say(job->why, sizeof job->why, rubraview_pack_method_fits(job->format, job->method) ? T("that codec is not written in ZIP yet")
+                                                                                         : T("that codec does not go in this format"), "");
+        return;
+    }
     job->files = job->folders = 0;
     job->why[0] = job->written[0] = '\0';
     atomic_store(&job->phase, 0);
@@ -746,6 +809,9 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
         .progress = pack_progress, .progress_ctx = job,
         .password = secret ? job->password : NULL,
         .encryption = !secret ? FULTA_ARC_ENCRYPT_DEFAULT : job->format == RUBRAVIEW_PACK_7Z ? FULTA_ARC_ENCRYPT_7Z_AES256 : FULTA_ARC_ENCRYPT_ZIP_AES256,
+        /* level 0 stores, whatever the codec; ZIP's Deflate is its default (its writer takes no named codec yet) */
+        .method = job->level <= 0 || job->format == RUBRAVIEW_PACK_ZIP ? FULTA_ARC_METHOD_DEFAULT : fulta_method(job->method),
+        .solid = job->format == RUBRAVIEW_PACK_7Z && job->solid_off ? FULTA_ARC_SOLID_OFF : FULTA_ARC_SOLID_DEFAULT,
     };
     fulta_arc_format_t format = job->format == RUBRAVIEW_PACK_7Z ? FULTA_ARC_FORMAT_7Z : FULTA_ARC_FORMAT_ZIP;
     if (err == FULTA_ARC_OK) err = fulta_arc_edit_write_file(edit, format, job->written, &wo);

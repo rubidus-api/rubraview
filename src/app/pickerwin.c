@@ -201,6 +201,35 @@ rubraview_pal_rect_t picker_button_rect(double win_w, double win_h, double dpi, 
                                    width, row_h - gap };
 }
 
+/* D-260 (owner, 2026-11-02: "하단에 압축하기와 압축풀기 등의 버튼들을 상황에 맞게"): the bottom shows what fits the place
+   and what is picked (rubraview_picker_bottom_shows), in PICKER_BOTTOM's order; Cancel and Open always. */
+int32_t picker_bottom_list(const app_state_t *app, picker_button_t *out) {
+    rubraview_picker_place_t place = { .in_book = app->picker_in_book, .in_archive = picker_in_archive(app), .add_mode = app->picker_add_mode };
+    for (size_t i = 0; app->picker_selected && !place.in_archive && i < app->picker_listing.count; ++i) {
+        if (!app->picker_selected[i] || picker_is_up(app, i)) continue;
+        const rubraview_fs_entry_t *e = &app->picker_listing.entries[i];
+        place.picked++;
+        if (e->is_directory) continue;
+        if (rubraview_glob_match_list(e->name, PROVEN_LIT(ARCHIVE_FILTER_ALL))) place.picked_archives++;
+        if (picker_viewer_opens(e->name)) place.picked_viewer++;
+    }
+    uint32_t shows = rubraview_picker_bottom_shows(&place);
+    int32_t n = 0;
+    for (int32_t i = 0; i < PICKER_BOTTOM_COUNT; ++i) {
+        picker_button_t b = PICKER_BOTTOM[i];
+        uint32_t need = b == PICKER_BTN_PLAYLIST ? RUBRAVIEW_PICKER_SHOW_LIST : b == PICKER_BTN_EXTRACT ? RUBRAVIEW_PICKER_SHOW_EXTRACT
+                      : b == PICKER_BTN_COMPRESS ? RUBRAVIEW_PICKER_SHOW_COMPRESS
+                      : b == PICKER_BTN_RECYCLE || b == PICKER_BTN_MOVE || b == PICKER_BTN_COPY ? RUBRAVIEW_PICKER_SHOW_FILES : 0;
+        if (need == 0 || (shows & need)) out[n++] = b;
+    }
+    return n;
+}
+
+/* The slots keep their width; what acts fills from the left, Cancel and Open stay at the right. */
+int32_t picker_bottom_slot(int32_t index, int32_t shown) {
+    return index >= shown - 2 ? PICKER_BOTTOM_COUNT - (shown - index) : index;
+}
+
 /* Back, up and forward at the path bar's left end (which 0, 1, 2). */
 rubraview_pal_rect_t picker_nav_rect(const app_state_t *app, double dpi, int which) {
     double crumb_h = PICKER_CRUMB_HEIGHT * dpi;

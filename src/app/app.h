@@ -54,6 +54,7 @@
 #include "rubraview/subtitle.h"
 #include "rubraview/encoding.h"
 #include "rubraview/glob.h"
+#include "rubraview/archive_job.h"
 #include "rubraview/ui_scrollbar.h"
 #include "rubraview/shellreq.h"
 #include "rubraview/arcedit.h"
@@ -1151,7 +1152,16 @@ typedef struct app_state {
     bool                   rename_is_pack;          /* RV-207: the Compress box (the new archive's place) */
     bool                   password_for_pack;       /* the password box asks for a new archive */
     bool                   password_for_extract;    /* the password box asks for an archive being extracted */
-    int32_t                pack_level;              /* the Compress box's level: 0 store, 1 fast, 2 normal, 3 best */
+    int32_t                pack_level;              /* the Compress window's level step: 0 store ... 5 ultra (D-260) */
+    int32_t                pack_method;             /* its codec (rubraview_pack_method_t; DEFAULT = the format's first) */
+    bool                   pack_solid_off;          /* 7z: one block a file */
+    int32_t                pack_split;              /* its split size's place (0 none); none is written yet */
+#define PACK_CHIPS_MAX 32   /* D-260: the Compress window's chips */
+    rubraview_pal_rect_t   pack_chip[PACK_CHIPS_MAX];
+    int32_t                pack_chip_kind[PACK_CHIPS_MAX];
+    bool                   pack_chip_off[PACK_CHIPS_MAX];
+    int32_t                pack_chip_n;
+    rubraview_pal_rect_t   pack_panel;              /* the window's rows: a press there is its own */
     struct archwork       *archwork;                /* the extracting or compressing under way */
     char                   password_for[1024];
     size_t                 password_for_len;
@@ -1678,7 +1688,9 @@ extern double g_col_w[RUBRAVIEW_PICKER_SORT_COUNT];
 
 
 /* Moved from main.c: more than one file uses them (RV-163). */
-enum { RENAME_BTN_OK = 1, RENAME_BTN_CANCEL, RENAME_BTN_BROWSE, RENAME_BTN_BACK, RENAME_BTN_FORMAT, RENAME_BTN_LEVEL };   /* RV-207: the Compress box's two */
+enum { RENAME_BTN_OK = 1, RENAME_BTN_CANCEL, RENAME_BTN_BROWSE, RENAME_BTN_BACK };
+/* D-260: the Compress window's rows; a chip's kind is its row * 16 + its place in the row */
+enum { PACK_ROW_FORMAT = 0, PACK_ROW_LEVEL, PACK_ROW_METHOD, PACK_ROW_SOLID, PACK_ROW_SPLIT, PACK_ROWS };
 
 
 /* Shared variables, defined in the file that owns them. */
@@ -2051,9 +2063,10 @@ void archwork_compress_quick(app_state_t *app);
 void archwork_compress_ask(app_state_t *app);
 void archwork_pack_typed(app_state_t *app);
 void archwork_pack_cancelled(app_state_t *app);
-void archwork_pack_toggle_format(app_state_t *app);
-void archwork_pack_next_level(app_state_t *app);
-const char *archwork_level_word(const app_state_t *app);
+bool archwork_pack_is_7z(const app_state_t *app);
+void archwork_pack_set_format(app_state_t *app, bool sevenz);
+rubraview_pack_method_t archwork_pack_method(const app_state_t *app, bool sevenz);
+bool pack_window_press(app_state_t *app, double x, double y);   /* D-260: a chip of the Compress window */
 bool archwork_password_box(app_state_t *app, bool entered, proven_u8str_view_t typed);
 void filmcache_for(app_state_t *app, proven_u8str_view_t path);   /* RV-216 (D-249): the cache's settings for a film about to open */
 void live_start(app_state_t *app);  /* RV-215: a fresh second's measuring */
@@ -2172,6 +2185,8 @@ void picker_add_to_list(app_state_t *app);
 bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_item_t *out);
 void picker_button(app_state_t *app, picker_button_t button);
 rubraview_pal_rect_t picker_button_rect(double win_w, double win_h, double dpi, int32_t index);
+int32_t picker_bottom_list(const app_state_t *app, picker_button_t *out);   /* D-260: the buttons shown, in order */
+int32_t picker_bottom_slot(int32_t index, int32_t shown);                    /* where the shown one `index` sits */
 rubraview_pal_rect_t picker_check_rect(const app_state_t *app, size_t index, double win_w, double dpi);
 bool picker_chip_span(const app_state_t *app, size_t index, double dpi, double win_w, double *out_x, double *out_w);
 double picker_chip_width(proven_u8str_view_t label, double dpi);

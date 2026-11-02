@@ -280,9 +280,11 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 int32_t pw = 0, ph = 0;
                 rubraview_pal_window_get_size(app->window, &pw, &ph);
                 if (event->mouse.y >= (double)ph - PICKER_ACTION_HEIGHT * dpi) {
-                    for (int32_t b = 0; b < PICKER_BOTTOM_COUNT; ++b) {
-                        if (pal_rect_has(picker_button_rect((double)pw, (double)ph, dpi, b), event->mouse.x, event->mouse.y)) {
-                            picker_button(app, PICKER_BOTTOM[b]);
+                    picker_button_t shown[PICKER_BOTTOM_COUNT];
+                    int32_t shown_n = picker_bottom_list(app, shown);   /* D-260: as drawn */
+                    for (int32_t b = 0; b < shown_n; ++b) {
+                        if (pal_rect_has(picker_button_rect((double)pw, (double)ph, dpi, picker_bottom_slot(b, shown_n)), event->mouse.x, event->mouse.y)) {
+                            picker_button(app, shown[b]);
                             break;
                         }
                     }

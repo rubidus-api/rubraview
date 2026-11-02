@@ -1483,8 +1483,6 @@ bool rename_box_press(app_state_t *app, double x, double y) {
             case RENAME_BTN_CANCEL: rename_cancel(app); break;
             case RENAME_BTN_BROWSE: target_browse(app); break;
             case RENAME_BTN_BACK:   text_find_step(app, false); break;
-            case RENAME_BTN_FORMAT: archwork_pack_toggle_format(app); break;   /* RV-207 */
-            case RENAME_BTN_LEVEL:  archwork_pack_next_level(app); break;
             case RENAME_BTN_OK + 100: rename_extension_apply(app); break;   /* Change extensions: all rows now */
             default: break;
         }
@@ -1493,6 +1491,7 @@ bool rename_box_press(app_state_t *app, double x, double y) {
     if (app->rename_is_extension) {
         for (int32_t k = 0; k < app->ext_n; ++k) if (pal_rect_has(app->ext_row_rect[k], x, y)) { ext_switch(app, k); return true; }
     }
+    if (app->rename_is_pack) return pack_window_press(app, x, y);   /* D-260 */
     return false;
 }
 

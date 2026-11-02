@@ -575,10 +575,116 @@ void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi
     }
 }
 
+/* D-260 (owner, 2026-11-02: "압축할 때 옵션 창 ... 압축포맷 압축률 압축코덱 분할압축 등"): the Compress window's rows over
+   its name box. The format is the name's ending; a greyed chip is one FultaArc does not write yet. */
+static const char *const PACK_LEVEL_WORD[RUBRAVIEW_PACK_LEVEL_STEPS] = { N_("Store"), N_("Fastest"), N_("Fast"), N_("Normal"),
+                                                                         N_("Maximum"), N_("Ultra") };
+static const char *const PACK_SPLIT_WORD[] = { N_("None"), "10 MB", "100 MB", "700 MB", "4 GB" };
+#define PACK_SPLITS ((int32_t)(sizeof PACK_SPLIT_WORD / sizeof *PACK_SPLIT_WORD))
+
+static const char *pack_method_word(rubraview_pack_method_t m) {
+    switch (m) {
+        case RUBRAVIEW_PACK_METHOD_DEFLATE: return "Deflate";
+        case RUBRAVIEW_PACK_METHOD_BZIP2:   return "BZip2";
+        case RUBRAVIEW_PACK_METHOD_LZMA:    return "LZMA";
+        case RUBRAVIEW_PACK_METHOD_LZMA2:   return "LZMA2";
+        case RUBRAVIEW_PACK_METHOD_PPMD:    return "PPMd";
+        case RUBRAVIEW_PACK_METHOD_ZSTD:    return "Zstandard";
+        default:                            return "";
+    }
+}
+
+#define PACK_TITLE_H 34.0
+#define PACK_ROW_H 40.0
+#define PACK_NOTE_H 24.0
+static double pack_window_height(double dpi) { return (PACK_TITLE_H + PACK_ROW_H * PACK_ROWS + PACK_NOTE_H * 2.0 + 12.0) * dpi; }
+
+static void draw_pack_window(app_state_t *app, rubraview_pal_rect_t name_label, double dpi) {
+    bool sevenz = archwork_pack_is_7z(app);
+    rubraview_pack_format_t format = sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP;
+    rubraview_pack_method_t methods[8];
+    size_t method_n = rubraview_pack_methods(format, methods, 8);
+    rubraview_pack_method_t lit = archwork_pack_method(app, sevenz);
+    bool store = app->pack_level == 0;
+    double row_h = PACK_ROW_H * dpi, label_w = 110.0 * dpi, pad = 12.0 * dpi, title_h = PACK_TITLE_H * dpi, note_h = PACK_NOTE_H * dpi;
+    double panel_h = pack_window_height(dpi);
+    rubraview_pal_rect_t panel = { name_label.x, name_label.y - panel_h - 8.0 * dpi, name_label.width, panel_h };
+    if (panel.y < 4.0 * dpi) panel.y = 4.0 * dpi;
+    app->pack_panel = panel;
+    rubraview_pal_render_fill_rect(app->renderer, panel, 0xF6202020u, 4.0 * dpi);
+    rubraview_pal_render_stroke_rect(app->renderer, panel, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
+    rubraview_pal_render_draw_text(app->renderer, TU8("Compress"), (rubraview_pal_rect_t){ panel.x + pad, panel.y, panel.width - 2.0 * pad, title_h },
+                                   16.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    static const char *const ROW_WORD[PACK_ROWS] = { N_("Format"), N_("Level"), N_("Codec"), N_("Solid"), N_("Split") };
+    app->pack_chip_n = 0;
+    for (int32_t row = 0; row < PACK_ROWS; ++row) {
+        double y = panel.y + title_h + row_h * (double)row;
+        rubraview_pal_render_draw_text(app->renderer, cstr(rubraview_tr(ROW_WORD[row])), (rubraview_pal_rect_t){ panel.x + pad, y, label_w, row_h - 6.0 * dpi },
+                                       14.0 * dpi, 0xC0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+        const char *words[8];
+        bool on[8] = { 0 }, off[8] = { 0 };
+        int32_t n = 0;
+        switch (row) {
+            case PACK_ROW_FORMAT:
+                words[n] = "ZIP"; on[n++] = !sevenz;
+                words[n] = "7z";  on[n++] = sevenz;
+                break;
+            case PACK_ROW_LEVEL:
+                for (int32_t k = 0; k < RUBRAVIEW_PACK_LEVEL_STEPS; ++k) { words[n] = rubraview_tr(PACK_LEVEL_WORD[k]); on[n++] = app->pack_level == k; }
+                break;
+            case PACK_ROW_METHOD:
+                for (size_t k = 0; k < method_n && n < 8; ++k) {
+                    words[n] = pack_method_word(methods[k]);
+                    on[n] = !store && methods[k] == lit;
+                    off[n++] = store || !rubraview_pack_method_ready(format, methods[k]);
+                }
+                break;
+            case PACK_ROW_SOLID:
+                words[n] = T("Solid");        on[n] = sevenz && !app->pack_solid_off; off[n++] = !sevenz;
+                words[n] = T("File by file"); on[n] = !sevenz || app->pack_solid_off;  off[n++] = !sevenz;
+                break;
+            default:
+                for (int32_t k = 0; k < PACK_SPLITS; ++k) {
+                    words[n] = k == 0 ? rubraview_tr(PACK_SPLIT_WORD[0]) : PACK_SPLIT_WORD[k];
+                    on[n] = app->pack_split == k;
+                    off[n++] = k > 0 && !rubraview_pack_split_supported(format);
+                }
+                break;
+        }
+        double x = panel.x + pad + label_w;
+        for (int32_t k = 0; k < n; ++k) {
+            double tw = 0.0;
+            (void)rubraview_pal_render_measure_text(app->renderer, cstr(words[k]), 14.0 * dpi, &tw);
+            double w = tw + 24.0 * dpi < 64.0 * dpi ? 64.0 * dpi : tw + 24.0 * dpi;
+            rubraview_pal_rect_t chip = { x, y + 3.0 * dpi, w, row_h - 8.0 * dpi };
+            bool over = pal_rect_has(chip, app->pointer_x, app->pointer_y);
+            rubraview_pal_render_fill_rect(app->renderer, chip, on[k] ? COLOR_TILE_CURRENT : over && !off[k] ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
+            rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 3.0);
+            rubraview_pal_render_draw_text(app->renderer, cstr(words[k]), chip, 14.0 * dpi, off[k] ? 0x60F0F0F0u : COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            if (app->pack_chip_n < PACK_CHIPS_MAX) {
+                app->pack_chip[app->pack_chip_n] = chip;
+                app->pack_chip_kind[app->pack_chip_n] = row * 16 + k;
+                app->pack_chip_off[app->pack_chip_n++] = off[k];
+            }
+            x += w + 6.0 * dpi;
+        }
+    }
+    /* what the choice means, then what is greyed */
+    const char *note = store ? T("Store: the files go in as they are, the codec unused")
+                     : !sevenz && rubraview_pack_method_plain(format, lit) ? T("ZIP with Deflate: Windows opens it too")
+                     : sevenz ? T("7z: 7-Zip, Bandizip and this viewer open it") : "";
+    double ny = panel.y + title_h + row_h * PACK_ROWS;
+    rubraview_pal_render_draw_text(app->renderer, cstr(note), (rubraview_pal_rect_t){ panel.x + pad, ny, panel.width - 2.0 * pad, note_h },
+                                   13.0 * dpi, 0xC0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    rubraview_pal_render_draw_text(app->renderer, TU8("Greyed: not written by FultaArc yet (split volumes; ZIP's codecs but Deflate)"),
+                                   (rubraview_pal_rect_t){ panel.x + pad, ny + note_h, panel.width - 2.0 * pad, note_h },
+                                   13.0 * dpi, 0x90F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+}
+
 void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
     if (!app->rename_active) return;
     {
-        double box_w = 560.0 * dpi, box_h = 72.0 * dpi;   /* 1.25.0: roomier */
+        double box_w = (app->rename_is_pack ? 680.0 : 560.0) * dpi, box_h = 72.0 * dpi;   /* 1.25.0: roomier; D-260: the Compress window's rows */
         if (box_w > win_w - 16.0 * dpi) box_w = win_w - 16.0 * dpi;   /* a narrow Edit window (RV-137) */
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
         /* Edit to all asks with Edit open: the box goes left of its panel. */
@@ -587,6 +693,11 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
         /* A password is asked in the middle, clear of the toolbox's anchor
            (VM, 2026-10-01: it showed through the box). */
         if (app->rename_is_password || app->rename_is_target || app->rename_is_extension || app->rename_is_pack) box.y = (win_h - box_h) * 0.5;
+        if (app->rename_is_pack) {   /* D-260: the rows, the label, the box and its buttons centred together */
+            double above = pack_window_height(dpi) + 38.0 * dpi, below = box_h + 68.0 * dpi;
+            double top = (win_h - above - below) * 0.5;
+            box.y = (top > 8.0 * dpi ? top : 8.0 * dpi) + above;
+        }
         if (app->rename_is_extension) {   /* 1.24.0: the rows over the box, the one it edits lit */
             double row_h = 34.0 * dpi, top = box.y - 40.0 * dpi - row_h * (double)app->ext_n;
             if (top < 8.0 * dpi) top = 8.0 * dpi;
@@ -628,6 +739,7 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             rubraview_pal_render_fill_rect(app->renderer, label, COLOR_BOX_FILL, 3.0);
             rubraview_pal_render_draw_text(app->renderer, TU8("Compress into:  its ending (.zip or .7z) says which  ·  Enter, then a password or none"),
                                            label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            draw_pack_window(app, label, dpi);   /* D-260 */
         }
         if (app->rename_is_target) {
             rubraview_pal_rect_t label = { box.x - 40.0 * dpi, box.y - 30.0 * dpi, box.width + 80.0 * dpi, 26.0 * dpi };
@@ -727,12 +839,6 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             kinds[n++] = RENAME_BTN_OK;
             if (app->rename_is_extension && app->ext_at + 1 < app->ext_n) { words[n] = T("Apply"); kinds[n++] = RENAME_BTN_OK + 100; }
             if (app->rename_is_target) { words[n] = T("Browse..."); kinds[n++] = RENAME_BTN_BROWSE; }
-            if (app->rename_is_pack) {   /* RV-207: the ending swapped, the level stepped */
-                static char level[64];
-                snprintf(level, sizeof level, T("Level: %s"), archwork_level_word(app));
-                words[n] = "ZIP / 7z"; kinds[n++] = RENAME_BTN_FORMAT;
-                words[n] = level; kinds[n++] = RENAME_BTN_LEVEL;
-            }
             words[n] = T("Cancel"); kinds[n++] = RENAME_BTN_CANCEL;
         }
         double bw = 120.0 * dpi, bh = 48.0 * dpi, gap = 10.0 * dpi;   /* 1.25.0: roomier */

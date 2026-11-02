@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.72.exe              the viewer, as built
-dist/rubraview-v1.39.72/                 the release bundle
-dist/rubraview-v1.39.72.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.73.exe              the viewer, as built
+dist/rubraview-v1.39.73/                 the release bundle
+dist/rubraview-v1.39.73.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1645,9 +1645,14 @@ whole; added to a list, it brings its pictures, films, music and text.
 **Archives.** The right click on an archive offers Extract into a folder of
 its name, Extract here (smart: as it is when everything in it is in one top
 folder) and Extract to...; on files and folders, Compress to a ZIP and
-Compress... (the place and name — its ending, .zip or .7z, says which — a
-level and an AES-256 password or none). The bar at the foot has **Extract**
-(the way Settings › Files › Extracting says) and **Compress**. **Look inside
+Compress... (a window: the place and name — its ending, .zip or .7z, says
+which — then **Format** ZIP or 7z, **Level** Store, Fastest, Fast, Normal,
+Maximum or Ultra, **Codec** (ZIP: Deflate, which Windows opens too; 7z: LZMA2,
+LZMA, PPMd, BZip2 or Deflate), **Solid** or file by file for a 7z, and
+**Split**; `Enter` then asks an AES-256 password or none). Greyed chips are
+what FultaArc does not write yet: split volumes, and ZIP's codecs other than
+Deflate. The bar at the foot has **Extract** (the way Settings › Files ›
+Extracting says) and **Compress**, when they fit what is picked. **Look inside
 (an archive)** (or `Shift+Enter`) lists all of an archive's folders and
 files, as a folder is listed. Opening an archive opens it that way too: a ZIP,
 7z, RAR, ALZ or EGG, from here, Explorer, a drop on the window, Open, Recent or
@@ -1719,8 +1724,12 @@ the history, so a folder seen before is known straight away; it is not
 written when Settings › Recent keeps no list, and nothing of a folder kept
 out of Recent goes into it. **Sort by ▾** and **Rising ▾** each open a list to choose from, and
 **Details** (or **Tiles**) at its end changes the view. The bottom row
-acts on what is picked: **Add to the list**, **Recycle** (press
-it twice), **Move to**, **Copy to**, **Cancel** and **Open** (**OK** when
+acts on what is picked and shows only what fits it: with nothing picked,
+**Cancel** and **Open** alone; **Add to the list** when something the viewer
+opens is picked, **Extract** when an archive is, **Compress**, **Recycle** (press
+it twice), **Move to** and **Copy to** when anything is; inside an archive
+**Extract** (all of it when nothing is picked), in a book none of them;
+**Cancel** and **Open** (**OK** when
 files are being picked for the list) — send them to one of the numbered
 folders: press the number after the button, or `0` for another folder,
 typed or browsed (**Browse...** under the box, or `Ctrl+O`) in the same

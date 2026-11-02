@@ -3081,3 +3081,22 @@ Do not store credentials, private infrastructure details, personal data, private
   with a bar and "Esc stops it; the choices open when it is done"; when it is done the choices open there as before.
   Pressed again while it reads (its own or a sort's), nothing starts over; `Esc` stops it (`shape_stop`, what was
   read kept) and leaves the screen open; a text box open keeps its own `Esc`. The passing line is gone.
+
+## 2026-11-02: D-260 The open-file screen's foot shows what fits; Compress... is a window of choices (W-20261102-2000)
+
+- Status: Accepted (owner 2026-11-02: "파일 브라우저 하단에 압축하기와 압축풀기 등의 버튼들을 상황에 맞게 표시해 주세요. 그리고 압축할 때
+  옵션 창 만들어 주세요. 압축포맷 압축률 압축코덱 분할압축 등..."; asked, "아무것도 고르지 않았을 때": "완전히 숨기기"; split:
+  "fultaarc쪽에 구현요청하고 여기는 껍데기만 만들어두고 구현되면 마무리").
+- Decision: the foot's buttons are chosen by `rubraview_picker_bottom_shows` from the place and the picks: nothing
+  picked on disk, Cancel and Open alone; Add to the list for something the viewer opens, Extract for an archive,
+  Compress, Recycle, Move to and Copy to for anything; inside an archive Extract alone; in a book or picking for the
+  list none. The slots keep their width, Cancel and Open at the right; the drawing and the click read the same list
+  (`picker_bottom_list`). Compress... keeps its name box and gains rows over it: Format (the ending), Level in six
+  steps (0 / 1 / 3 / 5 / 7 / 9), Codec by format, Solid or File by file for 7z, Split. The choices last the session.
+- FultaArc writes no volumes, and its ZIP convert route (the one Rubraview streams through) takes no codec but its
+  default: those chips are shown greyed and say so, and the job refuses them too
+  (`rubraview_pack_split_supported`, `rubraview_pack_method_ready`). Asked of FultaArc (RV-219); a 7z's codecs and
+  File by file are written now, each read back before it is kept.
+- Rejected: splitting the finished archive ourselves (a raw `.zip.001` neither Windows nor FultaArc reads; the
+  owner chose FultaArc); dimmed buttons for nothing picked (the owner chose hidden); keeping the choices in the
+  settings (not asked; the level was per session before).
