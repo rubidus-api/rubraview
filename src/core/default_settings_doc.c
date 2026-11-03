@@ -302,6 +302,8 @@ static const char *const PARTS[] = {
 "  note   \"card even when it says it has none (for testing only).\"\n"
 "  choice video.hdr_tone_mapping   \"HDR tone mapping\"        off | bt2390 = bt2390 wired\n"
 "  choice video.hdr_output         \"HDR output\"              off | auto | always = auto wired\n"
+"  toggle video.display_resample   \"Match a film to the screen\" = true wired\n"
+"  note   \"A film whose frames nearly fit the screen's refresh (29.97 on 60 Hz) is played up to a hundredth faster or slower, the sound too, so every frame stays on screen as long as the next.\"\n"
 "  info   \"FFmpeg\"                  {media.ffmpeg}\n"
 "  section \"Subtitles\"\n"
 "  int    video.subtitle_size      \"Subtitle size\"           10..72 step 1 unit \"pt\" = 24 wired\n"

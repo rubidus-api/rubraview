@@ -568,6 +568,8 @@ typedef struct app_state {
     double                 media_progress_pos, media_progress_at;   /* 1.25.2: the last picture's time plus the sound heard, and when it last changed */
     double                 sound_dry_since;   /* when the sound device last ran empty; 0 while it plays */
     double                 media_speed;       /* D-15: 0.25–4.0, kept across files for the session */
+    double                 media_resample;    /* D-271: the film matched to the screen (1 when not); played at speed × this */
+    double                 media_refresh_hz;  /* the refresh it was matched to */
     double                 ab_a, ab_b;        /* D-15 A-B repeat points in file seconds, -1 when unset */
     /* The same two points, typed (owner, 2026-09-24). The box holds one
        field per point; a key stamps the playhead into the one in hand,
@@ -2409,6 +2411,8 @@ void slidepop_close(app_state_t *app);
 void slides_follow_screen(app_state_t *app);
 void source_close(app_state_t *app);
 void speed_set(app_state_t *app, double speed);
+double media_rate(const app_state_t *app);   /* D-271: the speed asked times the match to the screen */
+void media_resample_follow(app_state_t *app);
 int speed_text(char *buffer, size_t size, double speed);
 void speed_tile_move(app_state_t *app, double y, bool detached);
 void speed_tile_press(app_state_t *app, double y, bool detached, bool interval);

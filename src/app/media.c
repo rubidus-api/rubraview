@@ -805,7 +805,7 @@ static bool bgm_release_to_page(app_state_t *app, int32_t index) {
     app->media_master = rubraview_media_master_for(app->media_info.has_audio, app->media_info.audio_output);
     app->media_clock = rubraview_media_clock_create(app->media_master, app->bgm_position,
                                                     rubraview_pal_time_now_seconds());
-    rubraview_media_clock_set_rate(&app->media_clock, app->media_speed, rubraview_pal_time_now_seconds());
+    rubraview_media_clock_set_rate(&app->media_clock, media_rate(app), rubraview_pal_time_now_seconds());
     if (!app->media_paused) rubraview_media_clock_resume(&app->media_clock, rubraview_pal_time_now_seconds());
 
     app->bgm_media = NULL;
@@ -1137,8 +1137,9 @@ static void media_adopt(app_state_t *app, int32_t index, proven_u8str_view_t pat
     app->media_master = rubraview_media_master_for(opened.info.has_audio, opened.info.audio_output);
     app->media_clock = rubraview_media_clock_create(app->media_master, 0.0, rubraview_pal_time_now_seconds());
     if (app->media_speed <= 0.0) app->media_speed = 1.0;
-    rubraview_media_clock_set_rate(&app->media_clock, app->media_speed, rubraview_pal_time_now_seconds());
-    rubraview_pal_audio_set_speed(app->media_speed);
+    app->media_resample = 1.0;   /* D-271: matched again once its pictures' rate is known */
+    rubraview_media_clock_set_rate(&app->media_clock, media_rate(app), rubraview_pal_time_now_seconds());
+    rubraview_pal_audio_set_speed(media_rate(app));
     app->ab_a = app->ab_b = -1.0;   /* a repeat belongs to the file it was set in */
     /* §3.2.6 / RV-061: a slide holding a film or a track waits for the
        whole of it, not for the still-image interval. */
@@ -1213,6 +1214,30 @@ static void media_show(app_state_t *app, app_page_t *page, const rubraview_video
 
 /* Once per loop pass: follow the sound, put the due frame on the page,
    and notice the end. */
+/* D-271 (RV-215 step 3, mpv's display-resample; owner 2026-11-03: "진행 바랍니다"): a film played a little faster or
+   slower — under 1 %, the sound with it — so each frame lasts a whole number of the screen's refreshes. */
+double media_rate(const app_state_t *app) {
+    double speed = app->media_speed > 0.0 ? app->media_speed : 1.0;
+    double match = app->media_resample > 0.0 ? app->media_resample : 1.0;
+    return speed * match;
+}
+
+void media_resample_follow(app_state_t *app) {
+    double match = 1.0, hz = 0.0;
+    if (app->media && app->media_info.has_video &&
+        rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("display_resample")) > 0.5) {
+        double period = rubraview_pal_render_refresh_seconds(app->renderer);
+        hz = period > 0.0 ? 1.0 / period : 0.0;
+        match = rubraview_media_display_resample(app->media_info.frame_rate, hz, 0.01);
+    }
+    app->media_refresh_hz = hz;
+    if (fabs(match - (app->media_resample > 0.0 ? app->media_resample : 1.0)) < 1e-9) return;
+    app->media_resample = match;
+    if (!app->media) return;
+    rubraview_media_clock_set_rate(&app->media_clock, media_rate(app), rubraview_pal_time_now_seconds());
+    rubraview_pal_audio_set_speed(media_rate(app));
+}
+
 void media_tick(app_state_t *app) {
     app_page_t *page = media_page_ready(app);
     if (!page) return;
@@ -1235,6 +1260,7 @@ void media_tick(app_state_t *app) {
         rubraview_media_rate_differs(app->media_info.frame_rate, measured_rate)) {
         app->media_info.frame_rate = measured_rate;
     }
+    media_resample_follow(app);   /* D-271: the rate or the screen may have changed */
 
     /* §5.3: with the sound as master, the clock follows what is heard. */
     /* When the sound has run out before the picture (a film whose picture
@@ -1250,7 +1276,7 @@ void media_tick(app_state_t *app) {
         if (rubraview_pal_media_audio_position(m, &heard, &at)) {
             rubraview_media_clock_sync_audio(&app->media_clock,
                 rubraview_audio_position_now_at_rate(heard, at, now, !app->media_paused, MEDIA_AUDIO_EXTRAPOLATION,
-                                                     app->media_speed > 0.0 ? app->media_speed : 1.0),
+                                                     media_rate(app)),
                 now);
         }
     }
@@ -1498,7 +1524,7 @@ static void music_promote_next(app_state_t *app) {
     app->media_title_tenth = -1;
     app->media_master = rubraview_media_master_for(app->media_info.has_audio, app->media_info.audio_output);
     app->media_clock = rubraview_media_clock_create(app->media_master, 0.0, rubraview_pal_time_now_seconds());
-    rubraview_media_clock_set_rate(&app->media_clock, app->media_speed, rubraview_pal_time_now_seconds());
+    rubraview_media_clock_set_rate(&app->media_clock, media_rate(app), rubraview_pal_time_now_seconds());
     app->ab_a = app->ab_b = -1.0;      /* a repeat belongs to the track it was set in */
 
     music_load(app, app->source.pages[page].path);

@@ -110,8 +110,8 @@ void speed_set(app_state_t *app, double speed) {
     if (speed > 4.0) speed = 4.0;
     app->media_speed = speed;
     if (app->media) {
-        rubraview_media_clock_set_rate(&app->media_clock, speed, rubraview_pal_time_now_seconds());
-        rubraview_pal_audio_set_speed(speed);
+        rubraview_media_clock_set_rate(&app->media_clock, media_rate(app), rubraview_pal_time_now_seconds());   /* D-271 */
+        rubraview_pal_audio_set_speed(media_rate(app));
     } else {
         app->animation.speed = speed;   /* D-82: the same ladder, and kept for the session as a film's is */
     }

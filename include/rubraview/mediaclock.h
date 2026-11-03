@@ -47,6 +47,14 @@ rubraview_frame_decision_t rubraview_media_schedule_at(double frame_pts, double 
                                                         double clock_seconds, double ahead_seconds);
 
 /**
+ * RV-215 step 3 (D-271), mpv's display-resample: the speed a film is played at so that each of its frames lasts a
+ * whole number of the screen's refreshes — 29.97 on 60 Hz 1.001, 23.976 on 24 Hz 1.001, 25 on 50 Hz 1 — rounded to
+ * a thousandth (the sound's step, so the clock and the sound go alike). 1 when no whole number is within `max_change`
+ * (0.01: 24 frames on 60 Hz stay 3:2), or a rate is not known.
+ */
+double rubraview_media_display_resample(double frame_rate, double refresh_hz, double max_change);
+
+/**
  * Redraw pacing while a film or a sound plays and nothing else on screen
  * moves. A new picture is drawn at once; otherwise only the seek bar and
  * the time (minutes and seconds) change, and four times a second is plenty

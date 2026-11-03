@@ -65,6 +65,8 @@ static void live_second(app_state_t *app, double now) {
         .ready = film ? (uint32_t)rubraview_pal_media_frames_ready(app->media) : 0,
         .read_known = known, .read_bytes = known ? read - app->stats_read_from : 0,
         .film_bits = film ? live_film_bits(app) : 0.0, .fine_timer = app->stats_fine,
+        .resample = film ? app->media_resample : 1.0, .refresh_hz = film ? app->media_refresh_hz : 0.0,   /* D-271 */
+        .frame_rate = film ? app->media_info.frame_rate : 0.0,
     };
     rubraview_filmcache_stats_t cs;   /* RV-216 */
     rubraview_pal_filmcache_stats(&cs);

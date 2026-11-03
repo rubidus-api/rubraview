@@ -3229,3 +3229,20 @@ Do not store credentials, private infrastructure details, personal data, private
   frames a second) no worse than 1.39.80, pause, resume and a seek included (T345). A film whose frames start
   exactly on refreshes still wobbles at the edge: step 3 (display-resample) is what holds that, to be weighed with
   the owner's numbers.
+
+## 2026-11-03: D-271 A film's speed matched to the screen (display-resample, RV-215 step 3) (W-20261103-0600)
+
+- Status: Accepted (owner 2026-11-03: "진행 바랍니다", after being told its reach: 29.97 / 59.94 on 60 Hz and
+  23.976 on 24 / 120 / 144 Hz gain, 24 on 60 Hz does not).
+- Decision: `rubraview_media_display_resample` finds the whole number of refreshes nearest a frame's length and
+  the speed that makes it exact; within 1 % it is used, rounded to a thousandth (the sound's step, so the clock and
+  the sound go alike), else 1. The film plays at the speed asked times that (`media_rate`: the clock's rate, the
+  sound's speed, the sound's position extrapolated), the speed shown stays the one asked. It is followed each tick
+  from the pictures' measured rate and the screen's refresh (`DwmGetCompositionTimingInfo`, read again every 2 s),
+  and reset when a film opens. Settings › Video › Match a film to the screen (`video.display_resample`, on) turns
+  it off. The Live rows say "Matched to the screen: 1.001x for 60 Hz (the sound too)" or "as it is: 29.970 frames
+  a second on 32 Hz".
+- Evidence: the speeds and the cadence they give (`test_mediaclock`), the row (`test_fileinfo`); on the VM, whose
+  remote display runs at 32 Hz, a 31.968 film matched 1.001x, a 29.97 one left as it is, nothing with the setting
+  off, no worse than 1.39.81 (T346). The owner's screen and films decide whether it is seen.
+- Not done: interpolation (frames blended for 24 on 60 Hz); offered when the numbers ask for it.

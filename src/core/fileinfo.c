@@ -405,6 +405,10 @@ void rubraview_info_add_live(proven_arena_t *arena, rubraview_info_t *info, cons
     if (live->film) {
         rubraview_info_addf(arena, info, T("Film pictures"), T("%.0f shown, %.0f dropped a second, %u decoded ahead"),
                             live->shown / span, live->dropped / span, (unsigned)live->ready);
+        if (live->resample > 0.0 && fabs(live->resample - 1.0) > 1e-6)
+            rubraview_info_addf(arena, info, T("Matched to the screen"), T("%.3fx for %.4g Hz (the sound too)"), live->resample, live->refresh_hz);
+        else if (live->refresh_hz > 0.0 && live->frame_rate > 0.0)   /* looked at, and nothing to match (or more than 1 % off) */
+            rubraview_info_addf(arena, info, T("Matched to the screen"), T("as it is: %.3f frames a second on %.4g Hz"), live->frame_rate, live->refresh_hz);
         if (live->shown > 0)
             rubraview_info_addf(arena, info, T("Picture late"), T("%.1f ms behind the clock on average"), live->late * 1000.0 / live->shown);
         if (live->taken > 0)

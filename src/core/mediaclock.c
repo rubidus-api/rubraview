@@ -26,6 +26,17 @@ rubraview_frame_decision_t rubraview_media_schedule_at(double frame_pts, double 
     return rubraview_media_schedule(frame_pts, frame_duration, clock_seconds + ahead_seconds);
 }
 
+double rubraview_media_display_resample(double frame_rate, double refresh_hz, double max_change) {
+    if (!(frame_rate > 1.0 && frame_rate < 400.0) || !(refresh_hz > 10.0 && refresh_hz < 1000.0) || !(max_change > 0.0)) return 1.0;
+    double ratio = refresh_hz / frame_rate;
+    double n = floor(ratio + 0.5);
+    if (n < 1.0) return 1.0;   /* more frames than refreshes: nothing to land on */
+    double speed = ratio / n;
+    if (fabs(speed - 1.0) > max_change) return 1.0;
+    speed = floor(speed * 1000.0 + 0.5) / 1000.0;
+    return speed;
+}
+
 /* How far the clock may be from the picture and the picture still be
    "where the film is": a late frame or two, not a stretch without any. */
 #define POSITION_SLACK_SECONDS 0.5

@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.81.exe              the viewer, as built
-dist/rubraview-v1.39.81/                 the release bundle
-dist/rubraview-v1.39.81.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.82.exe              the viewer, as built
+dist/rubraview-v1.39.82/                 the release bundle
+dist/rubraview-v1.39.82.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1555,6 +1555,13 @@ filename code page, the memory cap). Some worth knowing:
   information window's **Presented** then says "scRGB FP16", and **HDR**
   "sent to the screen as HDR"; otherwise **HDR output** says why not. A
   frame taken out of such a film is clipped at SDR white.
+- **Video** › **Match a film to the screen** (on): a film whose frames nearly
+  fit the screen's refresh — 29.97 or 59.94 on 60 Hz, 23.976 on 24, 120 or
+  144 Hz — plays up to 1 % faster or slower, the sound with it, so every
+  frame stays on screen as long as the next, as mpv's display-resample does;
+  24 frames on 60 Hz stay as they are (three refreshes, then two). The
+  information window's Live rows say **Matched to the screen** and by how
+  much, or that it is played as it is.
 - **Video** also has the subtitle's **font** (type a family's name, such
   as `Malgun Gothic`) and **colour**, and **Preferred sound** and
   **Preferred subtitles**: a language as films name it (`kor`, `eng`,
