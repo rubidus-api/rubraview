@@ -3213,3 +3213,19 @@ Do not store credentials, private infrastructure details, personal data, private
   was 0.1 ms) and nothing is worse against the 1.39.79 release and the old way in the same build (frames a second,
   slowest gap, 33 pictures a second turned); the VM's software decode caps films at 10-12 frames a second, so it
   cannot show the gain. The owner's film on the owner's PC decides step 2 (the picture chosen for when it is seen).
+
+## 2026-11-03: D-270 A film's picture chosen for when it is seen (RV-215 step 2) (W-20261103-0500)
+
+- Status: Accepted (owner 2026-11-03, asked whether mpv's GPU renderer would do better: "A가 좋겠네요" — mpv's
+  timing done in Rubraview's own way rather than libplacebo or libmpv).
+- Decision: while a film plays on a waitable chain (D-269), the loop waits for the screen's free buffer before the
+  picture is chosen (`rubraview_pal_render_wait_frame`, a refresh and 4 ms at most, a key or a click ending it), then
+  chooses with `rubraview_media_schedule_at` for the time until the next refresh (`rubraview_pal_render_seen_in_seconds`
+  from when the buffer freed and `DwmGetCompositionTimingInfo`'s period); the frame then begun does not wait again.
+  The wait is counted as waiting for the screen, outside the drawing time. The old chain (`RUBRAVIEW_PACING_OLD`)
+  chooses for now as before.
+- Evidence: a simulation of the loop's choice gives 3:2 for 24 frames on 60 Hz, 2 for 30, 1 for 60, 6 for 24 on
+  144 Hz, 1-2 for 50, none dropped, with 1-2 ms of wobble (`test_mediaclock`); the VM (software decode at 10-12
+  frames a second) no worse than 1.39.80, pause, resume and a seek included (T345). A film whose frames start
+  exactly on refreshes still wobbles at the edge: step 3 (display-resample) is what holds that, to be weighed with
+  the owner's numbers.

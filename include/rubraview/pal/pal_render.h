@@ -112,6 +112,14 @@ double rubraview_pal_render_present_seconds(const rubraview_renderer_t *renderer
 /* RV-215 (D-269): whether frames are begun when the screen can take them (a flip chain's waitable object), the wait
    then counted in present_seconds. */
 bool rubraview_pal_render_paced(const rubraview_renderer_t *renderer);
+/* RV-215 step 2 (D-270): wait for the screen to free a buffer before a film's picture is chosen (true when it did,
+   the next frame then begun without waiting again); and the screen's refresh period (1/60 when not known). */
+bool rubraview_pal_render_wait_frame(rubraview_renderer_t *renderer, uint32_t timeout_ms);
+double rubraview_pal_render_refresh_seconds(rubraview_renderer_t *renderer);
+/* How long until a frame begun now is seen (the refresh after the freed buffer's), 0 when no buffer is held. */
+double rubraview_pal_render_seen_in_seconds(rubraview_renderer_t *renderer);
+/* Of present_seconds, what was waited before the frame's picture was chosen (not within its drawing). */
+double rubraview_pal_render_ahead_seconds(const rubraview_renderer_t *renderer);
 
 /**
  * Draw a whole texture under `transform` (typically from

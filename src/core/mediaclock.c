@@ -20,6 +20,12 @@ rubraview_frame_decision_t rubraview_media_schedule(double frame_pts, double fra
     return RUBRAVIEW_FRAME_WAIT;
 }
 
+rubraview_frame_decision_t rubraview_media_schedule_at(double frame_pts, double frame_duration,
+                                                        double clock_seconds, double ahead_seconds) {
+    if (!(ahead_seconds > 0.0 && ahead_seconds <= 0.1)) ahead_seconds = 0.0;
+    return rubraview_media_schedule(frame_pts, frame_duration, clock_seconds + ahead_seconds);
+}
+
 /* How far the clock may be from the picture and the picture still be
    "where the film is": a late frame or two, not a stretch without any. */
 #define POSITION_SLACK_SECONDS 0.5

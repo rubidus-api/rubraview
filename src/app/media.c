@@ -1266,10 +1266,20 @@ void media_tick(app_state_t *app) {
         }
     } else if (!(app->media_paused && app->media_has_frame)) {
         rubraview_video_frame_t frame;
+        /* RV-215 step 2 (D-270, owner 2026-11-03: "A가 좋겠네요"): the screen's free buffer waited for first, then the
+           picture chosen for the refresh it will be seen at, one period on; RUBRAVIEW_PACING_OLD (no waitable chain)
+           chooses for now as before. A picture already waiting to be shown is not waited for again. */
+        double ahead = 0.0;
+        if (app->media_has_frame && rubraview_pal_render_paced(app->renderer) && !app->media_new_picture &&
+            rubraview_pal_media_peek_frame(m, &frame) && rubraview_pal_render_wait_frame(app->renderer,
+                (uint32_t)(rubraview_pal_render_refresh_seconds(app->renderer) * 1000.0) + 4u)) {
+            ahead = rubraview_pal_render_seen_in_seconds(app->renderer);
+            clock = rubraview_media_clock_now(&app->media_clock, rubraview_pal_time_now_seconds());
+        }
         while (rubraview_pal_media_peek_frame(m, &frame)) {
             /* The first picture after opening or seeking shows at once. */
             rubraview_frame_decision_t decision = app->media_has_frame
-                ? rubraview_media_schedule(frame.pts, frame.duration, clock)
+                ? rubraview_media_schedule_at(frame.pts, frame.duration, clock, ahead)
                 : RUBRAVIEW_FRAME_SHOW;
             if (decision == RUBRAVIEW_FRAME_WAIT) break;
             if (decision == RUBRAVIEW_FRAME_DROP && rubraview_pal_media_frames_ready(m) > 1) {

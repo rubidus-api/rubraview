@@ -8,6 +8,7 @@
 #include <dxgi1_2.h>
 #include <dxgi1_6.h>   /* IDXGISwapChain3, IDXGIOutput6 (RV-153) */
 #include <dwrite.h>
+#include <dwmapi.h>   /* RV-215: the screen's refresh */
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -113,6 +114,11 @@ struct rubraview_renderer {
     int32_t present_model;         /* RUBRAVIEW_PRESENT_*: how the swap chain hands frames to the compositor */
     UINT swap_flags;               /* RV-215: the chain's flags, given again to ResizeBuffers as it must be */
     double wait_seconds;           /* RV-215: this frame's wait for the screen, before it was begun */
+    double waited_ahead;           /* RV-215 step 2: waited before the frame was chosen (rubraview_pal_render_wait_frame) */
+    double ahead_seconds;          /* that wait, for the frame last begun (outside its drawing time) */
+    bool frame_ready;              /* the waitable object taken and no frame begun since */
+    double ready_at;               /* when it was (QueryPerformanceCounter seconds) */
+    double refresh_seconds, refresh_read_at;
     HANDLE frame_wait;             /* RV-215: signalled when the screen can take a frame (flip model), or NULL */
     ID2D1Bitmap1 *back_buffer;     /* Direct2D's target: the swap chain's buffer, or (HDR) the scene */
     /* RV-153 (D-183): the window sent to an HDR screen as scRGB, FP16 */
@@ -521,13 +527,16 @@ void rubraview_pal_render_begin(rubraview_renderer_t *renderer, uint32_t clear_a
     /* RV-215 (D-269): the frame begun when the screen can take it, so what is drawn is what is newest when shown;
        the wait counts as waiting for the screen (the Live rows), a minimised window's never-signalled one cut short */
     renderer->wait_seconds = 0.0;
-    if (renderer->frame_wait) {
+    renderer->ahead_seconds = renderer->waited_ahead;
+    renderer->waited_ahead = 0.0;
+    if (renderer->frame_wait && renderer->frame_ready) renderer->frame_ready = false;   /* taken before the choice */
+    else if (renderer->frame_wait) {
         LARGE_INTEGER f, a, b;
         QueryPerformanceFrequency(&f);
         QueryPerformanceCounter(&a);
         WaitForSingleObjectEx(renderer->frame_wait, 100, TRUE);
         QueryPerformanceCounter(&b);
-        renderer->wait_seconds = (double)(b.QuadPart - a.QuadPart) / (double)f.QuadPart;
+        renderer->wait_seconds += (double)(b.QuadPart - a.QuadPart) / (double)f.QuadPart;
     }
     bool drop[RUBRAVIEW_SCREENCOPY_SLOTS];
     rubraview_screencopy_frame(&renderer->screencopy, drop);   /* RV-166: copies not drawn last frame go */
@@ -550,8 +559,54 @@ bool rubraview_pal_render_paced(const rubraview_renderer_t *renderer) {
     return renderer && renderer->frame_wait != NULL;
 }
 
+bool rubraview_pal_render_wait_frame(rubraview_renderer_t *renderer, uint32_t timeout_ms) {
+    if (!renderer || !renderer->frame_wait) return false;
+    if (renderer->frame_ready) return true;   /* taken already, no frame begun since: waiting again would hang */
+    LARGE_INTEGER f, a, b;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&a);
+    /* a key or a click ends the wait too: the pass takes it and the picture is chosen for now this once */
+    renderer->frame_ready = MsgWaitForMultipleObjectsEx(1, &renderer->frame_wait, timeout_ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE) == WAIT_OBJECT_0;
+    QueryPerformanceCounter(&b);
+    renderer->ready_at = (double)b.QuadPart / (double)f.QuadPart;
+    renderer->waited_ahead += (double)(b.QuadPart - a.QuadPart) / (double)f.QuadPart;
+    return renderer->frame_ready;
+}
+
+double rubraview_pal_render_seen_in_seconds(rubraview_renderer_t *renderer) {
+    if (!renderer || !renderer->frame_ready) return 0.0;
+    double period = rubraview_pal_render_refresh_seconds(renderer);
+    LARGE_INTEGER f, c;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    double since = (double)c.QuadPart / (double)f.QuadPart - renderer->ready_at;   /* the buffer freed just after a refresh */
+    if (since < 0.0) since = 0.0;
+    return period - fmod(since, period);   /* the next refresh from now */
+}
+
+double rubraview_pal_render_refresh_seconds(rubraview_renderer_t *renderer) {
+    if (!renderer) return 1.0 / 60.0;
+    LARGE_INTEGER f, c;
+    QueryPerformanceFrequency(&f);
+    QueryPerformanceCounter(&c);
+    double now = (double)c.QuadPart / (double)f.QuadPart;
+    if (renderer->refresh_seconds <= 0.0 || now - renderer->refresh_read_at > 2.0) {   /* a monitor changed now and then */
+        DWM_TIMING_INFO info = { .cbSize = sizeof info };
+        double period = 0.0;
+        if (SUCCEEDED(DwmGetCompositionTimingInfo(NULL, &info)) && info.rateRefresh.uiNumerator > 0)
+            period = (double)info.rateRefresh.uiDenominator / (double)info.rateRefresh.uiNumerator;
+        renderer->refresh_seconds = period > 1.0 / 500.0 && period < 0.1 ? period : 1.0 / 60.0;
+        renderer->refresh_read_at = now;
+    }
+    return renderer->refresh_seconds;
+}
+
 double rubraview_pal_render_present_seconds(const rubraview_renderer_t *renderer) {
-    return renderer ? renderer->wait_seconds + renderer->present_seconds : 0.0;   /* RV-215: the wait before, Present's own */
+    return renderer ? renderer->ahead_seconds + renderer->wait_seconds + renderer->present_seconds : 0.0;   /* RV-215: every wait for the screen */
+}
+
+double rubraview_pal_render_ahead_seconds(const rubraview_renderer_t *renderer) {
+    return renderer ? renderer->ahead_seconds : 0.0;
 }
 
 bool rubraview_pal_render_end(rubraview_renderer_t *renderer) {

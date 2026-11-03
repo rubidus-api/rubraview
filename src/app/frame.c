@@ -216,7 +216,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
             double present = rubraview_pal_render_present_seconds(app->renderer);
             app->stats_frames++;
             app->stats_present += present;
-            app->stats_draw += rubraview_pal_time_now_seconds() - drawn_at - present;
+            app->stats_draw += rubraview_pal_time_now_seconds() - drawn_at - (present - rubraview_pal_render_ahead_seconds(app->renderer));
         }
         fc->last_scene_signature = scene_signature(app);
         fc->last_render_seconds = now;

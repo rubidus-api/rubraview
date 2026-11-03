@@ -39,6 +39,14 @@ rubraview_frame_decision_t rubraview_media_schedule(double frame_pts, double fra
                                                      double clock_seconds);
 
 /**
+ * RV-215 step 2 (D-270): the same, for the moment the frame will be seen: `ahead` seconds after the clock (one
+ * refresh, when the frame is begun as the screen frees a buffer and shown at the next refresh). Out of 0..0.1 s it
+ * counts as 0 (the decision for now).
+ */
+rubraview_frame_decision_t rubraview_media_schedule_at(double frame_pts, double frame_duration,
+                                                        double clock_seconds, double ahead_seconds);
+
+/**
  * Redraw pacing while a film or a sound plays and nothing else on screen
  * moves. A new picture is drawn at once; otherwise only the seek bar and
  * the time (minutes and seconds) change, and four times a second is plenty
