@@ -58,12 +58,15 @@ static fulta_arc_err_t dbcs_decode(fa_buf_t *b, const uint8_t *s, size_t n, cons
     return FULTA_ARC_OK;
 }
 
-char *fa_codepage_to_utf8(const uint8_t *s, size_t n, fulta_arc_codepage_t cp, fulta_arc_codepage_t fallback) {
-    fa_buf_t b = {0};
-    if (cp == FULTA_ARC_CP_AUTO) cp = fa_utf8_valid(s, n) ? FULTA_ARC_CP_UTF8 : fallback;
+char *fa_codepage_to_utf8(proven_allocator_t a, proven_mem_view_t bytes, fulta_arc_codepage_t cp,
+                          fulta_arc_codepage_t fallback) {
+    const uint8_t *s = bytes.ptr;
+    size_t n = bytes.size;
+    fa_buf_t b = {.alloc = a};
+    if (cp == FULTA_ARC_CP_AUTO) cp = fa_utf8_valid(fa_bytes(s, n)) ? FULTA_ARC_CP_UTF8 : fallback;
     fulta_arc_err_t e;
     dbcs_t d;
-    if (cp == FULTA_ARC_CP_UTF8) e = fa_utf8_valid(s, n) ? fa_buf_append(&b, s, n) : sbcs(&b, s, n, fa_cp1252);
+    if (cp == FULTA_ARC_CP_UTF8) e = fa_utf8_valid(fa_bytes(s, n)) ? fa_buf_append(&b, fa_bytes(s, n)) : sbcs(&b, s, n, fa_cp1252);
     else if (sbcs_table(cp)) e = sbcs(&b, s, n, sbcs_table(cp));
     else if (get_dbcs(cp, &d)) e = dbcs_decode(&b, s, n, &d);
     else e = sbcs(&b, s, n, fa_cp437);
@@ -74,10 +77,10 @@ char *fa_codepage_to_utf8(const uint8_t *s, size_t n, fulta_arc_codepage_t cp, f
 
 /* UTF-8 to a code page, for passwords that an archiver stored in its code page (ALZ, old ZIP). Characters the
  * page lacks make the conversion fail (NULL). Linear search: used once per password. */
-char *fa_utf8_to_codepage(const char *utf8, fulta_arc_codepage_t cp) {
+char *fa_utf8_to_codepage(proven_allocator_t a, const char *utf8, fulta_arc_codepage_t cp) {
     const uint8_t *s = (const uint8_t *)utf8;
     size_t n = strlen(utf8);
-    fa_buf_t b = {0};
+    fa_buf_t b = {.alloc = a};
     dbcs_t d;
     bool dbcs = get_dbcs(cp, &d);
     const uint16_t *hi = sbcs_table(cp) ? sbcs_table(cp) : fa_cp437;
@@ -97,7 +100,7 @@ char *fa_utf8_to_codepage(const char *utf8, fulta_arc_codepage_t cp) {
             for (size_t k = 0; k < 24066 && !found; k++)
                 if (d.pairs[k] == c) {
                     uint8_t t[2] = {(uint8_t)(0x81 + k / 191), (uint8_t)(0x40 + k % 191)};
-                    e = fa_buf_append(&b, t, 2);
+                    e = fa_buf_append(&b, fa_bytes(t, 2));
                     found = true;
                 }
         } else {

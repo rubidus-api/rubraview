@@ -11,6 +11,7 @@
 #define FA_ALZ_H
 
 #include "compat.h"
+#include "../core/fa_alloc.h"   /* proven_allocator_t and FultaArc's allocation calls (D-038) */
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -78,7 +79,8 @@ typedef struct fa_alz_archive {
     fa_alz_entry_t *entries;          /* files only (no folders), in the archive's order */
     size_t entry_count;
     bool damaged;           /* the listing stopped at damage, before the end record */
-    void *state;            /* the password, while one is set; heap */
+    void *state;            /* the password, while one is set; in `alloc` */
+    proven_allocator_t alloc;   /* the archive's (D-038): state, password and decode buffers */
 } fa_alz_archive_t;
 
 typedef struct fa_alz_result {
@@ -89,10 +91,10 @@ typedef struct fa_alz_result {
 /** "ALZ" 01 at the start: the signature decides, not the extension. */
 bool fa_alz_is_alz(const uint8_t *data, size_t size);
 
-[[nodiscard]] fa_alz_result_t fa_alz_open(proven_arena_t *arena, const uint8_t *data, size_t size);
+[[nodiscard]] fa_alz_result_t fa_alz_open(proven_allocator_t alloc, proven_arena_t *arena, const uint8_t *data, size_t size);
 
 /** Open from every volume of a split archive, the `.alz` first. The array is copied; the bytes are borrowed. */
-[[nodiscard]] fa_alz_result_t fa_alz_open_volumes(proven_arena_t *arena, const fa_alz_volume_t *volumes,
+[[nodiscard]] fa_alz_result_t fa_alz_open_volumes(proven_allocator_t alloc, proven_arena_t *arena, const fa_alz_volume_t *volumes,
                                                                 size_t volume_count);
 
 /**

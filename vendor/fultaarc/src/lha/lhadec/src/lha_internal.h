@@ -8,9 +8,11 @@
 #define LHA_INTERNAL_H
 
 #include "../include/lhadec.h"
+#include "../../../core/fa_alloc.h"   /* FultaArc edition (D-038): every block through proven's allocator trait */
 
 /* Buffered input over the user's read callback. */
 typedef struct lha_in {
+    proven_allocator_t alloc;    /* the reader's, and every decoder's that reads through it */
     lha_read_fn rd;
     void *ctx;
     unsigned char *buf;

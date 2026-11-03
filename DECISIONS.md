@@ -3157,3 +3157,16 @@ Do not store credentials, private infrastructure details, personal data, private
 - Not done: FultaArc's own move to proven v0.107.x and its allocators (asked of it by the owner; it waits on the
   owner's decisions there); its next snapshot is resynced when it comes. LZMA SDK 26.05 (FultaArc `3ca96f0`) not
   taken with it: the owner had not decided (the higher levels' memory).
+
+## 2026-11-03: D-265 FultaArc ad1a532: LZMA SDK 26.05 and 7-Zip's memory at the high levels, said (W-20261103-0200)
+
+- Status: Accepted (owner 2026-11-03, asked how the higher levels' memory goes: "7-Zip과 같게 + 안내").
+- Decision: `vendor/fultaarc` resynced to `ad1a532`, unmodified: the LZMA SDK 26.05 (dictionaries per level as 7-Zip
+  24.09 and later: Normal 32 MiB, Maximum 128 MiB, Ultra 256 MiB, never more than the input needs), every allocation
+  through proven's allocator, ARM-Thumb and RISC-V filters, Deflate decoding about 1.9 times faster. Its one break,
+  `fulta_arc_extract_alloc` freed by `fulta_arc_free`, touches nothing here (not called). Its `vendor/proven` is
+  v0.108.0, the copy Rubraview vendors (D-264), on which it is built. The Compress window keeps 7-Zip's levels and
+  says, with LZMA or LZMA2 at Maximum or Ultra, that a large file may take about 1.5 GB / 3 GB of memory to pack.
+- The LZMA SDK's files keep their CRLF lines as upstream ships them; `.gitattributes` turns git's whitespace check off
+  under `vendor/` (the gate's `git diff --check` took them for trailing spaces).
+- Rejected: lowering the level when memory is short, and keeping the old dictionaries (the owner chose 7-Zip's).

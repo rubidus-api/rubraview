@@ -38,7 +38,7 @@ static bool lzip_probe(const uint8_t *head, size_t n, uint64_t *offset) {
     return true;
 }
 
-static char *lzip_derive_name(const char *archive_name) {
+static char *lzip_derive_name(proven_allocator_t alloc, const char *archive_name) {
     const char *base = archive_name ? archive_name : "";
     for (const char *p = base; *p; p++) if (*p == '/' || *p == '\\') base = p + 1;
     size_t len = strlen(base);
@@ -49,7 +49,7 @@ static char *lzip_derive_name(const char *archive_name) {
     #undef EQ
     if (len == 0) { base = "data"; len = 4; tar = NULL; }
     size_t extra = tar ? 4 : 0;
-    char *outn = fa_malloc(len + extra + 1);
+    char *outn = fa_alloc(alloc, len + extra + 1);
     if (!outn) return NULL;
     memcpy(outn, base, len);
     if (tar) memcpy(outn + len, tar, 4);
@@ -61,12 +61,12 @@ static fulta_arc_err_t lzip_open(fulta_arc_t *arc, uint64_t offset) {
     (void)offset;
     const fulta_arc_source_t *src = arc->volumes[0];
     uint8_t h[6];
-    if (src->size < 6 + LZIP_TRAILER || fa_source_read_exact(src, 0, h, 6)) return FULTA_ARC_ERR_NOT_ARCHIVE;
+    if (src->size < 6 + LZIP_TRAILER || fa_source_read_exact(src, 0, fa_bytes_mut(h, 6))) return FULTA_ARC_ERR_NOT_ARCHIVE;
     if (h[0] != 'L' || h[1] != 'Z' || h[2] != 'I' || h[3] != 'P' || h[4] != 1) return FULTA_ARC_ERR_NOT_ARCHIVE;
     uint32_t dict;
     if (!lzip_dict(h[5], &dict)) return FULTA_ARC_ERR_NOT_ARCHIVE;
 
-    lzip_state_t *st = fa_calloc(1, sizeof *st);
+    lzip_state_t *st = fa_zalloc(arc->alloc, 1, sizeof *st);
     if (!st) return FULTA_ARC_ERR_NOMEM;
     st->dict = dict;
     st->off = 6;
@@ -75,11 +75,11 @@ static fulta_arc_err_t lzip_open(fulta_arc_t *arc, uint64_t offset) {
      * can decode exactly `data_size` bytes and verify the CRC-32. Otherwise (multi-member) decode the first member
      * by its LZMA end-of-stream marker, size and CRC unverified (first-member-only, like the other wrappers). */
     uint8_t t[LZIP_TRAILER];
-    if (fa_source_read_exact(src, src->size - LZIP_TRAILER, t, LZIP_TRAILER)) { fa_free(st); return FULTA_ARC_ERR_TRUNCATED; }
+    if (fa_source_read_exact(src, src->size - LZIP_TRAILER, fa_bytes_mut(t, LZIP_TRAILER))) { fa_release(arc->alloc, st); return FULTA_ARC_ERR_TRUNCATED; }
     uint32_t crc = fa_le32(t);
     uint64_t data_size = fa_le32(t + 4) | ((uint64_t)fa_le32(t + 8) << 32);
     uint64_t member_size = fa_le32(t + 12) | ((uint64_t)fa_le32(t + 16) << 32);
-    if (member_size < 6 + LZIP_TRAILER || member_size > src->size) { fa_free(st); return FULTA_ARC_ERR_NOT_ARCHIVE; }
+    if (member_size < 6 + LZIP_TRAILER || member_size > src->size) { fa_release(arc->alloc, st); return FULTA_ARC_ERR_NOT_ARCHIVE; }
 
     uint64_t esize = 0;
     if (member_size == src->size) {                 /* single member: the trailer is trustworthy */
@@ -96,10 +96,10 @@ static fulta_arc_err_t lzip_open(fulta_arc_t *arc, uint64_t offset) {
     }
     arc->state = st;
 
-    char *name = lzip_derive_name(arc->name);
+    char *name = lzip_derive_name(arc->alloc, arc->name);
     const char *use = name ? name : "data";
-    fa_entry_t *e = fa_add_entry(arc, (const uint8_t *)use, strlen(use), use, "lzma");
-    fa_free(name);
+    fa_entry_t *e = fa_add_entry(arc, fa_bytes((const uint8_t *)use, strlen(use)), use, "lzma");
+    fa_release(arc->alloc, name);
     if (!e) return FULTA_ARC_ERR_NOMEM;
     e->pub.size = esize;
     e->pub.packed_size = src->size;
@@ -116,7 +116,7 @@ static fulta_arc_err_t lzip_extract(fulta_arc_t *arc, size_t index, const fulta_
     fa_piece_t piece = { src, st->off, st->len };
     fa_range_t range = { &piece, 1, st->len };
     fa_stream_t *s = NULL, *d = NULL;
-    fulta_arc_err_t e = fa_stream_range(&range, 0, st->len, &s);
+    fulta_arc_err_t e = fa_stream_range(arc->alloc, &range, 0, st->len, &s);
     if (e) return e;
     uint8_t props[5] = { 93, 0, 0, 0, 0 };          /* lc=3,lp=0,pb=2 -> (pb*5+lp)*9+lc = 93; dict LE follows */
     fa_put_le32(props + 1, st->dict);
@@ -127,7 +127,7 @@ static fulta_arc_err_t lzip_extract(fulta_arc_t *arc, size_t index, const fulta_
 }
 
 static void lzip_close(fulta_arc_t *arc) {
-    fa_free(arc->state);
+    fa_release(arc->alloc, arc->state);
     arc->state = NULL;
 }
 

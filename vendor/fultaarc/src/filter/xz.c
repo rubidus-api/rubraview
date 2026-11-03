@@ -12,7 +12,7 @@ static bool xz_probe(const uint8_t *head, size_t n, uint64_t *offset) {
     return true;
 }
 
-static char *xz_derive_name(const char *archive_name) {
+static char *xz_derive_name(proven_allocator_t alloc, const char *archive_name) {
     const char *base = archive_name ? archive_name : "";
     for (const char *p = base; *p; p++) if (*p == '/' || *p == '\\') base = p + 1;
     size_t len = strlen(base);
@@ -23,7 +23,7 @@ static char *xz_derive_name(const char *archive_name) {
     #undef EQ
     if (len == 0) { base = "data"; len = 4; tar = NULL; }
     size_t extra = tar ? 4 : 0;
-    char *out = fa_malloc(len + extra + 1);
+    char *out = fa_alloc(alloc, len + extra + 1);
     if (!out) return NULL;
     memcpy(out, base, len);
     if (tar) memcpy(out + len, tar, 4);
@@ -35,13 +35,13 @@ static fulta_arc_err_t xz_open(fulta_arc_t *arc, uint64_t offset) {
     (void)offset;
     const fulta_arc_source_t *src = arc->volumes[0];
     uint8_t h[6];
-    if (src->size < 6 || fa_source_read_exact(src, 0, h, 6)) return FULTA_ARC_ERR_NOT_ARCHIVE;
+    if (src->size < 6 || fa_source_read_exact(src, 0, fa_bytes_mut(h, 6))) return FULTA_ARC_ERR_NOT_ARCHIVE;
     if (memcmp(h, XZ_MAGIC, 6) != 0) return FULTA_ARC_ERR_NOT_ARCHIVE;
 
-    char *name = xz_derive_name(arc->name);
+    char *name = xz_derive_name(arc->alloc, arc->name);
     const char *use = name ? name : "data";
-    fa_entry_t *e = fa_add_entry(arc, (const uint8_t *)use, strlen(use), use, "xz");
-    fa_free(name);
+    fa_entry_t *e = fa_add_entry(arc, fa_bytes((const uint8_t *)use, strlen(use)), use, "xz");
+    fa_release(arc->alloc, name);
     if (!e) return FULTA_ARC_ERR_NOMEM;
     e->pub.size = 0;                        /* decoded from the stream; not pre-read here */
     e->pub.packed_size = src->size;

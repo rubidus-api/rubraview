@@ -255,14 +255,14 @@ static void undo_calljump(uint8_t *d, uint32_t n) {
 static fulta_arc_err_t next_chunk(azo_stream_t *z) {
     if (!z->started) {
         uint8_t h[2];
-        fulta_arc_err_t e = fa_stream_read_exact(z->in, h, 2);
+        fulta_arc_err_t e = fa_stream_read_exact(z->in, fa_bytes_mut(h, 2));
         if (e) return e;
         if (h[0] != 0x31) return FULTA_ARC_ERR_UNSUPPORTED;   /* profile 0x31; the second byte is a flag (below) */
         z->xform = h[1] & 1;                                  /* bit 0: the call/jump transform; other bits ignored */
         z->started = true;
     }
     uint8_t h[12];
-    fulta_arc_err_t e = fa_stream_read_exact(z->in, h, 12);
+    fulta_arc_err_t e = fa_stream_read_exact(z->in, fa_bytes_mut(h, 12));
     if (e) return e;
     uint32_t U = fa_be32(h), C = fa_be32(h + 4), X = fa_be32(h + 8);
     if (!U && !C && !X) {
@@ -276,24 +276,24 @@ static fulta_arc_err_t next_chunk(azo_stream_t *z) {
     }
     if (!U || !C || (U ^ C) != X || U > CHUNK_MAX || C > CHUNK_MAX) return FULTA_ARC_ERR_CORRUPT;
     if (U > z->out_cap) {
-        uint8_t *p = fa_realloc(z->out, U);
+        uint8_t *p = fa_resize(z->base.alloc, z->out, z->out_cap, U);
         if (!p) return FULTA_ARC_ERR_NOMEM;
         z->out = p;
         z->out_cap = U;
     }
     if (U == C) {
-        e = fa_stream_read_exact(z->in, z->out, U);
+        e = fa_stream_read_exact(z->in, fa_bytes_mut(z->out, U));
         if (e) return e;
     } else {
         if (C > z->packed_cap) {
-            uint8_t *p = fa_realloc(z->packed, C);
+            uint8_t *p = fa_resize(z->base.alloc, z->packed, z->packed_cap, C);
             if (!p) return FULTA_ARC_ERR_NOMEM;
             z->packed = p;
             z->packed_cap = C;
         }
-        if ((e = fa_stream_read_exact(z->in, z->packed, C))) return e;
+        if ((e = fa_stream_read_exact(z->in, fa_bytes_mut(z->packed, C)))) return e;
         if (!z->m) {
-            z->m = fa_malloc(sizeof *z->m);
+            z->m = fa_alloc(z->base.alloc, sizeof *z->m);
             if (!z->m) return FULTA_ARC_ERR_NOMEM;
         }
         if ((e = decode_chunk(z->m, z->packed, C, z->out, U))) return e;
@@ -327,16 +327,18 @@ static fulta_arc_err_t azo_read(fa_stream_t *s, void *buf, size_t n, size_t *got
 static void azo_destroy(fa_stream_t *s) {
     azo_stream_t *z = (azo_stream_t *)s;
     fa_stream_destroy(z->in);
-    fa_free(z->m);
-    fa_free(z->out);
-    fa_free(z->packed);
-    fa_free(z);
+    fa_release(s->alloc, z->m);
+    fa_release(s->alloc, z->out);
+    fa_release(s->alloc, z->packed);
+    fa_release(s->alloc, z);
 }
 
 fulta_arc_err_t fa_dec_azo(fa_stream_t *in, fa_stream_t **out) {
-    azo_stream_t *z = fa_calloc(1, sizeof *z);
+    proven_allocator_t a = in->alloc;
+    azo_stream_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     z->in = in;
+    z->base.alloc = a;
     z->base.read = azo_read;
     z->base.destroy = azo_destroy;
     *out = &z->base;

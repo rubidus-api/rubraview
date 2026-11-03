@@ -17,6 +17,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "proven/allocator.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -90,7 +92,7 @@ typedef struct lha_reader lha_reader;
 
 /* Create a reader.  If scan_limit > 0 and the source does not start with an entry, up to scan_limit
  * leading bytes are searched for the first entry (self-extracting archives, spec container §6). */
-int lha_open(lha_reader **out, lha_read_fn rd, void *ctx, size_t scan_limit);
+int lha_open(lha_reader **out, proven_allocator_t alloc, lha_read_fn rd, void *ctx, size_t scan_limit);
 int lha_next(lha_reader *r, lha_entry *e);              /* LHA_OK, LHA_END or error */
 int lha_extract(lha_reader *r, lha_write_fn wr, void *ctx);
 int lha_skip(lha_reader *r);
@@ -105,7 +107,7 @@ int lha_dos_time_fields(uint32_t dos, int *year, int *mon, int *day, int *hour, 
 
 /* Raw-buffer method decoder (for tests and embedding): decodes `in` (packed) into exactly `out_len`
  * bytes of `out`.  Returns LHA_OK or an error code. */
-int lha_decode_buffer(lha_method m, const unsigned char *in, size_t in_len,
+int lha_decode_buffer(proven_allocator_t alloc, lha_method m, const unsigned char *in, size_t in_len,
                       unsigned char *out, size_t out_len);
 
 #ifdef __cplusplus

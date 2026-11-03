@@ -146,6 +146,7 @@ static int lzx_decode(lzx_bits_t *b, const lzx_huff_t *h) {
 static const uint8_t LZX_POSSLOTS[LZX_MAX_WIN - LZX_MIN_WIN + 1] = {30, 32, 34, 36, 38, 42, 50};
 
 struct fa_lzx {
+    proven_allocator_t alloc; /* this state lives here */
     uint8_t *out;            /* the folder's cumulative output buffer (caller-owned); matches read from it */
     uint64_t out_cap;        /* its capacity */
     uint64_t pos;            /* bytes produced so far */
@@ -166,10 +167,11 @@ struct fa_lzx {
     lzx_huff_t main, length, aligned;
 };
 
-fulta_arc_err_t fa_lzx_create(unsigned window_bits, uint8_t *out, uint64_t out_cap, fa_lzx_t **lzx) {
+fulta_arc_err_t fa_lzx_create(proven_allocator_t a, unsigned window_bits, uint8_t *out, uint64_t out_cap, fa_lzx_t **lzx) {
     if (window_bits < LZX_MIN_WIN || window_bits > LZX_MAX_WIN) return FULTA_ARC_ERR_UNSUPPORTED;
-    fa_lzx_t *lz = fa_calloc(1, sizeof *lz);
+    fa_lzx_t *lz = fa_zalloc(a, 1, sizeof *lz);
     if (!lz) return FULTA_ARC_ERR_NOMEM;
+    lz->alloc = a;
     lz->out = out; lz->out_cap = out_cap; lz->pos = 0;
     lz->window_size = 1u << window_bits;
     lz->num_pos_slots = LZX_POSSLOTS[window_bits - LZX_MIN_WIN];
@@ -186,7 +188,7 @@ fulta_arc_err_t fa_lzx_create(unsigned window_bits, uint8_t *out, uint64_t out_c
     return FULTA_ARC_OK;
 }
 
-void fa_lzx_destroy(fa_lzx_t *lz) { fa_free(lz); }
+void fa_lzx_destroy(fa_lzx_t *lz) { if (lz) fa_release(lz->alloc, lz); }
 
 /* Read one tree's path lengths: a 20-element pretree (4 bits each), then delta-decode `num` lengths starting at
  * `first` against the existing values in `len` (which persist across blocks). [MS-PATCH] 2.5. */

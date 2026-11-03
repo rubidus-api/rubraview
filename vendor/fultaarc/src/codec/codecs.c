@@ -20,7 +20,7 @@
  * proven_allocator_t (fa_budget_as_allocator). The ISzAlloc vtable is the first member so an ISzAllocPtr casts
  * straight back to it. The SAME instance is handed to every *_Allocate and its matching *_Free and lives in the
  * decoder's own state for the decoder's lifetime; the budget's blocks never leave this hook pair, so they never
- * meet fa_free or libc free. When an archive supplies no budget (a direct call without limits), the bridge carries
+ * meet fa_release. When an archive supplies no budget (a direct call without limits), the bridge carries
  * its own unlimited `fallback` so the allocator is always a real fa_budget_t. */
 typedef struct { ISzAlloc vt; fa_budget_t *b; fa_budget_t fallback; } fa_sz_alloc_t;
 static void *sz_balloc(ISzAllocPtr p, size_t n) {
@@ -81,6 +81,7 @@ void bz_internal_error(int errcode) { (void)errcode; abort(); }
 /* ---- input buffer shared by the wrappers --------------------------------------------------------------------- */
 
 typedef struct inbuf {
+    proven_allocator_t alloc;   /* the input's: data lives here, and outlives the input at inbuf_free */
     fa_stream_t *src;
     uint8_t *data;
     size_t pos, len;
@@ -100,7 +101,8 @@ static fulta_arc_err_t inbuf_fill(inbuf_t *b) {
 
 static fulta_arc_err_t inbuf_init(inbuf_t *b, fa_stream_t *src) {
     b->src = src;
-    b->data = fa_malloc(INBUF);
+    b->alloc = src->alloc;
+    b->data = fa_alloc(b->alloc, INBUF);
     b->pos = b->len = 0;
     b->eof = false;
     return b->data ? FULTA_ARC_OK : FULTA_ARC_ERR_NOMEM;
@@ -108,7 +110,7 @@ static fulta_arc_err_t inbuf_init(inbuf_t *b, fa_stream_t *src) {
 
 static void inbuf_free(inbuf_t *b) {
     fa_stream_destroy(b->src);
-    fa_free(b->data);
+    fa_release(b->alloc, b->data);
 }
 
 /* ---- bzip2 (standard; one or more concatenated streams) ------------------------------------------------------ */
@@ -174,18 +176,20 @@ static void bz_destroy(fa_stream_t *s) {
     bz_w_t *z = (bz_w_t *)s;
     if (z->open) BZ2_bzDecompressEnd(&z->bz);
     inbuf_free(&z->in);
-    fa_free(z);
+    fa_release(s->alloc, z);
 }
 
 fulta_arc_err_t fa_dec_bzip2(fa_stream_t *in, uint64_t out_size, const fa_limits_t *lim, fa_stream_t **out) {
-    bz_w_t *z = fa_calloc(1, sizeof *z);
+    proven_allocator_t a = in->alloc;
+    bz_w_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
-    if (inbuf_init(&z->in, in)) { fa_free(z->in.data); fa_free(z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    if (inbuf_init(&z->in, in)) { fa_release(a, z->in.data); fa_release(a, z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     z->bptr = budget_of(lim, &z->fallback);
     bz_set_alloc(z);
-    if (BZ2_bzDecompressInit(&z->bz, 0, 0) != BZ_OK) { fulta_arc_err_t e = budget_mem_err(z->bptr); inbuf_free(&z->in); fa_free(z); return e; }
+    if (BZ2_bzDecompressInit(&z->bz, 0, 0) != BZ_OK) { fulta_arc_err_t e = budget_mem_err(z->bptr); inbuf_free(&z->in); fa_release(a, z); return e; }
     z->open = true;
     z->out_size = out_size;
+    z->base.alloc = a;
     z->base.read = bz_read;
     z->base.destroy = bz_destroy;
     *out = &z->base;
@@ -241,7 +245,7 @@ static void lzma_destroy(fa_stream_t *s) {
     if (z->is2) Lzma2Dec_Free(&z->dec2, &z->sz.vt);
     else LzmaDec_Free(&z->dec, &z->sz.vt);
     inbuf_free(&z->in);
-    fa_free(z);
+    fa_release(s->alloc, z);
 }
 
 static uint64_t max_dict(const fa_limits_t *lim) {
@@ -250,15 +254,16 @@ static uint64_t max_dict(const fa_limits_t *lim) {
 
 fulta_arc_err_t fa_dec_lzma(fa_stream_t *in, const uint8_t props[5], uint64_t out_size, const fa_limits_t *lim,
                             fa_stream_t **out) {
+    proven_allocator_t a = in->alloc;
     uint32_t dict = fa_le32(props + 1);
     if (dict > max_dict(lim) && (out_size == UINT64_MAX || out_size > max_dict(lim))) {
         fa_stream_destroy(in);
         return FULTA_ARC_ERR_LIMIT;
     }
-    lzma_w_t *z = fa_calloc(1, sizeof *z);
+    lzma_w_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z || inbuf_init(&z->in, in)) {
-        if (z) fa_free(z->in.data);
-        fa_free(z);
+        if (z) fa_release(a, z->in.data);
+        fa_release(a, z);
         fa_stream_destroy(in);
         return FULTA_ARC_ERR_NOMEM;
     }
@@ -274,11 +279,12 @@ fulta_arc_err_t fa_dec_lzma(fa_stream_t *in, const uint8_t props[5], uint64_t ou
     SRes r = LzmaDec_Allocate(&z->dec, p2, 5, &z->sz.vt);
     if (r != SZ_OK) {
         inbuf_free(&z->in);
-        fa_free(z);
+        fa_release(a, z);
         return r == SZ_ERROR_MEM ? mem_err(lim) : FULTA_ARC_ERR_UNSUPPORTED;
     }
     LzmaDec_Init(&z->dec);
     z->out_size = out_size;
+    z->base.alloc = a;
     z->base.read = lzma_read;
     z->base.destroy = lzma_destroy;
     *out = &z->base;
@@ -287,16 +293,17 @@ fulta_arc_err_t fa_dec_lzma(fa_stream_t *in, const uint8_t props[5], uint64_t ou
 
 fulta_arc_err_t fa_dec_lzma2(fa_stream_t *in, uint8_t prop, uint64_t out_size, const fa_limits_t *lim,
                              fa_stream_t **out) {
+    proven_allocator_t a = in->alloc;
     if (prop > 40) { fa_stream_destroy(in); return FULTA_ARC_ERR_UNSUPPORTED; }
     uint64_t dict = prop == 40 ? 0xFFFFFFFFu : (uint64_t)(2 | (prop & 1)) << (prop / 2 + 11);
     if (dict > max_dict(lim) && (out_size == UINT64_MAX || out_size > max_dict(lim))) {
         fa_stream_destroy(in);
         return FULTA_ARC_ERR_LIMIT;
     }
-    lzma_w_t *z = fa_calloc(1, sizeof *z);
+    lzma_w_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z || inbuf_init(&z->in, in)) {
-        if (z) fa_free(z->in.data);
-        fa_free(z);
+        if (z) fa_release(a, z->in.data);
+        fa_release(a, z);
         fa_stream_destroy(in);
         return FULTA_ARC_ERR_NOMEM;
     }
@@ -312,11 +319,12 @@ fulta_arc_err_t fa_dec_lzma2(fa_stream_t *in, uint8_t prop, uint64_t out_size, c
     SRes r = Lzma2Dec_Allocate(&z->dec2, p, &z->sz.vt);
     if (r != SZ_OK) {
         inbuf_free(&z->in);
-        fa_free(z);
+        fa_release(a, z);
         return r == SZ_ERROR_MEM ? mem_err(lim) : FULTA_ARC_ERR_UNSUPPORTED;
     }
     Lzma2Dec_Init(&z->dec2);
     z->out_size = out_size;
+    z->base.alloc = a;
     z->base.read = lzma_read;
     z->base.destroy = lzma_destroy;
     *out = &z->base;
@@ -371,11 +379,12 @@ static void ppmd_destroy(fa_stream_t *s) {
     ppmd_w_t *z = (ppmd_w_t *)s;
     Ppmd7_Free(&z->model, &z->sz.vt);
     fa_stream_destroy(z->src);
-    fa_free(z);
+    fa_release(s->alloc, z);
 }
 
 fulta_arc_err_t fa_dec_ppmd7z(fa_stream_t *in, const uint8_t *props, size_t nprops, uint64_t out_size,
                               const fa_limits_t *lim, fa_stream_t **out) {
+    proven_allocator_t a = in->alloc;
     if (nprops != 5 || out_size == UINT64_MAX) { fa_stream_destroy(in); return FULTA_ARC_ERR_UNSUPPORTED; }
     unsigned order = props[0];
     uint32_t mem = fa_le32(props + 1);
@@ -384,16 +393,17 @@ fulta_arc_err_t fa_dec_ppmd7z(fa_stream_t *in, const uint8_t *props, size_t npro
         return FULTA_ARC_ERR_UNSUPPORTED;
     }
     if (mem > max_dict(lim)) { fa_stream_destroy(in); return FULTA_ARC_ERR_LIMIT; }
-    ppmd_w_t *z = fa_calloc(1, sizeof *z);
+    ppmd_w_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     sz_init(&z->sz, lim);
     Ppmd7_Construct(&z->model);
-    if (!Ppmd7_Alloc(&z->model, mem, &z->sz.vt)) { fulta_arc_err_t me = mem_err(lim); fa_free(z); fa_stream_destroy(in); return me; }
+    if (!Ppmd7_Alloc(&z->model, mem, &z->sz.vt)) { fulta_arc_err_t me = mem_err(lim); fa_release(a, z); fa_stream_destroy(in); return me; }
     z->vt.Read = ppmd_byte;
     z->src = in;
     fa_bytes_init(&z->in, in);
     z->order = order;
     z->out_size = out_size;
+    z->base.alloc = a;
     z->base.read = ppmd_read;
     z->base.destroy = ppmd_destroy;
     *out = &z->base;
@@ -475,22 +485,24 @@ static fulta_arc_err_t filt_read(fa_stream_t *s, void *buf, size_t n, size_t *go
 static void filt_destroy(fa_stream_t *s) {
     filt_w_t *z = (filt_w_t *)s;
     fa_stream_destroy(z->src);
-    fa_free(z);
+    fa_release(s->alloc, z);
 }
 
 fulta_arc_err_t fa_dec_filter(fa_stream_t *in, fa_filter_kind_t kind, uint32_t param, fa_stream_t **out) {
-    filt_w_t *z = fa_calloc(1, sizeof *z);
+    proven_allocator_t a = in->alloc;
+    filt_w_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     z->src = in;
     z->kind = kind;
     z->param = param;
     if (kind == FA_FILTER_DELTA) {
-        if (param < 1 || param > 256) { fa_free(z); fa_stream_destroy(in); return FULTA_ARC_ERR_UNSUPPORTED; }
+        if (param < 1 || param > 256) { fa_release(a, z); fa_stream_destroy(in); return FULTA_ARC_ERR_UNSUPPORTED; }
         Delta_Init(z->delta_state);
     } else {
         z->pc = param;
     }
     z->x86_state = Z7_BRANCH_CONV_ST_X86_STATE_INIT_VAL;
+    z->base.alloc = a;
     z->base.read = filt_read;
     z->base.destroy = filt_destroy;
     *out = &z->base;
@@ -592,11 +604,12 @@ static fulta_arc_err_t bcj2_read(fa_stream_t *s, void *buf, size_t n, size_t *go
 static void bcj2_destroy(fa_stream_t *s) {
     bcj2_w_t *z = (bcj2_w_t *)s;
     for (int i = 0; i < 4; i++) fa_stream_destroy(z->ins[i]);
-    fa_free(z);
+    fa_release(s->alloc, z);
 }
 
 fulta_arc_err_t fa_dec_bcj2(fa_stream_t *ins[4], uint64_t out_size, fa_stream_t **out) {
-    bcj2_w_t *z = fa_calloc(1, sizeof *z);
+    proven_allocator_t a = ins[0]->alloc;
+    bcj2_w_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) {
         for (int i = 0; i < 4; i++) fa_stream_destroy(ins[i]);
         return FULTA_ARC_ERR_NOMEM;
@@ -608,6 +621,7 @@ fulta_arc_err_t fa_dec_bcj2(fa_stream_t *ins[4], uint64_t out_size, fa_stream_t 
     fa_bytes_init(&z->rc, ins[3]);
     for (int i = 0; i < 2 + 256; i++) z->probs[i] = 1024;
     z->out_size = out_size;
+    z->base.alloc = a;
     z->base.read = bcj2_read;
     z->base.destroy = bcj2_destroy;
     *out = &z->base;
@@ -663,27 +677,29 @@ static void ppmd8_destroy(fa_stream_t *s) {
     ppmd8_w_t *z = (ppmd8_w_t *)s;
     Ppmd8_Free(&z->model, &z->sz.vt);
     fa_stream_destroy(z->src);
-    fa_free(z);
+    fa_release(s->alloc, z);
 }
 
 fulta_arc_err_t fa_dec_ppmd8_zip(fa_stream_t *in, uint64_t out_size, const fa_limits_t *lim, fa_stream_t **out) {
+    proven_allocator_t a = in->alloc;
     uint8_t h[2];
-    fulta_arc_err_t e = fa_stream_read_exact(in, h, 2);
+    fulta_arc_err_t e = fa_stream_read_exact(in, fa_bytes_mut(h, 2));
     if (e) { fa_stream_destroy(in); return e; }
     unsigned v = fa_le16(h), order = (v & 15) + 1, mem = ((v >> 4) & 0xFF) + 1, restore = v >> 12;
     if (order < 2 || restore > 2) { fa_stream_destroy(in); return FULTA_ARC_ERR_UNSUPPORTED; }
     if (((uint64_t)mem << 20) > max_dict(lim)) { fa_stream_destroy(in); return FULTA_ARC_ERR_LIMIT; }
-    ppmd8_w_t *z = fa_calloc(1, sizeof *z);
+    ppmd8_w_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     sz_init(&z->sz, lim);
     Ppmd8_Construct(&z->model);
-    if (!Ppmd8_Alloc(&z->model, (UInt32)mem << 20, &z->sz.vt)) { fulta_arc_err_t me = mem_err(lim); fa_free(z); fa_stream_destroy(in); return me; }
+    if (!Ppmd8_Alloc(&z->model, (UInt32)mem << 20, &z->sz.vt)) { fulta_arc_err_t me = mem_err(lim); fa_release(a, z); fa_stream_destroy(in); return me; }
     z->vt.Read = ppmd8_byte;
     z->src = in;
     fa_bytes_init(&z->in, in);
     z->order = order;
     z->restore = restore;
     z->out_size = out_size;
+    z->base.alloc = a;
     z->base.read = ppmd8_read;
     z->base.destroy = ppmd8_destroy;
     *out = &z->base;
@@ -742,27 +758,29 @@ static void zstd_destroy(fa_stream_t *s) {
     zstd_w_t *z = (zstd_w_t *)s;
     ZSTD_freeDStream(z->ds);
     inbuf_free(&z->in);
-    fa_free(z);
+    fa_release(s->alloc, z);
 }
 
 fulta_arc_err_t fa_dec_zstd(fa_stream_t *in, uint64_t out_size, const fa_limits_t *lim, fa_stream_t **out) {
-    zstd_w_t *z = fa_calloc(1, sizeof *z);
+    proven_allocator_t a = in->alloc;
+    zstd_w_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
-    if (inbuf_init(&z->in, in)) { fa_free(z->in.data); fa_free(z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    if (inbuf_init(&z->in, in)) { fa_release(a, z->in.data); fa_release(a, z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     z->bptr = budget_of(lim, &z->fallback);
     z->ds = ZSTD_createDStream_advanced((ZSTD_customMem){ zstd_balloc, zstd_bfree, z->bptr });
-    if (!z->ds) { fulta_arc_err_t e = budget_mem_err(z->bptr); inbuf_free(&z->in); fa_free(z); return e; }
+    if (!z->ds) { fulta_arc_err_t e = budget_mem_err(z->bptr); inbuf_free(&z->in); fa_release(a, z); return e; }
     /* the window is the dictionary: refuse frames whose window passes the limit */
     int wlog = 10;
     while (wlog < 31 && (UINT64_C(1) << (wlog + 1)) <= max_dict(lim)) wlog++;
     if (ZSTD_isError(ZSTD_DCtx_setParameter(z->ds, ZSTD_d_windowLogMax, wlog))) {
         ZSTD_freeDStream(z->ds);
         inbuf_free(&z->in);
-        fa_free(z);
+        fa_release(a, z);
         return FULTA_ARC_ERR_NOMEM;
     }
     z->pending = 1;
     z->out_size = out_size;
+    z->base.alloc = a;
     z->base.read = zstd_read;
     z->base.destroy = zstd_destroy;
     *out = &z->base;

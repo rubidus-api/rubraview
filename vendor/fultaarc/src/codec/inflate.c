@@ -40,7 +40,15 @@ static const uint32_t DBASE[32] = {1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 
 static const uint8_t DEXTRA[32] = {0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
                                    12, 12, 13, 13, 14, 14};
 
-static fulta_arc_err_t need(inflate_stream_t *z, int n) {
+static inline fulta_arc_err_t need(inflate_stream_t *z, int n) {
+    if (z->bitcnt >= n) return FULTA_ARC_OK;
+    /* the common case: whole bytes straight from the reader's buffer, up to 56 bits at once (the stream is this
+     * decoder's alone, so bits taken early are never wanted by anyone else) */
+    fa_bytes_t *in = &z->in;
+    while (z->bitcnt <= 56 && in->pos < in->len) {
+        z->bitbuf |= (uint64_t)in->buf[in->pos++] << z->bitcnt;
+        z->bitcnt += 8;
+    }
     while (z->bitcnt < n) {
         int c = fa_bytes_get(&z->in);
         if (c < 0) return z->in.err ? z->in.err : FULTA_ARC_ERR_TRUNCATED;
@@ -50,7 +58,7 @@ static fulta_arc_err_t need(inflate_stream_t *z, int n) {
     return FULTA_ARC_OK;
 }
 
-static fulta_arc_err_t bits(inflate_stream_t *z, int n, uint32_t *v) {
+static inline fulta_arc_err_t bits(inflate_stream_t *z, int n, uint32_t *v) {
     if (n == 0) { *v = 0; return FULTA_ARC_OK; }
     fulta_arc_err_t e = need(z, n);
     if (e) return e;
@@ -107,7 +115,7 @@ static fulta_arc_err_t build(huff_t *h, const uint8_t *len, int n, bool is_dist)
     return FULTA_ARC_OK;
 }
 
-static fulta_arc_err_t decode(inflate_stream_t *z, const huff_t *h, int *sym) {
+static inline fulta_arc_err_t decode(inflate_stream_t *z, const huff_t *h, int *sym) {
     (void)need(z, FAST_BITS);      /* near the end fewer bits may be there; the slow path reads exactly */
     if (z->bitcnt >= FAST_BITS || z->bitcnt > 0) {
         uint16_t f = h->fast[z->bitbuf & ((1u << FAST_BITS) - 1)];
@@ -226,6 +234,17 @@ static fulta_arc_err_t inflate_read(fa_stream_t *s, void *buf, size_t n, size_t 
     while (done < n) {
         if (z->copy_len) {
             uint64_t from = z->wtotal - z->copy_dist;
+            /* the common case in one go: source and destination neither overlap (dist >= len) nor wrap the ring */
+            size_t k = z->copy_len < n - done ? z->copy_len : n - done;
+            size_t fi = (size_t)(from & z->wmask), ti = (size_t)(z->wtotal & z->wmask);
+            if (z->copy_dist >= k && fi + k <= z->wmask + 1u && ti + k <= z->wmask + 1u) {
+                memcpy(z->window + ti, z->window + fi, k);
+                memcpy(out + done, z->window + ti, k);
+                z->wtotal += k;
+                done += k;
+                z->copy_len -= (uint32_t)k;
+                continue;
+            }
             while (z->copy_len && done < n) {
                 uint8_t c = z->window[from++ & z->wmask];
                 put(z, c);
@@ -286,20 +305,22 @@ static fulta_arc_err_t inflate_read(fa_stream_t *s, void *buf, size_t n, size_t 
 static void inflate_destroy(fa_stream_t *s) {
     inflate_stream_t *z = (inflate_stream_t *)s;
     fa_stream_destroy(z->src);
-    fa_free(z->window);
-    fa_free(z);
+    fa_release(s->alloc, z->window);
+    fa_release(s->alloc, z);
 }
 
 fulta_arc_err_t fa_dec_deflate(fa_stream_t *in, bool deflate64, uint64_t out_size, fa_stream_t **out) {
-    inflate_stream_t *z = fa_calloc(1, sizeof *z);
+    proven_allocator_t a = in->alloc;
+    inflate_stream_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
-    z->window = fa_malloc(65536);
-    if (!z->window) { fa_free(z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    z->window = fa_alloc(a, 65536);
+    if (!z->window) { fa_release(a, z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     z->wmask = 65535;
     z->src = in;
     fa_bytes_init(&z->in, in);
     z->d64 = deflate64;
     z->out_size = out_size;
+    z->base.alloc = a;
     z->base.read = inflate_read;
     z->base.destroy = inflate_destroy;
     *out = &z->base;
@@ -313,10 +334,11 @@ fulta_arc_err_t fa_dec_deflate(fa_stream_t *in, bool deflate64, uint64_t out_siz
  * <=32768 bytes of output (which start at window[dictlen]) never wrap over the dict. See cab.md, [MS-CAB] / RFC 1951. */
 fulta_arc_err_t fa_dec_deflate_dict(fa_stream_t *in, uint64_t out_size, const uint8_t *dict, size_t dictlen,
                                     fa_stream_t **out) {
-    inflate_stream_t *z = fa_calloc(1, sizeof *z);
+    proven_allocator_t a = in->alloc;
+    inflate_stream_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
-    z->window = fa_malloc(65536);
-    if (!z->window) { fa_free(z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    z->window = fa_alloc(a, 65536);
+    if (!z->window) { fa_release(a, z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     z->wmask = 65535;
     if (dictlen > 32768) { dict += dictlen - 32768; dictlen = 32768; }
     if (dictlen) memcpy(z->window, dict, dictlen);
@@ -324,6 +346,7 @@ fulta_arc_err_t fa_dec_deflate_dict(fa_stream_t *in, uint64_t out_size, const ui
     z->src = in;
     fa_bytes_init(&z->in, in);
     z->out_size = out_size;
+    z->base.alloc = a;
     z->base.read = inflate_read;
     z->base.destroy = inflate_destroy;
     *out = &z->base;

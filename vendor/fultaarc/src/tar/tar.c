@@ -20,6 +20,7 @@ typedef struct tar_item {
 } tar_item_t;
 
 typedef struct tar_state {
+    proven_allocator_t alloc;   /* the archive's: this state and everything it holds */
     tar_item_t *items;
     size_t n, cap;
 } tar_state_t;
@@ -66,7 +67,7 @@ bool fa_tar_detect(const uint8_t *h, size_t n) {
 static tar_item_t *tar_add_item(tar_state_t *st) {
     if (st->n == st->cap) {
         size_t nc = st->cap ? st->cap * 2 : 32;
-        tar_item_t *p = fa_realloc(st->items, nc * sizeof *p);
+        tar_item_t *p = fa_resize(st->alloc, st->items, st->cap * sizeof *p, nc * sizeof *p);
         if (!p) return NULL;
         st->items = p;
         st->cap = nc;
@@ -86,7 +87,7 @@ static int64_t tar_dec(const char *s) {
 }
 
 /* Find value for `key` in a pax record block ("<len> key=value\n" entries). Returns a heap copy or NULL. */
-static char *pax_get(const uint8_t *rec, size_t reclen, const char *key) {
+static char *pax_get(proven_allocator_t a, const uint8_t *rec, size_t reclen, const char *key) {
     size_t klen = strlen(key);
     size_t i = 0;
     while (i < reclen) {
@@ -103,7 +104,7 @@ static char *pax_get(const uint8_t *rec, size_t reclen, const char *key) {
             memcmp(rec + j, key, klen) == 0 && rec[j + klen] == '=') {
             const uint8_t *val = rec + j + klen + 1;
             size_t vlen = (size_t)(end - 1) - (j + klen + 1);
-            char *s = fa_malloc(vlen + 1);
+            char *s = fa_alloc(a, vlen + 1);
             if (!s) return NULL;
             memcpy(s, val, vlen);
             s[vlen] = 0;
@@ -122,11 +123,12 @@ static fulta_arc_err_t tar_open(fulta_arc_t *arc, uint64_t offset) {
     if (src->size < BLK) return FULTA_ARC_ERR_NOT_ARCHIVE;
 
     uint8_t h[BLK];
-    if (fa_source_read_exact(src, 0, h, BLK)) return FULTA_ARC_ERR_NOT_ARCHIVE;
+    if (fa_source_read_exact(src, 0, fa_bytes_mut(h, BLK))) return FULTA_ARC_ERR_NOT_ARCHIVE;
     if (!fa_tar_detect(h, BLK)) return FULTA_ARC_ERR_NOT_ARCHIVE;   /* the detection gate */
 
-    tar_state_t *st = fa_calloc(1, sizeof *st);
+    tar_state_t *st = fa_zalloc(arc->alloc, 1, sizeof *st);
     if (!st) return FULTA_ARC_ERR_NOMEM;
+    st->alloc = arc->alloc;
     arc->state = st;
 
     char *long_name = NULL, *long_link = NULL;   /* pending GNU 'L'/'K' overrides for the next member */
@@ -143,7 +145,7 @@ static fulta_arc_err_t tar_open(fulta_arc_t *arc, uint64_t offset) {
 
     for (;;) {
         if (pos + BLK > src->size) break;                /* no room for another header: end */
-        if (fa_source_read_exact(src, pos, h, BLK)) { e = FULTA_ARC_ERR_TRUNCATED; break; }
+        if (fa_source_read_exact(src, pos, fa_bytes_mut(h, BLK))) { e = FULTA_ARC_ERR_TRUNCATED; break; }
         if (tar_all_zero(h)) { if (++zero_run >= 2) break; pos += BLK; continue; }
         zero_run = 0;
         if (!tar_checksum_ok(h)) break;                  /* a non-zero, non-checksumming block ends the archive */
@@ -158,22 +160,22 @@ static fulta_arc_err_t tar_open(fulta_arc_t *arc, uint64_t offset) {
             if (hsize > NAME_MAX_META) { e = FULTA_ARC_ERR_CORRUPT; break; }
             uint64_t pad = (hsize + 511) & ~(uint64_t)511;
             if (data > src->size || pad > src->size - data) { e = FULTA_ARC_ERR_TRUNCATED; break; }
-            uint8_t *buf = fa_malloc((size_t)hsize + 1);
+            uint8_t *buf = fa_alloc(arc->alloc, (size_t)hsize + 1);
             if (!buf) { e = FULTA_ARC_ERR_NOMEM; break; }
-            if (fa_source_read_exact(src, data, buf, (size_t)hsize)) { fa_free(buf); e = FULTA_ARC_ERR_TRUNCATED; break; }
+            if (fa_source_read_exact(src, data, fa_bytes_mut(buf, (size_t)hsize))) { fa_release(arc->alloc, buf); e = FULTA_ARC_ERR_TRUNCATED; break; }
             buf[hsize] = 0;
-            if (type == 'L') { fa_free(long_name); long_name = (char *)buf; }
-            else if (type == 'K') { fa_free(long_link); long_link = (char *)buf; }
+            if (type == 'L') { fa_release(arc->alloc, long_name); long_name = (char *)buf; }
+            else if (type == 'K') { fa_release(arc->alloc, long_link); long_link = (char *)buf; }
             else {                                       /* pax: path/linkpath/size/mtime override the next member */
-                char *p = pax_get(buf, (size_t)hsize, "path");
-                if (p) { fa_free(pax_path); pax_path = p; }
-                char *l = pax_get(buf, (size_t)hsize, "linkpath");
-                if (l) { fa_free(pax_link); pax_link = l; }
-                char *s = pax_get(buf, (size_t)hsize, "size");
-                if (s) { int64_t v = tar_dec(s); pax_size = v < 0 ? 0 : (uint64_t)v; pax_has_size = true; fa_free(s); }
-                char *m = pax_get(buf, (size_t)hsize, "mtime");
-                if (m) { pax_mtime = tar_dec(m); pax_has_mtime = true; fa_free(m); }
-                fa_free(buf);
+                char *p = pax_get(arc->alloc, buf, (size_t)hsize, "path");
+                if (p) { fa_release(arc->alloc, pax_path); pax_path = p; }
+                char *l = pax_get(arc->alloc, buf, (size_t)hsize, "linkpath");
+                if (l) { fa_release(arc->alloc, pax_link); pax_link = l; }
+                char *s = pax_get(arc->alloc, buf, (size_t)hsize, "size");
+                if (s) { int64_t v = tar_dec(s); pax_size = v < 0 ? 0 : (uint64_t)v; pax_has_size = true; fa_release(arc->alloc, s); }
+                char *m = pax_get(arc->alloc, buf, (size_t)hsize, "mtime");
+                if (m) { pax_mtime = tar_dec(m); pax_has_mtime = true; fa_release(arc->alloc, m); }
+                fa_release(arc->alloc, buf);
             }
             pos = data + pad;
             continue;
@@ -205,12 +207,12 @@ static fulta_arc_err_t tar_open(fulta_arc_t *arc, uint64_t offset) {
         }
 
         /* a safe UTF-8 name copy for the public field */
-        char *safe = fa_malloc(name_len + 1);
+        char *safe = fa_alloc(arc->alloc, name_len + 1);
         if (!safe) { e = FULTA_ARC_ERR_NOMEM; break; }
         memcpy(safe, name_src, name_len);
         safe[name_len] = 0;
         bool is_dir = (type == '5') || (name_len && safe[name_len - 1] == '/');
-        if (!fa_sanitize_name(safe)) { fa_free(safe); safe = NULL; }   /* unsafe (e.g. "..") -> the "data" placeholder */
+        if (!fa_sanitize_name(safe)) { fa_release(arc->alloc, safe); safe = NULL; }   /* unsafe (e.g. "..") -> the "data" placeholder */
         const char *use = safe && safe[0] ? safe : "data";
 
         uint64_t esize = (type == '0' || type == 0 || type == '7') ? eff : 0;
@@ -226,16 +228,16 @@ static fulta_arc_err_t tar_open(fulta_arc_t *arc, uint64_t offset) {
             }
         }
 
-        fa_entry_t *en = fa_add_entry(arc, (const uint8_t *)name_src, name_len, use, "store");
+        fa_entry_t *en = fa_add_entry(arc, fa_bytes((const uint8_t *)name_src, name_len), use, "store");
         tar_item_t *it = tar_add_item(st);
-        fa_free(safe);
+        fa_release(arc->alloc, safe);
         if (!en || !it) { e = FULTA_ARC_ERR_NOMEM; break; }
 
         if (is_dir) {
             en->pub.flags |= FULTA_ARC_ENTRY_DIR;
         } else if (type == '2') {
             en->pub.flags |= FULTA_ARC_ENTRY_SYMLINK;
-            if (link) { it->link = fa_strndup(link, strlen(link)); esize = it->link ? strlen(it->link) : 0; }
+            if (link) { it->link = fa_strndup_a(arc->alloc, link, strlen(link)); esize = it->link ? strlen(it->link) : 0; }
         } else if (type == 'S') {
             en->pub.flags |= FULTA_ARC_ENTRY_UNSUPPORTED;   /* GNU sparse: layout needs the sparse map */
         }
@@ -249,19 +251,19 @@ static fulta_arc_err_t tar_open(fulta_arc_t *arc, uint64_t offset) {
         else if (tar_num(h + 136, 12, &mtime)) { en->pub.mtime = (int64_t)mtime * INT64_C(1000000000); en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME; }
 
         /* the overrides are one-shot (pax 'x', GNU L/K) */
-        fa_free(long_name); long_name = NULL;
-        fa_free(long_link); long_link = NULL;
-        fa_free(pax_path); pax_path = NULL;
-        fa_free(pax_link); pax_link = NULL;
+        fa_release(arc->alloc, long_name); long_name = NULL;
+        fa_release(arc->alloc, long_link); long_link = NULL;
+        fa_release(arc->alloc, pax_path); pax_path = NULL;
+        fa_release(arc->alloc, pax_link); pax_link = NULL;
         pax_has_size = false;
         pax_has_mtime = false;
         pos = data + pad;
     }
 
-    fa_free(long_name);
-    fa_free(long_link);
-    fa_free(pax_path);
-    fa_free(pax_link);
+    fa_release(arc->alloc, long_name);
+    fa_release(arc->alloc, long_link);
+    fa_release(arc->alloc, pax_path);
+    fa_release(arc->alloc, pax_link);
     if (e) { tar_close(arc); return e; }
     if (arc->count == 0) { tar_close(arc); return FULTA_ARC_ERR_NOT_ARCHIVE; }   /* a lone header, nothing listed */
     return FULTA_ARC_OK;
@@ -278,7 +280,7 @@ static fulta_arc_err_t tar_extract(fulta_arc_t *arc, size_t index, const fulta_a
     fa_piece_t piece = { src, it->off, it->size };
     fa_range_t range = { &piece, 1, it->size };
     fa_stream_t *s = NULL;
-    fulta_arc_err_t e = fa_stream_range(&range, 0, it->size, &s);
+    fulta_arc_err_t e = fa_stream_range(arc->alloc, &range, 0, it->size, &s);
     if (e) return e;
     e = fa_pump(s, it->size, false, 0, sink, arc, arc->opt.keep_damaged);
     fa_stream_destroy(s);
@@ -288,9 +290,9 @@ static fulta_arc_err_t tar_extract(fulta_arc_t *arc, size_t index, const fulta_a
 static void tar_close(fulta_arc_t *arc) {
     tar_state_t *st = arc->state;
     if (!st) return;
-    for (size_t i = 0; i < st->n; i++) fa_free(st->items[i].link);
-    fa_free(st->items);
-    fa_free(st);
+    for (size_t i = 0; i < st->n; i++) fa_release(arc->alloc, st->items[i].link);
+    fa_release(arc->alloc, st->items);
+    fa_release(arc->alloc, st);
     arc->state = NULL;
 }
 

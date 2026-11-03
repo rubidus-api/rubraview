@@ -14,7 +14,7 @@ static bool compress_probe(const uint8_t *head, size_t n, uint64_t *offset) {
 }
 
 /* Derive a member name from the archive name: basename with a compress suffix stripped (.Z, or .taz -> .tar). */
-static char *compress_derive_name(const char *archive_name) {
+static char *compress_derive_name(proven_allocator_t alloc, const char *archive_name) {
     const char *base = archive_name ? archive_name : "";
     for (const char *p = base; *p; p++) if (*p == '/' || *p == '\\') base = p + 1;
     size_t len = strlen(base);
@@ -25,7 +25,7 @@ static char *compress_derive_name(const char *archive_name) {
     #undef EQ
     if (len == 0) { base = "data"; len = 4; tar = NULL; }
     size_t extra = tar ? 4 : 0;
-    char *outn = fa_malloc(len + extra + 1);
+    char *outn = fa_alloc(alloc, len + extra + 1);
     if (!outn) return NULL;
     memcpy(outn, base, len);
     if (tar) memcpy(outn + len, tar, 4);
@@ -37,14 +37,14 @@ static fulta_arc_err_t compress_open(fulta_arc_t *arc, uint64_t offset) {
     (void)offset;
     const fulta_arc_source_t *src = arc->volumes[0];
     uint8_t h[3];
-    if (src->size < 3 || fa_source_read_exact(src, 0, h, 3)) return FULTA_ARC_ERR_NOT_ARCHIVE;
+    if (src->size < 3 || fa_source_read_exact(src, 0, fa_bytes_mut(h, 3))) return FULTA_ARC_ERR_NOT_ARCHIVE;
     if (h[0] != 0x1F || h[1] != 0x9D || (h[2] & 0x60) || (h[2] & 0x1F) < 9 || (h[2] & 0x1F) > 16)
         return FULTA_ARC_ERR_NOT_ARCHIVE;
 
-    char *name = compress_derive_name(arc->name);
+    char *name = compress_derive_name(arc->alloc, arc->name);
     const char *use = name ? name : "data";
-    fa_entry_t *e = fa_add_entry(arc, (const uint8_t *)use, strlen(use), use, "compress");
-    fa_free(name);
+    fa_entry_t *e = fa_add_entry(arc, fa_bytes((const uint8_t *)use, strlen(use)), use, "compress");
+    fa_release(arc->alloc, name);
     if (!e) return FULTA_ARC_ERR_NOMEM;
     e->pub.size = 0;                        /* compress stores no uncompressed size */
     e->pub.packed_size = src->size;
@@ -57,7 +57,7 @@ static fulta_arc_err_t compress_extract(fulta_arc_t *arc, size_t index, const fu
     fa_piece_t piece = { src, 0, src->size };
     fa_range_t range = { &piece, 1, src->size };
     fa_stream_t *s = NULL, *d = NULL;
-    fulta_arc_err_t e = fa_stream_range(&range, 0, src->size, &s);
+    fulta_arc_err_t e = fa_stream_range(arc->alloc, &range, 0, src->size, &s);
     if (e) return e;
     if ((e = fa_dec_compress(s, &d))) { fa_stream_destroy(s); return e; }
     e = fa_pump(d, UINT64_MAX, false, 0, sink, arc, arc->opt.keep_damaged);

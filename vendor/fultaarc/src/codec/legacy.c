@@ -90,21 +90,23 @@ static fulta_arc_err_t legacy_read(fa_stream_t *s, void *buf, size_t n, size_t *
 static void legacy_destroy(fa_stream_t *s) {
     legacy_t *L = (legacy_t *)s;
     fa_stream_destroy(L->b.in.in);
-    fa_free(L->win);
-    fa_free(L->state);
-    fa_free(L);
+    fa_release(s->alloc, L->win);
+    fa_release(s->alloc, L->state);
+    fa_release(s->alloc, L);
 }
 
 static fulta_arc_err_t legacy_new(fa_stream_t *in, uint64_t out_size, step_fn step, size_t state_size, bool window,
                                   legacy_t **out) {
-    legacy_t *L = fa_calloc(1, sizeof *L);
+    proven_allocator_t a = in->alloc;
+    legacy_t *L = fa_zalloc(a, 1, sizeof *L);
     if (!L) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     fa_bytes_init(&L->b.in, in);
-    L->state = fa_calloc(1, state_size);
-    L->win = window ? fa_calloc(1, WIN) : NULL;
+    L->state = fa_zalloc(a, 1, state_size);
+    L->win = window ? fa_zalloc(a, 1, WIN) : NULL;
     if (!L->state || (window && !L->win)) { legacy_destroy(&L->base); return FULTA_ARC_ERR_NOMEM; }
     L->step = step;
     L->left = out_size;
+    L->base.alloc = a;
     L->base.read = legacy_read;
     L->base.destroy = legacy_destroy;
     *out = L;

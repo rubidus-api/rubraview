@@ -54,7 +54,7 @@ size_t lha_in_need(lha_in *in, size_t n)
         size_t nc = in->cap;
         unsigned char *nb;
         while (nc < n) nc *= 2;
-        nb = (unsigned char *)realloc(in->buf, nc);
+        nb = fa_resize(in->alloc, in->buf, in->cap, nc);
         if (!nb) { in->err = LHA_ERR_NOMEM; return avail; }
         in->buf = nb;
         in->cap = nc;
@@ -201,7 +201,7 @@ static int ensure_names(lha_reader *r, size_t n)
 {
     if (n <= r->names_cap) return LHA_OK;
     {
-        unsigned char *p = (unsigned char *)realloc(r->names, n);
+        unsigned char *p = fa_resize(r->in.alloc, r->names, r->names_cap, n);
         if (!p) return LHA_ERR_NOMEM;
         r->names = p;
         r->names_cap = n;
@@ -209,17 +209,18 @@ static int ensure_names(lha_reader *r, size_t n)
     return LHA_OK;
 }
 
-int lha_open(lha_reader **out, lha_read_fn rd, void *ctx, size_t scan_limit)
+int lha_open(lha_reader **out, proven_allocator_t alloc, lha_read_fn rd, void *ctx, size_t scan_limit)
 {
     lha_reader *r;
     *out = NULL;
-    r = (lha_reader *)calloc(1, sizeof *r);
+    r = (lha_reader *)fa_zalloc(alloc, 1, sizeof *r);
     if (!r) return LHA_ERR_NOMEM;
+    r->in.alloc = alloc;
     r->in.rd = rd;
     r->in.ctx = ctx;
     r->in.cap = 65536;
-    r->in.buf = (unsigned char *)malloc(r->in.cap);
-    if (!r->in.buf) { free(r); return LHA_ERR_NOMEM; }
+    r->in.buf = (unsigned char *)fa_alloc(alloc, r->in.cap);
+    if (!r->in.buf) { fa_release(alloc, r); return LHA_ERR_NOMEM; }
     if (scan_limit) {
         r->scan_mode = 1;
         /* spec container §6: find the first offset where an entry parses */
@@ -242,16 +243,17 @@ int lha_open(lha_reader **out, lha_read_fn rd, void *ctx, size_t scan_limit)
 void lha_close(lha_reader *r)
 {
     if (!r) return;
-    free(r->in.buf);
-    free(r->hdr);
-    free(r->names);
-    free(r);
+    proven_allocator_t a = r->in.alloc;
+    fa_release(a, r->in.buf);
+    fa_release(a, r->hdr);
+    fa_release(a, r->names);
+    fa_release(a, r);
 }
 
 /* Copy the header bytes [0, n) out of the input buffer (they must be available). */
 static int keep_header(lha_reader *r, size_t n)
 {
-    unsigned char *p = (unsigned char *)realloc(r->hdr, n ? n : 1);
+    unsigned char *p = (unsigned char *)fa_resize(r->in.alloc, r->hdr, r->hdr_len, n ? n : 1);
     if (!p) return LHA_ERR_NOMEM;
     r->hdr = p;
     memcpy(r->hdr, r->in.buf + r->in.pos, n);
@@ -596,7 +598,7 @@ static int mem_write(void *ctx, const void *buf, size_t n)
     return 0;
 }
 
-int lha_decode_buffer(lha_method m, const unsigned char *in, size_t in_len, unsigned char *out, size_t out_len)
+int lha_decode_buffer(proven_allocator_t alloc, lha_method m, const unsigned char *in, size_t in_len, unsigned char *out, size_t out_len)
 {
     lha_in li;
     lha_src src;
@@ -607,13 +609,14 @@ int lha_decode_buffer(lha_method m, const unsigned char *in, size_t in_len, unsi
     memset(&li, 0, sizeof li);
     ms.p = in; ms.n = in_len;
     md.p = out; md.n = out_len; md.used = 0;
+    li.alloc = alloc;
     li.rd = mem_read; li.ctx = &ms; li.cap = 65536;
-    li.buf = (unsigned char *)malloc(li.cap);
+    li.buf = (unsigned char *)fa_alloc(alloc, li.cap);
     if (!li.buf) return LHA_ERR_NOMEM;
     src.in = &li; src.remaining = in_len;
     sink.wr = mem_write; sink.ctx = &md; sink.crc = 0; sink.count = 0;
     rc = lha_decode_method(m, &src, &sink, out_len);
-    free(li.buf);
+    fa_release(alloc, li.buf);
     if (rc == LHA_OK && md.used != out_len) rc = LHA_ERR_DATA;
     return rc;
 }

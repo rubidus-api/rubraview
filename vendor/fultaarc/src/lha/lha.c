@@ -2,8 +2,8 @@
  *
  * Glue only. The decoding is lhadec in src/lha/lhadec/: the deliverable of the LHA clean room
  * (fultaarc-cleanroom-lha, closed 2026-10-16 at 5792dae, log L0001-L0033, audits 1-8), copied byte-identical to the
- * room's close-out MANIFEST (re-checked by tests/tools/lhadec-pin.sh) and compiled through lhadec_shim.h (allocator
- * seam and fa_lha_* symbol names; no source edit). The room wrote lhadec from its own specification (lzh-container.md,
+ * room's close-out MANIFEST and, since D-038, edited only so that it allocates through the proven allocator it is
+ * given; compiled through lhadec_shim.h (fa_lha_* symbol names). The room wrote lhadec from its own specification (lzh-container.md,
  * lzh-methods.md), which it derived from Haruhiko Okumura's public-domain ar002 and from black-box runs of lhasa 0.6.0
  * (ISC), UNLHA32.DLL 3.00 (-lh2-/-lh3-) and PMarc 2.00/PMext 2.22 (-pm2-) on its corpus and on input of its own
  * making. Neither that room nor this file read the source of any LHA reader (Unix lha, lhasa, UNLHA32, 7-Zip,
@@ -40,6 +40,7 @@ typedef struct lha_item {
 } lha_item_t;
 
 typedef struct lha_state {
+    proven_allocator_t alloc;   /* the archive's: this state and everything it holds */
     lha_item_t *items;
     size_t n, cap;
 } lha_state_t;
@@ -142,7 +143,7 @@ static bool lha_probe(const uint8_t *head, size_t n, uint64_t *offset) {
 static lha_item_t *lha_add_item(lha_state_t *st) {
     if (st->n == st->cap) {
         size_t nc = st->cap ? st->cap * 2 : 16;
-        lha_item_t *p = fa_realloc(st->items, nc * sizeof *p);
+        lha_item_t *p = fa_resize(st->alloc, st->items, st->cap * sizeof *p, nc * sizeof *p);
         if (!p) return NULL;
         st->items = p;
         st->cap = nc;
@@ -179,7 +180,7 @@ extern const uint8_t fa_cp932_lead[128], fa_cp936_lead[128], fa_cp950_lead[128];
  * one of those three code pages, chosen exactly as fa_decode_name chooses (not UTF-8; options.codepage, else
  * options.auto_codepage, else CP932). Found by a synthetic archive (tests/test_lha.c); the corpus has no such name. */
 static void lha_restore_dbcs_5c(const fulta_arc_t *arc, uint8_t *s, size_t n) {
-    if (fa_utf8_valid(s, n)) return;
+    if (fa_utf8_valid(fa_bytes(s, n))) return;
     fulta_arc_codepage_t cp = arc->opt.codepage;
     if (cp == FULTA_ARC_CP_AUTO) cp = arc->opt.auto_codepage ? arc->opt.auto_codepage : FULTA_ARC_CP_932;
     const uint8_t *lead = cp == FULTA_ARC_CP_932 ? fa_cp932_lead : cp == FULTA_ARC_CP_936 ? fa_cp936_lead
@@ -199,7 +200,7 @@ static fulta_arc_err_t lha_emit(fulta_arc_t *arc, lha_state_t *st, const lha_ent
     bool link = (le->flags & LHA_HAS_SYMLINK) != 0;
     bool dir = !link && (le->flags & LHA_IS_DIR) != 0;
     size_t rn = le->path_len + le->name_len;
-    uint8_t *raw = fa_malloc(rn + 1);
+    uint8_t *raw = fa_alloc(arc->alloc, rn + 1);
     if (!raw) return FULTA_ARC_ERR_NOMEM;
     if (le->path_len) memcpy(raw, le->path, le->path_len);
     if (le->name_len) memcpy(raw + le->path_len, le->name, le->name_len);
@@ -209,17 +210,17 @@ static fulta_arc_err_t lha_emit(fulta_arc_t *arc, lha_state_t *st, const lha_ent
     while (un && raw[un - 1] == '/') un--;              /* a directory's path ends in '/' */
 
     bool not_unicode = false;
-    char *name = fa_decode_name(arc, raw, un, false, FULTA_ARC_CP_932, &not_unicode);
-    if (!name) { fa_free(raw); return FULTA_ARC_ERR_NOMEM; }
+    char *name = fa_decode_name(arc, fa_bytes(raw, un), false, FULTA_ARC_CP_932, &not_unicode);
+    if (!name) { fa_release(arc->alloc, raw); return FULTA_ARC_ERR_NOMEM; }
     bool named = fa_sanitize_name(name) && name[0];
-    if (!named && dir) { fa_free(name); fa_free(raw); return FULTA_ARC_OK; }
+    if (!named && dir) { fa_release(arc->alloc, name); fa_release(arc->alloc, raw); return FULTA_ARC_OK; }
 
     char method[8];
     lha_method_text(le, method);
-    fa_entry_t *en = fa_add_entry(arc, raw, rn, named ? name : "data", method);
+    fa_entry_t *en = fa_add_entry(arc, fa_bytes(raw, rn), named ? name : "data", method);
     lha_item_t *it = en ? lha_add_item(st) : NULL;
-    fa_free(name);
-    fa_free(raw);
+    fa_release(arc->alloc, name);
+    fa_release(arc->alloc, raw);
     if (!en || !it) return FULTA_ARC_ERR_NOMEM;
 
     it->hdr_off = le->header_offset;
@@ -232,7 +233,7 @@ static fulta_arc_err_t lha_emit(fulta_arc_t *arc, lha_state_t *st, const lha_ent
         en->pub.size = 0;
     } else if (link) {
         en->pub.flags |= FULTA_ARC_ENTRY_SYMLINK;
-        it->link = fa_strndup((const char *)le->link, le->link_len);
+        it->link = fa_strndup_a(arc->alloc, (const char *)le->link, le->link_len);
         if (!it->link) return FULTA_ARC_ERR_NOMEM;
         en->pub.size = strlen(it->link);
     } else {
@@ -262,18 +263,19 @@ static fulta_arc_err_t lha_open_fmt(fulta_arc_t *arc, uint64_t offset) {
     size_t scan = 0;
     if (offset == UINT64_MAX) {                  /* second pass: search only behind an executable stub */
         uint8_t h[8];
-        if (src->size < 26 || fa_source_read_exact(src, 0, h, sizeof h) || !lha_exe_stub(h, sizeof h))
+        if (src->size < 26 || fa_source_read_exact(src, 0, fa_bytes_mut(h, sizeof h)) || !lha_exe_stub(h, sizeof h))
             return FULTA_ARC_ERR_NOT_ARCHIVE;
         scan = LHA_SFX_SCAN;
     }
 
-    lha_state_t *st = fa_calloc(1, sizeof *st);
+    lha_state_t *st = fa_zalloc(arc->alloc, 1, sizeof *st);
     if (!st) return FULTA_ARC_ERR_NOMEM;
+    st->alloc = arc->alloc;
     arc->state = st;
 
     lha_rd_t rd = { .src = src, .pos = 0, .arc = arc, .err = FULTA_ARC_OK };
     lha_reader *r = NULL;
-    int rc = lha_open(&r, lha_read_cb, &rd, scan);
+    int rc = lha_open(&r, arc->alloc, lha_read_cb, &rd, scan);
     fulta_arc_err_t e = FULTA_ARC_OK;
     if (rc) {
         e = rd.err ? rd.err : rc == LHA_ERR_NOT_FOUND ? FULTA_ARC_ERR_NOT_ARCHIVE : lha_map(rc);
@@ -314,7 +316,7 @@ static fulta_arc_err_t lha_extract_fmt(fulta_arc_t *arc, size_t index, const ful
 
     lha_rd_t rd = { .src = arc->volumes[0], .pos = it->hdr_off, .arc = arc, .err = FULTA_ARC_OK };
     lha_reader *r = NULL;
-    int rc = lha_open(&r, lha_read_cb, &rd, 0);
+    int rc = lha_open(&r, arc->alloc, lha_read_cb, &rd, 0);
     if (rc) return rd.err ? rd.err : lha_map(rc);
     lha_entry le;
     rc = lha_next(r, &le);
@@ -338,9 +340,9 @@ static fulta_arc_err_t lha_extract_fmt(fulta_arc_t *arc, size_t index, const ful
 static void lha_close_fmt(fulta_arc_t *arc) {
     lha_state_t *st = arc->state;
     if (!st) return;
-    for (size_t i = 0; i < st->n; i++) fa_free(st->items[i].link);
-    fa_free(st->items);
-    fa_free(st);
+    for (size_t i = 0; i < st->n; i++) fa_release(arc->alloc, st->items[i].link);
+    fa_release(arc->alloc, st->items);
+    fa_release(arc->alloc, st);
     arc->state = NULL;
 }
 

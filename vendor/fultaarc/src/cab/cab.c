@@ -65,10 +65,11 @@ typedef struct cab_item {
 } cab_item_t;
 
 typedef struct cab_state {
+    proven_allocator_t alloc;   /* the archive's: this state and everything it holds */
     cab_folder_t *folders;
     size_t nfolders, capfolders;
     cab_item_t *items;
-    size_t nitems;
+    size_t nitems, capitems;
     uint64_t cache_total;   /* running sum of folder cache bytes (bomb guard) */
 } cab_state_t;
 
@@ -101,7 +102,7 @@ static uint32_t cab_checksum(const uint8_t *resv, size_t rlen, const uint8_t *da
 static size_t cab_read_cstr(const fulta_arc_source_t *src, uint64_t off, char *dst, size_t max) {
     for (size_t i = 0; i < max; i++) {
         uint8_t c;
-        if (off + i >= src->size || fa_source_read_exact(src, off + i, &c, 1)) return 0;
+        if (off + i >= src->size || fa_source_read_exact(src, off + i, fa_bytes_mut(&c, 1))) return 0;
         if (i < max - 1) dst[i] = (char)c; else dst[i] = 0;
         if (c == 0) { dst[i] = 0; return i + 1; }
     }
@@ -135,7 +136,7 @@ static fulta_arc_err_t cab_decode_folder(fulta_arc_t *arc, cab_state_t *st, size
         uint64_t scan = p->data_off;
         for (uint32_t b = 0; b < p->nblocks; b++) {
             uint8_t hd[8];
-            if (scan + 8 > src->size || fa_source_read_exact(src, scan, hd, 8)) return FULTA_ARC_ERR_TRUNCATED;
+            if (scan + 8 > src->size || fa_source_read_exact(src, scan, fa_bytes_mut(hd, 8))) return FULTA_ARC_ERR_TRUNCATED;
             uint16_t cbData = fa_le16(hd + 4), cbUncomp = fa_le16(hd + 6);
             if (cbUncomp > CAB_BLOCK_MAX || cbData > cdata_max || pend + cbData > cdata_max) return FULTA_ARC_ERR_CORRUPT;
             uint64_t next = scan + 8 + p->data_reserve + cbData;
@@ -154,7 +155,7 @@ static fulta_arc_err_t cab_decode_folder(fulta_arc_t *arc, cab_state_t *st, size
     if (pend) return FULTA_ARC_ERR_CORRUPT;
     if (cap == 0) { f->decoded = true; return FULTA_ARC_OK; }
     if (cap > CAB_CACHE_CAP || st->cache_total > CAB_CACHE_CAP - cap) return FULTA_ARC_ERR_LIMIT;
-    uint8_t *buf = fa_malloc(cap);
+    uint8_t *buf = fa_alloc(arc->alloc, cap);
     if (!buf) return FULTA_ARC_ERR_NOMEM;
     uint8_t *join = NULL;                                             /* the split block's joined payload */
     uint32_t join_len = 0;
@@ -162,9 +163,9 @@ static fulta_arc_err_t cab_decode_folder(fulta_arc_t *arc, cab_state_t *st, size
     fa_lzx_t *lz = NULL;                                              /* LZX spans the folder: one state object */
     fa_quantum_t *qt = NULL;                                          /* so does Quantum (tables + window) */
     fulta_arc_err_t e = FULTA_ARC_OK;
-    if (type == 3) e = fa_lzx_create(wbits, buf, cap, &lz);
-    else if (type == 2) e = fa_quantum_create(wbits, buf, cap, &qt);
-    if (e) { fa_free(buf); return e; }
+    if (type == 3) e = fa_lzx_create(arc->alloc, wbits, buf, cap, &lz);
+    else if (type == 2) e = fa_quantum_create(arc->alloc, wbits, buf, cap, &qt);
+    if (e) { fa_release(arc->alloc, buf); return e; }
 
     uint64_t produced = 0;
     for (uint32_t pi = 0; pi < f->nparts && !e; pi++) {
@@ -173,7 +174,7 @@ static fulta_arc_err_t cab_decode_folder(fulta_arc_t *arc, cab_state_t *st, size
         uint64_t off = p->data_off;
         for (uint32_t b = 0; b < p->nblocks; b++) {
             uint8_t hdr[8];
-            if (off + 8 > src->size || fa_source_read_exact(src, off, hdr, 8)) { e = FULTA_ARC_ERR_TRUNCATED; break; }
+            if (off + 8 > src->size || fa_source_read_exact(src, off, fa_bytes_mut(hdr, 8))) { e = FULTA_ARC_ERR_TRUNCATED; break; }
             uint32_t csum = fa_le32(hdr);
             uint16_t cbData = fa_le16(hdr + 4), cbUncomp = fa_le16(hdr + 6);
             uint64_t rvoff = off + 8;                                    /* abReserve, then the cbData payload */
@@ -182,56 +183,56 @@ static fulta_arc_err_t cab_decode_folder(fulta_arc_t *arc, cab_state_t *st, size
             if (rvoff + total > src->size) { e = FULTA_ARC_ERR_TRUNCATED; break; }
             if (produced + cbUncomp > cap) { e = FULTA_ARC_ERR_CORRUPT; break; }
 
-            uint8_t *rv = fa_malloc(total ? total : 1);
+            uint8_t *rv = fa_alloc(arc->alloc, total ? total : 1);
             if (!rv) { e = FULTA_ARC_ERR_NOMEM; break; }
-            if (total && fa_source_read_exact(src, rvoff, rv, total)) { fa_free(rv); e = FULTA_ARC_ERR_TRUNCATED; break; }
+            if (total && fa_source_read_exact(src, rvoff, fa_bytes_mut(rv, total))) { fa_release(arc->alloc, rv); e = FULTA_ARC_ERR_TRUNCATED; break; }
             if (csum && cab_checksum(rv, p->data_reserve, rv + p->data_reserve, cbData, (uint16_t)cbData, cbUncomp) != csum) {
-                fa_free(rv); e = FULTA_ARC_ERR_CHECKSUM; break;
+                fa_release(arc->alloc, rv); e = FULTA_ARC_ERR_CHECKSUM; break;
             }
             uint8_t *pay = rv + p->data_reserve;                         /* the compressed/stored block itself */
             uint32_t paylen = cbData;
             off = rvoff + total;
             if (cbUncomp == 0) {                                         /* first half of a block split at the boundary */
-                if (pi + 1 == f->nparts) { fa_free(rv); break; }          /* no second half: the files before it are whole */
-                if (!join) { join = fa_malloc(cdata_max); if (!join) { fa_free(rv); e = FULTA_ARC_ERR_NOMEM; break; } }
-                if (join_len + cbData > cdata_max) { fa_free(rv); e = FULTA_ARC_ERR_CORRUPT; break; }
+                if (pi + 1 == f->nparts) { fa_release(arc->alloc, rv); break; }          /* no second half: the files before it are whole */
+                if (!join) { join = fa_alloc(arc->alloc, cdata_max); if (!join) { fa_release(arc->alloc, rv); e = FULTA_ARC_ERR_NOMEM; break; } }
+                if (join_len + cbData > cdata_max) { fa_release(arc->alloc, rv); e = FULTA_ARC_ERR_CORRUPT; break; }
                 memcpy(join + join_len, pay, cbData); join_len += cbData;
-                fa_free(rv);
+                fa_release(arc->alloc, rv);
                 continue;
             }
             if (join_len) {                                              /* second half: decode the joined payload */
-                if (join_len + cbData > cdata_max) { fa_free(rv); e = FULTA_ARC_ERR_CORRUPT; break; }
+                if (join_len + cbData > cdata_max) { fa_release(arc->alloc, rv); e = FULTA_ARC_ERR_CORRUPT; break; }
                 memcpy(join + join_len, pay, cbData); paylen = join_len + cbData; join_len = 0;
                 pay = join;
             }
 
             if (type == 0) {                                             /* Store: raw bytes */
-                if (paylen != cbUncomp) { fa_free(rv); e = FULTA_ARC_ERR_CORRUPT; break; }
+                if (paylen != cbUncomp) { fa_release(arc->alloc, rv); e = FULTA_ARC_ERR_CORRUPT; break; }
                 memcpy(buf + produced, pay, cbUncomp);
             } else if (type == 1) {                                      /* MSZIP: "CK" + Deflate, dict = prior tail */
-                if (paylen < 2 || pay[0] != 'C' || pay[1] != 'K') { fa_free(rv); e = FULTA_ARC_ERR_CORRUPT; break; }
+                if (paylen < 2 || pay[0] != 'C' || pay[1] != 'K') { fa_release(arc->alloc, rv); e = FULTA_ARC_ERR_CORRUPT; break; }
                 fa_stream_t *ms = NULL, *dec = NULL;                      /* `rv`/`join` back the memory stream; both
                                                                             live until after dec is destroyed, below */
-                if ((e = fa_stream_memory(pay + 2, paylen - 2, &ms))) { fa_free(rv); break; }
+                if ((e = fa_stream_memory(st->alloc, pay + 2, paylen - 2, &ms))) { fa_release(arc->alloc, rv); break; }
                 size_t dlen = produced < CAB_BLOCK_MAX ? (size_t)produced : CAB_BLOCK_MAX;
-                if ((e = fa_dec_deflate_dict(ms, cbUncomp, buf + produced - dlen, dlen, &dec))) { fa_free(rv); break; }
-                e = fa_stream_read_exact(dec, buf + produced, cbUncomp);
+                if ((e = fa_dec_deflate_dict(ms, cbUncomp, buf + produced - dlen, dlen, &dec))) { fa_release(arc->alloc, rv); break; }
+                e = fa_stream_read_exact(dec, fa_bytes_mut(buf + produced, cbUncomp));
                 fa_stream_destroy(dec);
-                if (e) { fa_free(rv); break; }
+                if (e) { fa_release(arc->alloc, rv); break; }
             } else if (type == 3) {                                      /* LZX: continuous bitstream, this chunk */
-                if ((e = fa_lzx_chunk(lz, pay, paylen, cbUncomp))) { fa_free(rv); break; }
+                if ((e = fa_lzx_chunk(lz, pay, paylen, cbUncomp))) { fa_release(arc->alloc, rv); break; }
             } else {                                                     /* Quantum: coder restarts, tables persist */
-                if ((e = fa_quantum_chunk(qt, pay, paylen, cbUncomp))) { fa_free(rv); break; }
+                if ((e = fa_quantum_chunk(qt, pay, paylen, cbUncomp))) { fa_release(arc->alloc, rv); break; }
             }
-            fa_free(rv);
+            fa_release(arc->alloc, rv);
             produced += cbUncomp;
         }
     }
-    fa_free(join);
+    fa_release(arc->alloc, join);
     if (!e && lz) fa_lzx_finish(lz);                                     /* undo E8 x86 translation over the output */
     fa_lzx_destroy(lz);
     fa_quantum_destroy(qt);
-    if (e) { fa_free(buf); return e; }
+    if (e) { fa_release(arc->alloc, buf); return e; }
     f->cache = buf;
     f->cache_len = produced;
     f->decoded = true;
@@ -253,7 +254,7 @@ typedef struct cab_hdr {
 static fulta_arc_err_t cab_read_header(const fulta_arc_source_t *src, cab_hdr_t *h) {
     uint8_t b[36];
     memset(h, 0, sizeof *h);
-    if (src->size < 36 || fa_source_read_exact(src, 0, b, 36)) return FULTA_ARC_ERR_NOT_ARCHIVE;
+    if (src->size < 36 || fa_source_read_exact(src, 0, fa_bytes_mut(b, 36))) return FULTA_ARC_ERR_NOT_ARCHIVE;
     if (memcmp(b, "MSCF", 4) != 0 || fa_le32(b + 4) != 0) return FULTA_ARC_ERR_NOT_ARCHIVE;   /* magic + reserved1 */
     h->coff_files = fa_le32(b + 16);
     h->cfolders = fa_le16(b + 26); h->cfiles = fa_le16(b + 28); h->flags = fa_le16(b + 30);
@@ -262,7 +263,7 @@ static fulta_arc_err_t cab_read_header(const fulta_arc_source_t *src, cab_hdr_t 
     uint64_t pos = 36;
     if (h->flags & CAB_FLAG_RESERVE) {
         uint8_t r[4];
-        if (pos + 4 > src->size || fa_source_read_exact(src, pos, r, 4)) return FULTA_ARC_ERR_NOT_ARCHIVE;
+        if (pos + 4 > src->size || fa_source_read_exact(src, pos, fa_bytes_mut(r, 4))) return FULTA_ARC_ERR_NOT_ARCHIVE;
         h->folder_reserve = r[2];
         h->data_reserve = r[3];
         pos += 4 + fa_le16(r);                                   /* skip the per-cabinet header reserve */
@@ -284,7 +285,7 @@ static fulta_arc_err_t cab_read_header(const fulta_arc_source_t *src, cab_hdr_t 
 static cab_folder_t *cab_new_folder(cab_state_t *st, uint16_t comp) {
     if (st->nfolders == st->capfolders) {
         size_t nc = st->capfolders ? st->capfolders * 2 : 16;
-        cab_folder_t *q = fa_realloc(st->folders, nc * sizeof *q);
+        cab_folder_t *q = fa_resize(st->alloc, st->folders, st->capfolders * sizeof *q, nc * sizeof *q);
         if (!q) return NULL;
         st->folders = q; st->capfolders = nc;
     }
@@ -294,8 +295,8 @@ static cab_folder_t *cab_new_folder(cab_state_t *st, uint16_t comp) {
     return f;
 }
 
-static bool cab_add_part(cab_folder_t *f, uint32_t vol, uint64_t data_off, uint32_t nblocks, uint8_t reserve) {
-    cab_part_t *q = fa_realloc(f->parts, (f->nparts + 1) * sizeof *q);
+static bool cab_add_part(proven_allocator_t a, cab_folder_t *f, uint32_t vol, uint64_t data_off, uint32_t nblocks, uint8_t reserve) {
+    cab_part_t *q = fa_resize(a, f->parts, f->nparts * sizeof *q, (f->nparts + 1) * sizeof *q);
     if (!q) return false;
     f->parts = q;
     f->parts[f->nparts++] = (cab_part_t){vol, data_off, nblocks, reserve};
@@ -310,7 +311,7 @@ static fulta_arc_err_t cab_has_from_prev(const fulta_arc_source_t *src, const ca
     uint64_t fp = h->coff_files;
     for (uint16_t i = 0; i < h->cfiles; i++) {
         uint8_t fe[16];
-        if (fp + 16 > src->size || fa_source_read_exact(src, fp, fe, 16)) return FULTA_ARC_ERR_TRUNCATED;
+        if (fp + 16 > src->size || fa_source_read_exact(src, fp, fa_bytes_mut(fe, 16))) return FULTA_ARC_ERR_TRUNCATED;
         uint16_t ifolder = fa_le16(fe + 8);
         if (ifolder == 0xFFFD || ifolder == 0xFFFF) *from_prev = true;
         char raw[CAB_NAME_MAX];
@@ -339,7 +340,7 @@ static fulta_arc_err_t cab_add_cabinet(fulta_arc_t *arc, cab_state_t *st, uint32
     uint64_t pos = h->folders_off;
     for (uint16_t i = 0; i < h->cfolders; i++) {
         uint8_t fd[8];
-        if (pos + 8 > src->size || fa_source_read_exact(src, pos, fd, 8)) return FULTA_ARC_ERR_TRUNCATED;
+        if (pos + 8 > src->size || fa_source_read_exact(src, pos, fa_bytes_mut(fd, 8))) return FULTA_ARC_ERR_TRUNCATED;
         uint16_t comp = fa_le16(fd + 6);
         cab_folder_t *f;
         if (i == 0 && prev_cont) {
@@ -349,7 +350,7 @@ static fulta_arc_err_t cab_add_cabinet(fulta_arc_t *arc, cab_state_t *st, uint32
             f = cab_new_folder(st, comp);
             if (!f) return FULTA_ARC_ERR_NOMEM;
         }
-        if (!cab_add_part(f, vol, fa_le32(fd), fa_le16(fd + 4), h->data_reserve)) return FULTA_ARC_ERR_NOMEM;
+        if (!cab_add_part(st->alloc, f, vol, fa_le32(fd), fa_le16(fd + 4), h->data_reserve)) return FULTA_ARC_ERR_NOMEM;
         pos += 8 + h->folder_reserve;
     }
     /* logical index of this cabinet's folder i */
@@ -359,7 +360,7 @@ static fulta_arc_err_t cab_add_cabinet(fulta_arc_t *arc, cab_state_t *st, uint32
     uint64_t fp = h->coff_files;
     for (uint16_t i = 0; i < h->cfiles; i++) {
         uint8_t fe[16];
-        if (fp + 16 > src->size || fa_source_read_exact(src, fp, fe, 16)) return FULTA_ARC_ERR_TRUNCATED;
+        if (fp + 16 > src->size || fa_source_read_exact(src, fp, fa_bytes_mut(fe, 16))) return FULTA_ARC_ERR_TRUNCATED;
         uint32_t cbFile = fa_le32(fe);
         uint32_t uoff = fa_le32(fe + 4);
         uint16_t ifolder = fa_le16(fe + 8);
@@ -379,13 +380,13 @@ static fulta_arc_err_t cab_add_cabinet(fulta_arc_t *arc, cab_state_t *st, uint32
 
         char *name = (attribs & 0x80)                                  /* _A_NAME_IS_UTF: declared UTF-8 - still
                                                                           validated/repaired, as zip.c does */
-            ? fa_codepage_to_utf8((const uint8_t *)raw, strlen(raw), FULTA_ARC_CP_UTF8, FULTA_ARC_CP_UTF8)
-            : fa_codepage_to_utf8((const uint8_t *)raw, strlen(raw), arc->opt.codepage, FULTA_ARC_CP_1252);
+            ? fa_codepage_to_utf8(st->alloc, fa_bytes((const uint8_t *)raw, strlen(raw)), FULTA_ARC_CP_UTF8, FULTA_ARC_CP_UTF8)
+            : fa_codepage_to_utf8(st->alloc, fa_bytes((const uint8_t *)raw, strlen(raw)), arc->opt.codepage, FULTA_ARC_CP_1252);
         if (!name) return FULTA_ARC_ERR_NOMEM;
         for (char *p = name; *p; p++) if (*p == '\\') *p = '/';          /* CAB uses backslash path separators */
 
-        char *safe = fa_strndup(name, strlen(name));
-        if (safe && !fa_sanitize_name(safe)) { fa_free(safe); safe = NULL; }
+        char *safe = fa_strndup_a(arc->alloc, name, strlen(name));
+        if (safe && !fa_sanitize_name(safe)) { fa_release(arc->alloc, safe); safe = NULL; }
         const char *use = safe && safe[0] ? safe : "data";
         uint16_t ftype = ok ? CAB_COMP_TYPE(st->folders[lf].comp) : 0xFF;
         const char *method = !ok ? "unsupported"
@@ -393,9 +394,9 @@ static fulta_arc_err_t cab_add_cabinet(fulta_arc_t *arc, cab_state_t *st, uint32
             : ftype == 1 ? "MSZIP"
             : ftype == 2 ? "Quantum"
             : ftype == 3 ? "LZX" : "unsupported";
-        fa_entry_t *en = fa_add_entry(arc, (const uint8_t *)name, strlen(name), use, method);
-        fa_free(safe);
-        fa_free(name);
+        fa_entry_t *en = fa_add_entry(arc, fa_bytes((const uint8_t *)name, strlen(name)), use, method);
+        fa_release(arc->alloc, safe);
+        fa_release(arc->alloc, name);
         if (!en) return FULTA_ARC_ERR_NOMEM;
         en->pub.size = cbFile;
         /* a CFFILE has no per-file compressed size (CFDATA compression is folder-level), so report it only for the
@@ -403,11 +404,12 @@ static fulta_arc_err_t cab_add_cabinet(fulta_arc_t *arc, cab_state_t *st, uint32
         en->pub.packed_size = (ok && st->folders[lf].comp == 0) ? cbFile : 0;
         if (to_next) en->pub.flags |= FULTA_ARC_ENTRY_SPLIT;
 
-        if (st->nitems == 0 || (st->nitems & (st->nitems - 1)) == 0) {   /* grow by powers of two */
-            size_t nc = st->nitems ? st->nitems * 2 : 64;
-            cab_item_t *q = fa_realloc(st->items, nc * sizeof *q);
+        if (st->nitems == st->capitems) {                 /* grow by doubling (it used to re-fit at every power of two) */
+            size_t nc = st->capitems ? st->capitems * 2 : 64;
+            cab_item_t *q = fa_resize(st->alloc, st->items, st->capitems * sizeof *q, nc * sizeof *q);
             if (!q) return FULTA_ARC_ERR_NOMEM;
             st->items = q;
+            st->capitems = nc;
         }
         st->items[st->nitems++] = (cab_item_t){lf, uoff, cbFile, vol, to_next, ok};
     }
@@ -417,7 +419,7 @@ static fulta_arc_err_t cab_add_cabinet(fulta_arc_t *arc, cab_state_t *st, uint32
 
 /* The path of the next cabinet: the header's file name (a bare name - separators, drive letters and "."/".." are
  * refused) in the directory of the opened file. When the archive has no name, the bare name goes to the resolver. */
-static char *cab_sibling_path(const char *first, const char *next) {
+static char *cab_sibling_path(proven_allocator_t a, const char *first, const char *next) {
     size_t n = strlen(next);
     if (n == 0 || strcmp(next, ".") == 0 || strcmp(next, "..") == 0) return NULL;
     for (size_t i = 0; i < n; i++) if (next[i] == '/' || next[i] == '\\' || next[i] == ':') return NULL;
@@ -425,7 +427,7 @@ static char *cab_sibling_path(const char *first, const char *next) {
     if (first) {
         for (size_t i = 0; first[i]; i++) if (first[i] == '/' || first[i] == '\\') dir = i + 1;
     }
-    char *p = fa_malloc(dir + n + 1);
+    char *p = fa_alloc(a, dir + n + 1);
     if (!p) return NULL;
     if (dir) memcpy(p, first, dir);
     memcpy(p + dir, next, n + 1);
@@ -435,7 +437,7 @@ static char *cab_sibling_path(const char *first, const char *next) {
 /* Ask the resolver for a sibling cabinet (NEXT or PREV) by its declared name, then by that name in lower and upper
  * case (sets copied between file systems often carry a different case than their headers: PRECOPY2.CAB / win95_03.cab). */
 static fulta_arc_err_t cab_sibling_volume(fulta_arc_t *arc, uint32_t k, const char *next, const fulta_arc_source_t **src) {
-    char *path = cab_sibling_path(arc->opt.name, next);
+    char *path = cab_sibling_path(arc->alloc, arc->opt.name, next);
     if (!path) return FULTA_ARC_ERR_VOLUME_MISSING;
     fulta_arc_err_t e = fa_volume(arc, k, path, src);
     size_t dir = strlen(path) - strlen(next);
@@ -448,7 +450,7 @@ static fulta_arc_err_t cab_sibling_volume(fulta_arc_t *arc, uint32_t k, const ch
         }
         if (changed) e = fa_volume(arc, k, path, src);
     }
-    fa_free(path);
+    fa_release(arc->alloc, path);
     return e;
 }
 
@@ -466,8 +468,9 @@ static fulta_arc_err_t cab_open(fulta_arc_t *arc, uint64_t offset) {
     cab_hdr_t h;
     fulta_arc_err_t e = cab_read_header(arc->volumes[0], &h);
     if (e) return e;
-    cab_state_t *st = fa_calloc(1, sizeof *st);
+    cab_state_t *st = fa_zalloc(arc->alloc, 1, sizeof *st);
     if (!st) return FULTA_ARC_ERR_NOMEM;
+    st->alloc = arc->alloc;
     arc->state = st;
 
     char open_buf[256];
@@ -502,21 +505,21 @@ static fulta_arc_err_t cab_open(fulta_arc_t *arc, uint64_t offset) {
             cab_hdr_t hp;
             if (cab_read_header(src, &hp) || hp.set_id != set_id || hp.icab + 1 != cur.icab || !(hp.flags & CAB_FLAG_NEXT)) break;
             if (cur_name && !cab_name_eq(hp.next, cur_name)) break;   /* it must point forward at the cabinet we left */
-            cab_back_t *q = fa_realloc(back, (nback + 1) * sizeof *q);
-            if (!q) { fa_free(back); cab_close(arc); return FULTA_ARC_ERR_NOMEM; }
+            cab_back_t *q = fa_resize(arc->alloc, back, nback * sizeof *q, (nback + 1) * sizeof *q);
+            if (!q) { fa_release(arc->alloc, back); cab_close(arc); return FULTA_ARC_ERR_NOMEM; }
             back = q; back[nback].h = hp; back[nback].vol = vol; nback++;
             memcpy(cur_buf, cur.prev, sizeof cur_buf);              /* the name we followed is that cabinet's */
             cur = hp; cur_name = cur_buf;
-            if ((e = cab_has_from_prev(src, &cur, &from_prev))) { fa_free(back); cab_close(arc); return e; }
+            if ((e = cab_has_from_prev(src, &cur, &from_prev))) { fa_release(arc->alloc, back); cab_close(arc); return e; }
         }
     }
     /* 2. add the cabinets in set order: the earliest reached predecessor first ... the opened cabinet (volume 0) */
     bool next_cont = false;
     for (uint32_t i = nback; i > 0; i--) {
-        if ((e = cab_add_cabinet(arc, st, back[i - 1].vol, &back[i - 1].h, i != nback, &next_cont))) { fa_free(back); cab_close(arc); return e; }
+        if ((e = cab_add_cabinet(arc, st, back[i - 1].vol, &back[i - 1].h, i != nback, &next_cont))) { fa_release(arc->alloc, back); cab_close(arc); return e; }
     }
-    if ((e = cab_add_cabinet(arc, st, 0, &h, nback > 0, &next_cont))) { fa_free(back); cab_close(arc); return e; }
-    fa_free(back);
+    if ((e = cab_add_cabinet(arc, st, 0, &h, nback > 0, &next_cont))) { fa_release(arc->alloc, back); cab_close(arc); return e; }
+    fa_release(arc->alloc, back);
 
     /* 3. follow the NEXT chain while a file runs into the next cabinet (the files that start there are listed too) */
     uint32_t last = 0;                                          /* volume index of the last cabinet added */
@@ -561,10 +564,10 @@ static fulta_arc_err_t cab_extract(fulta_arc_t *arc, size_t index, const fulta_a
 static void cab_close(fulta_arc_t *arc) {
     cab_state_t *st = arc->state;
     if (!st) return;
-    for (size_t i = 0; i < st->nfolders; i++) { fa_free(st->folders[i].cache); fa_free(st->folders[i].parts); }
-    fa_free(st->folders);
-    fa_free(st->items);
-    fa_free(st);
+    for (size_t i = 0; i < st->nfolders; i++) { fa_release(arc->alloc, st->folders[i].cache); fa_release(arc->alloc, st->folders[i].parts); }
+    fa_release(arc->alloc, st->folders);
+    fa_release(arc->alloc, st->items);
+    fa_release(arc->alloc, st);
     arc->state = NULL;
 }
 

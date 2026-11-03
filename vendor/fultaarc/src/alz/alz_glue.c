@@ -13,6 +13,7 @@
 #include <stdlib.h>
 
 typedef struct alz_glue {
+    proven_allocator_t alloc;   /* the archive's: the glue, its volume views and copies */
     proven_arena_t arena;
     void *backing;
     fa_view_t *views;
@@ -44,26 +45,27 @@ static fulta_arc_err_t map_err(fa_alz_err_t e) {
 }
 
 static fulta_arc_err_t add_volume(alz_glue_t *g, const fulta_arc_source_t *src) {
-    fa_view_t *v = fa_realloc(g->views, (g->nvol + 1) * sizeof *v);
+    fa_view_t *v = fa_resize(g->alloc, g->views, g->nvol * sizeof *v, (g->nvol + 1) * sizeof *v);
     if (!v) return FULTA_ARC_ERR_NOMEM;
     g->views = v;
-    fa_alz_volume_t *av = fa_realloc(g->vols, (g->nvol + 1) * sizeof *av);
+    fa_alz_volume_t *av = fa_resize(g->alloc, g->vols, g->nvol * sizeof *av, (g->nvol + 1) * sizeof *av);
     if (!av) return FULTA_ARC_ERR_NOMEM;
     g->vols = av;
-    fulta_arc_err_t e = fa_view_open(src, &g->views[g->nvol]);
+    fulta_arc_err_t e = fa_view_open(g->alloc, src, &g->views[g->nvol]);
     if (e) return e;
-    g->vols[g->nvol] = (fa_alz_volume_t){g->views[g->nvol].data, g->views[g->nvol].size};
+    g->vols[g->nvol] = (fa_alz_volume_t){g->views[g->nvol].bytes.ptr, g->views[g->nvol].bytes.size};
     g->nvol++;
     return FULTA_ARC_OK;
 }
 
 static fulta_arc_err_t alz_open(fulta_arc_t *arc, uint64_t search) {
     if (search == UINT64_MAX) return FULTA_ARC_ERR_NOT_ARCHIVE;   /* ALZ has no stub form */
-    alz_glue_t *g = fa_calloc(1, sizeof *g);
+    alz_glue_t *g = fa_zalloc(arc->alloc, 1, sizeof *g);
     if (!g) return FULTA_ARC_ERR_NOMEM;
+    g->alloc = arc->alloc;
     arc->state = g;
     size_t asz = (size_t)1 << 20;
-    g->backing = fa_malloc(asz);
+    g->backing = fa_alloc(arc->alloc, asz);
     if (!g->backing) return FULTA_ARC_ERR_NOMEM;
     g->arena = proven_arena_create((proven_mem_mut_t){.ptr = g->backing, .size = asz});
     fulta_arc_err_t e = add_volume(g, arc->volumes[0]);
@@ -74,11 +76,11 @@ static fulta_arc_err_t alz_open(fulta_arc_t *arc, uint64_t search) {
         for (unsigned k = 1; k < 2600 && !fa_alz_volume_is_last(g->vols[g->nvol - 1].data, g->vols[g->nvol - 1].size); k++) {
             proven_u8str_view_t p = fa_alz_volume_path(&g->arena, first, k);
             if (!p.ptr) break;
-            char *path = fa_strndup((const char *)p.ptr, p.size);
+            char *path = fa_strndup_a(arc->alloc, (const char *)p.ptr, p.size);
             if (!path) return FULTA_ARC_ERR_NOMEM;
             const fulta_arc_source_t *src;
             e = fa_volume(arc, k, path, &src);
-            fa_free(path);
+            fa_release(arc->alloc, path);
             if (e == FULTA_ARC_ERR_VOLUME_MISSING) break;
             if (e) return e;
             if ((e = add_volume(g, src))) return e;
@@ -88,11 +90,11 @@ static fulta_arc_err_t alz_open(fulta_arc_t *arc, uint64_t search) {
     }
     for (;;) {
         proven_arena_reset(&g->arena);
-        fa_alz_result_t r = fa_alz_open_volumes(&g->arena, g->vols, g->nvol);
+        fa_alz_result_t r = fa_alz_open_volumes(g->alloc, &g->arena, g->vols, g->nvol);
         if (r.err == FA_ALZ_ERR_OUT_OF_MEMORY && asz < ((size_t)1 << 30)) {
             asz *= 4;
-            fa_free(g->backing);
-            g->backing = fa_malloc(asz);
+            fa_release(arc->alloc, g->backing);
+            g->backing = fa_alloc(arc->alloc, asz);
             if (!g->backing) return FULTA_ARC_ERR_NOMEM;
             g->arena = proven_arena_create((proven_mem_mut_t){.ptr = g->backing, .size = asz});
             continue;
@@ -104,14 +106,14 @@ static fulta_arc_err_t alz_open(fulta_arc_t *arc, uint64_t search) {
     }
     for (size_t i = 0; i < g->ar.entry_count; i++) {
         const fa_alz_entry_t *ae = &g->ar.entries[i];
-        char *uname = fa_codepage_to_utf8(ae->name.ptr, ae->name.size, arc->opt.codepage, FULTA_ARC_CP_949);
+        char *uname = fa_codepage_to_utf8(arc->alloc, fa_bytes(ae->name.ptr, ae->name.size), arc->opt.codepage, FULTA_ARC_CP_949);
         if (!uname) return FULTA_ARC_ERR_NOMEM;
         const char *m = ae->method == FA_ALZ_METHOD_STORED ? "Store" : ae->method == FA_ALZ_METHOD_DEFLATE ? "Deflate"
                       : ae->method == FA_ALZ_METHOD_BZIP2 ? "BZip2-ALZ" : "Unknown";
         char method[32];
         snprintf(method, sizeof method, "%s%s", m, ae->encrypted ? ":ZipCrypto" : "");
-        fa_entry_t *en = fa_add_entry(arc, ae->name.ptr, ae->name.size, uname, method);
-        fa_free(uname);
+        fa_entry_t *en = fa_add_entry(arc, fa_bytes(ae->name.ptr, ae->name.size), uname, method);
+        fa_release(arc->alloc, uname);
         if (!en) return FULTA_ARC_ERR_NOMEM;
         en->pub.size = ae->size;
         en->pub.packed_size = ae->packed_size;
@@ -134,11 +136,11 @@ static fa_alz_err_t try_password(const fulta_arc_t *arc, fa_alz_archive_t *ar, c
     fulta_arc_codepage_t cps[2] = {arc->opt.codepage, FULTA_ARC_CP_949};
     for (int k = 0; k < 2; k++) {
         if (cps[k] == FULTA_ARC_CP_AUTO || cps[k] == FULTA_ARC_CP_UTF8 || (k == 1 && cps[0] == FULTA_ARC_CP_949)) continue;
-        char *c = fa_utf8_to_codepage(pw, cps[k]);
+        char *c = fa_utf8_to_codepage(arc->alloc, pw, cps[k]);
         if (!c) continue;
         r = fa_alz_set_password(ar, proven_u8str_view_from_cstr(c));
         memset(c, 0, strlen(c));
-        fa_free(c);
+        fa_release(arc->alloc, c);
         if (r != FA_ALZ_ERR_BAD_PASSWORD) return r;
     }
     return FA_ALZ_ERR_BAD_PASSWORD;
@@ -162,13 +164,13 @@ static fulta_arc_err_t alz_extract(fulta_arc_t *arc, size_t index, const fulta_a
     }
     if (ae->size > SIZE_MAX - 4096) return FULTA_ARC_ERR_LIMIT;
     size_t need = (size_t)ae->size + 4096;
-    void *mem = fa_malloc(need);
+    void *mem = fa_alloc(arc->alloc, need);
     if (!mem) return FULTA_ARC_ERR_NOMEM;
     proven_arena_t a = proven_arena_create((proven_mem_mut_t){.ptr = mem, .size = need});
     fa_alz_data_result_t r = fa_alz_read_entry(&a, &g->ar, index, ae->size);
     fulta_arc_err_t e = map_err(r.err);
     if (!e && sink && r.data.size) e = sink->write(sink->ctx, r.data.ptr, r.data.size);
-    fa_free(mem);
+    fa_release(arc->alloc, mem);
     return e;
 }
 
@@ -177,10 +179,10 @@ static void alz_close(fulta_arc_t *arc) {
     if (!g) return;
     if (g->open) fa_alz_close(&g->ar);
     for (size_t i = 0; i < g->nvol; i++) fa_view_close(&g->views[i]);
-    fa_free(g->views);
-    fa_free(g->vols);
-    fa_free(g->backing);
-    fa_free(g);
+    fa_release(arc->alloc, g->views);
+    fa_release(arc->alloc, g->vols);
+    fa_release(arc->alloc, g->backing);
+    fa_release(arc->alloc, g);
     arc->state = NULL;
 }
 

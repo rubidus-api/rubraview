@@ -34,6 +34,7 @@ typedef struct {
 } qt_table;
 
 struct fa_quantum {
+    proven_allocator_t alloc;   /* this state lives here */
     unsigned X;
     uint8_t *out; uint64_t cap, produced;
     qt_table sel, lit[4], len, dist[3];
@@ -125,13 +126,14 @@ static int qt_decode(fa_quantum_t *q, qt_table *t) {
     return (int)i;
 }
 
-fulta_arc_err_t fa_quantum_create(unsigned window_bits, uint8_t *out, uint64_t out_cap, fa_quantum_t **qp) {
+fulta_arc_err_t fa_quantum_create(proven_allocator_t a, unsigned window_bits, uint8_t *out, uint64_t out_cap,
+                                  fa_quantum_t **qp) {
     *qp = NULL;
     if (window_bits < 10 || window_bits > 21) return FULTA_ARC_ERR_UNSUPPORTED;   /* spec: Container - X */
     if (!out && out_cap) return FULTA_ARC_ERR_INVALID_ARG;
-    fa_quantum_t *q = fa_malloc(sizeof *q);
+    fa_quantum_t *q = fa_zalloc(a, 1, sizeof *q);
     if (!q) return FULTA_ARC_ERR_NOMEM;
-    memset(q, 0, sizeof *q);
+    q->alloc = a;
     q->X = window_bits; q->out = out; q->cap = out_cap; q->produced = 0;
     qt_init(&q->sel, 7);
     for (int k = 0; k < 4; k++) qt_init(&q->lit[k], 64);
@@ -145,7 +147,7 @@ fulta_arc_err_t fa_quantum_create(unsigned window_bits, uint8_t *out, uint64_t o
 
 uint64_t fa_quantum_produced(const fa_quantum_t *q) { return q ? q->produced : 0; }
 
-void fa_quantum_destroy(fa_quantum_t *q) { if (q) fa_free(q); }
+void fa_quantum_destroy(fa_quantum_t *q) { if (q) fa_release(q->alloc, q); }
 
 fulta_arc_err_t fa_quantum_chunk(fa_quantum_t *q, const uint8_t *in, size_t in_len, uint64_t uncomp) {
     if (!q || (!in && in_len)) return FULTA_ARC_ERR_INVALID_ARG;

@@ -10,6 +10,7 @@
 #include "bzlib.h"
 #include "Ppmd7.h"
 #include "Ppmd8.h"
+#define ZSTD_STATIC_LINKING_ONLY   /* ZSTD_customMem: zstd allocates through the writer's allocator */
 #include "zstd.h"
 #include "Delta.h"
 #include "Bra.h"
@@ -29,6 +30,7 @@
 /* ---- little-endian output ---- */
 
 typedef struct out {
+    proven_allocator_t alloc;   /* the writer's (D-038): every buffer of this write lives here */
     const fulta_arc_write_sink_t *sink;
     uint64_t at;            /* bytes appended so far */
     bool failed;
@@ -41,6 +43,18 @@ static void put(out_t *o, const void *data, size_t size) {
     o->at += size;
 }
 
+/* The writer's allocator (D-038): the options' fulta_arc_allocator_t (the bridge points into the options, which live
+ * as long as the write), else proven's heap. The entry points refuse a partial set first (write_alloc_ok). */
+proven_allocator_t fa_write_alloc(const fulta_arc_write_options_t *opt) {
+    proven_allocator_t a = proven_heap_allocator();
+    if (opt && fa_allocator_pick(&opt->allocator, &a)) a = proven_heap_allocator();
+    return a;
+}
+bool fa_write_alloc_ok(const fulta_arc_write_options_t *opt) {
+    proven_allocator_t a;
+    return !opt || fa_allocator_pick(&opt->allocator, &a) == FULTA_ARC_OK;
+}
+
 static void le16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
 static void le32(uint8_t *p, uint32_t v) { for (int i = 0; i < 4; ++i) p[i] = (uint8_t)(v >> (8 * i)); }
 static void le64(uint8_t *p, uint64_t v) { for (int i = 0; i < 8; ++i) p[i] = (uint8_t)(v >> (8 * i)); }
@@ -49,7 +63,7 @@ static uint32_t crc32_of(const uint8_t *data, uint64_t size) {
     uint32_t crc = 0;
     while (size > 0) {
         size_t n = size > (1u << 30) ? (1u << 30) : (size_t)size;
-        crc = fa_crc32(crc, data, n);
+        crc = fa_crc32(crc, fa_bytes(data, n));
         data += n;
         size -= n;
     }
@@ -80,10 +94,10 @@ static bool name_ok(proven_u8str_view_t name) {
 }
 
 /* The name as stored: '/' between folders; a folder's ZIP name ends in '/', its 7z name does not. */
-static char *stored_name(const char *name, bool dir, bool zip) {
+static char *stored_name(proven_allocator_t a, const char *name, bool dir, bool zip) {
     size_t len = strlen(name);
     while (len && (name[len - 1] == '/' || name[len - 1] == '\\')) len--;
-    char *s = (char*)malloc(len + 2);
+    char *s = fa_alloc(a, len + 2);
     if (!s) return NULL;
     for (size_t i = 0; i < len; ++i) s[i] = name[i] == '\\' ? '/' : name[i];
     if (dir && zip) s[len++] = '/';
@@ -207,13 +221,13 @@ static void zip_aes_mark(zip_record_t *r, int strength) {
     r->crc = 0;                                                        /* AE-2: no plaintext CRC */
 }
 
-static uint8_t *zip_aes_seal(const char *pw, size_t pwlen, int strength, const uint8_t *body, size_t blen,
+static uint8_t *zip_aes_seal(proven_allocator_t a, const char *pw, size_t pwlen, int strength, const uint8_t *body, size_t blen,
                              zip_record_t *r, size_t *out_len, fulta_arc_err_t *err) {
     size_t sl = aes_salt_len[strength], kl = aes_key_len[strength];
-    uint8_t *blob = malloc(sl + 2 + blen + 10);
+    uint8_t *blob = fa_alloc(a, sl + 2 + blen + 10);
     if (!blob) { *err = FULTA_ARC_ERR_NOMEM; return NULL; }
     uint8_t k[66];
-    if (!zip_aes_keys(pw, pwlen, strength, blob, k)) { free(blob); *err = FULTA_ARC_ERR_IO; return NULL; }   /* no entropy */
+    if (!zip_aes_keys(pw, pwlen, strength, blob, k)) { fa_release(a, blob); *err = FULTA_ARC_ERR_IO; return NULL; }   /* no entropy */
     blob[sl] = k[2 * kl]; blob[sl + 1] = k[2 * kl + 1];                 /* 2-byte password verifier */
     if (blen) memcpy(blob + sl + 2, body, blen);
     fa_aes_ctr_le1_xor(k, kl, blob + sl + 2, blen);                    /* AES-CTR */
@@ -327,13 +341,51 @@ static fulta_arc_err_t write_zip_central(out_t *o, const zip_record_t *rec, size
     return FULTA_ARC_OK;
 }
 
-static void *sz_alloc(ISzAllocPtr p, size_t size) { (void)p; return malloc(size); }
-static void sz_free(ISzAllocPtr p, void *address) { (void)p; free(address); }
-static const ISzAlloc SZ_ALLOC = { sz_alloc, sz_free };
+/* The vendored encoders' own allocations, through the writer's allocator (D-038): the LZMA SDK's ISzAlloc, bzip2's
+ * bzalloc/bzfree and zstd's customMem each carry it (a pointer to an allocator that outlives the encoder). */
+typedef struct fa_isz { ISzAlloc vt; proven_allocator_t a; } fa_isz_t;
+static void *isz_alloc(ISzAllocPtr p, size_t size) { return fa_alloc(((const fa_isz_t *)(const void *)p)->a, size); }
+static void isz_free(ISzAllocPtr p, void *address) { fa_release(((const fa_isz_t *)(const void *)p)->a, address); }
+static fa_isz_t isz_of(proven_allocator_t a) { return (fa_isz_t){ .vt = { isz_alloc, isz_free }, .a = a }; }
+
+static void *bz_alloc_cb(void *opaque, int n, int m) {
+    if (n < 0 || m < 0) return NULL;
+    return fa_alloc(*(const proven_allocator_t *)opaque, (size_t)n * (size_t)m);
+}
+static void bz_free_cb(void *opaque, void *p) { fa_release(*(const proven_allocator_t *)opaque, p); }
+static void bz_hook(bz_stream *bz, const proven_allocator_t *a) {
+    bz->bzalloc = bz_alloc_cb; bz->bzfree = bz_free_cb; bz->opaque = (void *)(uintptr_t)a;
+}
+
+static void *zs_alloc_cb(void *opaque, size_t n) { return fa_alloc(*(const proven_allocator_t *)opaque, n); }
+static void zs_free_cb(void *opaque, void *p) { fa_release(*(const proven_allocator_t *)opaque, p); }
+static ZSTD_CCtx *zstd_cctx(const proven_allocator_t *a) {
+    ZSTD_customMem m = { zs_alloc_cb, zs_free_cb, (void *)(uintptr_t)a };
+    return ZSTD_createCCtx_advanced(m);
+}
+
+/* miniz's deflate into a growing block of `a`: the compressor is ours (tdefl_compress_mem_to_heap would take it and
+ * the output from the C library). */
+typedef struct defl_mem { proven_allocator_t a; uint8_t *p; size_t len, cap; bool oom; } defl_mem_t;
+static mz_bool defl_mem_put(const void *buf, int len, void *user) {
+    defl_mem_t *d = user;
+    if (len <= 0) return MZ_TRUE;
+    if (d->len + (size_t)len > d->cap) {
+        size_t nc = d->cap ? d->cap : 4096;
+        while (nc < d->len + (size_t)len) nc *= 2;
+        uint8_t *np = fa_resize(d->a, d->p, d->cap, nc);
+        if (!np) { d->oom = true; return MZ_FALSE; }
+        d->p = np; d->cap = nc;
+    }
+    memcpy(d->p + d->len, buf, (size_t)len);
+    d->len += (size_t)len;
+    return MZ_TRUE;
+}
 
 /* ---- a growable IByteOut for the PPMd range encoder (PPMd can expand, so there is no fixed output bound) ---- */
 typedef struct byteout {
     IByteOut vt;
+    proven_allocator_t alloc;
     uint8_t *buf;
     size_t len, cap;
     bool oom;
@@ -344,7 +396,7 @@ static void byteout_write(IByteOutPtr pp, Byte b) {
     if (o->oom) return;
     if (o->len == o->cap) {
         size_t nc = o->cap ? o->cap * 2 : 4096;
-        uint8_t *nb = realloc(o->buf, nc);
+        uint8_t *nb = fa_resize(o->alloc, o->buf, o->cap, nc);
         if (!nb) { o->oom = true; return; }
         o->buf = nb; o->cap = nc;
     }
@@ -378,7 +430,7 @@ static void ppmd7_params_for_level(int level, unsigned *order, uint32_t *mem) {
    ZIP method number, or *packed is NULL meaning "store the raw data" (*method_out = 0). DEFLATE falls back to store
    when the input is empty, level 0, or incompressible; STORE always stores; BZIP2/LZMA honour the chosen method.
    `zf` is the precomputed tdefl flags for DEFLATE. */
-static fulta_arc_err_t zip_encode_body(fulta_arc_method_t m, int level, mz_uint zf,
+static fulta_arc_err_t zip_encode_body(proven_allocator_t a, fulta_arc_method_t m, int level, mz_uint zf,
                                        const void *data, uint64_t size,
                                        void **packed, size_t *packed_len, uint16_t *method_out) {
     *packed = NULL; *packed_len = 0; *method_out = 0;
@@ -386,23 +438,35 @@ static fulta_arc_err_t zip_encode_body(fulta_arc_method_t m, int level, mz_uint 
 
     if (m == FULTA_ARC_METHOD_DEFLATE) {
         if (level <= 0 || size > SIZE_MAX) return FULTA_ARC_OK;    /* store */
-        size_t plen = 0;
-        void *p = tdefl_compress_mem_to_heap(data, (size_t)size, &plen, (int)zf);
-        if (!p) return FULTA_ARC_ERR_CORRUPT;
-        if (plen >= size) { free(p); return FULTA_ARC_OK; }        /* store: no gain */
-        *packed = p; *packed_len = plen; *method_out = 8;
+        tdefl_compressor *comp = fa_alloc(a, sizeof *comp);
+        if (!comp) return FULTA_ARC_ERR_NOMEM;
+        defl_mem_t d = { .a = a };
+        tdefl_status st = tdefl_init(comp, defl_mem_put, &d, (int)zf);
+        if (st == TDEFL_STATUS_OKAY) st = tdefl_compress_buffer(comp, data, (size_t)size, TDEFL_FINISH);
+        fa_release(a, comp);
+        if (st != TDEFL_STATUS_DONE) { fa_release(a, d.p); return d.oom ? FULTA_ARC_ERR_NOMEM : FULTA_ARC_ERR_CORRUPT; }
+        if (d.len >= size) { fa_release(a, d.p); return FULTA_ARC_OK; }   /* store: no gain */
+        *packed = d.p; *packed_len = d.len; *method_out = 8;
         return FULTA_ARC_OK;
     }
 
     if (m == FULTA_ARC_METHOD_BZIP2) {
-        if (size > 0xFFFFFFFFu) return FULTA_ARC_ERR_UNSUPPORTED;   /* bzip2 one-shot is 32-bit */
+        if (size > 0xFFFFFFFFu) return FULTA_ARC_ERR_UNSUPPORTED;   /* one 32-bit input, as before */
         unsigned dlen = (unsigned)size + (unsigned)(size / 100) + 600;  /* libbzip2's recommended bound */
-        char *dst = malloc(dlen);
+        char *dst = fa_alloc(a, dlen);
         if (!dst) return FULTA_ARC_ERR_NOMEM;
         int bs = level < 1 ? 1 : level > 9 ? 9 : level;
-        int rc = BZ2_bzBuffToBuffCompress(dst, &dlen, (char *)(uintptr_t)data, (unsigned)size, bs, 0, 0);
-        if (rc != BZ_OK) { free(dst); return FULTA_ARC_ERR_CORRUPT; }
-        *packed = dst; *packed_len = dlen; *method_out = 12;
+        bz_stream bz; memset(&bz, 0, sizeof bz);
+        bz_hook(&bz, &a);
+        if (BZ2_bzCompressInit(&bz, bs, 0, 0) != BZ_OK) { fa_release(a, dst); return FULTA_ARC_ERR_NOMEM; }
+        bz.next_in = (char *)(uintptr_t)data; bz.avail_in = (unsigned)size;
+        bz.next_out = dst; bz.avail_out = dlen;
+        int rc;
+        do rc = BZ2_bzCompress(&bz, BZ_FINISH); while (rc == BZ_FINISH_OK && bz.avail_out);
+        unsigned got = dlen - bz.avail_out;
+        BZ2_bzCompressEnd(&bz);
+        if (rc != BZ_STREAM_END) { fa_release(a, dst); return FULTA_ARC_ERR_CORRUPT; }
+        *packed = dst; *packed_len = got; *method_out = 12;
         return FULTA_ARC_OK;
     }
 
@@ -412,16 +476,17 @@ static fulta_arc_err_t zip_encode_body(fulta_arc_method_t m, int level, mz_uint 
         ep.level = level < 1 ? 1 : level > 9 ? 9 : level;
         ep.reduceSize = size;                                       /* dictionary no larger than the data needs */
         size_t cap = (size_t)size + size / 2 + 4096;
-        uint8_t *dst = malloc(cap);
+        uint8_t *dst = fa_alloc(a, cap);
         if (!dst) return FULTA_ARC_ERR_NOMEM;
         /* body layout the reader expects (zip.c:502): [verMaj, verMin, propsLen LE16 = 5] then the 5 LZMA props. */
         dst[0] = 9; dst[1] = 20; dst[2] = 5; dst[3] = 0;
         uint8_t props[LZMA_PROPS_SIZE]; SizeT props_size = sizeof props;
         SizeT dlen = cap - 4 - LZMA_PROPS_SIZE;
+        fa_isz_t isz = isz_of(a);
         SRes res = LzmaEncode(dst + 4 + LZMA_PROPS_SIZE, &dlen, data, (SizeT)size,
                               &ep, props, &props_size, 0 /* no end marker: decoded by size */, NULL,
-                              &SZ_ALLOC, &SZ_ALLOC);
-        if (res != SZ_OK || props_size != LZMA_PROPS_SIZE) { free(dst); return res == SZ_ERROR_MEM ? FULTA_ARC_ERR_NOMEM : FULTA_ARC_ERR_CORRUPT; }
+                              &isz.vt, &isz.vt);
+        if (res != SZ_OK || props_size != LZMA_PROPS_SIZE) { fa_release(a, dst); return res == SZ_ERROR_MEM ? FULTA_ARC_ERR_NOMEM : FULTA_ARC_ERR_CORRUPT; }
         memcpy(dst + 4, props, LZMA_PROPS_SIZE);
         *packed = dst; *packed_len = 4 + LZMA_PROPS_SIZE + (size_t)dlen; *method_out = 14;
         return FULTA_ARC_OK;
@@ -432,14 +497,15 @@ static fulta_arc_err_t zip_encode_body(fulta_arc_method_t m, int level, mz_uint 
            by uncompressed size (no end marker). Mirrors fa_dec_ppmd8_zip. */
         unsigned order, memMB, restore;
         ppmd_params_for_level(level, &order, &memMB, &restore);
-        byteout_t bo = {.vt = {byteout_write}};
+        byteout_t bo = {.vt = {byteout_write}, .alloc = a};
         /* the 2-byte header first */
         uint16_t v = (uint16_t)((order - 1) | ((memMB - 1) << 4) | (restore << 12));
         byteout_write(&bo.vt, (Byte)(v & 0xFF));
         byteout_write(&bo.vt, (Byte)(v >> 8));
+        fa_isz_t isz = isz_of(a);
         CPpmd8 p;
         Ppmd8_Construct(&p);
-        if (!Ppmd8_Alloc(&p, (UInt32)memMB << 20, &SZ_ALLOC)) { free(bo.buf); return FULTA_ARC_ERR_NOMEM; }
+        if (!Ppmd8_Alloc(&p, (UInt32)memMB << 20, &isz.vt)) { fa_release(a, bo.buf); return FULTA_ARC_ERR_NOMEM; }
         p.Stream.Out = &bo.vt;
         Ppmd8_Init_RangeEnc(&p);
         Ppmd8_Init(&p, order, restore);
@@ -447,8 +513,8 @@ static fulta_arc_err_t zip_encode_body(fulta_arc_method_t m, int level, mz_uint 
         for (uint64_t i = 0; i < size; i++) Ppmd8_EncodeSymbol(&p, src[i]);
         Ppmd8_EncodeSymbol(&p, -1);                 /* end marker: 7-Zip's ZIP-PPMd decoder reads to it, not by size */
         Ppmd8_Flush_RangeEnc(&p);
-        Ppmd8_Free(&p, &SZ_ALLOC);
-        if (bo.oom) { free(bo.buf); return FULTA_ARC_ERR_NOMEM; }
+        Ppmd8_Free(&p, &isz.vt);
+        if (bo.oom) { fa_release(a, bo.buf); return FULTA_ARC_ERR_NOMEM; }
         *packed = bo.buf; *packed_len = bo.len; *method_out = 98;
         return FULTA_ARC_OK;
     }
@@ -459,10 +525,13 @@ static fulta_arc_err_t zip_encode_body(fulta_arc_method_t m, int level, mz_uint 
         static const int z_by_level[10] = {0, 1, 3, 6, 9, 12, 15, 17, 19, 19};
         int l = level < 1 ? 1 : level > 9 ? 9 : level;
         size_t bound = ZSTD_compressBound((size_t)size);
-        uint8_t *dst = malloc(bound ? bound : 1);
+        uint8_t *dst = fa_alloc(a, bound ? bound : 1);
         if (!dst) return FULTA_ARC_ERR_NOMEM;
-        size_t r = ZSTD_compress(dst, bound, data, (size_t)size, z_by_level[l]);
-        if (ZSTD_isError(r)) { free(dst); return FULTA_ARC_ERR_CORRUPT; }
+        ZSTD_CCtx *cc = zstd_cctx(&a);
+        if (!cc) { fa_release(a, dst); return FULTA_ARC_ERR_NOMEM; }
+        size_t r = ZSTD_compressCCtx(cc, dst, bound, data, (size_t)size, z_by_level[l]);
+        ZSTD_freeCCtx(cc);
+        if (ZSTD_isError(r)) { fa_release(a, dst); return FULTA_ARC_ERR_CORRUPT; }
         *packed = dst; *packed_len = r; *method_out = 93;
         return FULTA_ARC_OK;
     }
@@ -507,6 +576,7 @@ static fulta_arc_err_t filter_check(fulta_arc_format_t fmt, const fulta_arc_writ
             return opt->filter_delta_dist > 256 ? FULTA_ARC_ERR_INVALID_ARG : FULTA_ARC_OK;   /* 0 -> 1 */
         case FULTA_ARC_FILTER_BCJ_X86: case FULTA_ARC_FILTER_ARM: case FULTA_ARC_FILTER_ARM64:
         case FULTA_ARC_FILTER_PPC: case FULTA_ARC_FILTER_SPARC: case FULTA_ARC_FILTER_IA64:
+        case FULTA_ARC_FILTER_ARMT: case FULTA_ARC_FILTER_RISCV:
         case FULTA_ARC_FILTER_BCJ2:                      /* phase 7: multi-output folder (BCJ2 + sub-stream coders) */
             return FULTA_ARC_OK;
         default:
@@ -527,7 +597,7 @@ static fulta_arc_err_t write_zip(const fulta_arc_write_entry_t *entries, size_t 
     fulta_arc_err_t me = method_concrete(FULTA_ARC_FORMAT_ZIP, level, opt ? opt->method : FULTA_ARC_METHOD_DEFAULT, &m);
     if (me) return me;                                         /* INVALID_ARG: method cannot apply to ZIP */
     zip_begin(o);
-    zip_record_t *rec = (zip_record_t*)calloc(count ? count : 1, sizeof(zip_record_t));
+    zip_record_t *rec = fa_zalloc(o->alloc, count ? count : 1, sizeof(zip_record_t));
     if (!rec) return FULTA_ARC_ERR_NOMEM;
     fulta_arc_err_t err = FULTA_ARC_OK;
     uint64_t total = 0, done = 0;
@@ -537,7 +607,7 @@ static fulta_arc_err_t write_zip(const fulta_arc_write_entry_t *entries, size_t 
         const fulta_arc_write_entry_t *e = &entries[i];
         zip_record_t *r = &rec[i];
         bool dir = is_dir(e);
-        r->name = stored_name(e->name, dir, true);
+        r->name = stored_name(o->alloc, e->name, dir, true);
         r->dir = dir;
         if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
         r->name_len = strlen(r->name);
@@ -554,7 +624,7 @@ static fulta_arc_err_t write_zip(const fulta_arc_write_entry_t *entries, size_t 
         size_t packed_len = 0;
         uint16_t zmethod = 0;
         if (!dir && e->size > 0) {
-            err = zip_encode_body(m, level, flags, e->data, e->size, &packed, &packed_len, &zmethod);
+            err = zip_encode_body(o->alloc, m, level, flags, e->data, e->size, &packed, &packed_len, &zmethod);
             if (err) break;
         }
         r->method = zmethod;
@@ -563,8 +633,8 @@ static fulta_arc_err_t write_zip(const fulta_arc_write_entry_t *entries, size_t 
         uint8_t *blob = NULL; size_t blob_len = 0;
         if (enc_strength && !dir) {
             const uint8_t *body = packed ? (const uint8_t *)packed : (const uint8_t *)e->data;
-            blob = zip_aes_seal(pw, pwlen, enc_strength, body, (size_t)r->packed, r, &blob_len, &err);
-            if (!blob) { free(packed); break; }
+            blob = zip_aes_seal(o->alloc, pw, pwlen, enc_strength, body, (size_t)r->packed, r, &blob_len, &err);
+            if (!blob) { fa_release(o->alloc, packed); break; }
             r->packed = blob_len;
         }
         r->zip64 = force64 || r->size >= 0xFFFFFFFFu || r->packed >= 0xFFFFFFFFu;
@@ -578,15 +648,15 @@ static fulta_arc_err_t write_zip(const fulta_arc_write_entry_t *entries, size_t 
                 at += n;
             }
         }
-        free(blob);
-        free(packed);
+        fa_release(o->alloc, blob);
+        fa_release(o->alloc, packed);
         if (o->failed) { err = FULTA_ARC_ERR_IO; break; }
         done += e->size;
         if (opt && opt->progress && opt->progress(opt->progress_ctx, done, total)) err = FULTA_ARC_ERR_CANCELLED;
     }
     if (err == FULTA_ARC_OK) err = write_zip_central(o, rec, count, force64);
-    for (size_t i = 0; i < count; ++i) free(rec[i].name);
-    free(rec);
+    for (size_t i = 0; i < count; ++i) fa_release(o->alloc, rec[i].name);
+    fa_release(o->alloc, rec);
     return err;
 }
 
@@ -649,7 +719,7 @@ static SRes sz_spill_read(ISeqInStreamPtr pp, void *buf, size_t *size) {
 
 /* The spill directory's name: beside the output (`<hint>.d-<random>`) when a file path is known, else
  * `<temp>/fa7z-<random>`. */
-static fulta_arc_err_t spill_path(const char *hint, char **out) {
+static fulta_arc_err_t spill_path(proven_allocator_t a, const char *hint, char **out) {
     *out = NULL;
     const char *pre = hint, *sep = ".d-";
     if (!pre) {
@@ -662,7 +732,7 @@ static fulta_arc_err_t spill_path(const char *hint, char **out) {
     uint8_t rnd[12];
     if (!fa_random_bytes(rnd, sizeof rnd)) return FULTA_ARC_ERR_IO;
     size_t pn = strlen(pre), sn = strlen(sep);
-    char *s = malloc(pn + sn + 24 + 1);
+    char *s = fa_alloc(a, pn + sn + 24 + 1);
     if (!s) return FULTA_ARC_ERR_NOMEM;
     static const char hexd[] = "0123456789abcdef";
     char *q = s;
@@ -676,6 +746,7 @@ static fulta_arc_err_t spill_path(const char *hint, char **out) {
 
 /* The spill: one handle, read and written; its names removed as soon as it is open (see the section comment). */
 typedef struct spill {
+    proven_allocator_t alloc;   /* the names' */
     proven_file_t f;
     bool open;
     char *dir, *file;
@@ -683,20 +754,21 @@ typedef struct spill {
 } spill_t;
 
 static void spill_close(spill_t *s) {
-    proven_allocator_t heap = proven_heap_allocator();
+    proven_allocator_t heap = s->alloc;
     if (s->open) { proven_err_t ig = proven_fs_close(s->f); (void)ig; }
     if (s->file_named) { proven_err_t ig = proven_fs_remove(heap, proven_u8str_view_from_cstr(s->file)); (void)ig; }
     if (s->dir_named) { proven_err_t ig = proven_fs_rmdir(heap, proven_u8str_view_from_cstr(s->dir)); (void)ig; }
-    free(s->dir); free(s->file);
+    fa_release(s->alloc, s->dir); fa_release(s->alloc, s->file);
     memset(s, 0, sizeof *s);
 }
 
-static fulta_arc_err_t spill_open(const char *hint, spill_t *s) {
+static fulta_arc_err_t spill_open(proven_allocator_t a, const char *hint, spill_t *s) {
     memset(s, 0, sizeof *s);
-    proven_allocator_t heap = proven_heap_allocator();
-    fulta_arc_err_t err = spill_path(hint, &s->dir);
+    s->alloc = a;
+    proven_allocator_t heap = a;
+    fulta_arc_err_t err = spill_path(a, hint, &s->dir);
     if (err) return err;
-    if (proven_fs_mkdir(heap, proven_u8str_view_from_cstr(s->dir))) { free(s->dir); s->dir = NULL; return FULTA_ARC_ERR_IO; }
+    if (proven_fs_mkdir(heap, proven_u8str_view_from_cstr(s->dir))) { fa_release(s->alloc, s->dir); s->dir = NULL; return FULTA_ARC_ERR_IO; }
     s->dir_named = true;
 #ifndef _WIN32
     if (proven_fs_chmod(heap, proven_u8str_view_from_cstr(s->dir),
@@ -706,7 +778,7 @@ static fulta_arc_err_t spill_open(const char *hint, spill_t *s) {
     }
 #endif
     size_t dn = strlen(s->dir);
-    s->file = malloc(dn + 3);
+    s->file = fa_alloc(s->alloc, dn + 3);
     if (!s->file) { spill_close(s); return FULTA_ARC_ERR_NOMEM; }
     memcpy(s->file, s->dir, dn);
     memcpy(s->file + dn, "/s", 3);
@@ -774,6 +846,7 @@ struct conv_zip {
     bool aes;                  /* WinZip AES: what goes out is encrypted and authenticated (csize counts ciphertext) */
     fa_aes_ctr_t ctr;
     fa_hmac_sha1_t mac;
+    fa_isz_t isz;              /* the PPMd/LZMA encoders allocate through the writer's allocator */
 };
 
 /* The entry's packed bytes out: as they are, or AES-CTR encrypted and fed to the HMAC. */
@@ -816,13 +889,14 @@ static fulta_arc_err_t conv_begin(conv_zip_t *c, fulta_arc_method_t m, int level
             return FULTA_ARC_OK;
         case FULTA_ARC_METHOD_BZIP2:
             memset(&c->bz, 0, sizeof c->bz);
+            bz_hook(&c->bz, &c->o->alloc);
             if (BZ2_bzCompressInit(&c->bz, l, 0, 0) != BZ_OK) return FULTA_ARC_ERR_NOMEM;
             c->bz_on = true;
             return FULTA_ARC_OK;
         case FULTA_ARC_METHOD_ZSTD: {
             /* the same level map as zip_encode_body: 1..9 onto zstd 1..19 */
             static const int z_by_level[10] = {0, 1, 3, 6, 9, 12, 15, 17, 19, 19};
-            c->zs = ZSTD_createCCtx();
+            c->zs = zstd_cctx(&c->o->alloc);
             if (!c->zs) return FULTA_ARC_ERR_NOMEM;
             if (ZSTD_isError(ZSTD_CCtx_setParameter(c->zs, ZSTD_c_compressionLevel, z_by_level[l])))
                 return FULTA_ARC_ERR_CORRUPT;
@@ -836,7 +910,7 @@ static fulta_arc_err_t conv_begin(conv_zip_t *c, fulta_arc_method_t m, int level
             h[0] = (uint8_t)(v & 0xFF); h[1] = (uint8_t)(v >> 8);
             conv_emit(c, h, 2);
             Ppmd8_Construct(&c->ppmd);
-            if (!Ppmd8_Alloc(&c->ppmd, (UInt32)memMB << 20, &SZ_ALLOC)) return FULTA_ARC_ERR_NOMEM;
+            if (!Ppmd8_Alloc(&c->ppmd, (UInt32)memMB << 20, &c->isz.vt)) return FULTA_ARC_ERR_NOMEM;
             c->ppmd_on = true;
             c->pout.vt.Write = conv_ppmd_byte;
             c->pout.c = c;
@@ -916,13 +990,13 @@ static fulta_arc_err_t conv_code(conv_zip_t *c, const void *data, size_t n, bool
 static void conv_end(conv_zip_t *c) {
     if (c->bz_on) { BZ2_bzCompressEnd(&c->bz); c->bz_on = false; }
     if (c->zs) { ZSTD_freeCCtx(c->zs); c->zs = NULL; }
-    if (c->ppmd_on) { Ppmd8_Free(&c->ppmd, &SZ_ALLOC); c->ppmd_on = false; }
+    if (c->ppmd_on) { Ppmd8_Free(&c->ppmd, &c->isz.vt); c->ppmd_on = false; }
 }
 
 /* Count `n` plaintext bytes into crc, size and progress; poll cancel. */
 static fulta_arc_err_t conv_account(conv_zip_t *c, const void *data, size_t n) {
     if (n) {
-        c->crc = fa_crc32(c->crc, data, n);
+        c->crc = fa_crc32(c->crc, fa_bytes(data, n));
         c->usize += n;
     }
     if (c->opt && c->opt->progress) {
@@ -1001,7 +1075,7 @@ static fulta_arc_err_t conv_lzma(conv_zip_t *c, const fa_edit_item_t *it, int le
     conv_lzma_in_t in = { .vt = { conv_lzma_read }, .c = c, .rd = it->is_copy ? NULL : &it->reader };
     fulta_arc_err_t err = FULTA_ARC_OK;
     if (it->is_copy) {
-        err = spill_open(spill_hint, &spill);
+        err = spill_open(c->o->alloc, spill_hint, &spill);
         if (err) return err;
         conv_spill_w_t w = { .f = spill.f, .c = c };
         fulta_arc_sink_t s = { .ctx = &w, .write = conv_spill_write };
@@ -1010,7 +1084,7 @@ static fulta_arc_err_t conv_lzma(conv_zip_t *c, const fa_edit_item_t *it, int le
         in.sp.vt.Read = sz_spill_read;
         in.sp.f = spill.f;
     }
-    CLzmaEncHandle ench = err ? NULL : LzmaEnc_Create(&SZ_ALLOC);
+    CLzmaEncHandle ench = err ? NULL : LzmaEnc_Create(&c->isz.vt);
     if (!err && !ench) err = FULTA_ARC_ERR_NOMEM;
     if (!err) {
         CLzmaEncProps ep; LzmaEncProps_Init(&ep);
@@ -1022,19 +1096,20 @@ static fulta_arc_err_t conv_lzma(conv_zip_t *c, const fa_edit_item_t *it, int le
         if (res == SZ_OK) res = LzmaEnc_WriteProperties(ench, head + 4, &ps);
         if (res == SZ_OK) conv_emit(c, head, sizeof head);
         conv_lzma_out_t out = { .vt = { conv_lzma_write }, .c = c };
-        if (res == SZ_OK && !c->o->failed) res = LzmaEnc_Encode(ench, &out.vt, &in.vt, NULL, &SZ_ALLOC, &SZ_ALLOC);
+        if (res == SZ_OK && !c->o->failed) res = LzmaEnc_Encode(ench, &out.vt, &in.vt, NULL, &c->isz.vt, &c->isz.vt);
         if (c->err) err = c->err;
         else if (c->o->failed) err = FULTA_ARC_ERR_IO;
         else if (res == SZ_ERROR_MEM) err = FULTA_ARC_ERR_NOMEM;
         else if (res != SZ_OK) err = FULTA_ARC_ERR_CORRUPT;
     }
-    if (ench) LzmaEnc_Destroy(ench, &SZ_ALLOC, &SZ_ALLOC);
+    if (ench) LzmaEnc_Destroy(ench, &c->isz.vt, &c->isz.vt);
     if (it->is_copy) spill_close(&spill);
     return err;
 }
 
 /* What every streamed entry of one ZIP write shares. */
 typedef struct zip_stream_cfg {
+    proven_allocator_t alloc;      /* the writer's */
     fulta_arc_method_t m;          /* concrete (method_concrete) */
     int level;
     mz_uint zf;
@@ -1071,7 +1146,7 @@ static fulta_arc_err_t zip_stream_entry(out_t *o, zip_record_t *r, const fa_edit
     if (o->failed) return FULTA_ARC_ERR_IO;
     if (dir) return FULTA_ARC_OK;
 
-    conv_zip_t c = { .o = o, .opt = k->opt, .done = k->done, .total = k->total };
+    conv_zip_t c = { .o = o, .opt = k->opt, .done = k->done, .total = k->total, .isz = isz_of(o->alloc) };
     fulta_arc_err_t err = FULTA_ARC_OK;
     uint64_t aes_extra = 0;                              /* salt + verifier before the data, MAC after */
     if (k->enc_strength) {
@@ -1140,6 +1215,7 @@ static fulta_arc_err_t zip_stream_entry(out_t *o, zip_record_t *r, const fa_edit
 static fulta_arc_err_t zip_stream_cfg_init(zip_stream_cfg_t *k, int level, bool force64,
                                            const fulta_arc_write_options_t *opt, const char *spill_hint) {
     memset(k, 0, sizeof *k);
+    k->alloc = fa_write_alloc(opt);
     k->level = level; k->force64 = force64; k->opt = opt; k->spill_hint = spill_hint;
     k->pw = opt ? opt->password : NULL;
     k->pwlen = k->pw ? strlen(k->pw) : 0;
@@ -1151,7 +1227,7 @@ static fulta_arc_err_t zip_stream_cfg_init(zip_stream_cfg_t *k, int level, bool 
     if (e) return e;                                     /* INVALID_ARG: LZMA2 is not a ZIP method */
     k->zf = tdefl_create_comp_flags_from_zip_params(level > 0 ? level : 6, -15, MZ_DEFAULT_STRATEGY);
     if (k->m == FULTA_ARC_METHOD_DEFLATE && level > 0) {
-        k->comp = malloc(sizeof *k->comp);
+        k->comp = fa_alloc(k->alloc, sizeof *k->comp);
         if (!k->comp) return FULTA_ARC_ERR_NOMEM;
     }
     return FULTA_ARC_OK;
@@ -1160,15 +1236,16 @@ static fulta_arc_err_t zip_stream_cfg_init(zip_stream_cfg_t *k, int level, bool 
 fulta_arc_err_t fa_write_zip_convert(const fa_edit_item_t *items, size_t count, int level, bool force64,
                                      const fulta_arc_write_options_t *opt, const fulta_arc_write_sink_t *sink,
                                      const char *spill_hint) {
+    proven_allocator_t a = fa_write_alloc(opt);
     if (!sink || !sink->write || !sink->patch) return FULTA_ARC_ERR_INVALID_ARG;
     zip_stream_cfg_t k;
     uint64_t done = 0;
     fulta_arc_err_t err = zip_stream_cfg_init(&k, level, force64, opt, spill_hint);
-    if (err) { free(k.comp); return err; }
-    out_t o = { .sink = sink };
+    if (err) { fa_release(a, k.comp); return err; }
+    out_t o = { .sink = sink, .alloc = fa_write_alloc(opt) };
     zip_begin(&o);
-    zip_record_t *rec = calloc(count ? count : 1, sizeof *rec);
-    if (!rec) { free(k.comp); return FULTA_ARC_ERR_NOMEM; }
+    zip_record_t *rec = fa_zalloc(a, count ? count : 1, sizeof *rec);
+    if (!rec) { fa_release(a, k.comp); return FULTA_ARC_ERR_NOMEM; }
 
     /* progress total: the sum of the plaintext sizes we know up front */
     for (size_t i = 0; i < count; ++i) {
@@ -1204,7 +1281,7 @@ fulta_arc_err_t fa_write_zip_convert(const fa_edit_item_t *items, size_t count, 
             known_usize = dir ? 0 : (it->reader.read ? it->reader.size : 0);
         }
         if (!uname) { err = FULTA_ARC_ERR_INVALID_ARG; break; }
-        r->name = stored_name(uname, dir, true);
+        r->name = stored_name(k.alloc, uname, dir, true);
         if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
         r->name_len = strlen(r->name);
         r->flags = ascii(r->name) ? 0 : 0x0800;
@@ -1216,24 +1293,25 @@ fulta_arc_err_t fa_write_zip_convert(const fa_edit_item_t *items, size_t count, 
         err = zip_stream_entry(&o, r, it, known_usize, &k);
     }
     if (err == FULTA_ARC_OK) err = write_zip_central(&o, rec, count, force64);
-    for (size_t i = 0; i < count; ++i) free(rec[i].name);
-    free(rec);
-    free(k.comp);
+    for (size_t i = 0; i < count; ++i) fa_release(a, rec[i].name);
+    fa_release(a, rec);
+    fa_release(a, k.comp);
     return err;
 }
 
 fulta_arc_err_t fa_write_zip_edited(const fa_edit_item_t *items, size_t count, int level, bool force64,
                                     const fulta_arc_write_options_t *opt, const fulta_arc_write_sink_t *sink) {
+    proven_allocator_t a = fa_write_alloc(opt);
     if (!sink || !sink->write || !sink->patch) return FULTA_ARC_ERR_INVALID_ARG;
     if (opt && opt->password) return FULTA_ARC_ERR_UNSUPPORTED;   /* encrypting write is D-016, not yet */
     zip_stream_cfg_t k;                                /* added entries: streamed with the chosen method */
     fulta_arc_err_t err = zip_stream_cfg_init(&k, level, force64, opt, NULL);
-    if (err) { free(k.comp); return err; }
-    out_t o = { .sink = sink };
+    if (err) { fa_release(a, k.comp); return err; }
+    out_t o = { .sink = sink, .alloc = fa_write_alloc(opt) };
     zip_begin(&o);
-    zip_record_t *rec = calloc(count ? count : 1, sizeof *rec);
-    fa_zip_copy_t *cis = calloc(count ? count : 1, sizeof *cis);
-    if (!rec || !cis) { free(rec); free(cis); free(k.comp); return FULTA_ARC_ERR_NOMEM; }
+    zip_record_t *rec = fa_zalloc(a, count ? count : 1, sizeof *rec);
+    fa_zip_copy_t *cis = fa_zalloc(a, count ? count : 1, sizeof *cis);
+    if (!rec || !cis) { fa_release(a, rec); fa_release(a, cis); fa_release(a, k.comp); return FULTA_ARC_ERR_NOMEM; }
 
     /* total for progress: copied packed bytes + bytes to re-encode */
     uint64_t total = 0, done = 0;
@@ -1255,12 +1333,12 @@ fulta_arc_err_t fa_write_zip_edited(const fa_edit_item_t *items, size_t count, i
             const fa_zip_copy_t *ci = &cis[i];
             r->dir = ci->is_dir;
             if (it->name) {                               /* renamed: UTF-8 name */
-                r->name = stored_name(it->name, ci->is_dir, true);
+                r->name = stored_name(k.alloc, it->name, ci->is_dir, true);
                 if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
                 r->name_len = strlen(r->name);
                 r->flags = ascii(r->name) ? 0 : 0x0800;
             } else {                                      /* keep the raw name bytes and the UTF-8 flag bit */
-                r->name = malloc(ci->name_raw_len ? ci->name_raw_len : 1);
+                r->name = fa_alloc(a, ci->name_raw_len ? ci->name_raw_len : 1);
                 if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
                 memcpy(r->name, ci->name_raw, ci->name_raw_len);
                 r->name_len = ci->name_raw_len;
@@ -1286,7 +1364,7 @@ fulta_arc_err_t fa_write_zip_edited(const fa_edit_item_t *items, size_t count, i
         } else {
             bool dir = name_is_dir(it->name);
             r->dir = dir;
-            r->name = stored_name(it->name, dir, true);
+            r->name = stored_name(k.alloc, it->name, dir, true);
             if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
             r->name_len = strlen(r->name);
             r->flags = ascii(r->name) ? 0 : 0x0800;
@@ -1299,8 +1377,8 @@ fulta_arc_err_t fa_write_zip_edited(const fa_edit_item_t *items, size_t count, i
         if (!err && o.failed) err = FULTA_ARC_ERR_IO;
     }
     if (err == FULTA_ARC_OK) err = write_zip_central(&o, rec, count, force64);
-    for (size_t i = 0; i < count; ++i) free(rec[i].name);
-    free(rec); free(cis); free(k.comp);
+    for (size_t i = 0; i < count; ++i) fa_release(a, rec[i].name);
+    fa_release(a, rec); fa_release(a, cis); fa_release(a, k.comp);
     return err;
 }
 
@@ -1308,6 +1386,7 @@ fulta_arc_err_t fa_write_zip_edited(const fa_edit_item_t *items, size_t count, i
 
 /* A growing byte buffer for the header. */
 typedef struct buf {
+    proven_allocator_t alloc;
     uint8_t *p;
     size_t len, cap;
     bool failed;
@@ -1318,7 +1397,7 @@ static void b_put(buf_t *b, const void *data, size_t size) {
     if (b->len + size > b->cap) {
         size_t cap = b->cap ? b->cap * 2 : 256;
         while (cap < b->len + size) cap *= 2;
-        uint8_t *p = (uint8_t*)realloc(b->p, cap);
+        uint8_t *p = fa_resize(b->alloc, b->p, b->cap, cap);
         if (!p) { b->failed = true; return; }
         b->p = p;
         b->cap = cap;
@@ -1480,28 +1559,30 @@ static mz_bool sz_tdefl_put(const void *buf, int len, void *user) {
 static fulta_arc_err_t encode_7z_push(fulta_arc_method_t m, int level, const fulta_arc_write_entry_t *entries,
                                       size_t count, uint64_t total, sz_out_t *os,
                                       const fulta_arc_write_options_t *opt) {
+    proven_allocator_t a = fa_write_alloc(opt);
     uint64_t done = 0;
     if (m == FULTA_ARC_METHOD_DEFLATE) {
-        tdefl_compressor *c = malloc(sizeof *c);
+        tdefl_compressor *c = fa_alloc(a, sizeof *c);
         if (!c) return FULTA_ARC_ERR_NOMEM;
         mz_uint zf = tdefl_create_comp_flags_from_zip_params(level > 0 ? level : 6, -15, MZ_DEFAULT_STRATEGY);
         tdefl_init(c, sz_tdefl_put, os, (int)zf);
         for (size_t i = 0; i < count; ++i) {
             if (is_dir(&entries[i]) || !entries[i].size) continue;
             if (tdefl_compress_buffer(c, entries[i].data, (size_t)entries[i].size, TDEFL_NO_FLUSH) != TDEFL_STATUS_OKAY) {
-                free(c); return FULTA_ARC_ERR_IO;
+                fa_release(a, c); return FULTA_ARC_ERR_IO;
             }
             done += entries[i].size;
-            if (opt && opt->progress && opt->progress(opt->progress_ctx, done, total)) { free(c); return FULTA_ARC_ERR_CANCELLED; }
+            if (opt && opt->progress && opt->progress(opt->progress_ctx, done, total)) { fa_release(a, c); return FULTA_ARC_ERR_CANCELLED; }
         }
         tdefl_status st = tdefl_compress_buffer(c, NULL, 0, TDEFL_FINISH);
-        free(c);
+        fa_release(a, c);
         return st == TDEFL_STATUS_DONE ? FULTA_ARC_OK : FULTA_ARC_ERR_IO;
     }
     /* BZip2 (streaming, so no 32-bit length cap and no doubled plaintext). bz.avail_in is unsigned (32-bit), so an
        entry larger than UINT_MAX is fed in <=UINT_MAX chunks; the usual case is one chunk. All entries form one
        continuous stream (BZ_RUN throughout), finished once after the last (i == count). */
     bz_stream bz; memset(&bz, 0, sizeof bz);
+    bz_hook(&bz, &a);
     int bs = level < 1 ? 1 : level > 9 ? 9 : level;
     if (BZ2_bzCompressInit(&bz, bs, 0, 0) != BZ_OK) return FULTA_ARC_ERR_NOMEM;
     char outbuf[1 << 16];
@@ -1553,20 +1634,21 @@ typedef struct sz_desc {
  * the plain header). Replaces `h` with that record; the packed stream is written at `o` now. */
 static void emit_folder_coders(buf_t *h, const fa_7z_copy_t *F);
 static fulta_arc_err_t encode_7z_header(out_t *o, buf_t *h) {
+    fa_isz_t isz = isz_of(o->alloc);   /* the encoders' own allocations go to the writer's allocator */
     CLzmaEncProps ep; LzmaEncProps_Init(&ep);
     ep.level = 5;
     ep.reduceSize = h->len;
     size_t cap = h->len + h->len / 2 + 4096;
-    uint8_t *c = malloc(cap + 16);
+    uint8_t *c = fa_alloc(o->alloc, cap + 16);
     if (!c) return FULTA_ARC_ERR_NOMEM;
     uint8_t props[LZMA_PROPS_SIZE]; SizeT ps = sizeof props;
     SizeT clen = cap;
-    SRes res = LzmaEncode(c, &clen, h->p, h->len, &ep, props, &ps, 0, NULL, &SZ_ALLOC, &SZ_ALLOC);
-    if (res != SZ_OK || ps != LZMA_PROPS_SIZE) { free(c); return res == SZ_ERROR_MEM ? FULTA_ARC_ERR_NOMEM : FULTA_ARC_ERR_CORRUPT; }
+    SRes res = LzmaEncode(c, &clen, h->p, h->len, &ep, props, &ps, 0, NULL, &isz.vt, &isz.vt);
+    if (res != SZ_OK || ps != LZMA_PROPS_SIZE) { fa_release(o->alloc, c); return res == SZ_ERROR_MEM ? FULTA_ARC_ERR_NOMEM : FULTA_ARC_ERR_CORRUPT; }
     uint8_t salt[16], iv[16], key[32], ivc[16];
-    if (!fa_random_bytes(salt, 16) || !fa_random_bytes(iv, 16)) { free(c); return FULTA_ARC_ERR_IO; }   /* no entropy */
-    fulta_arc_err_t err = fa_7z_derive_key(o->hdr_pw, salt, 16, 19, key);
-    if (err) { free(c); return err; }
+    if (!fa_random_bytes(salt, 16) || !fa_random_bytes(iv, 16)) { fa_release(o->alloc, c); return FULTA_ARC_ERR_IO; }   /* no entropy */
+    fulta_arc_err_t err = fa_7z_derive_key(proven_heap_allocator(), o->hdr_pw, salt, 16, 19, key);
+    if (err) { fa_release(o->alloc, c); return err; }
     size_t padded = ((size_t)clen + 15) & ~(size_t)15;
     memset(c + clen, 0, padded - clen);
     memcpy(ivc, iv, 16);
@@ -1574,7 +1656,7 @@ static fulta_arc_err_t encode_7z_header(out_t *o, buf_t *h) {
     memset(key, 0, sizeof key);
     uint64_t pack_pos = o->at - 32;
     put(o, c, padded);
-    free(c);
+    fa_release(o->alloc, c);
     if (o->failed) return FULTA_ARC_ERR_IO;
 
     uint8_t aesprops[34];
@@ -1588,7 +1670,7 @@ static fulta_arc_err_t encode_7z_header(out_t *o, buf_t *h) {
     F.binds[0][0] = 0; F.binds[0][1] = 1;                /* LZMA.in0 <- AES.out */
     F.unpack_sizes[0] = h->len; F.unpack_sizes[1] = clen;
 
-    buf_t e = {0};
+    buf_t e = {.alloc = o->alloc};
     b_byte(&e, 0x17);                                    /* kEncodedHeader */
     b_byte(&e, 0x06);                                    /* kPackInfo */
     b_num(&e, pack_pos);
@@ -1602,9 +1684,9 @@ static fulta_arc_err_t encode_7z_header(out_t *o, buf_t *h) {
     b_byte(&e, 0x0A); b_byte(&e, 1); b_u32(&e, crc32_of(h->p, h->len));   /* the plain header's CRC */
     b_byte(&e, 0x00);
     b_byte(&e, 0x00);                                    /* end of StreamsInfo */
-    if (e.failed) { free(e.p); return FULTA_ARC_ERR_NOMEM; }
+    if (e.failed) { fa_release(o->alloc, e.p); return FULTA_ARC_ERR_NOMEM; }
     memset(h->p, 0, h->len);                             /* the names in the clear go */
-    free(h->p);
+    fa_release(o->alloc, h->p);
     *h = e;
     return FULTA_ARC_OK;
 }
@@ -1614,12 +1696,12 @@ static fulta_arc_err_t encode_7z_header(out_t *o, buf_t *h) {
  * (frees it). `streams` is how many entries have a stream (size != 0 && !dir). */
 static fulta_arc_err_t write_7z_tail(out_t *o, uint8_t *sig, buf_t *h, const sz_desc_t *d, size_t count,
                                      size_t streams) {
-    bool *flags = (bool*)calloc(count ? count : 1, sizeof(bool));
-    char **names = (char**)calloc(count ? count : 1, sizeof(char*));
-    if (!flags || !names) { free(flags); free(names); free(h->p); return FULTA_ARC_ERR_NOMEM; }
+    bool *flags = fa_zalloc(o->alloc, count ? count : 1, sizeof(bool));
+    char **names = (char**)fa_zalloc(o->alloc, count ? count : 1, sizeof(char*));
+    if (!flags || !names) { fa_release(o->alloc, flags); fa_release(o->alloc, names); fa_release(o->alloc, h->p); return FULTA_ARC_ERR_NOMEM; }
     fulta_arc_err_t err = FULTA_ARC_OK;
     for (size_t i = 0; i < count; ++i) {
-        names[i] = stored_name(d[i].name, d[i].dir, false);
+        names[i] = stored_name(o->alloc, d[i].name, d[i].dir, false);
         if (!names[i]) err = FULTA_ARC_ERR_NOMEM;
     }
     b_byte(h, 0x05);                                     /* kFilesInfo */
@@ -1633,17 +1715,17 @@ static fulta_arc_err_t write_7z_tail(out_t *o, uint8_t *sig, buf_t *h, const sz_
         b_byte(h, 0x0F); b_num(h, (empty + 7) / 8); b_bits(h, flags, empty);
     }
     {
-        buf_t n = {0};
+        buf_t n = {.alloc = o->alloc};
         b_byte(&n, 0);                                   /* not external */
         for (size_t i = 0; i < count && names[i]; ++i) b_name16(&n, names[i]);
         b_byte(h, 0x11); b_num(h, n.len); b_put(h, n.p, n.len);
         if (n.failed) h->failed = true;
-        free(n.p);
+        fa_release(o->alloc, n.p);
     }
     size_t timed = 0;
     for (size_t i = 0; i < count; ++i) if (d[i].mtime) timed++;
     if (timed > 0) {
-        buf_t t = {0};
+        buf_t t = {.alloc = o->alloc};
         if (timed == count) {
             b_byte(&t, 1);
         } else {
@@ -1658,7 +1740,7 @@ static fulta_arc_err_t write_7z_tail(out_t *o, uint8_t *sig, buf_t *h, const sz_
         }
         b_byte(h, 0x14); b_num(h, t.len); b_put(h, t.p, t.len);
         if (t.failed) h->failed = true;
-        free(t.p);
+        fa_release(o->alloc, t.p);
     }
     b_byte(h, 0x00);                                     /* end of FilesInfo */
     b_byte(h, 0x00);                                     /* end of Header */
@@ -1677,10 +1759,10 @@ static fulta_arc_err_t write_7z_tail(out_t *o, uint8_t *sig, buf_t *h, const sz_
             if (o->sink->patch(o->sink->ctx, 0, sig, 32)) err = FULTA_ARC_ERR_IO;
         }
     }
-    for (size_t i = 0; i < count; ++i) free(names[i]);
-    free(names);
-    free(flags);
-    free(h->p);
+    for (size_t i = 0; i < count; ++i) fa_release(o->alloc, names[i]);
+    fa_release(o->alloc, names);
+    fa_release(o->alloc, flags);
+    fa_release(o->alloc, h->p);
     return err;
 }
 
@@ -1711,7 +1793,7 @@ static void emit_folder_coders(buf_t *h, const fa_7z_copy_t *F) {
  * packed-stream sizes and per-coder unpack sizes are in `F`, holding `streams` substreams. */
 static fulta_arc_err_t write_7z_finish(out_t *o, uint8_t *sig, const sz_desc_t *d, size_t count, size_t streams,
                                        const fa_7z_copy_t *F) {
-    buf_t h = {0};
+    buf_t h = {.alloc = o->alloc};
     b_byte(&h, 0x01);                                    /* kHeader */
     if (streams > 0) {
         b_byte(&h, 0x04);                                /* kMainStreamsInfo */
@@ -1753,10 +1835,10 @@ static fulta_arc_err_t write_7z_finish(out_t *o, uint8_t *sig, const sz_desc_t *
  * EOF. On success *out holds the filtered bytes (caller frees) and *fc is the filter coder (id + any properties;
  * `dprop` backs Delta's one byte). Coder ids mirror the reader's map (codecs.c): x86 03030103, Delta 03,
  * ARM 03030501, ARM64 0A, PPC 03030205, SPARC 03030805, IA64 03030401. */
-static fulta_arc_err_t apply_filter_7z(fulta_arc_filter_t f, uint32_t dist,
+static fulta_arc_err_t apply_filter_7z(proven_allocator_t a, fulta_arc_filter_t f, uint32_t dist,
                                        const fulta_arc_write_entry_t *entries, size_t count, uint64_t total,
                                        uint8_t **out, fa_7z_coder_t *fc, uint8_t *dprop) {
-    uint8_t *b = (uint8_t *)malloc(total ? (size_t)total : 1);
+    uint8_t *b = fa_alloc(a, total ? (size_t)total : 1);
     if (!b) return FULTA_ARC_ERR_NOMEM;
     uint64_t at = 0;
     for (size_t i = 0; i < count; ++i) {
@@ -1802,8 +1884,16 @@ static fulta_arc_err_t apply_filter_7z(fulta_arc_filter_t f, uint32_t dist,
             z7_BranchConv_IA64_Enc(b, n, 0);
             fc->id[0] = 0x03; fc->id[1] = 0x03; fc->id[2] = 0x04; fc->id[3] = 0x01; fc->idlen = 4;
             break;
+        case FULTA_ARC_FILTER_ARMT:
+            z7_BranchConv_ARMT_Enc(b, n, 0);
+            fc->id[0] = 0x03; fc->id[1] = 0x03; fc->id[2] = 0x07; fc->id[3] = 0x01; fc->idlen = 4;
+            break;
+        case FULTA_ARC_FILTER_RISCV:
+            z7_BranchConv_RISCV_Enc(b, n, 0);
+            fc->id[0] = 0x0B; fc->idlen = 1;
+            break;
         default:
-            free(b); return FULTA_ARC_ERR_INVALID_ARG;   /* NONE/BCJ2 never reach here (filter_check gates) */
+            fa_release(a, b); return FULTA_ARC_ERR_INVALID_ARG;   /* NONE/BCJ2 never reach here (filter_check gates) */
     }
     *out = b;
     return FULTA_ARC_OK;
@@ -1818,6 +1908,7 @@ static fulta_arc_err_t encode_7z_stream(fulta_arc_method_t m, int level,
                                         const fulta_arc_write_entry_t *ents, size_t nents, uint64_t size,
                                         const fulta_arc_write_options_t *opt, out_t *o, sz_out_t *outs,
                                         fa_7z_coder_t *coder, uint8_t props[LZMA_PROPS_SIZE]) {
+    fa_isz_t isz = isz_of(o->alloc);   /* the encoders' own allocations go to the writer's allocator */
     coder->nin = 1; coder->nprops = 0;
     if (m == FULTA_ARC_METHOD_STORE) {                   /* Copy: the bytes as they are */
         coder->id[0] = 0x00; coder->idlen = 1;
@@ -1833,7 +1924,7 @@ static fulta_arc_err_t encode_7z_stream(fulta_arc_method_t m, int level,
     }
     if (m == FULTA_ARC_METHOD_LZMA) {
         coder->id[0] = 0x03; coder->id[1] = 0x01; coder->id[2] = 0x01; coder->idlen = 3;
-        CLzmaEncHandle ench = LzmaEnc_Create(&SZ_ALLOC);
+        CLzmaEncHandle ench = LzmaEnc_Create(&isz.vt);
         if (!ench) return FULTA_ARC_ERR_NOMEM;
         CLzmaEncProps ep;
         LzmaEncProps_Init(&ep);
@@ -1844,8 +1935,8 @@ static fulta_arc_err_t encode_7z_stream(fulta_arc_method_t m, int level,
         if (res == SZ_OK) res = LzmaEnc_WriteProperties(ench, props, &ps);
         sz_in_t in = { .vt = { sz_in_read }, .entries = ents, .count = nents };
         sz_progress_t prog = { .vt = { sz_progress }, .opt = opt, .total = size };
-        if (res == SZ_OK) res = LzmaEnc_Encode(ench, &outs->vt, &in.vt, &prog.vt, &SZ_ALLOC, &SZ_ALLOC);
-        LzmaEnc_Destroy(ench, &SZ_ALLOC, &SZ_ALLOC);
+        if (res == SZ_OK) res = LzmaEnc_Encode(ench, &outs->vt, &in.vt, &prog.vt, &isz.vt, &isz.vt);
+        LzmaEnc_Destroy(ench, &isz.vt, &isz.vt);
         if (o->failed) return FULTA_ARC_ERR_IO;
         if (outs->buf && outs->buf->failed) return FULTA_ARC_ERR_NOMEM;
         if (res == SZ_ERROR_PROGRESS) return FULTA_ARC_ERR_CANCELLED;
@@ -1856,7 +1947,7 @@ static fulta_arc_err_t encode_7z_stream(fulta_arc_method_t m, int level,
     }
     if (m == FULTA_ARC_METHOD_LZMA2) {
         coder->id[0] = 0x21; coder->idlen = 1;
-        CLzma2EncHandle ench = Lzma2Enc_Create(&SZ_ALLOC, &SZ_ALLOC);
+        CLzma2EncHandle ench = Lzma2Enc_Create(&isz.vt, &isz.vt);
         if (!ench) return FULTA_ARC_ERR_NOMEM;
         CLzma2EncProps ep;
         Lzma2EncProps_Init(&ep);
@@ -1886,8 +1977,8 @@ static fulta_arc_err_t encode_7z_stream(fulta_arc_method_t m, int level,
         props[0] = (uint8_t)order; le32(props + 1, mem);  /* 5-byte property: [order, memSize LE32] */
         CPpmd7 p;
         Ppmd7_Construct(&p);
-        if (!Ppmd7_Alloc(&p, mem, &SZ_ALLOC)) return FULTA_ARC_ERR_NOMEM;
-        byteout_t bo = {.vt = {byteout_write}};
+        if (!Ppmd7_Alloc(&p, mem, &isz.vt)) return FULTA_ARC_ERR_NOMEM;
+        byteout_t bo = {.vt = {byteout_write}, .alloc = o->alloc};
         p.rc.enc.Stream = &bo.vt;
         Ppmd7z_Init_RangeEnc(&p);
         Ppmd7_Init(&p, order);
@@ -1901,12 +1992,12 @@ static fulta_arc_err_t encode_7z_stream(fulta_arc_method_t m, int level,
             if (opt && opt->progress && opt->progress(opt->progress_ctx, done, size)) cancelled = true;
         }
         Ppmd7z_Flush_RangeEnc(&p);
-        Ppmd7_Free(&p, &SZ_ALLOC);
+        Ppmd7_Free(&p, &isz.vt);
         fulta_arc_err_t r = FULTA_ARC_OK;
         if (cancelled) r = FULTA_ARC_ERR_CANCELLED;
         else if (bo.oom) r = FULTA_ARC_ERR_NOMEM;
         else if (bo.len && sz_out_write(&outs->vt, bo.buf, bo.len) != bo.len) r = o->failed ? FULTA_ARC_ERR_IO : FULTA_ARC_ERR_NOMEM;
-        free(bo.buf);
+        fa_release(o->alloc, bo.buf);
         if (r == FULTA_ARC_OK) { coder->props = props; coder->nprops = 5; }
         return r;
     }
@@ -1925,7 +2016,7 @@ static fulta_arc_err_t encode_7z_stream(fulta_arc_method_t m, int level,
  * buffer in out[] with its length in sizes[] (indices BCJ2_STREAM_*). The whole input is given at once with
  * END_STREAM; output buffers grow on demand (CALL/JUMP kept a multiple of 4, as Bcj2.h requires). The caller frees
  * out[0..3] (set to NULL on failure). */
-static fulta_arc_err_t bcj2_split(const uint8_t *src, size_t n, uint8_t *out[4], size_t sizes[4]) {
+static fulta_arc_err_t bcj2_split(proven_allocator_t a, const uint8_t *src, size_t n, uint8_t *out[4], size_t sizes[4]) {
     for (int i = 0; i < 4; i++) out[i] = NULL;
     CBcj2Enc e;
     Bcj2Enc_Init(&e);
@@ -1936,8 +2027,8 @@ static fulta_arc_err_t bcj2_split(const uint8_t *src, size_t n, uint8_t *out[4],
     for (int i = 0; i < 4; i++) {
         cap[i] = (i == BCJ2_STREAM_MAIN) ? n + 16 : 256;
         cap[i] = (cap[i] + 3) & ~(size_t)3;              /* CALL/JUMP buffer sizes must be a multiple of 4 */
-        base[i] = (uint8_t *)malloc(cap[i]);
-        if (!base[i]) { for (int j = 0; j < i; j++) free(base[j]); return FULTA_ARC_ERR_NOMEM; }
+        base[i] = fa_alloc(a, cap[i]);
+        if (!base[i]) { for (int j = 0; j < i; j++) fa_release(a, base[j]); return FULTA_ARC_ERR_NOMEM; }
         e.bufs[i] = base[i]; e.lims[i] = base[i] + cap[i];
     }
     size_t last_progress = SIZE_MAX; int stall = 0;
@@ -1946,18 +2037,18 @@ static fulta_arc_err_t bcj2_split(const uint8_t *src, size_t n, uint8_t *out[4],
         if (e.state == BCJ2_ENC_STATE_FINISHED) break;
         size_t prog = (size_t)(e.src - src);
         for (int i = 0; i < 4; i++) prog += (size_t)(e.bufs[i] - base[i]);
-        if (prog == last_progress) { if (++stall >= 2) { for (int j = 0; j < 4; j++) free(base[j]); return FULTA_ARC_ERR_CORRUPT; } }
+        if (prog == last_progress) { if (++stall >= 2) { for (int j = 0; j < 4; j++) fa_release(a, base[j]); return FULTA_ARC_ERR_CORRUPT; } }
         else { stall = 0; last_progress = prog; }
         if (e.state < BCJ2_NUM_STREAMS) {                /* that output stream's buffer is full: grow it */
             int s = (int)e.state;
             size_t used = (size_t)(e.bufs[s] - base[s]);
             size_t ncap = (cap[s] * 2 + 3) & ~(size_t)3;
-            uint8_t *nb = (uint8_t *)realloc(base[s], ncap);
-            if (!nb) { for (int j = 0; j < 4; j++) free(base[j]); return FULTA_ARC_ERR_NOMEM; }
+            uint8_t *nb = fa_resize(a, base[s], cap[s], ncap);
+            if (!nb) { for (int j = 0; j < 4; j++) fa_release(a, base[j]); return FULTA_ARC_ERR_NOMEM; }
             base[s] = nb; cap[s] = ncap;
             e.bufs[s] = base[s] + used; e.lims[s] = base[s] + cap[s];
         } else {                                         /* ORIG: wants more src, but END_STREAM had it all */
-            for (int j = 0; j < 4; j++) free(base[j]);
+            for (int j = 0; j < 4; j++) fa_release(a, base[j]);
             return FULTA_ARC_ERR_CORRUPT;
         }
     }
@@ -1972,7 +2063,7 @@ static fulta_arc_err_t bcj2_split(const uint8_t *src, size_t n, uint8_t *out[4],
 static fulta_arc_err_t encode_7z_bcj2(const fulta_arc_write_entry_t *entries, size_t count, fulta_arc_method_t m,
                                       int level, out_t *o, uint64_t total,
                                       uint8_t pr[3][LZMA_PROPS_SIZE], fa_7z_copy_t *F) {
-    uint8_t *buf = (uint8_t *)malloc(total ? (size_t)total : 1);
+    uint8_t *buf = fa_alloc(o->alloc, total ? (size_t)total : 1);
     if (!buf) return FULTA_ARC_ERR_NOMEM;
     uint64_t at = 0;
     for (size_t i = 0; i < count; ++i) {
@@ -1980,8 +2071,8 @@ static fulta_arc_err_t encode_7z_bcj2(const fulta_arc_write_entry_t *entries, si
         memcpy(buf + at, entries[i].data, (size_t)entries[i].size); at += entries[i].size;
     }
     uint8_t *s[4]; size_t sz[4];
-    fulta_arc_err_t e = bcj2_split(buf, (size_t)total, s, sz);
-    free(buf);
+    fulta_arc_err_t e = bcj2_split(o->alloc, buf, (size_t)total, s, sz);
+    fa_release(o->alloc, buf);
     if (e) return e;
 
     memset(F, 0, sizeof *F);
@@ -2003,7 +2094,7 @@ static fulta_arc_err_t encode_7z_bcj2(const fulta_arc_write_entry_t *entries, si
         put(o, s[BCJ2_STREAM_RC], sz[BCJ2_STREAM_RC]);
         if (o->failed) e = FULTA_ARC_ERR_IO;
     }
-    for (int i = 0; i < 4; i++) free(s[i]);
+    for (int i = 0; i < 4; i++) fa_release(o->alloc, s[i]);
     if (e) return e;
 
     F->coders[3] = (fa_7z_coder_t){ .id = {0x03, 0x03, 0x01, 0x1B}, .idlen = 4, .nin = 4, .nprops = 0 };
@@ -2042,7 +2133,7 @@ static fulta_arc_err_t encode_7z_folder(const fulta_arc_write_entry_t *ents, siz
     bool enc = pw != NULL;
     uint64_t total = 0; uint32_t crc = 0;
     for (size_t i = 0; i < nents; ++i)
-        if (ents[i].size && !is_dir(&ents[i])) { total += ents[i].size; crc = fa_crc32(crc, ents[i].data, (size_t)ents[i].size); }
+        if (ents[i].size && !is_dir(&ents[i])) { total += ents[i].size; crc = fa_crc32(crc, fa_bytes(ents[i].data, (size_t)ents[i].size)); }
     memset(F, 0, sizeof *F);
     if (total == 0) return FULTA_ARC_OK;                 /* no stream: caller does not emit a folder */
 
@@ -2058,36 +2149,36 @@ static fulta_arc_err_t encode_7z_folder(const fulta_arc_write_entry_t *ents, siz
         fa_7z_coder_t fcoder = {0};
         bool have_filter = false;
         if (opt && opt->filter != FULTA_ARC_FILTER_NONE) {
-            fulta_arc_err_t ae = apply_filter_7z(opt->filter, opt->filter_delta_dist, ents, nents, total, &fbuf, &fcoder, &sc->fprop);
+            fulta_arc_err_t ae = apply_filter_7z(o->alloc, opt->filter, opt->filter_delta_dist, ents, nents, total, &fbuf, &fcoder, &sc->fprop);
             if (ae) return ae;
             have_filter = true;
             syn = (fulta_arc_write_entry_t){ .name = "f", .data = fbuf, .size = total, .mtime = 0 };
             ments = &syn; mcount = 1;
         }
         fa_7z_coder_t inner = { .nin = 1 };
-        buf_t comp = {0};                                /* AES: the inner coder's output, captured for encrypting */
+        buf_t comp = {.alloc = o->alloc};                                /* AES: the inner coder's output, captured for encrypting */
         sz_out_t outs = { .vt = { sz_out_write }, .o = o, .buf = enc ? &comp : NULL };
         uint64_t start = o->at;
         fulta_arc_err_t ce = encode_7z_stream(m, level, ments, mcount, total, opt, o, &outs, &inner, sc->mprops);
-        free(fbuf);                                      /* the filtered plaintext is fully consumed by the main coder */
-        if (ce) { free(comp.p); return ce; }
+        fa_release(o->alloc, fbuf);                                      /* the filtered plaintext is fully consumed by the main coder */
+        if (ce) { fa_release(o->alloc, comp.p); return ce; }
         uint64_t packed = 0, clen = 0;
         if (enc) {                                       /* 7zAES: AES-256-CBC over the inner output, random salt+iv */
             clen = comp.len;
             uint8_t salt[16], iv[16], key[32];
-            if (!fa_random_bytes(salt, 16) || !fa_random_bytes(iv, 16)) { free(comp.p); return FULTA_ARC_ERR_IO; }
-            fulta_arc_err_t ke = fa_7z_derive_key(pw, salt, 16, 19, key);
-            if (ke) { free(comp.p); return ke; }
+            if (!fa_random_bytes(salt, 16) || !fa_random_bytes(iv, 16)) { fa_release(o->alloc, comp.p); return FULTA_ARC_ERR_IO; }
+            fulta_arc_err_t ke = fa_7z_derive_key(proven_heap_allocator(), pw, salt, 16, 19, key);
+            if (ke) { fa_release(o->alloc, comp.p); return ke; }
             size_t ct = (size_t)((clen + 15) & ~(uint64_t)15);
-            uint8_t *cbuf = calloc(ct ? ct : 1, 1);
-            if (!cbuf) { free(comp.p); memset(key, 0, 32); return FULTA_ARC_ERR_NOMEM; }
+            uint8_t *cbuf = fa_zalloc(o->alloc, ct ? ct : 1, 1);
+            if (!cbuf) { fa_release(o->alloc, comp.p); memset(key, 0, 32); return FULTA_ARC_ERR_NOMEM; }
             memcpy(cbuf, comp.p, (size_t)clen);
             uint8_t ivc[16]; memcpy(ivc, iv, 16);
             fa_aes_cbc_encrypt(key, 32, ivc, cbuf, ct);
             memset(key, 0, 32);
             put(o, cbuf, ct);
-            free(cbuf);
-            free(comp.p);
+            fa_release(o->alloc, cbuf);
+            fa_release(o->alloc, comp.p);
             packed = ct;
             sc->aesprops[0] = (uint8_t)(0xC0 | 19);      /* salt & iv present, NumCyclesPower = 19 */
             sc->aesprops[1] = 0xFF;                      /* salt_len = iv_len = 16 (high bits in [0]) */
@@ -2145,7 +2236,7 @@ static fulta_arc_err_t write_7z(const fulta_arc_write_entry_t *entries, size_t c
     bool solid_off = opt && opt->solid == FULTA_ARC_SOLID_OFF;
 
     /* describe each entry for the header (its bytes are written/encoded below) */
-    sz_desc_t *desc = (sz_desc_t*)calloc(count ? count : 1, sizeof *desc);
+    sz_desc_t *desc = fa_zalloc(o->alloc, count ? count : 1, sizeof *desc);
     if (!desc) return FULTA_ARC_ERR_NOMEM;
     for (size_t i = 0; i < count; ++i) {
         bool dir = is_dir(&entries[i]);
@@ -2159,9 +2250,9 @@ static fulta_arc_err_t write_7z(const fulta_arc_write_entry_t *entries, size_t c
         /* one folder per file -> the result is editable in place (RFC-0004 §5a). Each streaming entry becomes its
          * own folder (same coder machinery as a solid folder, applied to a single entry); directories and empty
          * files get no folder, in the entry order write_7z_header_multi expects. */
-        fold_scratch_t *scs = (fold_scratch_t*)calloc(streams ? streams : 1, sizeof *scs);
-        fa_7z_copy_t *fols = (fa_7z_copy_t*)calloc(streams ? streams : 1, sizeof *fols);
-        if (!scs || !fols) { free(scs); free(fols); free(desc); return FULTA_ARC_ERR_NOMEM; }
+        fold_scratch_t *scs = fa_zalloc(o->alloc, streams ? streams : 1, sizeof *scs);
+        fa_7z_copy_t *fols = fa_zalloc(o->alloc, streams ? streams : 1, sizeof *fols);
+        if (!scs || !fols) { fa_release(o->alloc, scs); fa_release(o->alloc, fols); fa_release(o->alloc, desc); return FULTA_ARC_ERR_NOMEM; }
         size_t nf = 0;
         for (size_t i = 0; i < count && err == FULTA_ARC_OK; ++i) {
             if (is_dir(&entries[i]) || !entries[i].size) continue;
@@ -2169,7 +2260,7 @@ static fulta_arc_err_t write_7z(const fulta_arc_write_entry_t *entries, size_t c
             if (!err) nf++;
         }
         if (err == FULTA_ARC_OK) err = write_7z_header_multi(o, sig, desc, count, fols, nf);
-        free(scs); free(fols);
+        fa_release(o->alloc, scs); fa_release(o->alloc, fols);
     } else {
         /* a single solid folder for all files (the default / SOLID_ON) */
         fa_7z_copy_t F = {0};
@@ -2177,7 +2268,7 @@ static fulta_arc_err_t write_7z(const fulta_arc_write_entry_t *entries, size_t c
         if (streams > 0) err = encode_7z_folder(entries, count, m, level, is_bcj2, opt, pw, o, &sc, &F);
         if (err == FULTA_ARC_OK) err = write_7z_finish(o, sig, desc, count, streams, &F);
     }
-    free(desc);
+    fa_release(o->alloc, desc);
     return err;
 }
 
@@ -2208,7 +2299,7 @@ static fulta_arc_err_t spill_feed(sz_spill_w_t *w, const void *data, size_t n) {
     if (w->err) return w->err;
     if (n) {
         if (proven_fs_write_all(w->f, (proven_mem_view_t){.ptr = data, .size = n})) return w->err = FULTA_ARC_ERR_IO;
-        w->crc = fa_crc32(w->crc, data, n);
+        w->crc = fa_crc32(w->crc, fa_bytes(data, n));
         w->size += n;
     }
     if (w->opt && w->opt->progress) {
@@ -2229,7 +2320,7 @@ static fulta_arc_err_t convert_7z_buffered(spill_t *spill, uint64_t total_un,
                                            const sz_desc_t *desc, size_t count, size_t streams,
                                            fulta_arc_method_t m, int level, bool is_bcj2, bool solid_off,
                                            const fulta_arc_write_options_t *opt, const char *pw, out_t *o, uint8_t *sig) {
-    uint8_t *allbuf = (uint8_t *)malloc(total_un ? (size_t)total_un : 1);
+    uint8_t *allbuf = fa_alloc(o->alloc, total_un ? (size_t)total_un : 1);
     if (!allbuf) return FULTA_ARC_ERR_NOMEM;
     fulta_arc_err_t err = spill_rewind(spill);
     uint64_t gotn = 0;
@@ -2240,10 +2331,10 @@ static fulta_arc_err_t convert_7z_buffered(spill_t *spill, uint64_t total_un,
         gotn += r.value;
     }
     if (!err && gotn != total_un) err = FULTA_ARC_ERR_IO;
-    if (err) { memset(allbuf, 0, (size_t)gotn); free(allbuf); return err; }
+    if (err) { memset(allbuf, 0, (size_t)gotn); fa_release(o->alloc, allbuf); return err; }
 
-    fulta_arc_write_entry_t *synth = (fulta_arc_write_entry_t *)calloc(streams ? streams : 1, sizeof *synth);
-    if (!synth) { free(allbuf); return FULTA_ARC_ERR_NOMEM; }
+    fulta_arc_write_entry_t *synth = fa_zalloc(o->alloc, streams ? streams : 1, sizeof *synth);
+    if (!synth) { fa_release(o->alloc, allbuf); return FULTA_ARC_ERR_NOMEM; }
     size_t ns = 0; uint64_t off = 0;
     for (size_t i = 0; i < count; ++i) {
         if (!desc[i].size || desc[i].dir) continue;
@@ -2256,23 +2347,25 @@ static fulta_arc_err_t convert_7z_buffered(spill_t *spill, uint64_t total_un,
         err = encode_7z_folder(synth, ns, m, level, is_bcj2, opt, pw, o, &sc, &F);
         if (!err) err = write_7z_finish(o, sig, desc, count, streams, &F);
     } else {                                             /* one folder per entry -> editable in place */
-        fold_scratch_t *scs = (fold_scratch_t *)calloc(ns ? ns : 1, sizeof *scs);
-        fa_7z_copy_t *fols = (fa_7z_copy_t *)calloc(ns ? ns : 1, sizeof *fols);
-        if (!scs || !fols) { free(scs); free(fols); free(synth); free(allbuf); return FULTA_ARC_ERR_NOMEM; }
+        fold_scratch_t *scs = fa_zalloc(o->alloc, ns ? ns : 1, sizeof *scs);
+        fa_7z_copy_t *fols = fa_zalloc(o->alloc, ns ? ns : 1, sizeof *fols);
+        if (!scs || !fols) { fa_release(o->alloc, scs); fa_release(o->alloc, fols); fa_release(o->alloc, synth); fa_release(o->alloc, allbuf); return FULTA_ARC_ERR_NOMEM; }
         for (size_t k = 0; k < ns && !err; ++k)
             err = encode_7z_folder(&synth[k], 1, m, level, is_bcj2, opt, pw, o, &scs[k], &fols[k]);
         if (!err) err = write_7z_header_multi(o, sig, desc, count, fols, ns);
-        free(scs); free(fols);
+        fa_release(o->alloc, scs); fa_release(o->alloc, fols);
     }
-    free(synth);
+    fa_release(o->alloc, synth);
     memset(allbuf, 0, (size_t)total_un);
-    free(allbuf);
+    fa_release(o->alloc, allbuf);
     return err;
 }
 
 fulta_arc_err_t fa_write_7z_convert(const fa_edit_item_t *items, size_t count, int level,
                                     const fulta_arc_write_options_t *opt, const fulta_arc_write_sink_t *sink,
                                     const char *spill_hint) {
+    fa_isz_t isz = isz_of(fa_write_alloc(opt));   /* the encoders' own allocations go to the writer's allocator */
+    proven_allocator_t a = fa_write_alloc(opt);
     if (!sink || !sink->write || !sink->patch) return FULTA_ARC_ERR_INVALID_ARG;
     const char *pw = opt ? opt->password : NULL;
     if (pw && opt->encryption != FULTA_ARC_ENCRYPT_DEFAULT && opt->encryption != FULTA_ARC_ENCRYPT_7Z_AES256)
@@ -2280,10 +2373,10 @@ fulta_arc_err_t fa_write_7z_convert(const fa_edit_item_t *items, size_t count, i
     if (pw && opt->filter == FULTA_ARC_FILTER_BCJ2) return FULTA_ARC_ERR_UNSUPPORTED;   /* as write_7z */
 
     spill_t spill;
-    fulta_arc_err_t err = spill_open(spill_hint, &spill);
+    fulta_arc_err_t err = spill_open(a, spill_hint, &spill);
     if (err) return err;
 
-    sz_desc_t *desc = (sz_desc_t *)calloc(count ? count : 1, sizeof *desc);
+    sz_desc_t *desc = fa_zalloc(a, count ? count : 1, sizeof *desc);
     if (!desc) { spill_close(&spill); return FULTA_ARC_ERR_NOMEM; }
 
     /* progress total: the plaintext sizes we know up front (same as the ZIP convert) */
@@ -2345,7 +2438,7 @@ fulta_arc_err_t fa_write_7z_convert(const fa_edit_item_t *items, size_t count, i
     for (size_t i = 0; i < count; ++i)
         if (desc[i].size && !desc[i].dir) { streams++; total_un += desc[i].size; }
 
-    out_t o = { .sink = sink };
+    out_t o = { .sink = sink, .alloc = fa_write_alloc(opt) };
     o.hdr_pw = opt && opt->password && opt->encrypt_names ? opt->password : NULL;   /* 7z -mhe */
     uint8_t props[LZMA_PROPS_SIZE];
     SizeT props_size = sizeof props;
@@ -2379,7 +2472,7 @@ fulta_arc_err_t fa_write_7z_convert(const fa_edit_item_t *items, size_t count, i
             if (pw) {                                    /* 7zAES-256: random salt + iv, key as write_7z derives it */
                 uint8_t salt[16];
                 if (!fa_random_bytes(salt, 16) || !fa_random_bytes(cbc.iv, 16)) err = FULTA_ARC_ERR_IO;   /* no entropy */
-                else err = fa_7z_derive_key(pw, salt, 16, 19, cbc.key);
+                else err = fa_7z_derive_key(proven_heap_allocator(), pw, salt, 16, 19, cbc.key);
                 aesprops[0] = (uint8_t)(0xC0 | 19);      /* salt & iv present, NumCyclesPower = 19 */
                 aesprops[1] = 0xFF;                      /* salt_len = iv_len = 16 */
                 memcpy(aesprops + 2, salt, 16);
@@ -2404,7 +2497,7 @@ fulta_arc_err_t fa_write_7z_convert(const fa_edit_item_t *items, size_t count, i
                     if (err == FULTA_ARC_OK && o.failed) err = FULTA_ARC_ERR_IO;
                     if (err == FULTA_ARC_OK) packed = o.at - start;
                 } else {
-                    CLzmaEncHandle ench = LzmaEnc_Create(&SZ_ALLOC);
+                    CLzmaEncHandle ench = LzmaEnc_Create(&isz.vt);
                     if (!ench) err = FULTA_ARC_ERR_NOMEM;
                     else {
                         CLzmaEncProps ep;
@@ -2416,8 +2509,8 @@ fulta_arc_err_t fa_write_7z_convert(const fa_edit_item_t *items, size_t count, i
                         sz_spill_r_t in = { .vt = { sz_spill_read }, .f = rf2 };
                         sz_out_t outs = { .vt = { sz_out_write }, .o = &o, .buf = NULL, .cbc = enc ? &cbc : NULL };
                         sz_progress_t prog = { .vt = { sz_progress }, .opt = opt, .total = total_un };
-                        if (res == SZ_OK) res = LzmaEnc_Encode(ench, &outs.vt, &in.vt, &prog.vt, &SZ_ALLOC, &SZ_ALLOC);
-                        LzmaEnc_Destroy(ench, &SZ_ALLOC, &SZ_ALLOC);
+                        if (res == SZ_OK) res = LzmaEnc_Encode(ench, &outs.vt, &in.vt, &prog.vt, &isz.vt, &isz.vt);
+                        LzmaEnc_Destroy(ench, &isz.vt, &isz.vt);
                         if (enc) cbc_finish(&o, &cbc);
                         if (o.failed) err = FULTA_ARC_ERR_IO;
                         else if (res == SZ_ERROR_PROGRESS) err = FULTA_ARC_ERR_CANCELLED;
@@ -2449,7 +2542,7 @@ fulta_arc_err_t fa_write_7z_convert(const fa_edit_item_t *items, size_t count, i
         }
     }
 
-    free(desc);
+    fa_release(a, desc);
     spill_close(&spill);
     return err;
 }
@@ -2494,19 +2587,19 @@ static fulta_arc_err_t encode_one_folder(const fulta_arc_reader_t *rd, int level
 
     /* buffer the reader (size known -> one malloc; unknown -> grow) */
     uint64_t cap = (rd->size != UINT64_MAX && rd->size > 0) ? rd->size : 65536;
-    uint8_t *buf = (uint8_t *)malloc(cap);
+    uint8_t *buf = fa_alloc(o->alloc, cap);
     if (!buf) return FULTA_ARC_ERR_NOMEM;
     uint64_t n = 0;
     for (;;) {
         if (n == cap) {
             uint64_t ncap = cap * 2;
-            uint8_t *nb = (uint8_t *)realloc(buf, ncap ? (size_t)ncap : 1);
-            if (!nb) { free(buf); return FULTA_ARC_ERR_NOMEM; }
+            uint8_t *nb = fa_resize(fa_write_alloc(opt), buf, (size_t)cap, ncap ? (size_t)ncap : 1);
+            if (!nb) { fa_release(o->alloc, buf); return FULTA_ARC_ERR_NOMEM; }
             buf = nb; cap = ncap;
         }
         size_t got = 0;
         fulta_arc_err_t e = rd->read ? rd->read(rd->ctx, buf + n, (size_t)(cap - n), &got) : FULTA_ARC_OK;
-        if (e) { free(buf); return e; }
+        if (e) { fa_release(o->alloc, buf); return e; }
         if (!got) break;
         n += got;
     }
@@ -2515,7 +2608,7 @@ static fulta_arc_err_t encode_one_folder(const fulta_arc_reader_t *rd, int level
      * the entry becomes a zero-size stream, exactly as write_7z and the convert route treat an empty file. */
     fulta_arc_write_entry_t syn = { .name = "e", .data = buf, .size = n };
     fulta_arc_err_t r = encode_7z_folder(&syn, 1, m, level, is_bcj2, opt, NULL, o, sc, F);
-    free(buf);
+    fa_release(o->alloc, buf);
     return r;
 }
 
@@ -2524,7 +2617,7 @@ static fulta_arc_err_t encode_one_folder(const fulta_arc_reader_t *rd, int level
  * one substream per folder. */
 static fulta_arc_err_t write_7z_header_multi(out_t *o, uint8_t *sig, const sz_desc_t *d, size_t count,
                                              const fa_7z_copy_t *of, size_t nf) {
-    buf_t h = {0};
+    buf_t h = {.alloc = o->alloc};
     b_byte(&h, 0x01);                                    /* kHeader */
     if (nf > 0) {
         b_byte(&h, 0x04);                                /* kMainStreamsInfo */
@@ -2553,11 +2646,11 @@ static fulta_arc_err_t write_7z_header_multi(out_t *o, uint8_t *sig, const sz_de
             for (size_t i = 0; i < nf; ++i) b_u32(&h, of[i].crc);
         } else {
             b_byte(&h, 0);
-            bool *dv = (bool*)calloc(nf, sizeof(bool));
-            if (!dv) { free(h.p); return FULTA_ARC_ERR_NOMEM; }
+            bool *dv = fa_zalloc(o->alloc, nf, sizeof(bool));
+            if (!dv) { fa_release(o->alloc, h.p); return FULTA_ARC_ERR_NOMEM; }
             for (size_t i = 0; i < nf; ++i) dv[i] = of[i].has_crc;
             b_bits(&h, dv, nf);
-            free(dv);
+            fa_release(o->alloc, dv);
             for (size_t i = 0; i < nf; ++i) if (of[i].has_crc) b_u32(&h, of[i].crc);
         }
         b_byte(&h, 0x00);                                /* end kSubStreamsInfo */
@@ -2568,15 +2661,16 @@ static fulta_arc_err_t write_7z_header_multi(out_t *o, uint8_t *sig, const sz_de
 
 fulta_arc_err_t fa_write_7z_edited(const fa_edit_item_t *items, size_t count, int level,
                                    const fulta_arc_write_options_t *opt, const fulta_arc_write_sink_t *sink) {
+    proven_allocator_t a = fa_write_alloc(opt);
     if (!sink || !sink->write || !sink->patch) return FULTA_ARC_ERR_INVALID_ARG;
     if (opt && opt->password) return FULTA_ARC_ERR_UNSUPPORTED;   /* encrypting the output: later increment */
 
-    sz_desc_t *fd = (sz_desc_t *)calloc(count ? count : 1, sizeof *fd);
-    fa_7z_copy_t *fol = (fa_7z_copy_t *)calloc(count ? count : 1, sizeof *fol);
-    fold_scratch_t *scr = (fold_scratch_t *)calloc(count ? count : 1, sizeof *scr);
-    if (!fd || !fol || !scr) { free(fd); free(fol); free(scr); return FULTA_ARC_ERR_NOMEM; }
+    sz_desc_t *fd = fa_zalloc(a, count ? count : 1, sizeof *fd);
+    fa_7z_copy_t *fol = fa_zalloc(a, count ? count : 1, sizeof *fol);
+    fold_scratch_t *scr = fa_zalloc(a, count ? count : 1, sizeof *scr);
+    if (!fd || !fol || !scr) { fa_release(a, fd); fa_release(a, fol); fa_release(a, scr); return FULTA_ARC_ERR_NOMEM; }
 
-    out_t o = { .sink = sink };
+    out_t o = { .sink = sink, .alloc = fa_write_alloc(opt) };
     o.hdr_pw = opt && opt->password && opt->encrypt_names ? opt->password : NULL;   /* 7z -mhe */
     uint8_t sig[32] = { '7', 'z', 0xBC, 0xAF, 0x27, 0x1C, 0, 4 };
     put(&o, sig, sizeof sig);
@@ -2626,9 +2720,9 @@ fulta_arc_err_t fa_write_7z_edited(const fa_edit_item_t *items, size_t count, in
     }
 
     if (err == FULTA_ARC_OK) err = write_7z_header_multi(&o, sig, fd, count, fol, nf);
-    free(fd);
-    free(fol);
-    free(scr);
+    fa_release(a, fd);
+    fa_release(a, fol);
+    fa_release(a, scr);
     return err;
 }
 
@@ -2640,9 +2734,10 @@ static fulta_arc_err_t write_any(fulta_arc_format_t format, const fulta_arc_writ
         if (!name_ok(proven_u8str_view_from_cstr(entries[i].name))) return FULTA_ARC_ERR_BAD_NAME;
         if (entries[i].size && !entries[i].data && !is_dir(&entries[i])) return FULTA_ARC_ERR_INVALID_ARG;
     }
+    if (!fa_write_alloc_ok(options)) return FULTA_ARC_ERR_INVALID_ARG;   /* one or two allocator functions set */
     int level = options ? options->level : 6;
     if (level < 0 || level > 9) level = 6;
-    out_t o = { .sink = sink };
+    out_t o = { .sink = sink, .alloc = fa_write_alloc(options) };
     o.hdr_pw = options && options->password && options->encrypt_names ? options->password : NULL;   /* 7z -mhe */
     switch (format) {
         case FULTA_ARC_FORMAT_ZIP:
@@ -2678,11 +2773,11 @@ fulta_arc_err_t fulta_arc_write_volumes(fulta_arc_format_t format, const fulta_a
                                         const fulta_arc_volume_sink_t *volumes) {
     if (!options) return FULTA_ARC_ERR_INVALID_ARG;
     write_job_t j = {format, entries, count, options};
-    return fa_vol_run(format, options->volume_size, volumes, write_job_run, &j);
+    return fa_vol_run(fa_write_alloc(options), format, options->volume_size, volumes, write_job_run, &j);
 }
 
 fulta_arc_err_t fa_write_file_split(const char *path, fulta_arc_format_t format, const fulta_arc_write_entry_t *entries,
                                     size_t count, const fulta_arc_write_options_t *options) {
     write_job_t j = {format, entries, count, options};
-    return fa_vol_files(path, format, options->volume_size, write_job_run, &j);
+    return fa_vol_files(fa_write_alloc(options), path, format, options->volume_size, write_job_run, &j);
 }

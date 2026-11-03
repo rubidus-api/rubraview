@@ -4,6 +4,7 @@
 
 #include "proven.h"
 
+/* A file source takes no allocator (it is public and made before any archive): it lives in proven's heap. */
 typedef struct file_src { proven_file_t f; } file_src_t;
 
 static fulta_arc_err_t file_read_at(void *ctx, uint64_t offset, void *buf, size_t n, size_t *got) {
@@ -21,28 +22,30 @@ static void file_close(void *ctx) {
     file_src_t *fs = ctx;
     proven_err_t ignored = proven_fs_close(fs->f);   /* a read-only file: nothing to report */
     (void)ignored;
-    fa_free(fs);
+    fa_release(proven_heap_allocator(), fs);
 }
 
 fulta_arc_err_t fulta_arc_source_file(const char *path, fulta_arc_source_t *out) {
     if (!path || !out) return FULTA_ARC_ERR_INVALID_ARG;
-    file_src_t *fs = fa_calloc(1, sizeof *fs);
+    file_src_t *fs = fa_zalloc(proven_heap_allocator(), 1, sizeof *fs);
     if (!fs) return FULTA_ARC_ERR_NOMEM;
     proven_result_file_t r = proven_fs_open(proven_heap_allocator(), proven_u8str_view_from_cstr(path), PROVEN_FS_READ);
-    if (r.err) { fa_free(fs); return r.err == PROVEN_ERR_NOT_FOUND ? FULTA_ARC_ERR_VOLUME_MISSING : FULTA_ARC_ERR_IO; }
+    if (r.err) { fa_release(proven_heap_allocator(), fs); return r.err == PROVEN_ERR_NOT_FOUND ? FULTA_ARC_ERR_VOLUME_MISSING : FULTA_ARC_ERR_IO; }
     fs->f = r.value;
     proven_result_size_t sz = proven_fs_size(fs->f);
     if (sz.err) {
         proven_err_t ignored = proven_fs_close(fs->f);
         (void)ignored;
-        fa_free(fs);
+        fa_release(proven_heap_allocator(), fs);
         return FULTA_ARC_ERR_IO;
     }
     *out = (fulta_arc_source_t){.ctx = fs, .size = sz.value, .read_at = file_read_at, .close = file_close};
     return FULTA_ARC_OK;
 }
 
-typedef struct mem_src { const uint8_t *p; size_t n; uint8_t *owned; } mem_src_t;
+/* A memory source lives in `alloc` (proven's heap for the public constructors, which take no allocator; the
+ * archive's for an owned buffer), and an owned buffer is released through it too. */
+typedef struct mem_src { proven_allocator_t alloc; const uint8_t *p; size_t n; uint8_t *owned; } mem_src_t;
 
 static fulta_arc_err_t mem_read_at(void *ctx, uint64_t offset, void *buf, size_t n, size_t *got) {
     const mem_src_t *m = ctx;
@@ -57,21 +60,26 @@ static fulta_arc_err_t mem_read_at(void *ctx, uint64_t offset, void *buf, size_t
 
 static void mem_close(void *ctx) {
     mem_src_t *m = ctx;
-    if (m) fa_free(m->owned);   /* NULL for a referencing source; the owned buffer for fa_source_memory_owned */
-    fa_free(ctx);
+    if (!m) return;
+    proven_allocator_t a = m->alloc;
+    fa_release(a, m->owned);   /* NULL for a referencing source; the owned buffer for fa_source_memory_owned */
+    fa_release(a, m);
 }
 
 fulta_arc_source_t fulta_arc_source_memory(const void *data, size_t size) {
-    mem_src_t *m = fa_calloc(1, sizeof *m);
+    proven_allocator_t a = proven_heap_allocator();
+    mem_src_t *m = fa_zalloc(a, 1, sizeof *m);
     if (!m) return (fulta_arc_source_t){0};
+    m->alloc = a;
     m->p = data;
     m->n = size;
     return (fulta_arc_source_t){.ctx = m, .size = size, .read_at = mem_read_at, .close = mem_close};
 }
 
-fulta_arc_source_t fa_source_memory_owned(uint8_t *buf, size_t size) {
-    mem_src_t *m = fa_calloc(1, sizeof *m);
+fulta_arc_source_t fa_source_memory_owned(proven_allocator_t a, uint8_t *buf, size_t size) {
+    mem_src_t *m = fa_zalloc(a, 1, sizeof *m);
     if (!m) return (fulta_arc_source_t){0};
+    m->alloc = a;
     m->p = buf;
     m->n = size;
     m->owned = buf;   /* freed by mem_close */
@@ -143,38 +151,35 @@ fulta_arc_err_t fulta_arc_write_file(const char *path, fulta_arc_format_t format
 
 enum { VIEW_EMPTY, VIEW_MEMORY, VIEW_MMAP, VIEW_HEAP };
 
-fulta_arc_err_t fa_view_open(const fulta_arc_source_t *s, fa_view_t *v) {
-    *v = (fa_view_t){0};
+fulta_arc_err_t fa_view_open(proven_allocator_t a, const fulta_arc_source_t *s, fa_view_t *v) {
+    *v = (fa_view_t){.alloc = a};
     if (s->size > SIZE_MAX) return FULTA_ARC_ERR_LIMIT;
-    if (s->size == 0) { v->data = (const uint8_t *)""; v->kind = VIEW_EMPTY; return FULTA_ARC_OK; }
+    if (s->size == 0) { v->bytes = fa_bytes("", 0); v->kind = VIEW_EMPTY; return FULTA_ARC_OK; }
     if (s->read_at == mem_read_at) {
         const mem_src_t *m = s->ctx;
-        v->data = m->p;
-        v->size = m->n;
+        v->bytes = fa_bytes(m->p, m->n);
         v->kind = VIEW_MEMORY;
         return FULTA_ARC_OK;
     }
     if (s->read_at == file_read_at) {
         const file_src_t *fs = s->ctx;
-        proven_mmap_t *mm = fa_calloc(1, sizeof *mm);
+        proven_mmap_t *mm = fa_zalloc(a, 1, sizeof *mm);
         if (!mm) return FULTA_ARC_ERR_NOMEM;
         proven_result_mmap_t r = proven_mmap_create(fs->f, 0, (size_t)s->size, PROVEN_MMAP_READ, PROVEN_MMAP_PRIVATE);
         if (!r.err) {
             *mm = r.value;
-            v->data = mm->ptr;
-            v->size = (size_t)s->size;
+            v->bytes = fa_bytes(mm->ptr, (size_t)s->size);
             v->kind = VIEW_MMAP;
             v->priv = mm;
             return FULTA_ARC_OK;
         }
-        fa_free(mm);   /* fall back to reading it in */
+        fa_release(a, mm);   /* fall back to reading it in */
     }
-    uint8_t *b = fa_malloc((size_t)s->size);
+    uint8_t *b = fa_alloc(a, (size_t)s->size);
     if (!b) return FULTA_ARC_ERR_NOMEM;
-    fulta_arc_err_t e = fa_source_read_exact(s, 0, b, (size_t)s->size);
-    if (e) { fa_free(b); return e; }
-    v->data = b;
-    v->size = (size_t)s->size;
+    fulta_arc_err_t e = fa_source_read_exact(s, 0, fa_bytes_mut(b, (size_t)s->size));
+    if (e) { fa_release(a, b); return e; }
+    v->bytes = fa_bytes(b, (size_t)s->size);
     v->kind = VIEW_HEAP;
     v->priv = b;
     return FULTA_ARC_OK;
@@ -184,9 +189,9 @@ void fa_view_close(fa_view_t *v) {
     if (v->kind == VIEW_MMAP) {
         proven_err_t ignored = proven_mmap_destroy(v->priv);
         (void)ignored;
-        fa_free(v->priv);
+        fa_release(v->alloc, v->priv);
     } else if (v->kind == VIEW_HEAP) {
-        fa_free(v->priv);
+        fa_release(v->alloc, v->priv);
     }
     *v = (fa_view_t){0};
 }

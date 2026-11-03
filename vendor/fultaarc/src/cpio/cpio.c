@@ -13,6 +13,7 @@ typedef enum { CPIO_NEWC, CPIO_CRC, CPIO_ODC, CPIO_BIN_LE, CPIO_BIN_BE } cpio_fm
 typedef struct cpio_item { uint64_t off, size; } cpio_item_t;
 
 typedef struct cpio_state {
+    proven_allocator_t alloc;   /* the archive's: this state and everything it holds */
     cpio_item_t *items;
     size_t n, cap;
     cpio_fmt_t fmt;
@@ -39,7 +40,7 @@ static uint32_t cpio_u16(const uint8_t *p, bool be) { return be ? (uint32_t)(p[0
 static cpio_item_t *cpio_add(cpio_state_t *st) {
     if (st->n == st->cap) {
         size_t nc = st->cap ? st->cap * 2 : 32;
-        cpio_item_t *q = fa_realloc(st->items, nc * sizeof *q);
+        cpio_item_t *q = fa_resize(st->alloc, st->items, st->cap * sizeof *q, nc * sizeof *q);
         if (!q) return NULL;
         st->items = q;
         st->cap = nc;
@@ -61,7 +62,7 @@ static fulta_arc_err_t cpio_open(fulta_arc_t *arc, uint64_t offset) {
     (void)offset;
     const fulta_arc_source_t *src = arc->volumes[0];
     uint8_t m[6];
-    if (src->size < 6 || fa_source_read_exact(src, 0, m, 6)) return FULTA_ARC_ERR_NOT_ARCHIVE;
+    if (src->size < 6 || fa_source_read_exact(src, 0, fa_bytes_mut(m, 6))) return FULTA_ARC_ERR_NOT_ARCHIVE;
 
     cpio_fmt_t fmt;
     size_t hdr;
@@ -72,8 +73,9 @@ static fulta_arc_err_t cpio_open(fulta_arc_t *arc, uint64_t offset) {
     else if (m[0] == 0x71 && m[1] == 0xC7) { fmt = CPIO_BIN_BE; hdr = 26; }
     else return FULTA_ARC_ERR_NOT_ARCHIVE;
 
-    cpio_state_t *st = fa_calloc(1, sizeof *st);
+    cpio_state_t *st = fa_zalloc(arc->alloc, 1, sizeof *st);
     if (!st) return FULTA_ARC_ERR_NOMEM;
+    st->alloc = arc->alloc;
     st->fmt = fmt;
     arc->state = st;
 
@@ -82,7 +84,7 @@ static fulta_arc_err_t cpio_open(fulta_arc_t *arc, uint64_t offset) {
     for (;;) {
         if (pos + hdr > src->size) break;
         uint8_t h[110];
-        if (fa_source_read_exact(src, pos, h, hdr)) break;
+        if (fa_source_read_exact(src, pos, fa_bytes_mut(h, hdr))) break;
 
         uint64_t namesize, filesize, mode;
         if (fmt == CPIO_NEWC || fmt == CPIO_CRC) {
@@ -106,33 +108,33 @@ static fulta_arc_err_t cpio_open(fulta_arc_t *arc, uint64_t offset) {
         if (fmt == CPIO_NEWC || fmt == CPIO_CRC) data_off += (4 - ((hdr + namesize) & 3)) & 3;
         else if (fmt == CPIO_BIN_LE || fmt == CPIO_BIN_BE) data_off += namesize & 1;
 
-        char *name = fa_malloc((size_t)namesize + 1);
+        char *name = fa_alloc(arc->alloc, (size_t)namesize + 1);
         if (!name) { e = FULTA_ARC_ERR_NOMEM; break; }
-        if (fa_source_read_exact(src, name_off, name, (size_t)namesize)) { fa_free(name); break; }
+        if (fa_source_read_exact(src, name_off, fa_bytes_mut(name, (size_t)namesize))) { fa_release(arc->alloc, name); break; }
         name[namesize] = 0;
         size_t nlen = 0;
         while (nlen < namesize && name[nlen]) nlen++;   /* the stored name includes a NUL */
 
-        if (nlen == strlen(CPIO_TRAILER) && memcmp(name, CPIO_TRAILER, nlen) == 0) { fa_free(name); break; }
+        if (nlen == strlen(CPIO_TRAILER) && memcmp(name, CPIO_TRAILER, nlen) == 0) { fa_release(arc->alloc, name); break; }
 
-        if (data_off > src->size || filesize > src->size - data_off) { fa_free(name); break; }
+        if (data_off > src->size || filesize > src->size - data_off) { fa_release(arc->alloc, name); break; }
         uint64_t advance = data_off + filesize;
         if (fmt == CPIO_NEWC || fmt == CPIO_CRC) advance += (4 - (filesize & 3)) & 3;
         else if (fmt == CPIO_BIN_LE || fmt == CPIO_BIN_BE) advance += filesize & 1;
 
-        char *safe = fa_malloc(nlen + 1);
-        if (!safe) { fa_free(name); e = FULTA_ARC_ERR_NOMEM; break; }
+        char *safe = fa_alloc(arc->alloc, nlen + 1);
+        if (!safe) { fa_release(arc->alloc, name); e = FULTA_ARC_ERR_NOMEM; break; }
         memcpy(safe, name, nlen);
         safe[nlen] = 0;
         bool is_dir = (mode & CP_IFMT) == CP_IFDIR;
         bool is_lnk = (mode & CP_IFMT) == CP_IFLNK;
-        if (!fa_sanitize_name(safe)) { fa_free(safe); safe = NULL; }
+        if (!fa_sanitize_name(safe)) { fa_release(arc->alloc, safe); safe = NULL; }
         const char *use = safe && safe[0] ? safe : "data";
 
-        fa_entry_t *en = fa_add_entry(arc, (const uint8_t *)name, nlen, use, "store");
+        fa_entry_t *en = fa_add_entry(arc, fa_bytes((const uint8_t *)name, nlen), use, "store");
         cpio_item_t *it = cpio_add(st);
-        fa_free(safe);
-        fa_free(name);
+        fa_release(arc->alloc, safe);
+        fa_release(arc->alloc, name);
         if (!en || !it) { e = FULTA_ARC_ERR_NOMEM; break; }
 
         if (is_dir) {
@@ -164,7 +166,7 @@ static fulta_arc_err_t cpio_extract(fulta_arc_t *arc, size_t index, const fulta_
     fa_piece_t piece = { src, it->off, it->size };
     fa_range_t range = { &piece, 1, it->size };
     fa_stream_t *s = NULL;
-    fulta_arc_err_t e = fa_stream_range(&range, 0, it->size, &s);
+    fulta_arc_err_t e = fa_stream_range(arc->alloc, &range, 0, it->size, &s);
     if (e) return e;
     e = fa_pump(s, it->size, false, 0, sink, arc, arc->opt.keep_damaged);
     fa_stream_destroy(s);
@@ -174,8 +176,8 @@ static fulta_arc_err_t cpio_extract(fulta_arc_t *arc, size_t index, const fulta_
 static void cpio_close(fulta_arc_t *arc) {
     cpio_state_t *st = arc->state;
     if (!st) return;
-    fa_free(st->items);
-    fa_free(st);
+    fa_release(arc->alloc, st->items);
+    fa_release(arc->alloc, st);
     arc->state = NULL;
 }
 

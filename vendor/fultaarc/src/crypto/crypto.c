@@ -478,13 +478,15 @@ static fulta_arc_err_t zc_read(fa_stream_t *s, void *buf, size_t n, size_t *got)
     fa_zipcrypto_decrypt(&z->keys, buf, *got);
     return FULTA_ARC_OK;
 }
-static void zc_destroy(fa_stream_t *s) { zc_stream_t *z = (zc_stream_t *)s; fa_stream_destroy(z->in); fa_free(z); }
+static void zc_destroy(fa_stream_t *s) { zc_stream_t *z = (zc_stream_t *)s; fa_stream_destroy(z->in); fa_stream_release(s); }
 
 fulta_arc_err_t fa_dec_zipcrypto(fa_stream_t *in, const fa_zipcrypto_t *keys, fa_stream_t **out) {
-    zc_stream_t *z = fa_calloc(1, sizeof *z);
+    proven_allocator_t a = in->alloc;
+    zc_stream_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     z->in = in;
     z->keys = *keys;
+    z->base.alloc = a;
     z->base.read = zc_read;
     z->base.destroy = zc_destroy;
     *out = &z->base;
@@ -580,18 +582,21 @@ static fulta_arc_err_t block_read(fa_stream_t *s, void *buf, size_t n, size_t *g
 static void block_destroy(fa_stream_t *s) {
     block_stream_t *b = (block_stream_t *)s;
     fa_stream_destroy(b->in);
+    proven_allocator_t a = s->alloc;   /* the wipe below clears it */
     memset(b, 0, sizeof *b);
-    fa_free(b);
+    fa_release(a, b);
 }
 
 fulta_arc_err_t fa_dec_aes_cbc(fa_stream_t *in, const uint8_t *key, size_t keylen, const uint8_t iv[16],
                                fa_stream_t **out) {
-    block_stream_t *b = fa_calloc(1, sizeof *b);
+    proven_allocator_t a = in->alloc;
+    block_stream_t *b = fa_zalloc(a, 1, sizeof *b);
     if (!b) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     b->in = in;
     b->mode = 0;
     fa_aes_init_dec(&b->aes, key, keylen);
     memcpy(b->iv, iv, 16);
+    b->base.alloc = a;
     b->base.read = block_read;
     b->base.destroy = block_destroy;
     *out = &b->base;
@@ -599,12 +604,14 @@ fulta_arc_err_t fa_dec_aes_cbc(fa_stream_t *in, const uint8_t *key, size_t keyle
 }
 
 fulta_arc_err_t fa_dec_ctr(fa_stream_t *in, fa_ctr_kind_t kind, const uint8_t *key, size_t keylen, fa_stream_t **out) {
-    block_stream_t *b = fa_calloc(1, sizeof *b);
+    proven_allocator_t a = in->alloc;
+    block_stream_t *b = fa_zalloc(a, 1, sizeof *b);
     if (!b) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     b->in = in;
     b->opos = 16;
     if (kind == FA_CTR_AES_LE1) { b->mode = 1; fa_aes_init_enc(&b->aes, key, keylen); }   /* ctr = 0, +1 before use */
     else { b->mode = 2; fa_lea_init(&b->lea, key, keylen); }                            /* ctr = 0, used then +1 */
+    b->base.alloc = a;
     b->base.read = block_read;
     b->base.destroy = block_destroy;
     *out = &b->base;
@@ -641,13 +648,15 @@ static fulta_arc_err_t tap_read(fa_stream_t *s, void *buf, size_t n, size_t *got
     if (!e) fa_hmac_sha1_update(t->mac, buf, *got);
     return e;
 }
-static void tap_destroy(fa_stream_t *s) { tap_stream_t *t = (tap_stream_t *)s; fa_stream_destroy(t->in); fa_free(t); }
+static void tap_destroy(fa_stream_t *s) { tap_stream_t *t = (tap_stream_t *)s; fa_stream_destroy(t->in); fa_stream_release(s); }
 
 fulta_arc_err_t fa_stream_hmac_tap(fa_stream_t *in, fa_hmac_sha1_t *mac, fa_stream_t **out) {
-    tap_stream_t *t = fa_calloc(1, sizeof *t);
+    proven_allocator_t a = in->alloc;
+    tap_stream_t *t = fa_zalloc(a, 1, sizeof *t);
     if (!t) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     t->in = in;
     t->mac = mac;
+    t->base.alloc = a;
     t->base.read = tap_read;
     t->base.destroy = tap_destroy;
     *out = &t->base;

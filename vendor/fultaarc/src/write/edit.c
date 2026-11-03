@@ -12,10 +12,12 @@
 #include <string.h>
 
 struct fulta_arc_edit {
+    proven_allocator_t alloc;     /* the source archive's: this plan and its names live there (D-038) */
     fulta_arc_t *arc;
     fa_edit_item_t *items;
     size_t n, cap;
-    char **owned;                 /* strdup'd names, freed with the edit */
+    size_t nremoved;              /* originals marked removed */
+    char **owned;                 /* copied names, released with the edit */
     size_t nown, cown;
     bool failed;
 };
@@ -23,7 +25,7 @@ struct fulta_arc_edit {
 static bool push_item(fulta_arc_edit_t *ed, fa_edit_item_t it) {
     if (ed->n == ed->cap) {
         size_t nc = ed->cap ? ed->cap * 2 : 8;
-        fa_edit_item_t *ni = realloc(ed->items, nc * sizeof *ni);
+        fa_edit_item_t *ni = fa_resize(ed->alloc, ed->items, ed->cap * sizeof *ni, nc * sizeof *ni);
         if (!ni) return false;
         ed->items = ni; ed->cap = nc;
     }
@@ -31,15 +33,15 @@ static bool push_item(fulta_arc_edit_t *ed, fa_edit_item_t it) {
     return true;
 }
 
-/* strdup `s` into the edit's owned list; returns the copy (stable), or NULL on OOM / NULL input. */
+/* A copy of `s` in the edit's owned list; returns the copy (stable), or NULL on OOM / NULL input. */
 static const char *own_name(fulta_arc_edit_t *ed, const char *s) {
     if (!s) return NULL;
-    char *c = strdup(s);
+    char *c = fa_strdup_view(ed->alloc, proven_u8str_view_from_cstr(s));
     if (!c) return NULL;
     if (ed->nown == ed->cown) {
         size_t nc = ed->cown ? ed->cown * 2 : 8;
-        char **no = realloc(ed->owned, nc * sizeof *no);
-        if (!no) { free(c); return NULL; }
+        char **no = fa_resize(ed->alloc, ed->owned, ed->cown * sizeof *no, nc * sizeof *no);
+        if (!no) { fa_release(ed->alloc, c); return NULL; }
         ed->owned = no; ed->cown = nc;
     }
     ed->owned[ed->nown++] = c;
@@ -48,16 +50,17 @@ static const char *own_name(fulta_arc_edit_t *ed, const char *s) {
 
 /* The plan slot for original entry `index` (copied or replaced), or SIZE_MAX if it is gone (removed). */
 static size_t find_original(fulta_arc_edit_t *ed, size_t index) {
-    for (size_t i = 0; i < ed->n; i++)
-        if (ed->items[i].src == ed->arc && ed->items[i].src_index == index) return i;
-    return SIZE_MAX;
+    /* the originals stay in their slots (items[i] is source entry i; adds come after them), so this is O(1) */
+    if (index >= ed->n || ed->items[index].removed) return SIZE_MAX;
+    return index;
 }
 
 fulta_arc_err_t fulta_arc_edit_begin(fulta_arc_t *arc, fulta_arc_edit_t **out) {
     if (!arc || !out) return FULTA_ARC_ERR_INVALID_ARG;
     *out = NULL;
-    fulta_arc_edit_t *ed = calloc(1, sizeof *ed);
+    fulta_arc_edit_t *ed = fa_zalloc(arc->alloc, 1, sizeof *ed);
     if (!ed) return FULTA_ARC_ERR_NOMEM;
+    ed->alloc = arc->alloc;
     ed->arc = arc;
     for (size_t i = 0; i < fulta_arc_count(arc); i++) {
         fa_edit_item_t it = { .is_copy = true, .src = arc, .src_index = i };
@@ -72,8 +75,8 @@ fulta_arc_err_t fulta_arc_edit_remove(fulta_arc_edit_t *edit, size_t index) {
     if (index >= fulta_arc_count(edit->arc)) return FULTA_ARC_ERR_INVALID_ARG;
     size_t at = find_original(edit, index);
     if (at == SIZE_MAX) return FULTA_ARC_ERR_INVALID_ARG;   /* already removed */
-    memmove(&edit->items[at], &edit->items[at + 1], (edit->n - at - 1) * sizeof *edit->items);
-    edit->n--;
+    edit->items[at].removed = true;                          /* compacted once, when the edit is written */
+    edit->nremoved++;
     return FULTA_ARC_OK;
 }
 
@@ -122,6 +125,7 @@ static fulta_arc_err_t edit_write_to(fulta_arc_edit_t *edit, fulta_arc_format_t 
     if (!edit || !sink || !sink->write || !sink->patch) return FULTA_ARC_ERR_INVALID_ARG;
     if (format != FULTA_ARC_FORMAT_ZIP && format != FULTA_ARC_FORMAT_7Z) return FULTA_ARC_ERR_INVALID_ARG;
     if (opts && opts->volume_size && !fa_vol_of(sink)) return FULTA_ARC_ERR_INVALID_ARG;   /* one sink, one file */
+    if (!fa_write_alloc_ok(opts)) return FULTA_ARC_ERR_INVALID_ARG;   /* one or two allocator functions set */
     if (format == FULTA_ARC_FORMAT_ZIP && opts && opts->password && opts->encrypt_names) return FULTA_ARC_ERR_INVALID_ARG;
     fulta_arc_editable_t v = fulta_arc_editable(edit->arc);
     if (v == FULTA_ARC_EDIT_ENCRYPTED) return FULTA_ARC_ERR_UNSUPPORTED;   /* editing encrypted is refused (D-015) */
@@ -129,18 +133,35 @@ static fulta_arc_err_t edit_write_to(fulta_arc_edit_t *edit, fulta_arc_format_t 
     if (level < 0 || level > 9) level = 6;
     bool same_format = (format == fulta_arc_format(edit->arc));
     bool encrypt = opts && opts->password;                   /* copied bytes cannot be encrypted: convert instead */
+
+    /* the plan without the removed originals, made once here (removal only marks, so it stays O(1)) */
+    const fa_edit_item_t *items = edit->items;
+    size_t n = edit->n;
+    fa_edit_item_t *packed = NULL;
+    if (edit->nremoved) {
+        packed = fa_alloc(edit->alloc, (edit->n - edit->nremoved) * sizeof *packed);
+        if (!packed) return FULTA_ARC_ERR_NOMEM;
+        n = 0;
+        for (size_t i = 0; i < edit->n; i++)
+            if (!edit->items[i].removed) packed[n++] = edit->items[i];
+        items = packed;
+    }
+    fulta_arc_err_t e;
     if (same_format && v == FULTA_ARC_EDIT_OK && !encrypt) { /* copy route */
         if (format == FULTA_ARC_FORMAT_ZIP)   /* copied entries stay verbatim; added ones take opts->method */
-            return fa_write_zip_edited(edit->items, edit->n, level, opts && opts->zip64, opts, sink);
-        /* 7z copy route honours method/filter/BCJ2 on added/replaced entries (step 7b); copied folders stay verbatim.
-           SOLID_OFF is moot here (the source is already non-solid) but a BCJ2+password mix is caught by write_7z. */
-        return fa_write_7z_edited(edit->items, edit->n, level, opts, sink);
+            e = fa_write_zip_edited(items, n, level, opts && opts->zip64, opts, sink);
+        else  /* 7z copy route honours method/filter/BCJ2 on added/replaced entries; copied folders stay verbatim.
+                 SOLID_OFF is moot here (the source is already non-solid) but a BCJ2+password mix is caught by write_7z. */
+            e = fa_write_7z_edited(items, n, level, opts, sink);
+    } else if (format == FULTA_ARC_FORMAT_ZIP) {
+        /* convert route: re-encode everything into the target format (also the same format when a password is
+           given: every entry is then encrypted, D-016). Both honour the method; the 7z route also filter and solid. */
+        e = fa_write_zip_convert(items, n, level, opts && opts->zip64, opts, sink, spill_hint);
+    } else {
+        e = fa_write_7z_convert(items, n, level, opts, sink, spill_hint);
     }
-    /* convert route: re-encode everything into the target format (also the same format when a password is given:
-       every entry is then encrypted, D-016). Both honour the method; the 7z route also filter and solid. */
-    if (format == FULTA_ARC_FORMAT_ZIP)
-        return fa_write_zip_convert(edit->items, edit->n, level, opts && opts->zip64, opts, sink, spill_hint);
-    return fa_write_7z_convert(edit->items, edit->n, level, opts, sink, spill_hint);
+    fa_release(edit->alloc, packed);
+    return e;
 }
 
 fulta_arc_err_t fulta_arc_edit_write(fulta_arc_edit_t *edit, fulta_arc_format_t format,
@@ -167,7 +188,7 @@ fulta_arc_err_t fulta_arc_edit_write_volumes(fulta_arc_edit_t *edit, fulta_arc_f
                                              const fulta_arc_write_options_t *opts) {
     if (!edit || !opts) return FULTA_ARC_ERR_INVALID_ARG;
     edit_job_t j = {edit, format, opts, NULL};
-    return fa_vol_run(format, opts->volume_size, volumes, edit_job_run, &j);
+    return fa_vol_run(fa_write_alloc(opts), format, opts->volume_size, volumes, edit_job_run, &j);
 }
 
 /* ---- to a file: temp beside `path`, renamed over it only on success ---- */
@@ -187,16 +208,16 @@ fulta_arc_err_t fulta_arc_edit_write_file(fulta_arc_edit_t *edit, fulta_arc_form
     if (!edit || !path) return FULTA_ARC_ERR_INVALID_ARG;
     if (opts && opts->volume_size) {                         /* a split set: volumes.c names and renames */
         edit_job_t j = {edit, format, opts, path};
-        return fa_vol_files(path, format, opts->volume_size, edit_job_run, &j);
+        return fa_vol_files(fa_write_alloc(opts), path, format, opts->volume_size, edit_job_run, &j);
     }
     size_t pl = strlen(path);
-    char *tmp = malloc(pl + 7);
+    char *tmp = fa_alloc(edit->alloc, pl + 7);
     if (!tmp) return FULTA_ARC_ERR_NOMEM;
     memcpy(tmp, path, pl);
     memcpy(tmp + pl, ".fatmp", 7);                           /* same directory -> rename stays on one volume */
     proven_result_file_t r = proven_fs_open(proven_heap_allocator(), proven_u8str_view_from_cstr(tmp),
                                             PROVEN_FS_WRITE | PROVEN_FS_CREATE | PROVEN_FS_TRUNC);
-    if (r.err) { free(tmp); return FULTA_ARC_ERR_IO; }
+    if (r.err) { fa_release(edit->alloc, tmp); return FULTA_ARC_ERR_IO; }
     proven_file_t f = r.value;
     fulta_arc_write_sink_t sink = {.ctx = &f, .write = ew_write, .patch = ew_patch};
     fulta_arc_err_t e = edit_write_to(edit, format, &sink, opts, tmp);   /* 7z convert spills to `tmp.d` */
@@ -210,14 +231,15 @@ fulta_arc_err_t fulta_arc_edit_write_file(fulta_arc_edit_t *edit, fulta_arc_form
         proven_err_t ignored = proven_fs_remove(proven_heap_allocator(), proven_u8str_view_from_cstr(tmp));
         (void)ignored;
     }
-    free(tmp);
+    fa_release(edit->alloc, tmp);
     return e;
 }
 
 void fulta_arc_edit_free(fulta_arc_edit_t *edit) {
     if (!edit) return;
-    for (size_t i = 0; i < edit->nown; i++) free(edit->owned[i]);
-    free(edit->owned);
-    free(edit->items);
-    free(edit);
+    proven_allocator_t a = edit->alloc;
+    for (size_t i = 0; i < edit->nown; i++) fa_release(a, edit->owned[i]);
+    fa_release(a, edit->owned);
+    fa_release(a, edit->items);
+    fa_release(a, edit);
 }

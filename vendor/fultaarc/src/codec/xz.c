@@ -57,43 +57,43 @@ static fulta_arc_err_t parse(xz_stream_t *z, uint64_t off, uint64_t len) {
     while (end > off) {
         /* skip stream padding (zero bytes in groups of four) */
         uint8_t ft[12];
-        fulta_arc_err_t e = fa_range_read_exact(&z->range, end - 4, ft, 4);
+        fulta_arc_err_t e = fa_range_read_exact(&z->range, end - 4, fa_bytes_mut(ft, 4));
         if (e) return e;
         if (!fa_le32(ft)) { end -= 4; continue; }
         if (end - off < 24) return FULTA_ARC_ERR_CORRUPT;
-        if ((e = fa_range_read_exact(&z->range, end - 12, ft, 12))) return e;
-        if (ft[10] != 'Y' || ft[11] != 'Z' || fa_crc32(0, ft + 4, 6) != fa_le32(ft)) return FULTA_ARC_ERR_CORRUPT;
+        if ((e = fa_range_read_exact(&z->range, end - 12, fa_bytes_mut(ft, 12)))) return e;
+        if (ft[10] != 'Y' || ft[11] != 'Z' || fa_crc32(0, fa_bytes(ft + 4, 6)) != fa_le32(ft)) return FULTA_ARC_ERR_CORRUPT;
         uint8_t check = ft[9] & 0x0F;
         uint64_t isize = ((uint64_t)fa_le32(ft + 4) + 1) * 4;
         if (isize > end - off - 24 || isize > (64u << 20)) return FULTA_ARC_ERR_CORRUPT;
         uint64_t ipos = end - 12 - isize;
-        uint8_t *ix = fa_malloc((size_t)isize);
+        uint8_t *ix = fa_alloc(z->base.alloc, (size_t)isize);
         if (!ix) return FULTA_ARC_ERR_NOMEM;
-        if ((e = fa_range_read_exact(&z->range, ipos, ix, (size_t)isize))) { fa_free(ix); return e; }
+        if ((e = fa_range_read_exact(&z->range, ipos, fa_bytes_mut(ix, (size_t)isize)))) { fa_release(z->base.alloc, ix); return e; }
         size_t p = 1;
         uint64_t nrec;
-        if (ix[0] != 0 || !vli(ix, (size_t)isize, &p, &nrec) || nrec > isize || fa_crc32(0, ix, (size_t)isize - 4) != fa_le32(ix + isize - 4)) {
-            fa_free(ix);
+        if (ix[0] != 0 || !vli(ix, (size_t)isize, &p, &nrec) || nrec > isize || fa_crc32(0, fa_bytes(ix, (size_t)isize - 4)) != fa_le32(ix + isize - 4)) {
+            fa_release(z->base.alloc, ix);
             return FULTA_ARC_ERR_CORRUPT;
         }
         uint64_t total = 0;
-        uint64_t *uns = fa_calloc(nrec ? (size_t)nrec : 1, sizeof *uns), *unc = fa_calloc(nrec ? (size_t)nrec : 1, sizeof *unc);
-        if (!uns || !unc) { fa_free(ix); fa_free(uns); fa_free(unc); return FULTA_ARC_ERR_NOMEM; }
+        uint64_t *uns = fa_zalloc(z->base.alloc, nrec ? (size_t)nrec : 1, sizeof *uns), *unc = fa_zalloc(z->base.alloc, nrec ? (size_t)nrec : 1, sizeof *unc);
+        if (!uns || !unc) { fa_release(z->base.alloc, ix); fa_release(z->base.alloc, uns); fa_release(z->base.alloc, unc); return FULTA_ARC_ERR_NOMEM; }
         for (uint64_t i = 0; i < nrec; i++) {
             if (!vli(ix, (size_t)isize, &p, &uns[i]) || !vli(ix, (size_t)isize, &p, &unc[i]) || !uns[i]) { e = FULTA_ARC_ERR_CORRUPT; break; }
             total += (uns[i] + 3) & ~(uint64_t)3;
         }
-        fa_free(ix);
+        fa_release(z->base.alloc, ix);
         if (!e && ipos < off + 12 + total) e = FULTA_ARC_ERR_CORRUPT;
         uint64_t sstart = ipos - total - 12;
         uint8_t sh[12];
-        if (!e) e = fa_range_read_exact(&z->range, sstart, sh, 12);
-        if (!e && (memcmp(sh, "\xFD" "7zXZ\0", 6) != 0 || memcmp(sh + 6, ft + 8, 2) != 0 || fa_crc32(0, sh + 6, 2) != fa_le32(sh + 8)))
+        if (!e) e = fa_range_read_exact(&z->range, sstart, fa_bytes_mut(sh, 12));
+        if (!e && (memcmp(sh, "\xFD" "7zXZ\0", 6) != 0 || memcmp(sh + 6, ft + 8, 2) != 0 || fa_crc32(0, fa_bytes(sh + 6, 2)) != fa_le32(sh + 8)))
             e = FULTA_ARC_ERR_CORRUPT;
         /* blocks of this stream go in front of those of later streams */
-        xz_blk_t *nb = e ? NULL : fa_realloc(z->blk, (z->nblk + nrec) * sizeof *nb);
+        xz_blk_t *nb = e ? NULL : fa_resize(z->base.alloc, z->blk, z->nblk * sizeof *nb, (z->nblk + nrec) * sizeof *nb);
         if (!e && !nb) e = FULTA_ARC_ERR_NOMEM;
-        if (e) { fa_free(uns); fa_free(unc); return e; }
+        if (e) { fa_release(z->base.alloc, uns); fa_release(z->base.alloc, unc); return e; }
         memmove(nb + nrec, nb, z->nblk * sizeof *nb);
         z->blk = nb;
         uint64_t bp = sstart + 12;
@@ -101,11 +101,11 @@ static fulta_arc_err_t parse(xz_stream_t *z, uint64_t off, uint64_t len) {
             xz_blk_t *b = &nb[i];
             memset(b, 0, sizeof *b);
             uint8_t hdr[1024];
-            if ((e = fa_range_read_exact(&z->range, bp, hdr, 1))) break;
+            if ((e = fa_range_read_exact(&z->range, bp, fa_bytes_mut(hdr, 1)))) break;
             size_t hs = ((size_t)hdr[0] + 1) * 4;
             if (!hdr[0] || hs > uns[i]) { e = FULTA_ARC_ERR_CORRUPT; break; }
-            if ((e = fa_range_read_exact(&z->range, bp, hdr, hs))) break;
-            if (fa_crc32(0, hdr, hs - 4) != fa_le32(hdr + hs - 4)) { e = FULTA_ARC_ERR_CORRUPT; break; }
+            if ((e = fa_range_read_exact(&z->range, bp, fa_bytes_mut(hdr, hs)))) break;
+            if (fa_crc32(0, fa_bytes(hdr, hs - 4)) != fa_le32(hdr + hs - 4)) { e = FULTA_ARC_ERR_CORRUPT; break; }
             uint8_t fl = hdr[1];
             if (fl & 0x3C) { e = FULTA_ARC_ERR_UNSUPPORTED; break; }
             size_t q = 2;
@@ -132,8 +132,8 @@ static fulta_arc_err_t parse(xz_stream_t *z, uint64_t off, uint64_t len) {
             b->check_off = bp + ((uns[i] + 3) & ~(uint64_t)3) - cs;
             bp += (uns[i] + 3) & ~(uint64_t)3;
         }
-        fa_free(uns);
-        fa_free(unc);
+        fa_release(z->base.alloc, uns);
+        fa_release(z->base.alloc, unc);
         if (e) return e;
         z->nblk += nrec;
         end = sstart;
@@ -144,7 +144,7 @@ static fulta_arc_err_t parse(xz_stream_t *z, uint64_t off, uint64_t len) {
 static fulta_arc_err_t open_block(xz_stream_t *z) {
     xz_blk_t *b = &z->blk[z->cur];
     fa_stream_t *s;
-    fulta_arc_err_t e = fa_stream_range(&z->range, b->data_off, b->data_len, &s);
+    fulta_arc_err_t e = fa_stream_range(z->base.alloc, &z->range, b->data_off, b->data_len, &s);
     if (e) return e;
     for (int k = b->nfilt - 1; k >= 0 && !e; k--) {
         uint64_t id = b->fid[k];
@@ -178,7 +178,7 @@ static fulta_arc_err_t finish_block(xz_stream_t *z) {
     xz_blk_t *b = &z->blk[z->cur];
     uint8_t want[64], got[32];
     size_t cs = CHECK_SIZE[b->check_type];
-    fulta_arc_err_t e = fa_range_read_exact(&z->range, b->check_off, want, cs);
+    fulta_arc_err_t e = fa_range_read_exact(&z->range, b->check_off, fa_bytes_mut(want, cs));
     if (e) return e;
     if (b->check_type == 1) { fa_put_le32(got, z->crc32); if (memcmp(got, want, 4)) return FULTA_ARC_ERR_CHECKSUM; }
     else if (b->check_type == 4) { fa_put_le64(got, z->crc64); if (memcmp(got, want, 8)) return FULTA_ARC_ERR_CHECKSUM; }
@@ -211,7 +211,7 @@ static fulta_arc_err_t xz_read(fa_stream_t *st, void *buf, size_t n, size_t *got
         if (!g) return FULTA_ARC_ERR_TRUNCATED;
         uint8_t *p = (uint8_t *)buf + *got;
         uint8_t ct = z->blk[z->cur].check_type;
-        if (ct == 1) z->crc32 = fa_crc32(z->crc32, p, g);
+        if (ct == 1) z->crc32 = fa_crc32(z->crc32, fa_bytes(p, g));
         else if (ct == 4) z->crc64 = crc64(z->crc64, p, g);
         else if (ct == 10) fa_sha256_update(&z->sha, p, g);
         *got += g;
@@ -223,22 +223,25 @@ static fulta_arc_err_t xz_read(fa_stream_t *st, void *buf, size_t n, size_t *got
 static void xz_destroy(fa_stream_t *st) {
     xz_stream_t *z = (xz_stream_t *)st;
     fa_stream_destroy(z->s);
-    fa_free(z->blk);
-    fa_free(z->range.pieces);
-    fa_free(z);
+    fa_release(st->alloc, z->blk);
+    fa_release(st->alloc, z->range.pieces);
+    fa_release(st->alloc, z);
 }
 
 fulta_arc_err_t fa_dec_xz_range(const fa_range_t *r, uint64_t off, uint64_t len, const fa_limits_t *lim,
                                 fa_stream_t **out) {
-    xz_stream_t *z = fa_calloc(1, sizeof *z);
+    proven_allocator_t a = lim ? lim->alloc : proven_heap_allocator();
+    xz_stream_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) return FULTA_ARC_ERR_NOMEM;
-    z->range.pieces = fa_calloc(r->count, sizeof *r->pieces);
-    if (!z->range.pieces) { fa_free(z); return FULTA_ARC_ERR_NOMEM; }
+    z->range.pieces = fa_zalloc(a, r->count, sizeof *r->pieces);
+    if (!z->range.pieces) { fa_release(a, z); return FULTA_ARC_ERR_NOMEM; }
     memcpy(z->range.pieces, r->pieces, r->count * sizeof *r->pieces);
     z->range.count = r->count;
     z->range.size = r->size;
     if (lim) z->limits = *lim;
+    z->limits.alloc = a;
     z->lim = &z->limits;
+    z->base.alloc = a;
     z->base.read = xz_read;
     z->base.destroy = xz_destroy;
     fulta_arc_err_t e = len < 12 ? FULTA_ARC_ERR_CORRUPT : parse(z, off, len);

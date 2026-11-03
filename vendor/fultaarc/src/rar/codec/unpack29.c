@@ -19,9 +19,6 @@ typedef fa_rar_unpack_status_t status_t;
 
 /* ---- PPMd glue (spec 11) ---- */
 
-static void *ppm_alloc(ISzAllocPtr p, size_t size) { (void)p; return malloc(size); }
-static void ppm_free(ISzAllocPtr p, void *a) { (void)p; free(a); }
-static const ISzAlloc PPM_ALLOC = { ppm_alloc, ppm_free };
 
 /* The range coder's bytes: the next 8 bits of the packed stream, which is byte-aligned here. */
 static Byte ppm_read(IByteInPtr p) {
@@ -30,7 +27,7 @@ static Byte ppm_read(IByteInPtr p) {
 }
 
 void rc_unpack29_free(rc_unpack_t *u) {
-    if (u->v29.ppmd_alloc) Ppmd7_Free(&u->v29.ppmd, &PPM_ALLOC);
+    if (u->v29.ppmd_alloc) Ppmd7_Free(&u->v29.ppmd, &u->ppm_alloc.vt);
     u->v29.ppmd_alloc = false;
     u->v29.ppmd_ready = false;
 }
@@ -64,7 +61,7 @@ static bool ppm_header(rc_unpack_t *u) {
         }
         if (u->v29.ppmd_alloc && u->v29.ppmd_mem != size) rc_unpack29_free(u);
         if (!u->v29.ppmd_alloc) {
-            if (!Ppmd7_Alloc(&u->v29.ppmd, size, &PPM_ALLOC)) return false;
+            if (!Ppmd7_Alloc(&u->v29.ppmd, size, &u->ppm_alloc.vt)) return false;
             u->v29.ppmd_alloc = true;
             u->v29.ppmd_mem = size;
         }
@@ -132,17 +129,17 @@ static status_t read_filter(rc_unpack_t *u, bool ppm) {
     size_t n = (flags & 7) + 1;
     if (n == 7) { uint8_t x; NEXT_BYTE(x); n = (size_t)x + 7; }
     else if (n == 8) { uint8_t x, y; NEXT_BYTE(x); NEXT_BYTE(y); n = (size_t)x << 8 | y; }
-    uint8_t *data = (uint8_t*)malloc(n ? n : 1);
+    uint8_t *data = fa_alloc(u->alloc, n ? n : 1);
     if (!data) return FA_RAR_UNPACK_NO_MEMORY;
     for (size_t i = 0; i < n; ++i) {
         if (ppm) {
             int c = ppm_sym(u);
-            if (c < 0) { free(data); return S_BAD; }
+            if (c < 0) { fa_release(u->alloc, data); return S_BAD; }
             data[i] = (uint8_t)c;
         } else data[i] = (uint8_t)rc_get(&u->bits, 8);
     }
 #undef NEXT_BYTE
-    if (rc_overrun(&u->bits)) { free(data); return S_BAD; }
+    if (rc_overrun(&u->bits)) { fa_release(u->alloc, data); return S_BAD; }
 
     membr_t m = { data, n, 0, false };
     status_t st = S_BAD;
@@ -172,7 +169,7 @@ static status_t read_filter(rc_unpack_t *u, bool ppm) {
     if (num == u->v29.prog_count) {
         uint32_t clen = vmnum(&m);
         if (clen < 1 || clen > 0x10000 || u->v29.prog_count >= 1024 || m.bad) goto out;
-        uint8_t *code = (uint8_t*)malloc(clen);
+        uint8_t *code = fa_alloc(u->alloc, clen);
         if (!code) { st = FA_RAR_UNPACK_NO_MEMORY; goto out; }
         uint8_t x = 0;
         for (uint32_t i = 0; i < clen; ++i) {
@@ -181,7 +178,7 @@ static status_t read_filter(rc_unpack_t *u, bool ppm) {
         }
         bool ok = !m.bad && x == code[0];
         int type = ok ? identify(code, clen) : 0;
-        free(code);
+        fa_release(u->alloc, code);
         if (!ok) goto out;
         u->v29.prog[num].type = type;
         u->v29.prog[num].uses = 0;
@@ -215,7 +212,7 @@ static status_t read_filter(rc_unpack_t *u, bool ppm) {
     if (length == 0) { st = S_OK; goto out; }
     st = rc_add_filter(u, &f) ? S_OK : S_BAD;
 out:
-    free(data);
+    fa_release(u->alloc, data);
     return st;
 }
 

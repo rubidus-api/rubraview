@@ -695,7 +695,11 @@ static void draw_pack_window(app_state_t *app, rubraview_pal_rect_t name_label, 
         }
     }
     /* what the choice means, then what is greyed */
-    const char *note = app->pack_pw_len[0] || app->pack_focus > 0 ? (sevenz ? T("Password: AES-256 (7-Zip's own)") : T("Password: AES-256 (WinZip's; Windows' own ZIP cannot open it)"))
+    /* D-265 (owner, 2026-11-03: "7-Zip과 같게 + 안내"): LZMA's dictionary at Maximum and Ultra as 7-Zip's (FultaArc 3ca96f0) */
+    bool lzma = lit == RUBRAVIEW_PACK_METHOD_LZMA || lit == RUBRAVIEW_PACK_METHOD_LZMA2;
+    const char *note = lzma && app->pack_level == 5 ? T("Ultra: a large file may take about 3 GB of memory to pack, as in 7-Zip")
+                     : lzma && app->pack_level == 4 ? T("Maximum: a large file may take about 1.5 GB of memory to pack, as in 7-Zip")
+                     : app->pack_pw_len[0] || app->pack_focus > 0 ? (sevenz ? T("Password: AES-256 (7-Zip's own)") : T("Password: AES-256 (WinZip's; Windows' own ZIP cannot open it)"))
                      : store ? T("Store: the files go in as they are, the codec unused")
                      : !sevenz && rubraview_pack_method_plain(format, lit) ? T("ZIP with Deflate: Windows opens it too")
                      : !sevenz ? T("ZIP with this codec: 7-Zip, Bandizip and this viewer open it, Windows' own does not")

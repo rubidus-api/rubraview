@@ -3,6 +3,7 @@
 # operating scripts live in the sibling private repository and are linked in locally.
 /*
 !/.gitignore
+!/.gitattributes
 !/README.md
 !/README.ko.md
 !/LICENSE

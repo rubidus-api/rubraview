@@ -36,6 +36,7 @@ typedef struct iso_item {
 } iso_item_t;
 
 typedef struct iso_state {
+    proven_allocator_t alloc;   /* the archive's: this state and everything it holds */
     iso_item_t *items;
     size_t n, cap;
     uint32_t blocksize;
@@ -59,7 +60,7 @@ static bool iso_seen(iso_state_t *st, uint32_t lba) {
     if (st->nvis < ISO_MAX_DIRS) {
         if (st->nvis == st->capvis) {
             size_t nc = st->capvis ? st->capvis * 2 : 64;
-            uint32_t *p = fa_realloc(st->visited, nc * sizeof *p);
+            uint32_t *p = fa_resize(st->alloc, st->visited, st->capvis * sizeof *p, nc * sizeof *p);
             if (!p) return true;    /* out of memory for the set: treat as seen, stop descending */
             st->visited = p;
             st->capvis = nc;
@@ -72,7 +73,7 @@ static bool iso_seen(iso_state_t *st, uint32_t lba) {
 static iso_item_t *iso_add(iso_state_t *st) {
     if (st->n == st->cap) {
         size_t nc = st->cap ? st->cap * 2 : 64;
-        iso_item_t *q = fa_realloc(st->items, nc * sizeof *q);
+        iso_item_t *q = fa_resize(st->alloc, st->items, st->cap * sizeof *q, nc * sizeof *q);
         if (!q) return NULL;
         st->items = q;
         st->cap = nc;
@@ -92,14 +93,14 @@ static void iso_clean_name(char *name, size_t *len) {
 
 /* Decode a Joliet (UCS-2BE) identifier into UTF-8. Returns a fresh string (caller frees) or NULL. `units` is the
  * number of 16-bit code units (lenfi/2). We byte-swap into a temp and reuse the UTF-16LE converter. */
-static char *iso_joliet_name(const uint8_t *fi, size_t units) {
+static char *iso_joliet_name(proven_allocator_t a, const uint8_t *fi, size_t units) {
     if (units == 0 || units > ISO_MAX_NAME) return NULL;
     uint8_t stackbuf[512];
-    uint8_t *le = units * 2 <= sizeof stackbuf ? stackbuf : fa_malloc(units * 2);
+    uint8_t *le = units * 2 <= sizeof stackbuf ? stackbuf : fa_alloc(a, units * 2);
     if (!le) return NULL;
     for (size_t i = 0; i < units; i++) { le[2 * i] = fi[2 * i + 1]; le[2 * i + 1] = fi[2 * i]; }
-    char *u = fa_utf16le_to_utf8(le, units);
-    if (le != stackbuf) fa_free(le);
+    char *u = fa_utf16le_to_utf8(a, fa_bytes(le, units * 2));
+    if (le != stackbuf) fa_release(a, le);
     if (!u) return NULL;
     size_t n = strlen(u);                       /* strip ;version and a trailing '.' on the decoded side */
     for (size_t i = 0; i < n; i++) if (u[i] == ';') { n = i; break; }
@@ -155,10 +156,10 @@ static void rr_scan(fulta_arc_t *arc, iso_state_t *st, const uint8_t *buf, uint3
                 const fulta_arc_source_t *src = arc->volumes[0];
                 uint64_t cbase = (uint64_t)clba * st->blocksize + coff;
                 if (clen && clen <= ISO_MAX_CE_AREA && cbase < src->size && clen <= src->size - cbase) {
-                    uint8_t *cbuf = fa_malloc(clen);
-                    if (cbuf && fa_source_read_exact(src, cbase, cbuf, clen) == 0)
+                    uint8_t *cbuf = fa_alloc(arc->alloc, clen);
+                    if (cbuf && fa_source_read_exact(src, cbase, fa_bytes_mut(cbuf, clen)) == 0)
                         rr_scan(arc, st, cbuf, 0, clen, rr, ce_budget, sl_sep);
-                    fa_free(cbuf);
+                    fa_release(arc->alloc, cbuf);
                 }
             }
             break;                                       /* CE is the last usable entry of this area */
@@ -181,7 +182,7 @@ static uint32_t iso_dir_length(const fulta_arc_source_t *src, iso_state_t *st, u
     uint64_t base = (uint64_t)lba * st->blocksize;
     if (base >= src->size || src->size - base < 34) return 0;
     uint8_t rec[34];
-    if (fa_source_read_exact(src, base, rec, sizeof rec)) return 0;
+    if (fa_source_read_exact(src, base, fa_bytes_mut(rec, sizeof rec))) return 0;
     if (rec[0] < 34 || rec[32] != 1 || rec[33] != 0) return 0;   /* record 0 must be "." (0x00) */
     uint32_t len = fa_le32(rec + 10);
     return len <= ISO_MAX_DIR ? len : 0;                          /* cap here, not only at the iso_walk callee */
@@ -197,9 +198,9 @@ static fulta_arc_err_t iso_walk(fulta_arc_t *arc, iso_state_t *st, uint32_t lba,
     uint64_t base = (uint64_t)lba * st->blocksize;
     if (base >= src->size || length > src->size - base) return FULTA_ARC_OK;
 
-    uint8_t *buf = fa_malloc(length);
+    uint8_t *buf = fa_alloc(arc->alloc, length);
     if (!buf) return FULTA_ARC_ERR_NOMEM;
-    if (fa_source_read_exact(src, base, buf, length)) { fa_free(buf); return FULTA_ARC_OK; }
+    if (fa_source_read_exact(src, base, fa_bytes_mut(buf, length))) { fa_release(arc->alloc, buf); return FULTA_ARC_OK; }
 
     fulta_arc_err_t e = FULTA_ARC_OK;
     uint32_t p = 0;
@@ -247,8 +248,8 @@ static fulta_arc_err_t iso_walk(fulta_arc_t *arc, iso_state_t *st, uint32_t lba,
             nl = rr.namelen; memcpy(nmbuf, rr.name, nl); nmbuf[nl] = 0;
         } else if (mode == ISO_JOLIET) {
             if (lenfi & 1) { p += reclen; continue; }               /* UCS-2 names are an even byte count */
-            jol = iso_joliet_name(fi, lenfi / 2);
-            if (!jol || !jol[0]) { fa_free(jol); p += reclen; continue; }
+            jol = iso_joliet_name(arc->alloc, fi, lenfi / 2);
+            if (!jol || !jol[0]) { fa_release(arc->alloc, jol); p += reclen; continue; }
             nm = jol; nl = strlen(jol);
         } else {
             nl = lenfi;                                             /* lenfi <= 255 < sizeof nmbuf */
@@ -258,14 +259,14 @@ static fulta_arc_err_t iso_walk(fulta_arc_t *arc, iso_state_t *st, uint32_t lba,
 
         char path[1024];
         size_t pl = strlen(prefix);
-        if (pl + 1 + nl + 1 > sizeof path) { fa_free(jol); p += reclen; continue; }   /* path too long */
+        if (pl + 1 + nl + 1 > sizeof path) { fa_release(arc->alloc, jol); p += reclen; continue; }   /* path too long */
         size_t k = pl;
         memcpy(path, prefix, pl);
         if (pl) path[k++] = '/';
         memcpy(path + k, nm, nl);
         k += nl;
         path[k] = 0;
-        fa_free(jol);
+        fa_release(arc->alloc, jol);
 
         if (mode == ISO_RR && rr.have_cl) {
             /* CL: a (file-flagged) placeholder for a relocated deep directory. Its own data length is 0, so read
@@ -277,16 +278,16 @@ static fulta_arc_err_t iso_walk(fulta_arc_t *arc, iso_state_t *st, uint32_t lba,
         } else if (is_dir) {
             if ((e = iso_walk(arc, st, ext_lba, datalen, depth + 1, path, mode, skip))) break;
         } else if (mode == ISO_RR && rr.is_link) {
-            char *safe = fa_malloc(strlen(path) + 1);
+            char *safe = fa_alloc(arc->alloc, strlen(path) + 1);
             if (!safe) { e = FULTA_ARC_ERR_NOMEM; break; }
             strcpy(safe, path);
-            if (!fa_sanitize_name(safe)) { fa_free(safe); safe = NULL; }
+            if (!fa_sanitize_name(safe)) { fa_release(arc->alloc, safe); safe = NULL; }
             const char *use = safe && safe[0] ? safe : "data";
-            fa_entry_t *en = fa_add_entry(arc, (const uint8_t *)path, strlen(path), use, "store");
+            fa_entry_t *en = fa_add_entry(arc, fa_bytes((const uint8_t *)path, strlen(path)), use, "store");
             iso_item_t *it = iso_add(st);
-            fa_free(safe);
+            fa_release(arc->alloc, safe);
             if (!en || !it) { e = FULTA_ARC_ERR_NOMEM; break; }
-            uint8_t *tgt = fa_malloc(rr.tlen ? rr.tlen : 1);
+            uint8_t *tgt = fa_alloc(arc->alloc, rr.tlen ? rr.tlen : 1);
             if (!tgt) { e = FULTA_ARC_ERR_NOMEM; break; }
             memcpy(tgt, rr.target, rr.tlen);
             en->pub.flags |= FULTA_ARC_ENTRY_SYMLINK;              /* data is the link target (as tar/cpio do) */
@@ -300,20 +301,20 @@ static fulta_arc_err_t iso_walk(fulta_arc_t *arc, iso_state_t *st, uint32_t lba,
                 bool zf = false; uint8_t zblog = 0; uint64_t zusz = 0;
                 if (datalen >= ISO_ZF_HDR) {
                     uint8_t zh[ISO_ZF_HDR];
-                    if (fa_source_read_exact(src, foff, zh, ISO_ZF_HDR) == 0 &&
+                    if (fa_source_read_exact(src, foff, fa_bytes_mut(zh, ISO_ZF_HDR)) == 0 &&
                         memcmp(zh, ISO_ZF_MAGIC, 8) == 0 && zh[12] == 4 /* 16-byte header */ &&
                         zh[13] >= 15 && zh[13] <= 20) {
                         zf = true; zblog = zh[13]; zusz = fa_le32(zh + 8);
                     }
                 }
-                char *safe = fa_malloc(strlen(path) + 1);
+                char *safe = fa_alloc(arc->alloc, strlen(path) + 1);
                 if (!safe) { e = FULTA_ARC_ERR_NOMEM; break; }
                 strcpy(safe, path);
-                if (!fa_sanitize_name(safe)) { fa_free(safe); safe = NULL; }
+                if (!fa_sanitize_name(safe)) { fa_release(arc->alloc, safe); safe = NULL; }
                 const char *use = safe && safe[0] ? safe : "data";
-                fa_entry_t *en = fa_add_entry(arc, (const uint8_t *)path, strlen(path), use, zf ? "zisofs" : "store");
+                fa_entry_t *en = fa_add_entry(arc, fa_bytes((const uint8_t *)path, strlen(path)), use, zf ? "zisofs" : "store");
                 iso_item_t *it = iso_add(st);
-                fa_free(safe);
+                fa_release(arc->alloc, safe);
                 if (!en || !it) { e = FULTA_ARC_ERR_NOMEM; break; }
                 en->pub.size = zf ? zusz : datalen;
                 en->pub.packed_size = datalen;
@@ -324,7 +325,7 @@ static fulta_arc_err_t iso_walk(fulta_arc_t *arc, iso_state_t *st, uint32_t lba,
         }
         p += reclen;
     }
-    fa_free(buf);
+    fa_release(arc->alloc, buf);
     return e;
 }
 
@@ -337,7 +338,7 @@ static bool iso_has_susp(fulta_arc_t *arc, iso_state_t *st, uint32_t root_lba, u
     if (len < 34 || base >= src->size || len > src->size - base) return false;
     uint8_t rec[2048];
     if (len > sizeof rec) len = sizeof rec;
-    if (fa_source_read_exact(src, base, rec, len)) return false;
+    if (fa_source_read_exact(src, base, fa_bytes_mut(rec, len))) return false;
     uint8_t reclen = rec[0], lenfi = rec[32];
     if (reclen < 34 || reclen > len) return false;
     uint32_t su = 33u + lenfi + ((lenfi & 1) ? 0u : 1u);
@@ -358,14 +359,15 @@ static fulta_arc_err_t iso_open(fulta_arc_t *arc, uint64_t offset) {
     const fulta_arc_source_t *src = arc->volumes[0];
     if (src->size < ISO_SYS_AREA + 2048) return FULTA_ARC_ERR_NOT_ARCHIVE;
     uint8_t vd[2048];
-    if (fa_source_read_exact(src, ISO_SYS_AREA, vd, 2048)) return FULTA_ARC_ERR_NOT_ARCHIVE;
+    if (fa_source_read_exact(src, ISO_SYS_AREA, fa_bytes_mut(vd, 2048))) return FULTA_ARC_ERR_NOT_ARCHIVE;
     if (vd[0] != 1 || memcmp(vd + 1, "CD001", 5) != 0) return FULTA_ARC_ERR_NOT_ARCHIVE;   /* Primary Volume Descriptor */
 
     uint32_t bs = (uint32_t)(vd[128] | (vd[129] << 8));
     if (bs < 512 || bs > 65536 || (bs & (bs - 1))) return FULTA_ARC_ERR_NOT_ARCHIVE;       /* power of two, 512..64K */
 
-    iso_state_t *st = fa_calloc(1, sizeof *st);
+    iso_state_t *st = fa_zalloc(arc->alloc, 1, sizeof *st);
     if (!st) return FULTA_ARC_ERR_NOMEM;
+    st->alloc = arc->alloc;
     st->blocksize = bs;
     arc->state = st;
 
@@ -379,7 +381,7 @@ static fulta_arc_err_t iso_open(fulta_arc_t *arc, uint64_t offset) {
         uint64_t vo = (uint64_t)s * 2048;
         if (vo + 2048 > src->size) break;
         uint8_t v[2048];
-        if (fa_source_read_exact(src, vo, v, 2048)) break;
+        if (fa_source_read_exact(src, vo, fa_bytes_mut(v, 2048))) break;
         if (memcmp(v + 1, "CD001", 5) != 0) break;
         if (v[0] == 255) break;                     /* volume-descriptor set terminator */
         if (v[0] == 2) {                            /* supplementary: Joliet if the escape is %/@, %/C or %/E */
@@ -416,11 +418,11 @@ static fulta_arc_err_t iso_zisofs_extract(fulta_arc_t *arc, iso_item_t *it, cons
     uint64_t tbl_bytes = (nblocks + 1) * 4;
     if (it->size < ISO_ZF_HDR || tbl_bytes > it->size - ISO_ZF_HDR) return FULTA_ARC_ERR_CORRUPT;   /* table in extent */
 
-    uint32_t *tbl = fa_malloc((size_t)tbl_bytes);
+    uint32_t *tbl = fa_alloc(arc->alloc, (size_t)tbl_bytes);
     if (!tbl) return FULTA_ARC_ERR_NOMEM;
-    if (fa_source_read_exact(src, it->off + ISO_ZF_HDR, (uint8_t *)tbl, (size_t)tbl_bytes)) { fa_free(tbl); return FULTA_ARC_ERR_TRUNCATED; }
+    if (fa_source_read_exact(src, it->off + ISO_ZF_HDR, fa_bytes_mut((uint8_t *)tbl, (size_t)tbl_bytes))) { fa_release(arc->alloc, tbl); return FULTA_ARC_ERR_TRUNCATED; }
 
-    uint8_t *obuf = fa_malloc(bsize), *cbuf = NULL;
+    uint8_t *obuf = fa_alloc(arc->alloc, bsize), *cbuf = NULL;
     size_t ccap = 0;
     fulta_arc_err_t e = obuf ? FULTA_ARC_OK : FULTA_ARC_ERR_NOMEM;
     uint64_t produced = 0;
@@ -434,18 +436,18 @@ static fulta_arc_err_t iso_zisofs_extract(fulta_arc_t *arc, iso_item_t *it, cons
         } else {
             uint32_t clen = end - start;
             if (clen < 2) { e = FULTA_ARC_ERR_CORRUPT; break; }
-            if (clen > ccap) { uint8_t *nc = fa_realloc(cbuf, clen); if (!nc) { e = FULTA_ARC_ERR_NOMEM; break; } cbuf = nc; ccap = clen; }
-            if (fa_source_read_exact(src, it->off + start, cbuf, clen)) { e = FULTA_ARC_ERR_TRUNCATED; break; }
+            if (clen > ccap) { uint8_t *nc = fa_resize(arc->alloc, cbuf, ccap, clen); if (!nc) { e = FULTA_ARC_ERR_NOMEM; break; } cbuf = nc; ccap = clen; }
+            if (fa_source_read_exact(src, it->off + start, fa_bytes_mut(cbuf, clen))) { e = FULTA_ARC_ERR_TRUNCATED; break; }
             fa_stream_t *ms = NULL, *dec = NULL;            /* skip the 2-byte zlib header; Adler trailer is ignored */
-            if ((e = fa_stream_memory(cbuf + 2, clen - 2, &ms))) break;
+            if ((e = fa_stream_memory(arc->alloc, cbuf + 2, clen - 2, &ms))) break;
             if ((e = fa_dec_deflate(ms, false, want, &dec))) break;
-            e = fa_stream_read_exact(dec, obuf, want);
+            e = fa_stream_read_exact(dec, fa_bytes_mut(obuf, want));
             fa_stream_destroy(dec);
             if (!e) e = sink->write(sink->ctx, obuf, want);
         }
         produced += want;
     }
-    fa_free(tbl); fa_free(obuf); fa_free(cbuf);
+    fa_release(arc->alloc, tbl); fa_release(arc->alloc, obuf); fa_release(arc->alloc, cbuf);
     return e;
 }
 
@@ -460,7 +462,7 @@ static fulta_arc_err_t iso_extract(fulta_arc_t *arc, size_t index, const fulta_a
     fa_piece_t piece = { src, it->off, it->size };
     fa_range_t range = { &piece, 1, it->size };
     fa_stream_t *s = NULL;
-    fulta_arc_err_t e = fa_stream_range(&range, 0, it->size, &s);
+    fulta_arc_err_t e = fa_stream_range(arc->alloc, &range, 0, it->size, &s);
     if (e) return e;
     e = fa_pump(s, it->size, false, 0, sink, arc, arc->opt.keep_damaged);
     fa_stream_destroy(s);
@@ -470,10 +472,10 @@ static fulta_arc_err_t iso_extract(fulta_arc_t *arc, size_t index, const fulta_a
 static void iso_close(fulta_arc_t *arc) {
     iso_state_t *st = arc->state;
     if (!st) return;
-    for (size_t i = 0; i < st->n; i++) fa_free(st->items[i].link);
-    fa_free(st->items);
-    fa_free(st->visited);
-    fa_free(st);
+    for (size_t i = 0; i < st->n; i++) fa_release(arc->alloc, st->items[i].link);
+    fa_release(arc->alloc, st->items);
+    fa_release(arc->alloc, st->visited);
+    fa_release(arc->alloc, st);
     arc->state = NULL;
 }
 

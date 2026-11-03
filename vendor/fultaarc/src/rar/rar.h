@@ -123,7 +123,7 @@ const struct fa_rar_codec *fa_rar_codec(void);
 /** Reading entry `index` needs the module, and none was given. */
 bool fa_rar_needs_codec(const fa_rar_archive_t *archive, size_t index);
 
-[[nodiscard]] fa_rar_result_t fa_rar_open(proven_arena_t *arena, const uint8_t *data, size_t size);
+[[nodiscard]] fa_rar_result_t fa_rar_open(proven_allocator_t alloc, proven_arena_t *arena, const uint8_t *data, size_t size);
 
 /**
  * Open from every volume of a set, the first first (one volume is a plain
@@ -131,7 +131,7 @@ bool fa_rar_needs_codec(const fa_rar_archive_t *archive, size_t index);
  * headers are encrypted: without it ERR_ENCRYPTED, with a wrong one
  * ERR_BAD_PASSWORD. The volume array is copied; the bytes are borrowed.
  */
-[[nodiscard]] fa_rar_result_t fa_rar_open_volumes(proven_arena_t *arena, const fa_rar_volume_t *volumes,
+[[nodiscard]] fa_rar_result_t fa_rar_open_volumes(proven_allocator_t alloc, proven_arena_t *arena, const fa_rar_volume_t *volumes,
                                                                 size_t volume_count, proven_u8str_view_t password);
 
 /**

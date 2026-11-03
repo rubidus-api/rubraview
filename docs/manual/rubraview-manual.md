@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.77.exe              the viewer, as built
-dist/rubraview-v1.39.77/                 the release bundle
-dist/rubraview-v1.39.77.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.78.exe              the viewer, as built
+dist/rubraview-v1.39.78/                 the release bundle
+dist/rubraview-v1.39.78.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1656,7 +1656,8 @@ readable or hidden by the password (7z: then it is not even listed without
 it); `Enter` compresses. A new archive's
 password takes English letters, digits and symbols only (Hangul and other
 letters are dropped, and the screen says so). The password is AES-256; a ZIP with one needs 7-Zip or Bandizip, not Windows' own. A ZIP packs each file on its own and cannot hide its names: those chips are
-greyed for it. The bar at the foot has **Extract** (the way Settings › Files ›
+greyed for it. Maximum and Ultra with LZMA or LZMA2 pack as 7-Zip does: a large
+file may take about 1.5 GB or 3 GB of memory, and the window says so. The bar at the foot has **Extract** (the way Settings › Files ›
 Extracting says) and **Compress**, when they fit what is picked. **Look inside
 (an archive)** (or `Shift+Enter`) lists all of an archive's folders and
 files, as a folder is listed. Opening an archive opens it that way too: a ZIP,

@@ -32,6 +32,7 @@ typedef struct sz_folder {
 } sz_folder_t;
 
 typedef struct sz_streams {
+    proven_allocator_t alloc;   /* the archive's: every array below lives here */
     uint64_t pack_pos;
     uint64_t *pack_sizes;
     uint32_t npack;
@@ -70,7 +71,7 @@ static bool sz_probe(const uint8_t *h, size_t n, uint64_t *off) {
 
 /* ---- header reading ------------------------------------------------------------------------------------------ */
 
-typedef struct rd { const uint8_t *p; size_t n, pos; bool bad; } rd_t;
+typedef struct rd { const uint8_t *p; size_t n, pos; bool bad; proven_allocator_t alloc; } rd_t;
 
 static uint8_t rd_byte(rd_t *r) {
     if (r->pos >= r->n) { r->bad = true; return 0; }
@@ -97,7 +98,7 @@ static uint32_t rd_u32(rd_t *r) {
 static uint64_t rd_u64(rd_t *r) { uint64_t lo = rd_u32(r); return lo | ((uint64_t)rd_u32(r) << 32); }
 
 static bool *rd_bits(rd_t *r, uint64_t n) {
-    bool *v = fa_calloc(n ? (size_t)n : 1, sizeof *v);
+    bool *v = fa_zalloc(r->alloc, n ? (size_t)n : 1, sizeof *v);
     if (!v) { r->bad = true; return NULL; }
     uint8_t b = 0;
     for (uint64_t i = 0; i < n; i++) {
@@ -110,7 +111,7 @@ static bool *rd_bits(rd_t *r, uint64_t n) {
 static bool *rd_defined(rd_t *r, uint64_t n) {
     uint8_t all = rd_byte(r);
     if (!all) return rd_bits(r, n);
-    bool *v = fa_calloc(n ? (size_t)n : 1, sizeof *v);
+    bool *v = fa_zalloc(r->alloc, n ? (size_t)n : 1, sizeof *v);
     if (!v) { r->bad = true; return NULL; }
     for (uint64_t i = 0; i < n; i++) v[i] = true;
     return v;
@@ -124,18 +125,18 @@ static void rd_skip(rd_t *r, uint64_t n) {
 static void free_streams(sz_streams_t *s) {
     for (uint32_t i = 0; i < s->nfolders; i++) {
         sz_folder_t *f = &s->folders[i];
-        for (uint32_t c = 0; c < f->ncoders; c++) fa_free(f->coders[c].props);
-        fa_free(f->coders);
-        fa_free(f->binds);
-        fa_free(f->packed);
-        fa_free(f->sizes);
+        for (uint32_t c = 0; c < f->ncoders; c++) fa_release(s->alloc, f->coders[c].props);
+        fa_release(s->alloc, f->coders);
+        fa_release(s->alloc, f->binds);
+        fa_release(s->alloc, f->packed);
+        fa_release(s->alloc, f->sizes);
     }
-    fa_free(s->folders);
-    fa_free(s->pack_sizes);
-    fa_free(s->nsub);
-    fa_free(s->sub_sizes);
-    fa_free(s->sub_has_crc);
-    fa_free(s->sub_crc);
+    fa_release(s->alloc, s->folders);
+    fa_release(s->alloc, s->pack_sizes);
+    fa_release(s->alloc, s->nsub);
+    fa_release(s->alloc, s->sub_sizes);
+    fa_release(s->alloc, s->sub_has_crc);
+    fa_release(s->alloc, s->sub_crc);
     memset(s, 0, sizeof *s);
 }
 
@@ -148,7 +149,7 @@ static bool coder_is(const sz_coder_t *c, uint32_t id) {
 static fulta_arc_err_t parse_folder(rd_t *r, sz_folder_t *f) {
     uint64_t nc = rd_num(r);
     if (r->bad || nc == 0 || nc > MAX_CODERS) return FULTA_ARC_ERR_UNSUPPORTED;
-    f->coders = fa_calloc((size_t)nc, sizeof *f->coders);
+    f->coders = fa_zalloc(r->alloc, (size_t)nc, sizeof *f->coders);
     if (!f->coders) return FULTA_ARC_ERR_NOMEM;
     f->ncoders = (uint32_t)nc;
     for (uint32_t i = 0; i < f->ncoders; i++) {
@@ -167,7 +168,7 @@ static fulta_arc_err_t parse_folder(rd_t *r, sz_folder_t *f) {
         if (fl & 0x20) {
             uint64_t np = rd_num(r);
             if (np > r->n - r->pos) return FULTA_ARC_ERR_CORRUPT;
-            c->props = fa_malloc((size_t)np);
+            c->props = fa_alloc(r->alloc, (size_t)np);
             if (!c->props) return FULTA_ARC_ERR_NOMEM;
             memcpy(c->props, r->p + r->pos, (size_t)np);
             c->nprops = (uint32_t)np;
@@ -178,7 +179,7 @@ static fulta_arc_err_t parse_folder(rd_t *r, sz_folder_t *f) {
         if (coder_is(c, 0x06F10701)) f->encrypted = true;
     }
     f->nbinds = f->ncoders - 1;
-    f->binds = fa_calloc(f->nbinds ? f->nbinds : 1, sizeof *f->binds);
+    f->binds = fa_zalloc(r->alloc, f->nbinds ? f->nbinds : 1, sizeof *f->binds);
     if (!f->binds) return FULTA_ARC_ERR_NOMEM;
     for (uint32_t i = 0; i < f->nbinds; i++) {
         uint64_t in = rd_num(r), out = rd_num(r);
@@ -190,7 +191,7 @@ static fulta_arc_err_t parse_folder(rd_t *r, sz_folder_t *f) {
     }
     if (f->nin < f->nbinds) return FULTA_ARC_ERR_CORRUPT;
     f->npacked = f->nin - f->nbinds;
-    f->packed = fa_calloc(f->npacked ? f->npacked : 1, sizeof *f->packed);
+    f->packed = fa_zalloc(r->alloc, f->npacked ? f->npacked : 1, sizeof *f->packed);
     if (!f->packed) return FULTA_ARC_ERR_NOMEM;
     if (f->npacked == 1) {
         for (uint32_t i = 0; i < f->nin; i++) {
@@ -219,6 +220,7 @@ static fulta_arc_err_t parse_folder(rd_t *r, sz_folder_t *f) {
 }
 
 static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
+    s->alloc = r->alloc;   /* free_streams gives the arrays back to it */
     fulta_arc_err_t e;
     uint64_t t = rd_num(r);
     if (t == 0x06) {
@@ -226,7 +228,7 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
         uint64_t np = rd_num(r);
         if (r->bad || np > (1u << 24)) return FULTA_ARC_ERR_CORRUPT;
         s->npack = (uint32_t)np;
-        s->pack_sizes = fa_calloc(np ? (size_t)np : 1, sizeof *s->pack_sizes);
+        s->pack_sizes = fa_zalloc(r->alloc, np ? (size_t)np : 1, sizeof *s->pack_sizes);
         if (!s->pack_sizes) return FULTA_ARC_ERR_NOMEM;
         for (;;) {
             uint64_t t2 = rd_num(r);
@@ -238,7 +240,7 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
                 bool *d = rd_defined(r, np);
                 if (!d) return FULTA_ARC_ERR_NOMEM;
                 for (uint32_t i = 0; i < s->npack; i++) if (d[i]) rd_u32(r);
-                fa_free(d);
+                fa_release(r->alloc, d);
             } else {
                 rd_skip(r, rd_num(r));
             }
@@ -250,7 +252,7 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
         uint64_t nf = rd_num(r);
         if (r->bad || nf > (1u << 24)) return FULTA_ARC_ERR_CORRUPT;
         if (rd_byte(r) != 0) return FULTA_ARC_ERR_UNSUPPORTED;    /* external folders (additional streams) */
-        s->folders = fa_calloc(nf ? (size_t)nf : 1, sizeof *s->folders);
+        s->folders = fa_zalloc(r->alloc, nf ? (size_t)nf : 1, sizeof *s->folders);
         if (!s->folders) return FULTA_ARC_ERR_NOMEM;
         s->nfolders = (uint32_t)nf;
         uint32_t pack_index = 0;
@@ -263,7 +265,7 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
         if (rd_num(r) != 0x0C) return FULTA_ARC_ERR_CORRUPT;
         for (uint32_t i = 0; i < s->nfolders; i++) {
             sz_folder_t *f = &s->folders[i];
-            f->sizes = fa_calloc(f->ncoders, sizeof *f->sizes);
+            f->sizes = fa_zalloc(r->alloc, f->ncoders, sizeof *f->sizes);
             if (!f->sizes) return FULTA_ARC_ERR_NOMEM;
             for (uint32_t c = 0; c < f->ncoders; c++) f->sizes[c] = rd_num(r);
         }
@@ -276,7 +278,7 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
                 if (!d) return FULTA_ARC_ERR_NOMEM;
                 for (uint32_t i = 0; i < s->nfolders; i++)
                     if (d[i]) { s->folders[i].has_crc = true; s->folders[i].crc = rd_u32(r); }
-                fa_free(d);
+                fa_release(r->alloc, d);
             } else {
                 rd_skip(r, rd_num(r));
             }
@@ -284,7 +286,7 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
         t = rd_num(r);
     }
     /* substreams: default one per folder */
-    s->nsub = fa_calloc(s->nfolders ? s->nfolders : 1, sizeof *s->nsub);
+    s->nsub = fa_zalloc(r->alloc, s->nfolders ? s->nfolders : 1, sizeof *s->nsub);
     if (!s->nsub) return FULTA_ARC_ERR_NOMEM;
     for (uint32_t i = 0; i < s->nfolders; i++) s->nsub[i] = 1;
     bool sizes_read = false;
@@ -300,9 +302,9 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
         }
         for (uint32_t i = 0; i < s->nfolders; i++) s->nsubtotal += s->nsub[i];
         if (s->nsubtotal > (1u << 24)) return FULTA_ARC_ERR_CORRUPT;
-        s->sub_sizes = fa_calloc(s->nsubtotal ? (size_t)s->nsubtotal : 1, sizeof *s->sub_sizes);
-        s->sub_has_crc = fa_calloc(s->nsubtotal ? (size_t)s->nsubtotal : 1, sizeof *s->sub_has_crc);
-        s->sub_crc = fa_calloc(s->nsubtotal ? (size_t)s->nsubtotal : 1, sizeof *s->sub_crc);
+        s->sub_sizes = fa_zalloc(r->alloc, s->nsubtotal ? (size_t)s->nsubtotal : 1, sizeof *s->sub_sizes);
+        s->sub_has_crc = fa_zalloc(r->alloc, s->nsubtotal ? (size_t)s->nsubtotal : 1, sizeof *s->sub_has_crc);
+        s->sub_crc = fa_zalloc(r->alloc, s->nsubtotal ? (size_t)s->nsubtotal : 1, sizeof *s->sub_crc);
         if (!s->sub_sizes || !s->sub_has_crc || !s->sub_crc) return FULTA_ARC_ERR_NOMEM;
         size_t k = 0;
         for (uint32_t i = 0; i < s->nfolders; i++) {
@@ -337,7 +339,7 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
                     for (uint32_t j = 0; j < s->nsub[i]; j++, si++, di++)
                         if (d[di]) { s->sub_has_crc[si] = true; s->sub_crc[si] = rd_u32(r); }
                 }
-                fa_free(d);
+                fa_release(r->alloc, d);
             } else {
                 rd_skip(r, rd_num(r));
             }
@@ -347,9 +349,9 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
     }
     if (!sizes_read) {
         s->nsubtotal = s->nfolders;
-        s->sub_sizes = fa_calloc(s->nfolders ? s->nfolders : 1, sizeof *s->sub_sizes);
-        s->sub_has_crc = fa_calloc(s->nfolders ? s->nfolders : 1, sizeof *s->sub_has_crc);
-        s->sub_crc = fa_calloc(s->nfolders ? s->nfolders : 1, sizeof *s->sub_crc);
+        s->sub_sizes = fa_zalloc(r->alloc, s->nfolders ? s->nfolders : 1, sizeof *s->sub_sizes);
+        s->sub_has_crc = fa_zalloc(r->alloc, s->nfolders ? s->nfolders : 1, sizeof *s->sub_has_crc);
+        s->sub_crc = fa_zalloc(r->alloc, s->nfolders ? s->nfolders : 1, sizeof *s->sub_crc);
         if (!s->sub_sizes || !s->sub_has_crc || !s->sub_crc) return FULTA_ARC_ERR_NOMEM;
     }
     for (uint32_t i = 0; i < s->nfolders && !sizes_read; i++) s->sub_sizes[i] = s->folders[i].sizes[s->folders[i].main];
@@ -370,9 +372,9 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
 
 /* 7zAES key = SHA-256 iterated 2^power times over (salt | password-UTF-16LE | counter_le64); power 0x3F is the
  * raw salt||password form. Shared by the reader (get_key) and the writer (write_7z). */
-fulta_arc_err_t fa_7z_derive_key(const char *pw, const uint8_t *salt, size_t salt_len, uint32_t power,
+fulta_arc_err_t fa_7z_derive_key(proven_allocator_t a, const char *pw, const uint8_t *salt, size_t salt_len, uint32_t power,
                                  uint8_t key[32]) {
-    fa_buf_t u = {0};
+    fa_buf_t u = {.alloc = a};
     const uint8_t *s = (const uint8_t *)pw;
     size_t n = strlen(pw);
     fulta_arc_err_t e = FULTA_ARC_OK;
@@ -388,10 +390,10 @@ fulta_arc_err_t fa_7z_derive_key(const char *pw, const uint8_t *salt, size_t sal
             cp -= 0x10000;
             fa_put_le16(t, (uint16_t)(0xD800 + (cp >> 10)));
             fa_put_le16(t + 2, (uint16_t)(0xDC00 + (cp & 0x3FF)));
-            e = fa_buf_append(&u, t, 4);
+            e = fa_buf_append(&u, fa_bytes(t, 4));
         } else {
             fa_put_le16(t, (uint16_t)cp);
-            e = fa_buf_append(&u, t, 2);
+            e = fa_buf_append(&u, fa_bytes(t, 2));
         }
         if (e) { fa_buf_free(&u); return e; }
     }
@@ -403,7 +405,7 @@ fulta_arc_err_t fa_7z_derive_key(const char *pw, const uint8_t *salt, size_t sal
     } else {
         fa_sha256_t h;
         fa_sha256_init(&h);
-        uint8_t *blk = fa_malloc(salt_len + u.size + 8);
+        uint8_t *blk = fa_alloc(a, salt_len + u.size + 8);
         if (!blk) { fa_buf_free(&u); return FULTA_ARC_ERR_NOMEM; }
         if (salt_len) memcpy(blk, salt, salt_len);
         if (u.size) memcpy(blk + salt_len, u.data, u.size);
@@ -412,7 +414,7 @@ fulta_arc_err_t fa_7z_derive_key(const char *pw, const uint8_t *salt, size_t sal
             fa_put_le64(blk + bl, i);
             fa_sha256_update(&h, blk, bl + 8);
         }
-        fa_free(blk);
+        fa_release(a, blk);
         fa_sha256_final(&h, key);
     }
     fa_buf_free(&u);
@@ -444,9 +446,9 @@ static fulta_arc_err_t get_key(fulta_arc_t *arc, const sz_coder_t *c, uint32_t a
     fulta_arc_err_t e = fa_password(arc, attempt, &pw);
     if (e) return e;
     if (!st->key_pw || strcmp(st->key_pw, pw) != 0) {      /* remember which password this key came from */
-        char *c = fa_strndup(pw, strlen(pw));
+        char *c = fa_strndup_a(arc->alloc, pw, strlen(pw));
         if (!c) return FULTA_ARC_ERR_NOMEM;
-        fa_free(st->key_pw);
+        fa_release(arc->alloc, st->key_pw);
         st->key_pw = c;
     }
     /* cache by (password, properties) */
@@ -457,7 +459,7 @@ static fulta_arc_err_t get_key(fulta_arc_t *arc, const sz_coder_t *c, uint32_t a
     fa_sha256_update(&h, pw, strlen(pw));
     fa_sha256_final(&h, ph);
     if (st->key_valid && memcmp(ph, st->key_props_hash, 32) == 0) { memcpy(key, st->key, 32); return FULTA_ARC_OK; }
-    e = fa_7z_derive_key(pw, salt, salt_len, power, key);
+    e = fa_7z_derive_key(arc->alloc, pw, salt, salt_len, power, key);
     if (e) return e;
     memcpy(st->key, key, 32);
     memcpy(st->key_props_hash, ph, 32);
@@ -559,7 +561,7 @@ static fulta_arc_err_t open_folder(fulta_arc_t *arc, const sz_streams_t *ss, uin
     fulta_arc_err_t e = FULTA_ARC_OK;
     for (uint32_t k = 0; k < f->npacked && !e; k++) {
         uint64_t n = ss->pack_sizes[f->first_pack + k];
-        e = fa_stream_range(&st->range, pos, n, &packs[k]);
+        e = fa_stream_range(arc->alloc, &st->range, pos, n, &packs[k]);
         pos += n;
     }
     if (!e) e = open_coder(arc, ss, fi, f->main, packs, attempt, 0, out);
@@ -576,12 +578,12 @@ static fulta_arc_err_t folder_to_memory(fulta_arc_t *arc, const sz_streams_t *ss
     fa_stream_t *s;
     fulta_arc_err_t e = open_folder(arc, ss, fi, attempt, &s);
     if (e) return e;
-    uint8_t *buf = fa_malloc((size_t)size);
+    uint8_t *buf = fa_alloc(arc->alloc, (size_t)size);
     if (!buf) { fa_stream_destroy(s); return FULTA_ARC_ERR_NOMEM; }
-    e = fa_stream_read_exact(s, buf, (size_t)size);
+    e = fa_stream_read_exact(s, fa_bytes_mut(buf, (size_t)size));
     fa_stream_destroy(s);
-    if (!e && f->has_crc && fa_crc32(0, buf, (size_t)size) != f->crc) e = FULTA_ARC_ERR_CHECKSUM;
-    if (e) { fa_free(buf); return e; }
+    if (!e && f->has_crc && fa_crc32(0, fa_bytes(buf, (size_t)size)) != f->crc) e = FULTA_ARC_ERR_CHECKSUM;
+    if (e) { fa_release(arc->alloc, buf); return e; }
     *out = buf;
     *outlen = (size_t)size;
     return FULTA_ARC_OK;
@@ -607,18 +609,18 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
         if (t == 0) break;
         uint64_t size = rd_num(r);
         if (r->bad || size > r->n - r->pos) { e = FULTA_ARC_ERR_CORRUPT; goto done; }
-        rd_t sub = {r->p + r->pos, (size_t)size, 0, false};
+        rd_t sub = {r->p + r->pos, (size_t)size, 0, false, r->alloc};
         r->pos += (size_t)size;
         if (t == 0x0E) {
-            fa_free(empty);
+            fa_release(arc->alloc, empty);
             empty = rd_bits(&sub, nfiles);
             nempty = 0;
             for (uint64_t i = 0; empty && i < nfiles; i++) nempty += empty[i];
         } else if (t == 0x0F) {
-            fa_free(emptyfile);
+            fa_release(arc->alloc, emptyfile);
             emptyfile = rd_bits(&sub, nempty);
         } else if (t == 0x10) {
-            fa_free(anti);
+            fa_release(arc->alloc, anti);
             anti = rd_bits(&sub, nempty);
         } else if (t == 0x11) {
             if (rd_byte(&sub) != 0) { e = FULTA_ARC_ERR_UNSUPPORTED; goto done; }
@@ -627,16 +629,16 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
         } else if (t == 0x14 || t == 0x15) {
             bool *d = rd_defined(&sub, nfiles);
             if (!d) { e = FULTA_ARC_ERR_NOMEM; goto done; }
-            if (rd_byte(&sub) != 0) { fa_free(d); e = FULTA_ARC_ERR_UNSUPPORTED; goto done; }
+            if (rd_byte(&sub) != 0) { fa_release(arc->alloc, d); e = FULTA_ARC_ERR_UNSUPPORTED; goto done; }
             if (t == 0x14) {
-                mt = fa_calloc(nfiles ? (size_t)nfiles : 1, sizeof *mt);
+                mt = fa_zalloc(arc->alloc, nfiles ? (size_t)nfiles : 1, sizeof *mt);
                 for (uint64_t i = 0; mt && i < nfiles; i++) if (d[i]) mt[i] = rd_u64(&sub);
-                fa_free(mdef);
+                fa_release(arc->alloc, mdef);
                 mdef = d;
             } else {
-                at = fa_calloc(nfiles ? (size_t)nfiles : 1, sizeof *at);
+                at = fa_zalloc(arc->alloc, nfiles ? (size_t)nfiles : 1, sizeof *at);
                 for (uint64_t i = 0; at && i < nfiles; i++) if (d[i]) at[i] = rd_u32(&sub);
-                fa_free(adef);
+                fa_release(arc->alloc, adef);
                 adef = d;
             }
             if ((t == 0x14 && !mt) || (t == 0x15 && !at)) { e = FULTA_ARC_ERR_NOMEM; goto done; }
@@ -644,7 +646,7 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
         if (sub.bad) { e = FULTA_ARC_ERR_CORRUPT; goto done; }
     }
     if (nfiles - nempty != ss->nsubtotal) { e = FULTA_ARC_ERR_CORRUPT; goto done; }
-    st->files = fa_calloc(nfiles ? (size_t)nfiles : 1, sizeof *st->files);
+    st->files = fa_zalloc(arc->alloc, nfiles ? (size_t)nfiles : 1, sizeof *st->files);
     if (!st->files) { e = FULTA_ARC_ERR_NOMEM; goto done; }
     /* map non-empty files to substreams in order */
     uint32_t fi = 0, sj = 0;
@@ -660,7 +662,7 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
             q += 2;
         }
         if (names && !found) { e = FULTA_ARC_ERR_CORRUPT; goto done; }
-        char *uname = names ? fa_utf16le_to_utf8(names + np, (q - np) / 2) : fa_strndup("", 0);
+        char *uname = names ? fa_utf16le_to_utf8(arc->alloc, fa_bytes(names + np, ((q - np) / 2) * 2)) : fa_strndup_a(arc->alloc, "", 0);
         const uint8_t *raw = names ? names + np : (const uint8_t *)"";
         size_t rawlen = names ? q - np : 0;
         if (names) np = q + 2;
@@ -676,7 +678,7 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
         char method[96] = "";
         if (!is_empty) {
             while (fi < ss->nfolders && sj >= ss->nsub[fi]) { fi++; sj = 0; off = 0; }
-            if (fi >= ss->nfolders) { fa_free(uname); e = FULTA_ARC_ERR_CORRUPT; goto done; }
+            if (fi >= ss->nfolders) { fa_release(arc->alloc, uname); e = FULTA_ARC_ERR_CORRUPT; goto done; }
             sf.folder = fi;
             sf.offset = off;
             sf.size = ss->sub_sizes[sub_index];
@@ -696,8 +698,8 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
                 snprintf(method + L, sizeof method - L, "%s%s", L ? ":" : "", nm);
             }
         }
-        fa_entry_t *en = fa_add_entry(arc, raw, rawlen, uname, method);
-        fa_free(uname);
+        fa_entry_t *en = fa_add_entry(arc, fa_bytes(raw, rawlen), uname, method);
+        fa_release(arc->alloc, uname);
         if (!en) { e = FULTA_ARC_ERR_NOMEM; goto done; }
         en->pub.size = sf.size;
         if (!is_empty) en->pub.solid_group = sf.folder;   /* entries of one folder share the solid unit */
@@ -721,18 +723,18 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
         st->files[arc->count - 1] = sf;
     }
 done:
-    fa_free(empty); fa_free(emptyfile); fa_free(anti); fa_free(mdef); fa_free(adef); fa_free(mt); fa_free(at);
+    fa_release(arc->alloc, empty); fa_release(arc->alloc, emptyfile); fa_release(arc->alloc, anti); fa_release(arc->alloc, mdef); fa_release(arc->alloc, adef); fa_release(arc->alloc, mt); fa_release(arc->alloc, at);
     return e;
 }
 
 static fulta_arc_err_t sz_open(fulta_arc_t *arc, uint64_t search) {
-    sz_state_t *st = fa_calloc(1, sizeof *st);
+    sz_state_t *st = fa_zalloc(arc->alloc, 1, sizeof *st);
     if (!st) return FULTA_ARC_ERR_NOMEM;
     arc->state = st;
     st->cur_folder = UINT32_MAX;
     const fulta_arc_source_t *first = arc->volumes[0];
     /* parts: name.7z.001, .002, ... */
-    st->range.pieces = fa_calloc(1, sizeof *st->range.pieces);
+    st->range.pieces = fa_zalloc(arc->alloc, 1, sizeof *st->range.pieces);
     if (!st->range.pieces) return FULTA_ARC_ERR_NOMEM;
     st->range.pieces[0] = (fa_piece_t){first, 0, first->size};
     st->range.count = 1;
@@ -741,16 +743,16 @@ static fulta_arc_err_t sz_open(fulta_arc_t *arc, uint64_t search) {
     size_t L = nm ? strlen(nm) : 0;
     if (nm && L > 4 && strcmp(nm + L - 4, ".001") == 0) {
         for (uint32_t k = 2; k < 100000; k++) {
-            char *vn = fa_malloc(L + 8);
+            char *vn = fa_alloc(arc->alloc, L + 8);
             if (!vn) return FULTA_ARC_ERR_NOMEM;
             memcpy(vn, nm, L - 3);
             snprintf(vn + L - 3, 11, "%03u", k);
             const fulta_arc_source_t *src;
             fulta_arc_err_t e = fa_volume(arc, k - 1, vn, &src);
-            fa_free(vn);
+            fa_release(arc->alloc, vn);
             if (e == FULTA_ARC_ERR_VOLUME_MISSING) break;
             if (e) return e;
-            fa_piece_t *p = fa_realloc(st->range.pieces, (st->range.count + 1) * sizeof *p);
+            fa_piece_t *p = fa_resize(arc->alloc, st->range.pieces, st->range.count * sizeof *p, (st->range.count + 1) * sizeof *p);
             if (!p) return FULTA_ARC_ERR_NOMEM;
             st->range.pieces = p;
             p[st->range.count++] = (fa_piece_t){src, 0, src->size};
@@ -761,35 +763,35 @@ static fulta_arc_err_t sz_open(fulta_arc_t *arc, uint64_t search) {
     uint8_t sh[32];
     if (search == UINT64_MAX) {
         uint64_t limit = st->range.size < (4u << 20) ? st->range.size : (4u << 20);
-        uint8_t *b = fa_malloc((size_t)limit);
+        uint8_t *b = fa_alloc(arc->alloc, (size_t)limit);
         if (!b) return FULTA_ARC_ERR_NOMEM;
-        fulta_arc_err_t e = fa_range_read_exact(&st->range, 0, b, (size_t)limit);
-        if (e) { fa_free(b); return FULTA_ARC_ERR_NOT_ARCHIVE; }
+        fulta_arc_err_t e = fa_range_read_exact(&st->range, 0, fa_bytes_mut(b, (size_t)limit));
+        if (e) { fa_release(arc->alloc, b); return FULTA_ARC_ERR_NOT_ARCHIVE; }
         bool found = false;
         for (size_t i = 0; i + 32 <= limit; i++)
-            if (memcmp(b + i, SIG, 6) == 0 && fa_crc32(0, b + i + 12, 20) == fa_le32(b + i + 8)) { st->base = i; found = true; break; }
-        fa_free(b);
+            if (memcmp(b + i, SIG, 6) == 0 && fa_crc32(0, fa_bytes(b + i + 12, 20)) == fa_le32(b + i + 8)) { st->base = i; found = true; break; }
+        fa_release(arc->alloc, b);
         if (!found) return FULTA_ARC_ERR_NOT_ARCHIVE;
     }
-    fulta_arc_err_t e = fa_range_read_exact(&st->range, st->base, sh, 32);
+    fulta_arc_err_t e = fa_range_read_exact(&st->range, st->base, fa_bytes_mut(sh, 32));
     if (e) return e;
     if (memcmp(sh, SIG, 6) != 0) return FULTA_ARC_ERR_NOT_ARCHIVE;
     if (sh[6] != 0) return FULTA_ARC_ERR_UNSUPPORTED;
-    if (fa_crc32(0, sh + 12, 20) != fa_le32(sh + 8)) return FULTA_ARC_ERR_CORRUPT;
+    if (fa_crc32(0, fa_bytes(sh + 12, 20)) != fa_le32(sh + 8)) return FULTA_ARC_ERR_CORRUPT;
     uint64_t nho = fa_le64(sh + 12), nhs = fa_le64(sh + 20);
     uint32_t nhc = fa_le32(sh + 28);
     if (nhs == 0) return FULTA_ARC_OK;   /* empty archive */
     if (nhs > MAX_HEADER || nho > st->range.size || st->base + 32 + nho + nhs > st->range.size) return FULTA_ARC_ERR_TRUNCATED;
-    uint8_t *hdr = fa_malloc((size_t)nhs);
+    uint8_t *hdr = fa_alloc(arc->alloc, (size_t)nhs);
     if (!hdr) return FULTA_ARC_ERR_NOMEM;
     size_t hlen = (size_t)nhs;
-    if ((e = fa_range_read_exact(&st->range, st->base + 32 + nho, hdr, hlen))) { fa_free(hdr); return e; }
-    if (fa_crc32(0, hdr, hlen) != nhc) { fa_free(hdr); return FULTA_ARC_ERR_CORRUPT; }
+    if ((e = fa_range_read_exact(&st->range, st->base + 32 + nho, fa_bytes_mut(hdr, hlen)))) { fa_release(arc->alloc, hdr); return e; }
+    if (fa_crc32(0, fa_bytes(hdr, hlen)) != nhc) { fa_release(arc->alloc, hdr); return FULTA_ARC_ERR_CORRUPT; }
     /* encoded headers (possibly encrypted): decode until a plain header appears */
     for (int round = 0; round < 4; round++) {
         if (hlen && hdr[0] == 0x01) break;
-        if (!hlen || hdr[0] != 0x17) { fa_free(hdr); return FULTA_ARC_ERR_CORRUPT; }
-        rd_t r = {hdr, hlen, 1, false};
+        if (!hlen || hdr[0] != 0x17) { fa_release(arc->alloc, hdr); return FULTA_ARC_ERR_CORRUPT; }
+        rd_t r = {hdr, hlen, 1, false, arc->alloc};
         sz_streams_t ss = {0};
         e = parse_streams(&r, &ss);
         if (!e && ss.nfolders < 1) e = FULTA_ARC_ERR_CORRUPT;
@@ -809,12 +811,12 @@ static fulta_arc_err_t sz_open(fulta_arc_t *arc, uint64_t search) {
             if (!e && enc && st->key_pw) fa_password_ok(arc, st->key_pw);
         }
         free_streams(&ss);
-        fa_free(hdr);
+        fa_release(arc->alloc, hdr);
         if (e) return e;
         hdr = plain;
         hlen = plen;
     }
-    rd_t r = {hdr, hlen, 0, false};
+    rd_t r = {hdr, hlen, 0, false, arc->alloc};
     e = FULTA_ARC_OK;
     if (rd_byte(&r) != 0x01) e = FULTA_ARC_ERR_CORRUPT;
     uint64_t t = e ? 0 : rd_num(&r);
@@ -832,7 +834,7 @@ static fulta_arc_err_t sz_open(fulta_arc_t *arc, uint64_t search) {
         if (!e) t = rd_num(&r);
     }
     if (!e && (t != 0 || r.bad)) e = FULTA_ARC_ERR_CORRUPT;
-    fa_free(hdr);
+    fa_release(arc->alloc, hdr);
     return e;
 }
 
@@ -888,11 +890,11 @@ static void sz_close(fulta_arc_t *arc) {
     if (!st) return;
     fa_stream_destroy(st->cur);
     free_streams(&st->main);
-    fa_free(st->files);
-    fa_free(st->range.pieces);
+    fa_release(arc->alloc, st->files);
+    fa_release(arc->alloc, st->range.pieces);
     memset(st->key, 0, sizeof st->key);
-    if (st->key_pw) { memset(st->key_pw, 0, strlen(st->key_pw)); fa_free(st->key_pw); }
-    fa_free(st);
+    if (st->key_pw) { memset(st->key_pw, 0, strlen(st->key_pw)); fa_release(arc->alloc, st->key_pw); }
+    fa_release(arc->alloc, st);
     arc->state = NULL;
 }
 
@@ -945,7 +947,7 @@ fulta_arc_err_t fa_7z_copy_info(fulta_arc_t *arc, size_t index, fa_7z_copy_t *ou
 
 fulta_arc_err_t fa_7z_copy_read(fulta_arc_t *arc, uint64_t off, void *buf, size_t n) {
     const sz_state_t *st = arc->state;
-    return fa_range_read_exact(&st->range, off, buf, n);
+    return fa_range_read_exact(&st->range, off, fa_bytes_mut(buf, n));
 }
 
 const fa_format_ops_t fa_7z_ops = {FULTA_ARC_FORMAT_7Z, sz_probe, sz_open, sz_extract, sz_close, NULL, sz_editable};

@@ -126,15 +126,17 @@ typedef enum fulta_arc_codepage {
     FULTA_ARC_CP_KOI8R,        /* Russian, KOI8-R (RFC 1489; Unix) */
 } fulta_arc_codepage_t;
 
-/* A memory allocator for the decompressor buffers that `max_memory` caps. Supply all three functions together (or
-   leave all NULL to use the C library's malloc); supplying one or two is rejected with FULTA_ARC_ERR_INVALID_ARG.
-   The library never mixes allocators: every block these functions return is reallocated and freed only by them.
+/* A memory allocator, in the form of proven_c_lib's allocator trait, for everything an archive allocates: its
+   entries and names, the readers' state, the decompressor buffers (which `max_memory` caps) and the
+   fulta_arc_extract_alloc result. For writing, fulta_arc_write_options_t.allocator does the same. Supply all three
+   functions together (or leave all NULL to use FultaArc's default, proven_c_lib's heap); supplying one or two is
+   rejected with FULTA_ARC_ERR_INVALID_ARG. The library never mixes allocators: every block these functions return
+   is reallocated and freed only by them.
    `align` is a power of two, at most alignof(max_align_t). `alloc` returns NULL on failure (reported as
    FULTA_ARC_ERR_NOMEM, or FULTA_ARC_ERR_LIMIT when max_memory was the cause). `realloc` with ptr==NULL behaves as
    alloc and with new_size==0 frees and returns NULL; `old_size` is the size last requested for ptr. `free(NULL)` is
-   a no-op. This backs only the codec buffers; the fulta_arc_extract_alloc result is always a C-library malloc block
-   (release it with free()), independent of this hook. The current codec-budget path exercises alloc and free;
-   realloc completes the contract for future buffered paths. */
+   a no-op. `ctx` must stay valid while the archive (or the write) is in use, and for the extract_alloc blocks until
+   they are freed. */
 typedef struct fulta_arc_allocator {
     void *(*alloc)(void *ctx, size_t size, size_t align);
     void *(*realloc)(void *ctx, void *ptr, size_t old_size, size_t new_size, size_t align);
@@ -246,8 +248,14 @@ fulta_arc_err_t fulta_arc_extract(fulta_arc_t *arc, size_t index, const fulta_ar
    no cheap check value (extract it to find out). The entry need not be encrypted (then FULTA_ARC_OK). */
 fulta_arc_err_t fulta_arc_check_password(fulta_arc_t *arc, size_t index);
 
-/* Extract into memory: *out_data is allocated with malloc (free it with free()). */
+/* Extract into memory. *out_data is allocated with the archive's allocator: with options.allocator set, release it
+   with that allocator's free; otherwise release it with fulta_arc_free (not the C library's free). The block stays
+   valid after fulta_arc_close. */
 fulta_arc_err_t fulta_arc_extract_alloc(fulta_arc_t *arc, size_t index, void **out_data, size_t *out_size);
+
+/* Release a block FultaArc allocated with its default allocator (fulta_arc_extract_alloc without
+   options.allocator). NULL is a no-op. */
+void fulta_arc_free(void *data);
 
 void fulta_arc_close(fulta_arc_t *arc);
 
@@ -301,7 +309,9 @@ typedef enum fulta_arc_filter {
     FULTA_ARC_FILTER_DELTA,
     FULTA_ARC_FILTER_BCJ_X86,
     FULTA_ARC_FILTER_BCJ2,
-    FULTA_ARC_FILTER_ARM, FULTA_ARC_FILTER_ARM64, FULTA_ARC_FILTER_PPC, FULTA_ARC_FILTER_SPARC, FULTA_ARC_FILTER_IA64
+    FULTA_ARC_FILTER_ARM, FULTA_ARC_FILTER_ARM64, FULTA_ARC_FILTER_PPC, FULTA_ARC_FILTER_SPARC, FULTA_ARC_FILTER_IA64,
+    FULTA_ARC_FILTER_ARMT,            /* ARM Thumb */
+    FULTA_ARC_FILTER_RISCV            /* RISC-V (7-Zip 24.03 and later write and read it) */
 } fulta_arc_filter_t;
 
 /* 7z solid grouping (7-Zip's `-ms`). ZIP entries are always independent, so this is ignored for ZIP. */
@@ -326,6 +336,7 @@ typedef struct fulta_arc_write_options {
                                          FULTA_ARC_VOLUME_MIN): honoured by the *_file and *_volumes calls only */
     int encrypt_names;                /* 7z with a password: encrypt the header too (names hidden, like 7-Zip's
                                          -mhe=on); ignored without a password; INVALID_ARG for ZIP */
+    fulta_arc_allocator_t allocator;  /* all-NULL: FultaArc's default (proven_c_lib's heap); see fulta_arc_allocator_t */
 } fulta_arc_write_options_t;
 
 /* The smallest volume: a ZIP header never spans two volumes, and one may be nearly 64 KiB. */

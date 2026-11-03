@@ -167,19 +167,20 @@ static fulta_arc_err_t cmp_read(fa_stream_t *s, void *buf, size_t n, size_t *got
 static void cmp_destroy(fa_stream_t *s) {
     comp_t *z = (comp_t *)s;
     fa_stream_destroy(z->in);
-    fa_free(z->inbuf);
-    fa_free(z->prefix);
-    fa_free(z->suffix);
-    fa_free(z->destack);
-    fa_free(z);
+    fa_release(s->alloc, z->inbuf);
+    fa_release(s->alloc, z->prefix);
+    fa_release(s->alloc, z->suffix);
+    fa_release(s->alloc, z->destack);
+    fa_release(s->alloc, z);
 }
 
 fulta_arc_err_t fa_dec_compress(fa_stream_t *in, fa_stream_t **out) {
-    comp_t *z = fa_calloc(1, sizeof *z);
+    proven_allocator_t a = in->alloc;
+    comp_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     z->in = in;
-    z->inbuf = fa_malloc(CMP_INBUF);
-    if (!z->inbuf) { fa_free(z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    z->inbuf = fa_alloc(a, CMP_INBUF);
+    if (!z->inbuf) { fa_release(a, z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
 
     /* header: magic + flags */
     if (cmp_in_byte(z) != 0x1F || cmp_in_byte(z) != 0x9D) { cmp_destroy(&z->base); return FULTA_ARC_ERR_NOT_ARCHIVE; }
@@ -197,11 +198,13 @@ fulta_arc_err_t fa_dec_compress(fa_stream_t *in, fa_stream_t **out) {
     z->free_ent = z->block_mode ? CMP_FIRST : 256;
     z->oldcode = -1;
 
-    z->prefix = fa_calloc(z->maxmaxcode, sizeof *z->prefix);
-    z->suffix = fa_malloc(z->maxmaxcode);
-    z->destack = fa_malloc(z->maxmaxcode);
+    z->prefix = fa_zalloc(a, z->maxmaxcode, sizeof *z->prefix);
+    z->suffix = fa_alloc(a, z->maxmaxcode);
+    z->destack = fa_alloc(a, z->maxmaxcode);
     if (!z->prefix || !z->suffix || !z->destack) { cmp_destroy(&z->base); return FULTA_ARC_ERR_NOMEM; }
     for (uint32_t i = 0; i < 256; i++) z->suffix[i] = (uint8_t)i;   /* literals: suffix[c] == c */
+
+    z->base.alloc = a;
 
     z->base.read = cmp_read;
     z->base.destroy = cmp_destroy;

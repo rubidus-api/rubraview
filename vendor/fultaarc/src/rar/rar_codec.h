@@ -5,6 +5,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "../core/fa_alloc.h"   /* proven_allocator_t and FultaArc's allocation calls (D-038) */
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -59,7 +61,8 @@ typedef struct fa_rar_codec {
 
     /* Unpacking, one file at a time; a failed call leaves the state unfit
        to continue a solid stream (start again from a non-solid file). */
-    void *(*unpack_create)(void);
+    /* Every object below lives in the allocator its create was given and goes back to it on destroy/final. */
+    void *(*unpack_create)(proven_allocator_t alloc);
     void  (*unpack_destroy)(void *unpack);
     fa_rar_unpack_status_t (*unpack_file)(void *unpack, const fa_rar_unpack_params_t *params,
                                                  fa_rar_read_fn read, void *read_ctx,
@@ -67,7 +70,7 @@ typedef struct fa_rar_codec {
 
     /* AES-CBC decryption, `key_bits` 128 or 256; the chain carries over
        between calls; `size` a multiple of 16. Destroy wipes the key. */
-    void *(*aes_create)(const uint8_t *key, unsigned key_bits, const uint8_t iv[16]);
+    void *(*aes_create)(proven_allocator_t alloc, const uint8_t *key, unsigned key_bits, const uint8_t iv[16]);
     void  (*aes_decrypt)(void *aes, uint8_t *data, size_t size);
     void  (*aes_destroy)(void *aes);
 
@@ -83,7 +86,7 @@ typedef struct fa_rar_codec {
     void  (*sha256)(const void *data, size_t size, uint8_t digest[32]);
 
     /* BLAKE2sp (spec 5.3), fed in pieces; final frees the state. */
-    void *(*blake2sp_create)(void);
+    void *(*blake2sp_create)(proven_allocator_t alloc);
     void  (*blake2sp_update)(void *state, const void *data, size_t size);
     void  (*blake2sp_final)(void *state, uint8_t digest[32]);
     /* HMAC-SHA-256 (RFC 2104): RAR 5's BLAKE2sp of an encrypted file as stored. */

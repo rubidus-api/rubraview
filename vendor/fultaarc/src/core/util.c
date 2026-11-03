@@ -7,49 +7,58 @@
 
 #include <stddef.h>
 
-/* Every internal allocation funnels through these four, and through them onto proven's allocator trait.
- * The LZMA SDK rides along: its ISzAlloc (src/codec/codecs.c) calls fa_malloc/fa_free. Stage 0 (D-021)
- * binds the seam to proven's heap allocator (malloc underneath); a later stage lets a caller supply one
- * per archive and places a memory budget behind it. A block is always allocated, reallocated and freed at
- * one fixed alignment, as the allocator trait requires, and never at an over-aligned class. This seam is
- * deliberately heap-pinned: it passes `old_size = 0` to the trait's realloc, which is correct only because the
- * backing is proven's heap (on POSIX a fundamental-align request stays on plain malloc/realloc/free, which ignore
- * old_size; on Windows the heap uses the _aligned_* family, which also does not need the caller's old_size). A
- * non-heap backing that needs a true old_size is not this seam but the budget allocator below, which carries the
- * size in a per-block header. The memory that crosses the public free() boundary (fulta_arc_extract_alloc) is
- * deliberately NOT from this seam; see arc.c. FA_ALIGN is in internal.h (shared with the budget allocator). */
-static proven_allocator_t fa_allocator(void) { return proven_heap_allocator(); }
-
-void *fa_malloc(size_t n) {
-    proven_allocator_t a = fa_allocator();
+/* Allocation (D-038): every block is made, resized and released through the proven allocator its owner names
+ * (fa_alloc.h); there is no hidden global allocator any more. A block is always at one fixed alignment (FA_ALIGN),
+ * as the allocator trait requires, and resized with its true old size. */
+void *fa_alloc(proven_allocator_t a, size_t n) {
     proven_result_mem_mut_t r = a.alloc_fn(a.ctx, n ? n : 1, FA_ALIGN);
     return r.err == PROVEN_OK ? r.value.ptr : NULL;
 }
-void *fa_calloc(size_t count, size_t n) {
+void *fa_zalloc(proven_allocator_t a, size_t count, size_t n) {
     if (n && count > SIZE_MAX / n) return NULL;
     size_t total = count * n;
     if (!total) total = 1;
-    void *p = fa_malloc(total);
+    void *p = fa_alloc(a, total);
     if (p) memset(p, 0, total);
     return p;
 }
-void *fa_realloc(void *p, size_t n) {
-    proven_allocator_t a = fa_allocator();
-    proven_result_mem_mut_t r = a.realloc_fn(a.ctx, p, 0 /* old_size: unused by the heap at FA_ALIGN */,
-                                             n ? n : 1, FA_ALIGN);
+void *fa_resize(proven_allocator_t a, void *p, size_t old_n, size_t new_n) {
+    if (!p) return fa_alloc(a, new_n);
+    proven_result_mem_mut_t r = a.realloc_fn(a.ctx, p, old_n ? old_n : 1, new_n ? new_n : 1, FA_ALIGN);
     return r.err == PROVEN_OK ? r.value.ptr : NULL;
 }
-void fa_free(void *p) {
-    proven_allocator_t a = fa_allocator();
-    a.free_fn(a.ctx, p);
+void fa_release(proven_allocator_t a, void *p) {
+    if (p) a.free_fn(a.ctx, p);
+}
+char *fa_strdup_view(proven_allocator_t a, proven_u8str_view_t s) {
+    if (s.size == SIZE_MAX) return NULL;
+    char *d = fa_alloc(a, s.size + 1);
+    if (!d) return NULL;
+    if (s.size) memcpy(d, s.ptr, s.size);
+    d[s.size] = 0;
+    return d;
+}
+char *fa_strndup_a(proven_allocator_t a, const char *s, size_t n) {
+    if (n == SIZE_MAX) return NULL;
+    char *d = fa_alloc(a, n + 1);
+    if (!d) return NULL;
+    if (n) memcpy(d, s, n);
+    d[n] = 0;
+    return d;
+}
+fulta_arc_err_t fa_allocator_pick(const fulta_arc_allocator_t *ua, proven_allocator_t *out) {
+    int set = ua ? (ua->alloc != NULL) + (ua->realloc != NULL) + (ua->free != NULL) : 0;
+    if (set != 0 && set != 3) return FULTA_ARC_ERR_INVALID_ARG;
+    *out = set == 3 ? fa_allocator_from_user(ua) : proven_heap_allocator();
+    return FULTA_ARC_OK;
 }
 
 /* The codec memory budget, expressed as proven's allocator trait (fa_budget_as_allocator). Distinct from the
- * fa_malloc seam: a block carries an FA_ALIGN-sized size prefix (holding the whole backing allocation's size) so the
+ * plain fa_alloc calls: a block carries an FA_ALIGN-sized size prefix (holding the whole backing allocation's size) so the
  * trait's free/realloc can credit the live counter -- proven's free_fn is handed only a pointer -- and so the
  * returned pointer stays FA_ALIGN-aligned (PPMd and LZMA state need it). Only fundamental alignment (<= FA_ALIGN) is
  * served, which is every codec state/buffer. These blocks live and die strictly inside one codec's alloc/free hook;
- * they never reach fa_free or libc free, so the prefix is only ever read back here. */
+ * they never reach fa_release, so the prefix is only ever read back here. */
 static proven_result_mem_mut_t budget_alloc(void *ctx, proven_size_t size, proven_size_t align) {
     fa_budget_t *b = ctx;
     proven_result_mem_mut_t r = { .err = PROVEN_ERR_INVALID_ARG };
@@ -140,15 +149,9 @@ proven_allocator_t fa_allocator_from_user(const fulta_arc_allocator_t *ua) {
                                  .realloc_fn = user_realloc, .free_fn = user_free };
 }
 
-char *fa_strndup(const char *s, size_t n) {
-    char *d = fa_malloc(n + 1);
-    if (!d) return NULL;
-    if (n) memcpy(d, s, n);
-    d[n] = 0;
-    return d;
-}
-
-fulta_arc_err_t fa_buf_append(fa_buf_t *b, const void *data, size_t n) {
+fulta_arc_err_t fa_buf_append(fa_buf_t *b, proven_mem_view_t bytes) {
+    const void *data = bytes.ptr;
+    size_t n = bytes.size;
     if (n > SIZE_MAX - b->size) return FULTA_ARC_ERR_NOMEM;
     if (b->size + n > b->cap) {
         size_t cap = b->cap ? b->cap : 64;
@@ -156,7 +159,7 @@ fulta_arc_err_t fa_buf_append(fa_buf_t *b, const void *data, size_t n) {
             if (cap > SIZE_MAX / 2) { cap = b->size + n; break; }
             cap *= 2;
         }
-        uint8_t *p = fa_realloc(b->data, cap);
+        uint8_t *p = fa_resize(b->alloc, b->data, b->cap, cap);
         if (!p) return FULTA_ARC_ERR_NOMEM;
         b->data = p;
         b->cap = cap;
@@ -166,24 +169,25 @@ fulta_arc_err_t fa_buf_append(fa_buf_t *b, const void *data, size_t n) {
     return FULTA_ARC_OK;
 }
 
-fulta_arc_err_t fa_buf_byte(fa_buf_t *b, uint8_t v) { return fa_buf_append(b, &v, 1); }
+fulta_arc_err_t fa_buf_byte(fa_buf_t *b, uint8_t v) { return fa_buf_append(b, fa_bytes(&v, 1)); }
 
 void fa_buf_free(fa_buf_t *b) {
-    fa_free(b->data);
-    *b = (fa_buf_t){0};
+    fa_release(b->alloc, b->data);
+    *b = (fa_buf_t){.alloc = b->alloc};
 }
 
 /* ---- CRC-32 ------------------------------------------------------------------------------------------------- */
 
 /* CRC-32 (IEEE 802.3, as ZIP): proven's, which reads eight bytes a step. */
-uint32_t fa_crc32(uint32_t crc, const void *data, size_t n) {
-    return proven_crc32_update(crc, (proven_mem_view_t){.ptr = data, .size = n});
+uint32_t fa_crc32(uint32_t crc, proven_mem_view_t data) {
+    return proven_crc32_update(crc, data);
 }
 
 /* ---- ranges -------------------------------------------------------------------------------------------------- */
 
-fulta_arc_err_t fa_source_read_exact(const fulta_arc_source_t *s, uint64_t offset, void *buf, size_t n) {
-    uint8_t *p = buf;
+fulta_arc_err_t fa_source_read_exact(const fulta_arc_source_t *s, uint64_t offset, proven_mem_mut_t buf) {
+    uint8_t *p = buf.ptr;
+    size_t n = buf.size;
     while (n) {
         size_t got = 0;
         fulta_arc_err_t e = s->read_at(s->ctx, offset, p, n, &got);
@@ -217,8 +221,9 @@ fulta_arc_err_t fa_range_read(const fa_range_t *r, uint64_t offset, void *buf, s
     return FULTA_ARC_OK;
 }
 
-fulta_arc_err_t fa_range_read_exact(const fa_range_t *r, uint64_t offset, void *buf, size_t n) {
-    uint8_t *p = buf;
+fulta_arc_err_t fa_range_read_exact(const fa_range_t *r, uint64_t offset, proven_mem_mut_t buf) {
+    uint8_t *p = buf.ptr;
+    size_t n = buf.size;
     while (n) {
         size_t got = 0;
         fulta_arc_err_t e = fa_range_read(r, offset, p, n, &got);
@@ -233,8 +238,9 @@ fulta_arc_err_t fa_range_read_exact(const fa_range_t *r, uint64_t offset, void *
 
 /* ---- streams ------------------------------------------------------------------------------------------------- */
 
-fulta_arc_err_t fa_stream_read_exact(fa_stream_t *s, void *buf, size_t n) {
-    uint8_t *p = buf;
+fulta_arc_err_t fa_stream_read_exact(fa_stream_t *s, proven_mem_mut_t buf) {
+    uint8_t *p = buf.ptr;
+    size_t n = buf.size;
     while (n) {
         size_t got = 0;
         fulta_arc_err_t e = s->read(s, p, n, &got);
@@ -263,6 +269,16 @@ void fa_stream_destroy(fa_stream_t *s) {
     if (s && s->destroy) s->destroy(s);
 }
 
+void *fa_stream_new(proven_allocator_t a, size_t size, fulta_arc_err_t (*read)(fa_stream_t *, void *, size_t, size_t *),
+                    void (*destroy)(fa_stream_t *)) {
+    fa_stream_t *s = fa_zalloc(a, 1, size);
+    if (!s) return NULL;
+    s->read = read;
+    s->destroy = destroy;
+    s->alloc = a;
+    return s;
+}
+
 typedef struct range_stream {
     fa_stream_t base;
     fa_range_t range;
@@ -283,23 +299,22 @@ static fulta_arc_err_t range_stream_read(fa_stream_t *s, void *buf, size_t n, si
 
 static void range_stream_destroy(fa_stream_t *s) {
     range_stream_t *r = (range_stream_t *)s;
-    fa_free(r->range.pieces);
-    fa_free(r);
+    fa_release(s->alloc, r->range.pieces);
+    fa_stream_release(s);
 }
 
-fulta_arc_err_t fa_stream_range(const fa_range_t *r, uint64_t offset, uint64_t size, fa_stream_t **out) {
+fulta_arc_err_t fa_stream_range(proven_allocator_t a, const fa_range_t *r, uint64_t offset, uint64_t size,
+                                fa_stream_t **out) {
     if (offset > r->size || size > r->size - offset) return FULTA_ARC_ERR_TRUNCATED;
-    range_stream_t *s = fa_calloc(1, sizeof *s);
+    range_stream_t *s = fa_stream_new(a, sizeof *s, range_stream_read, range_stream_destroy);
     if (!s) return FULTA_ARC_ERR_NOMEM;
-    s->range.pieces = fa_calloc(r->count, sizeof *r->pieces);
-    if (!s->range.pieces) { fa_free(s); return FULTA_ARC_ERR_NOMEM; }
+    s->range.pieces = fa_zalloc(a, r->count, sizeof *r->pieces);
+    if (!s->range.pieces) { fa_stream_release(&s->base); return FULTA_ARC_ERR_NOMEM; }
     memcpy(s->range.pieces, r->pieces, r->count * sizeof *r->pieces);
     s->range.count = r->count;
     s->range.size = r->size;
     s->pos = offset;
     s->end = offset + size;
-    s->base.read = range_stream_read;
-    s->base.destroy = range_stream_destroy;
     *out = &s->base;
     return FULTA_ARC_OK;
 }
@@ -316,15 +331,13 @@ static fulta_arc_err_t mem_stream_read(fa_stream_t *s, void *buf, size_t n, size
     return FULTA_ARC_OK;
 }
 
-static void mem_stream_destroy(fa_stream_t *s) { fa_free(s); }
+static void mem_stream_destroy(fa_stream_t *s) { fa_stream_release(s); }
 
-fulta_arc_err_t fa_stream_memory(const void *data, size_t size, fa_stream_t **out) {
-    mem_stream_t *m = fa_calloc(1, sizeof *m);
+fulta_arc_err_t fa_stream_memory(proven_allocator_t a, const void *data, size_t size, fa_stream_t **out) {
+    mem_stream_t *m = fa_stream_new(a, sizeof *m, mem_stream_read, mem_stream_destroy);
     if (!m) return FULTA_ARC_ERR_NOMEM;
     m->p = data;
     m->n = size;
-    m->base.read = mem_stream_read;
-    m->base.destroy = mem_stream_destroy;
     *out = &m->base;
     return FULTA_ARC_OK;
 }
@@ -362,17 +375,15 @@ static fulta_arc_err_t limit_read(fa_stream_t *s, void *buf, size_t n, size_t *g
 static void limit_destroy(fa_stream_t *s) {
     limit_stream_t *l = (limit_stream_t *)s;
     fa_stream_destroy(l->in);
-    fa_free(l);
+    fa_stream_release(s);
 }
 
 static fulta_arc_err_t limit_make(fa_stream_t *in, uint64_t size, bool strict, fa_stream_t **out) {
-    limit_stream_t *l = fa_calloc(1, sizeof *l);
+    limit_stream_t *l = fa_stream_new(in->alloc, sizeof *l, limit_read, limit_destroy);
     if (!l) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     l->in = in;
     l->left = size;
     l->strict = strict;
-    l->base.read = limit_read;
-    l->base.destroy = limit_destroy;
     *out = &l->base;
     return FULTA_ARC_OK;
 }
@@ -396,7 +407,7 @@ void fa_bytes_init(fa_bytes_t *b, fa_stream_t *in) {
     b->consumed = 0;
 }
 
-int fa_bytes_get(fa_bytes_t *b) {
+int fa_bytes_fill(fa_bytes_t *b) {
     if (b->pos == b->len) {
         if (b->eof || b->err) return -1;
         size_t got = 0;
@@ -412,7 +423,9 @@ int fa_bytes_get(fa_bytes_t *b) {
 
 /* ---- text ---------------------------------------------------------------------------------------------------- */
 
-bool fa_utf8_valid(const uint8_t *s, size_t n) {
+bool fa_utf8_valid(proven_mem_view_t bytes) {
+    const uint8_t *s = bytes.ptr;
+    size_t n = bytes.size;
     size_t i = 0;
     while (i < n) {
         uint8_t c = s[i];
@@ -447,11 +460,13 @@ fulta_arc_err_t fa_utf8_put(fa_buf_t *b, uint32_t cp) {
         t[0] = (uint8_t)(0xF0 | (cp >> 18)); t[1] = (uint8_t)(0x80 | ((cp >> 12) & 0x3F));
         t[2] = (uint8_t)(0x80 | ((cp >> 6) & 0x3F)); t[3] = (uint8_t)(0x80 | (cp & 0x3F)); n = 4;
     }
-    return fa_buf_append(b, t, n);
+    return fa_buf_append(b, fa_bytes(t, n));
 }
 
-char *fa_utf16le_to_utf8(const uint8_t *s, size_t units) {
-    fa_buf_t b = {0};
+char *fa_utf16le_to_utf8(proven_allocator_t a, proven_mem_view_t bytes) {
+    const uint8_t *s = bytes.ptr;
+    size_t units = bytes.size / 2;
+    fa_buf_t b = {.alloc = a};
     for (size_t i = 0; i < units; i++) {
         uint32_t u = fa_le16(s + 2 * i);
         if (u >= 0xD800 && u <= 0xDBFF && i + 1 < units) {

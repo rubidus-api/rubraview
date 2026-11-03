@@ -103,7 +103,11 @@ typedef struct rc_filter {
 
 #define RC_MAX_FILTERS 8192
 
+typedef struct rc_ppm_alloc { ISzAlloc vt; proven_allocator_t a; } rc_ppm_alloc_t;   /* PPMd's hook onto `alloc` */
+
 typedef struct rc_unpack {
+    proven_allocator_t alloc;     /* this state, its window, filters and PPMd model live here (D-038) */
+    rc_ppm_alloc_t ppm_alloc;
     /* window */
     uint8_t *win;
     uint64_t wsize;           /* bytes allocated; any size, not only powers of two */

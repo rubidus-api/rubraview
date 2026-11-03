@@ -88,11 +88,13 @@ typedef struct {
     uint64_t want;        /* bytes to produce */
     size_t flushed;       /* ring index up to which data was handed to the sink */
     lha_sink *sink;
+    proven_allocator_t alloc;   /* the ring's */
 } hist;
 
-static int hist_init(hist *h, size_t size, uint64_t want, lha_sink *sink)
+static int hist_init(hist *h, proven_allocator_t alloc, size_t size, uint64_t want, lha_sink *sink)
 {
-    h->ring = (unsigned char *)malloc(size);
+    h->alloc = alloc;
+    h->ring = (unsigned char *)fa_alloc(alloc, size);
     if (!h->ring) return LHA_ERR_NOMEM;
     h->mask = size - 1;
     h->total = 0;
@@ -134,7 +136,7 @@ static int hist_put(hist *h, unsigned char c)
 
 static void hist_free(hist *h)
 {
-    free(h->ring);
+    fa_release(h->alloc, h->ring);
     h->ring = NULL;
 }
 
@@ -309,11 +311,11 @@ static int decode_huf(lha_src *src, lha_sink *sink, uint64_t osize, const huf_pa
     int rc;
 
     while (ring < p->window) ring <<= 1;
-    rc = hist_init(&h, ring, osize, sink);
+    rc = hist_init(&h, src->in->alloc, ring, osize, sink);
     if (rc != LHA_OK) return rc;
-    t = (pcode *)malloc(sizeof *t);
-    c = (pcode *)malloc(sizeof *c);
-    pp = (pcode *)malloc(sizeof *pp);
+    t = (pcode *)fa_alloc(src->in->alloc, sizeof *t);
+    c = (pcode *)fa_alloc(src->in->alloc, sizeof *c);
+    pp = (pcode *)fa_alloc(src->in->alloc, sizeof *pp);
     if (!t || !c || !pp) { rc = LHA_ERR_NOMEM; goto done; }
     bi_init(&b, src);
 
@@ -361,7 +363,7 @@ static int decode_huf(lha_src *src, lha_sink *sink, uint64_t osize, const huf_pa
     }
     rc = hist_flush(&h);
 done:
-    free(t); free(c); free(pp);
+    fa_release(src->in->alloc, t); fa_release(src->in->alloc, c); fa_release(src->in->alloc, pp);
     hist_free(&h);
     return rc;
 }
@@ -716,7 +718,7 @@ static int growing_decode(growing *g, bitin *b)
 static int decode_adaptive(lha_src *src, lha_sink *sink, uint64_t osize, int lh2)
 {
     typedef struct { adaptive a; growing g; unsigned char win[8192]; } state;
-    state *st = (state *)malloc(sizeof *st);
+    state *st = (state *)fa_alloc(src->in->alloc, sizeof *st);
     unsigned wmask = lh2 ? 8191u : 4095u;
     unsigned char buf[4096];
     size_t nbuf = 0;
@@ -774,7 +776,7 @@ static int decode_adaptive(lha_src *src, lha_sink *sink, uint64_t osize, int lh2
         }
     }
     if (rc == LHA_OK && nbuf) rc = lha_sink_write(sink, buf, nbuf);
-    free(st);
+    fa_release(src->in->alloc, st);
     return rc;
 }
 
@@ -799,11 +801,11 @@ static int decode_lh3(lha_src *src, lha_sink *sink, uint64_t osize)
     pcode *c, *pp;
     int rc, s;
 
-    rc = hist_init(&h, 8192, osize, sink);
+    rc = hist_init(&h, src->in->alloc, 8192, osize, sink);
     if (rc != LHA_OK) return rc;
     memset(h.ring, 0x20, 8192);                       /* spec §7.5 */
-    c = (pcode *)malloc(sizeof *c);
-    pp = (pcode *)malloc(sizeof *pp);
+    c = (pcode *)fa_alloc(src->in->alloc, sizeof *c);
+    pp = (pcode *)fa_alloc(src->in->alloc, sizeof *pp);
     if (!c || !pp) { rc = LHA_ERR_NOMEM; goto done; }
     bi_init(&b, src);
 
@@ -861,7 +863,7 @@ static int decode_lh3(lha_src *src, lha_sink *sink, uint64_t osize)
     }
     rc = hist_flush(&h);
 done:
-    free(c); free(pp);
+    fa_release(src->in->alloc, c); fa_release(src->in->alloc, pp);
     hist_free(&h);
     return rc;
 }
@@ -901,10 +903,10 @@ static int decode_pm2(lha_src *src, lha_sink *sink, uint64_t osize)
     uint64_t next_flag = 0;
     int rc, i, have = 0, ncopy = 0, nd = 0;
 
-    rc = hist_init(&h, 8192, osize, sink);
+    rc = hist_init(&h, src->in->alloc, 8192, osize, sink);
     if (rc != LHA_OK) return rc;
-    t = (pcode *)malloc(sizeof *t);
-    d = (pcode *)malloc(sizeof *d);
+    t = (pcode *)fa_alloc(src->in->alloc, sizeof *t);
+    d = (pcode *)fa_alloc(src->in->alloc, sizeof *d);
     if (!t || !d) { rc = LHA_ERR_NOMEM; goto done; }
     for (i = 0; i < 96; i++) list[i] = (unsigned char)(0x20 + i);      /* spec §8.1 */
     for (i = 0; i < 32; i++) list[96 + i] = (unsigned char)i;
@@ -1000,7 +1002,7 @@ static int decode_pm2(lha_src *src, lha_sink *sink, uint64_t osize)
     }
     rc = hist_flush(&h);
 done:
-    free(t); free(d);
+    fa_release(src->in->alloc, t); fa_release(src->in->alloc, d);
     hist_free(&h);
     return rc;
 }
@@ -1089,7 +1091,7 @@ static int decode_pm1(lha_src *src, lha_sink *sink, uint64_t osize)
     hist h;
     int rc, i;
 
-    rc = hist_init(&h, 16384, osize, sink);
+    rc = hist_init(&h, src->in->alloc, 16384, osize, sink);
     if (rc != LHA_OK) return rc;
     for (i = 0; i < 96; i++) list[i] = (unsigned char)(0x20 + i);      /* spec §9.1 = §8.1 */
     for (i = 0; i < 32; i++) list[96 + i] = (unsigned char)i;

@@ -59,25 +59,31 @@ const char *fulta_arc_strerror(fulta_arc_err_t e) {
     }
 }
 
-static void free_all(fulta_arc_t *arc) {
-    if (arc->ops && arc->ops->close) arc->ops->close(arc);
+static void free_entries(fulta_arc_t *arc) {
     for (size_t i = 0; i < arc->count; i++) {
-        fa_free(arc->entries[i].name_owned);
-        fa_free(arc->entries[i].raw_owned);
-        fa_free(arc->entries[i].method_owned);
+        fa_release(arc->alloc, arc->entries[i].name_owned);
+        fa_release(arc->alloc, arc->entries[i].raw_owned);
+        fa_release(arc->alloc, arc->entries[i].method_owned);
     }
-    fa_free(arc->entries);
+    arc->count = 0;
+}
+
+static void free_all(fulta_arc_t *arc) {
+    proven_allocator_t a = arc->alloc;           /* the archive itself lives in it too */
+    if (arc->ops && arc->ops->close) arc->ops->close(arc);
+    free_entries(arc);
+    fa_release(a, arc->entries);
     for (size_t i = 0; i < arc->nvolumes; i++) {
         if (arc->volumes[i]->close) arc->volumes[i]->close(arc->volumes[i]->ctx);
-        fa_free(arc->volumes[i]);
+        fa_release(a, arc->volumes[i]);
     }
-    fa_free(arc->volumes);
-    fa_free(arc->name);
+    fa_release(a, arc->volumes);
+    fa_release(a, arc->name);
     if (arc->password) {
-        memset(arc->password, 0, strlen(arc->password));
-        fa_free(arc->password);
+        proven_mem_wipe((proven_mem_mut_t){.ptr = (proven_byte_t *)arc->password, .size = strlen(arc->password)});
+        fa_release(a, arc->password);
     }
-    fa_free(arc);
+    fa_release(a, arc);
 }
 
 /* ---- transparent unwrap (reprobe): a gzip/bzip2/xz/zstd stream wrapping a container -----------------------------
@@ -121,15 +127,16 @@ static fulta_arc_err_t peek_write(void *ctx, const void *d, size_t n) {
     return p->n >= sizeof p->buf ? (fulta_arc_err_t)FA_SINK_STOP : FULTA_ARC_OK;
 }
 
-/* grow sink: accumulate the whole decompressed stream into a heap buffer, capped at FA_REPROBE_CAP. */
-typedef struct { uint8_t *data; size_t n, cap; bool over; } grow_sink_t;
+/* grow sink: accumulate the whole decompressed stream into a buffer of the archive's allocator, capped at
+ * FA_REPROBE_CAP. */
+typedef struct { proven_allocator_t alloc; uint8_t *data; size_t n, cap; bool over; } grow_sink_t;
 static fulta_arc_err_t grow_write(void *ctx, const void *d, size_t n) {
     grow_sink_t *g = ctx;
     if (n > FA_REPROBE_CAP - g->n) { g->over = true; return (fulta_arc_err_t)FA_SINK_STOP; }
     if (g->n + n > g->cap) {
         size_t nc = g->cap ? g->cap : 65536;
         while (nc < g->n + n) nc *= 2;
-        uint8_t *p = fa_realloc(g->data, nc);
+        uint8_t *p = fa_resize(g->alloc, g->data, g->cap, nc);
         if (!p) return FULTA_ARC_ERR_NOMEM;
         g->data = p;
         g->cap = nc;
@@ -162,13 +169,13 @@ static fulta_arc_err_t reprobe(fulta_arc_t *arc, const fulta_arc_options_t *opti
     if (!container) return FULTA_ARC_OK;
 
     /* a container: decompress the whole payload into memory (bounded by the cap) */
-    grow_sink_t g = {0};
+    grow_sink_t g = {.alloc = arc->alloc};
     fulta_arc_sink_t gsink = { &g, grow_write };
     fulta_arc_err_t ge = fulta_arc_extract(arc, 0, &gsink);
-    if ((ge && ge != (fulta_arc_err_t)FA_SINK_STOP) || g.over || g.n == 0) { fa_free(g.data); return FULTA_ARC_OK; }
+    if ((ge && ge != (fulta_arc_err_t)FA_SINK_STOP) || g.over || g.n == 0) { fa_release(g.alloc, g.data); return FULTA_ARC_OK; }
 
-    fulta_arc_source_t msrc = fa_source_memory_owned(g.data, g.n);
-    if (!msrc.ctx) { fa_free(g.data); return FULTA_ARC_OK; }     /* not yet owned: free the buffer */
+    fulta_arc_source_t msrc = fa_source_memory_owned(g.alloc, g.data, g.n);
+    if (!msrc.ctx) { fa_release(g.alloc, g.data); return FULTA_ARC_OK; }     /* not yet owned: free the buffer */
     /* g.data is now owned by msrc; open_core consumes msrc on success or failure (free_all closes it) */
 
     fulta_arc_options_t io = options ? *options : (fulta_arc_options_t){0};
@@ -195,17 +202,23 @@ static fulta_arc_err_t open_core(const fulta_arc_source_t *source, const fulta_a
     if (!out) return FULTA_ARC_ERR_INVALID_ARG;
     *out = NULL;
     if (!source || !source->read_at) return FULTA_ARC_ERR_INVALID_ARG;
-    fulta_arc_t *arc = fa_calloc(1, sizeof *arc);
+    proven_allocator_t a;                        /* the caller's allocator (all three functions) or proven's heap */
+    if (fa_allocator_pick(options ? &options->allocator : NULL, &a)) {
+        if (source->close) source->close(source->ctx);
+        return FULTA_ARC_ERR_INVALID_ARG;
+    }
+    fulta_arc_t *arc = fa_zalloc(a, 1, sizeof *arc);
     if (!arc) {
         if (source->close) source->close(source->ctx);
         return FULTA_ARC_ERR_NOMEM;
     }
-    arc->volumes = fa_calloc(4, sizeof *arc->volumes);
-    fulta_arc_source_t *first = fa_malloc(sizeof *first);
+    arc->alloc = a;
+    arc->volumes = fa_zalloc(a, 4, sizeof *arc->volumes);
+    fulta_arc_source_t *first = fa_alloc(a, sizeof *first);
     if (!arc->volumes || !first) {
-        fa_free(arc->volumes);
-        fa_free(first);
-        fa_free(arc);
+        fa_release(a, arc->volumes);
+        fa_release(a, first);
+        fa_release(a, arc);
         if (source->close) source->close(source->ctx);
         return FULTA_ARC_ERR_NOMEM;
     }
@@ -216,20 +229,18 @@ static fulta_arc_err_t open_core(const fulta_arc_source_t *source, const fulta_a
     if (options) arc->opt = *options;
     arc->opt.name = NULL;
     if (options && options->name) {
-        arc->name = fa_strndup(options->name, strlen(options->name));
+        arc->name = fa_strdup_view(a, proven_u8str_view_from_cstr(options->name));
         if (!arc->name) { free_all(arc); return FULTA_ARC_ERR_NOMEM; }
         arc->opt.name = arc->name;
     }
     arc->limits.max_dictionary = arc->opt.max_dictionary ? arc->opt.max_dictionary : (UINT64_C(1) << 30);
     arc->limits.cancel = arc->opt.cancel;
     arc->limits.cancel_ctx = arc->opt.cancel_ctx;
-    {   /* back the codec budget with the caller's allocator when supplied; all three fns or none */
-        const fulta_arc_allocator_t *ua = &arc->opt.allocator;
-        int set = (ua->alloc != NULL) + (ua->realloc != NULL) + (ua->free != NULL);
-        if (set != 0 && set != 3) { free_all(arc); return FULTA_ARC_ERR_INVALID_ARG; }
-        proven_allocator_t backing = set == 3 ? fa_allocator_from_user(ua) : proven_heap_allocator();
-        arc->budget = (fa_budget_t){ .backing = backing, .limit = arc->opt.max_memory };
-    }
+    if (fa_allocator_pick(&arc->opt.allocator, &a)) { free_all(arc); return FULTA_ARC_ERR_INVALID_ARG; }
+    arc->alloc = a;                              /* re-bridged: the bridge points into arc->opt.allocator, which lives
+                                                    as long as the archive (the caller's copy may not) */
+    arc->limits.alloc = a;
+    arc->budget = (fa_budget_t){ .backing = a, .limit = arc->opt.max_memory };
     arc->limits.budget = &arc->budget;
 
     /* detection: the head of the file; SFX stubs are searched by the readers that support them */
@@ -255,12 +266,7 @@ static fulta_arc_err_t open_core(const fulta_arc_source_t *source, const fulta_a
         if (!e) return reprobe(arc, options, out, depth);
         if (arc->ops->close) arc->ops->close(arc);
         arc->state = NULL;
-        for (size_t k = 0; k < arc->count; k++) {
-            fa_free(arc->entries[k].name_owned);
-            fa_free(arc->entries[k].raw_owned);
-            fa_free(arc->entries[k].method_owned);
-        }
-        arc->count = 0;
+        free_entries(arc);
         if (e != FULTA_ARC_ERR_NOT_ARCHIVE) { arc->ops = NULL; free_all(arc); return e; }
     }
     arc->ops = NULL;
@@ -309,11 +315,9 @@ fulta_arc_editable_t fulta_arc_editable(const fulta_arc_t *arc) {
     return FULTA_ARC_EDIT_OK;                                 /* ZIP */
 }
 
-/* The one buffer that is handed to the caller to release with free(): it grows with the C library's own
- * malloc/realloc, NOT the fa_* seam, because the seam's allocator may hand out memory (e.g. _aligned_malloc
- * on Windows) that plain free() cannot release. The public contract on fulta_arc_extract_alloc is
- * "allocated with malloc (free it with free())"; keeping this path on libc preserves it on every platform. */
-typedef struct mem_sink { uint8_t *data; size_t size, cap; uint64_t limit; } mem_sink_t;
+/* fulta_arc_extract_alloc's buffer grows in the archive's allocator (D-038): the caller's when it gave one (it
+ * releases the block itself), else proven's heap (released with fulta_arc_free). */
+typedef struct mem_sink { proven_allocator_t alloc; uint8_t *data; size_t size, cap; uint64_t limit; } mem_sink_t;
 
 static fulta_arc_err_t mem_sink_write(void *ctx, const void *data, size_t n) {
     mem_sink_t *m = ctx;
@@ -325,7 +329,7 @@ static fulta_arc_err_t mem_sink_write(void *ctx, const void *data, size_t n) {
             if (cap > SIZE_MAX / 2) { cap = m->size + n; break; }
             cap *= 2;
         }
-        uint8_t *p = realloc(m->data, cap);
+        uint8_t *p = fa_resize(m->alloc, m->data, m->cap, cap);
         if (!p) return FULTA_ARC_ERR_NOMEM;
         m->data = p;
         m->cap = cap;
@@ -336,20 +340,24 @@ static fulta_arc_err_t mem_sink_write(void *ctx, const void *data, size_t n) {
 }
 
 fulta_arc_err_t fulta_arc_extract_alloc(fulta_arc_t *arc, size_t index, void **out_data, size_t *out_size) {
-    if (!out_data || !out_size) return FULTA_ARC_ERR_INVALID_ARG;
+    if (!out_data || !out_size || !arc) return FULTA_ARC_ERR_INVALID_ARG;
     *out_data = NULL;
     *out_size = 0;
-    mem_sink_t m = {.limit = SIZE_MAX};
+    mem_sink_t m = {.alloc = arc->alloc, .limit = SIZE_MAX};
     fulta_arc_sink_t sink = {.ctx = &m, .write = mem_sink_write};
     fulta_arc_err_t e = fulta_arc_extract(arc, index, &sink);
-    if (e && e != FULTA_ARC_DAMAGED) { free(m.data); return e; }
+    if (e && e != FULTA_ARC_DAMAGED) { fa_release(m.alloc, m.data); return e; }
     if (!m.data) {
-        m.data = malloc(1);
+        m.data = fa_alloc(m.alloc, 1);
         if (!m.data) return FULTA_ARC_ERR_NOMEM;
     }
     *out_data = m.data;
     *out_size = m.size;
     return e;   /* FULTA_ARC_OK, or FULTA_ARC_DAMAGED with the bytes that decoded */
+}
+
+void fulta_arc_free(void *data) {
+    fa_release(proven_heap_allocator(), data);
 }
 
 /* ---- helpers for the format readers ----------------------------------------------------------------------- */
@@ -360,22 +368,25 @@ void fa_progress(fulta_arc_t *arc, uint64_t delta) {
     if (arc->opt.progress) arc->opt.progress(arc->opt.progress_ctx, arc->progress_done, arc->progress_total);
 }
 
-char *fa_decode_name(const fulta_arc_t *arc, const uint8_t *raw, size_t n, bool unicode_flagged,
+char *fa_decode_name(const fulta_arc_t *arc, proven_mem_view_t raw_name, bool unicode_flagged,
                      fulta_arc_codepage_t fallback, bool *not_unicode) {
+    const uint8_t *raw = raw_name.ptr;
+    size_t n = raw_name.size;
     if (not_unicode) *not_unicode = false;
-    if (unicode_flagged || fa_utf8_valid(raw, n))
-        return fa_codepage_to_utf8(raw, n, FULTA_ARC_CP_UTF8, FULTA_ARC_CP_UTF8);   /* already Unicode */
+    if (unicode_flagged || fa_utf8_valid(fa_bytes(raw, n)))
+        return fa_codepage_to_utf8(arc->alloc, fa_bytes(raw, n), FULTA_ARC_CP_UTF8, FULTA_ARC_CP_UTF8);   /* already Unicode */
     fulta_arc_codepage_t cp = arc->opt.codepage;
     if (cp == FULTA_ARC_CP_AUTO) cp = arc->opt.auto_codepage ? arc->opt.auto_codepage : fallback;
     if (not_unicode) *not_unicode = true;
-    return fa_codepage_to_utf8(raw, n, cp, fallback);
+    return fa_codepage_to_utf8(arc->alloc, fa_bytes(raw, n), cp, fallback);
 }
 
-fa_entry_t *fa_add_entry(fulta_arc_t *arc, const uint8_t *raw_name, size_t raw_size, const char *utf8_name,
-                         const char *method) {
+fa_entry_t *fa_add_entry(fulta_arc_t *arc, proven_mem_view_t raw, const char *utf8_name, const char *method) {
+    const uint8_t *raw_name = raw.ptr;
+    size_t raw_size = raw.size;
     if (arc->count == arc->cap) {
         size_t cap = arc->cap ? arc->cap * 2 : 16;
-        fa_entry_t *p = fa_realloc(arc->entries, cap * sizeof *p);
+        fa_entry_t *p = fa_resize(arc->alloc, arc->entries, arc->cap * sizeof *p, cap * sizeof *p);
         if (!p) return NULL;
         arc->entries = p;
         arc->cap = cap;
@@ -383,20 +394,21 @@ fa_entry_t *fa_add_entry(fulta_arc_t *arc, const uint8_t *raw_name, size_t raw_s
     fa_entry_t *en = &arc->entries[arc->count];
     memset(en, 0, sizeof *en);
     en->pub.solid_group = (uint32_t)arc->count;   /* distinct unless the reader groups a solid unit */
-    en->raw_owned = fa_malloc(raw_size);
-    en->name_owned = fa_strndup(utf8_name, strlen(utf8_name));
-    en->method_owned = fa_strndup(method ? method : "", method ? strlen(method) : 0);
+    proven_allocator_t a = arc->alloc;
+    en->raw_owned = fa_alloc(a, raw_size);
+    en->name_owned = fa_strdup_view(a, proven_u8str_view_from_cstr(utf8_name));
+    en->method_owned = fa_strdup_view(a, proven_u8str_view_from_cstr(method ? method : ""));
     if (!en->raw_owned || !en->name_owned || !en->method_owned) {
-        fa_free(en->raw_owned);
-        fa_free(en->name_owned);
-        fa_free(en->method_owned);
+        fa_release(a, en->raw_owned);
+        fa_release(a, en->name_owned);
+        fa_release(a, en->method_owned);
         return NULL;
     }
     if (raw_size) memcpy(en->raw_owned, raw_name, raw_size);
     if (!fa_sanitize_name(en->name_owned)) {
-        char *p = fa_strndup("_", 1);
-        if (!p) { fa_free(en->raw_owned); fa_free(en->name_owned); fa_free(en->method_owned); return NULL; }
-        fa_free(en->name_owned);
+        char *p = fa_strdup_view(a, proven_u8str_view_from_cstr("_"));
+        if (!p) { fa_release(a, en->raw_owned); fa_release(a, en->name_owned); fa_release(a, en->method_owned); return NULL; }
+        fa_release(a, en->name_owned);
         en->name_owned = p;
     }
     en->pub.name = en->name_owned;
@@ -420,15 +432,16 @@ fulta_arc_err_t fa_volume(fulta_arc_t *arc, uint32_t index, const char *name, co
     if (!arc->opt.volume) return FULTA_ARC_ERR_VOLUME_MISSING;
     if (arc->nvolumes == arc->capvolumes) {
         /* the array of pointers may move; the sources themselves never do */
-        fulta_arc_source_t **p = fa_realloc(arc->volumes, 2 * arc->capvolumes * sizeof *p);
+        fulta_arc_source_t **p = fa_resize(arc->alloc, arc->volumes, arc->capvolumes * sizeof *p,
+                                           2 * arc->capvolumes * sizeof *p);
         if (!p) return FULTA_ARC_ERR_NOMEM;
         arc->volumes = p;
         arc->capvolumes *= 2;
     }
-    fulta_arc_source_t *s = fa_calloc(1, sizeof *s);
+    fulta_arc_source_t *s = fa_zalloc(arc->alloc, 1, sizeof *s);
     if (!s) return FULTA_ARC_ERR_NOMEM;
     fulta_arc_err_t e = arc->opt.volume(arc->opt.volume_ctx, index, name, s);
-    if (e || !s->read_at) { fa_free(s); return FULTA_ARC_ERR_VOLUME_MISSING; }
+    if (e || !s->read_at) { fa_release(arc->alloc, s); return FULTA_ARC_ERR_VOLUME_MISSING; }
     arc->volumes[arc->nvolumes++] = s;
     *out = s;
     return FULTA_ARC_OK;
@@ -446,9 +459,12 @@ fulta_arc_err_t fa_password(fulta_arc_t *arc, uint32_t attempt, const char **out
 
 void fa_password_ok(fulta_arc_t *arc, const char *pw) {
     if (arc->password && strcmp(arc->password, pw) == 0) return;
-    char *c = fa_strndup(pw, strlen(pw));
+    char *c = fa_strdup_view(arc->alloc, proven_u8str_view_from_cstr(pw));
     if (!c) return;
-    if (arc->password) { memset(arc->password, 0, strlen(arc->password)); fa_free(arc->password); }
+    if (arc->password) {
+        proven_mem_wipe((proven_mem_mut_t){.ptr = (proven_byte_t *)arc->password, .size = strlen(arc->password)});
+        fa_release(arc->alloc, arc->password);
+    }
     arc->password = c;
 }
 
@@ -456,7 +472,8 @@ bool fa_cancelled(const fulta_arc_t *arc) { return arc->opt.cancel && arc->opt.c
 
 fulta_arc_err_t fa_pump(fa_stream_t *s, uint64_t size, bool has_crc, uint32_t crc, const fulta_arc_sink_t *sink,
                         fulta_arc_t *arc, bool allow_damaged) {
-    uint8_t *buf = fa_malloc(65536);
+    proven_allocator_t a = arc ? arc->alloc : proven_heap_allocator();
+    uint8_t *buf = fa_alloc(a, 65536);
     if (!buf) return FULTA_ARC_ERR_NOMEM;
     uint64_t total = 0;
     uint32_t c = 0;
@@ -473,15 +490,15 @@ fulta_arc_err_t fa_pump(fa_stream_t *s, uint64_t size, bool has_crc, uint32_t cr
             if (size != UINT64_MAX && total < size) e = FULTA_ARC_ERR_TRUNCATED;
             break;
         }
-        c = fa_crc32(c, buf, got);
+        c = fa_crc32(c, fa_bytes(buf, got));
         total += got;
         fa_progress(arc, got);
         if (sink && sink->write) {
             fulta_arc_err_t we = sink->write(sink->ctx, buf, got);
-            if (we) { fa_free(buf); return we; }   /* a sink failure is the caller's, never "damaged" */
+            if (we) { fa_release(a, buf); return we; }   /* a sink failure is the caller's, never "damaged" */
         }
     }
-    fa_free(buf);
+    fa_release(a, buf);
     if (!e && has_crc && c != crc) e = FULTA_ARC_ERR_CHECKSUM;
     /* keep what decoded: a decode-side failure becomes FULTA_ARC_DAMAGED, the sink already has the bytes */
     if (e && allow_damaged && arc && arc->opt.keep_damaged && e != FULTA_ARC_ERR_CANCELLED &&

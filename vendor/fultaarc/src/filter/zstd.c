@@ -12,7 +12,7 @@ static bool zstd_probe(const uint8_t *head, size_t n, uint64_t *offset) {
     return true;
 }
 
-static char *zstd_derive_name(const char *archive_name) {
+static char *zstd_derive_name(proven_allocator_t alloc, const char *archive_name) {
     const char *base = archive_name ? archive_name : "";
     for (const char *p = base; *p; p++) if (*p == '/' || *p == '\\') base = p + 1;
     size_t len = strlen(base);
@@ -23,7 +23,7 @@ static char *zstd_derive_name(const char *archive_name) {
     #undef EQ
     if (len == 0) { base = "data"; len = 4; tar = NULL; }
     size_t extra = tar ? 4 : 0;
-    char *out = fa_malloc(len + extra + 1);
+    char *out = fa_alloc(alloc, len + extra + 1);
     if (!out) return NULL;
     memcpy(out, base, len);
     if (tar) memcpy(out + len, tar, 4);
@@ -35,13 +35,13 @@ static fulta_arc_err_t zstd_open(fulta_arc_t *arc, uint64_t offset) {
     (void)offset;
     const fulta_arc_source_t *src = arc->volumes[0];
     uint8_t h[4];
-    if (src->size < 4 || fa_source_read_exact(src, 0, h, 4)) return FULTA_ARC_ERR_NOT_ARCHIVE;
+    if (src->size < 4 || fa_source_read_exact(src, 0, fa_bytes_mut(h, 4))) return FULTA_ARC_ERR_NOT_ARCHIVE;
     if (memcmp(h, ZSTD_MAGIC, 4) != 0) return FULTA_ARC_ERR_NOT_ARCHIVE;
 
-    char *name = zstd_derive_name(arc->name);
+    char *name = zstd_derive_name(arc->alloc, arc->name);
     const char *use = name ? name : "data";
-    fa_entry_t *e = fa_add_entry(arc, (const uint8_t *)use, strlen(use), use, "zstd");
-    fa_free(name);
+    fa_entry_t *e = fa_add_entry(arc, fa_bytes((const uint8_t *)use, strlen(use)), use, "zstd");
+    fa_release(arc->alloc, name);
     if (!e) return FULTA_ARC_ERR_NOMEM;
     e->pub.size = 0;                        /* the frame may carry a content size; not pre-read here */
     e->pub.packed_size = src->size;
@@ -54,7 +54,7 @@ static fulta_arc_err_t zstd_extract(fulta_arc_t *arc, size_t index, const fulta_
     fa_piece_t piece = { src, 0, src->size };
     fa_range_t range = { &piece, 1, src->size };
     fa_stream_t *s = NULL, *d = NULL;
-    fulta_arc_err_t e = fa_stream_range(&range, 0, src->size, &s);
+    fulta_arc_err_t e = fa_stream_range(arc->alloc, &range, 0, src->size, &s);
     if (e) return e;
     if ((e = fa_dec_zstd(s, UINT64_MAX, &arc->limits, &d))) { fa_stream_destroy(s); return e; }
     e = fa_pump(d, UINT64_MAX, false, 0, sink, arc, arc->opt.keep_damaged);   /* zstd checks its own checksum */

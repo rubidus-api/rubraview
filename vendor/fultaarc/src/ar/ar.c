@@ -13,6 +13,7 @@
 typedef struct ar_item { uint64_t off, size; } ar_item_t;
 
 typedef struct ar_state {
+    proven_allocator_t alloc;   /* the archive's: this state and everything it holds */
     ar_item_t *items;
     size_t n, cap;
     char *nametab;        /* the GNU "//" long-name string table (may be NULL) */
@@ -39,7 +40,7 @@ static bool ar_dec(const uint8_t *f, size_t len, uint64_t *out) {
 static ar_item_t *ar_add(ar_state_t *st) {
     if (st->n == st->cap) {
         size_t nc = st->cap ? st->cap * 2 : 16;
-        ar_item_t *p = fa_realloc(st->items, nc * sizeof *p);
+        ar_item_t *p = fa_resize(st->alloc, st->items, st->cap * sizeof *p, nc * sizeof *p);
         if (!p) return NULL;
         st->items = p;
         st->cap = nc;
@@ -52,15 +53,15 @@ static void ar_close(fulta_arc_t *arc);
 /* Add a file entry with the resolved name and data range. */
 static fulta_arc_err_t ar_emit(fulta_arc_t *arc, ar_state_t *st, const char *name, size_t nlen,
                                uint64_t off, uint64_t size) {
-    char *safe = fa_malloc(nlen + 1);
+    char *safe = fa_alloc(arc->alloc, nlen + 1);
     if (!safe) return FULTA_ARC_ERR_NOMEM;
     memcpy(safe, name, nlen);
     safe[nlen] = 0;
-    if (!fa_sanitize_name(safe)) { fa_free(safe); safe = NULL; }
+    if (!fa_sanitize_name(safe)) { fa_release(arc->alloc, safe); safe = NULL; }
     const char *use = safe && safe[0] ? safe : "data";
-    fa_entry_t *e = fa_add_entry(arc, (const uint8_t *)name, nlen, use, "store");
+    fa_entry_t *e = fa_add_entry(arc, fa_bytes((const uint8_t *)name, nlen), use, "store");
     ar_item_t *it = ar_add(st);
-    fa_free(safe);
+    fa_release(arc->alloc, safe);
     if (!e || !it) return FULTA_ARC_ERR_NOMEM;
     e->pub.size = size;
     e->pub.packed_size = size;
@@ -79,11 +80,12 @@ static fulta_arc_err_t ar_open(fulta_arc_t *arc, uint64_t offset) {
     (void)offset;
     const fulta_arc_source_t *src = arc->volumes[0];
     uint8_t magic[8];
-    if (src->size < 8 || fa_source_read_exact(src, 0, magic, 8) || memcmp(magic, AR_MAGIC, 8) != 0)
+    if (src->size < 8 || fa_source_read_exact(src, 0, fa_bytes_mut(magic, 8)) || memcmp(magic, AR_MAGIC, 8) != 0)
         return FULTA_ARC_ERR_NOT_ARCHIVE;
 
-    ar_state_t *st = fa_calloc(1, sizeof *st);
+    ar_state_t *st = fa_zalloc(arc->alloc, 1, sizeof *st);
     if (!st) return FULTA_ARC_ERR_NOMEM;
+    st->alloc = arc->alloc;
     arc->state = st;
 
     fulta_arc_err_t e = FULTA_ARC_OK;
@@ -94,7 +96,7 @@ static fulta_arc_err_t ar_open(fulta_arc_t *arc, uint64_t offset) {
     uint64_t pos = 8;
     while (pos + AR_HDR <= src->size) {
         uint8_t h[AR_HDR];
-        if (fa_source_read_exact(src, pos, h, AR_HDR)) break;
+        if (fa_source_read_exact(src, pos, fa_bytes_mut(h, AR_HDR))) break;
         if (h[58] != 0x60 || h[59] != 0x0A) break;        /* no "`\n" terminator */
         uint64_t size;
         if (!ar_dec(h + 48, 10, &size)) break;            /* non-numeric size */
@@ -106,9 +108,9 @@ static fulta_arc_err_t ar_open(fulta_arc_t *arc, uint64_t offset) {
         if (nm[0] == '/' && nm[1] == '/') {               /* GNU long-name string table */
             if (size > AR_NAMETAB_MAX) break;
             if (!st->nametab && size) {
-                st->nametab = fa_malloc((size_t)size);
+                st->nametab = fa_alloc(arc->alloc, (size_t)size);
                 if (!st->nametab) { e = FULTA_ARC_ERR_NOMEM; break; }
-                if (fa_source_read_exact(src, data, st->nametab, (size_t)size)) break;
+                if (fa_source_read_exact(src, data, fa_bytes_mut(st->nametab, (size_t)size))) break;
                 st->nametab_len = (size_t)size;
             }
             pos = advance;
@@ -135,7 +137,7 @@ static fulta_arc_err_t ar_open(fulta_arc_t *arc, uint64_t offset) {
             if (namelen == 0 || namelen > size) break;
             char nbuf[256];
             size_t rn = namelen > sizeof nbuf ? sizeof nbuf : (size_t)namelen;   /* names in practice are < 100 */
-            if (fa_source_read_exact(src, data, nbuf, rn)) break;
+            if (fa_source_read_exact(src, data, fa_bytes_mut(nbuf, rn))) break;
             size_t nlen = 0;
             while (nlen < rn && nbuf[nlen]) nlen++;        /* BSD may NUL-pad the inline name */
             bool symtab = nlen >= 9 && memcmp(nbuf, "__.SYMDEF", 9) == 0;   /* "__.SYMDEF" / "__.SYMDEF SORTED" */
@@ -165,7 +167,7 @@ static fulta_arc_err_t ar_extract(fulta_arc_t *arc, size_t index, const fulta_ar
     fa_piece_t piece = { src, it->off, it->size };
     fa_range_t range = { &piece, 1, it->size };
     fa_stream_t *s = NULL;
-    fulta_arc_err_t e = fa_stream_range(&range, 0, it->size, &s);
+    fulta_arc_err_t e = fa_stream_range(arc->alloc, &range, 0, it->size, &s);
     if (e) return e;
     e = fa_pump(s, it->size, false, 0, sink, arc, arc->opt.keep_damaged);
     fa_stream_destroy(s);
@@ -175,9 +177,9 @@ static fulta_arc_err_t ar_extract(fulta_arc_t *arc, size_t index, const fulta_ar
 static void ar_close(fulta_arc_t *arc) {
     ar_state_t *st = arc->state;
     if (!st) return;
-    fa_free(st->items);
-    fa_free(st->nametab);
-    fa_free(st);
+    fa_release(arc->alloc, st->items);
+    fa_release(arc->alloc, st->nametab);
+    fa_release(arc->alloc, st);
     arc->state = NULL;
 }
 

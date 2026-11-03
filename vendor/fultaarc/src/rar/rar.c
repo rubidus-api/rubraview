@@ -77,6 +77,7 @@ typedef struct key30 { uint8_t salt[8]; bool has_salt; uint8_t key[16], iv[16]; 
 typedef struct key50 { uint8_t salt[16]; uint8_t lg2; uint8_t key[32], hash_key[32], check[8]; } key50_t;
 
 typedef struct rar_state {
+    proven_allocator_t alloc;      /* this state, the parse buffers and the codec objects live here (D-038) */
     void *unpack;
     size_t next;                   /* the entry a solid stream continues with; SIZE_MAX when none */
     bool have_password;
@@ -91,8 +92,9 @@ typedef struct rar_state {
 static void state_free(rar_state_t *st) {
     if (!st) return;
     if (st->unpack && g_codec) g_codec->unpack_destroy(st->unpack);
+    proven_allocator_t a = st->alloc;   /* the wipe below clears it */
     wipe(st, sizeof(*st));
-    free(st);
+    fa_release(a, st);
 }
 
 /* Spec 6.1.1 / 6.2.1 / 14: the password as UTF-8 and as UTF-16LE, 128 characters at most. */
@@ -169,12 +171,12 @@ static const key50_t *keys50(rar_state_t *st, const uint8_t salt[16], uint8_t lg
 /* ------------------------------------------------------------------ */
 /* growable arrays while parsing */
 
-typedef struct vec { void *data; size_t count, cap, elem; } vec_t;
+typedef struct vec { void *data; size_t count, cap, elem; proven_allocator_t alloc; } vec_t;
 
 static void *vec_push(vec_t *v) {
     if (v->count == v->cap) {
         size_t cap = v->cap ? v->cap * 2 : 16;
-        void *d = realloc(v->data, cap * v->elem);
+        void *d = fa_resize(v->alloc, v->data, v->cap * v->elem, cap * v->elem);
         if (!d) return NULL;
         v->data = d;
         v->cap = cap;
@@ -208,7 +210,7 @@ static bool reserve(parser_t *p, size_t n) {
     if (n <= p->cap) return true;
     size_t cap = p->cap ? p->cap : 256;
     while (cap < n) cap *= 2;
-    uint8_t *b = (uint8_t*)realloc(p->buf, cap);
+    uint8_t *b = fa_resize(p->st->alloc, p->buf, p->cap, cap);
     if (!b) return false;
     p->buf = b;
     p->cap = cap;
@@ -236,7 +238,7 @@ static size_t utf8_put(uint8_t *o, uint32_t cp) {
 }
 
 /* Spec 2.4: the narrow name, then the encoded UTF-16 one; to UTF-8 with '/' separators. */
-static proven_u8str_view_t rar4_name(proven_arena_t *arena, const uint8_t *name, size_t len, bool unicode, bool *legacy) {
+static proven_u8str_view_t rar4_name(proven_allocator_t alloc, proven_arena_t *arena, const uint8_t *name, size_t len, bool unicode, bool *legacy) {
     *legacy = false;
     const uint8_t *zero = unicode ? memchr(name, 0, len) : NULL;
     uint8_t *tmp = NULL;
@@ -245,9 +247,9 @@ static proven_u8str_view_t rar4_name(proven_arena_t *arena, const uint8_t *name,
         size_t nlen = (size_t)(zero - name);
         const uint8_t *enc = zero + 1;
         size_t elen = len - nlen - 1;
-        uint16_t *u = (uint16_t*)malloc((nlen + 1) * sizeof(uint16_t));
-        tmp = (uint8_t*)malloc(nlen * 4 + 4);
-        if (!u || !tmp) { free(u); free(tmp); return (proven_u8str_view_t){ .ptr = NULL, .size = 0 }; }
+        uint16_t *u = fa_alloc(alloc, (nlen + 1) * sizeof(uint16_t));
+        tmp = fa_alloc(alloc, nlen * 4 + 4);
+        if (!u || !tmp) { fa_release(alloc, u); fa_release(alloc, tmp); return (proven_u8str_view_t){ .ptr = NULL, .size = 0 }; }
         size_t n = 0;
         if (elen > 0) {
             uint8_t high = enc[0], flags = 0;
@@ -288,10 +290,10 @@ static proven_u8str_view_t rar4_name(proven_arena_t *arena, const uint8_t *name,
             } else if (cp >= 0xD800 && cp < 0xE000) cp = 0xFFFD;
             out_len += utf8_put(tmp + out_len, cp);
         }
-        free(u);
+        fa_release(alloc, u);
         if (n == 0) { memcpy(tmp, name, nlen); out_len = nlen; }   /* nothing encoded: the narrow name */
     } else {
-        tmp = (uint8_t*)malloc(len + 1);
+        tmp = fa_alloc(alloc, len + 1);
         if (!tmp) return (proven_u8str_view_t){ .ptr = NULL, .size = 0 };
         memcpy(tmp, name, len);
         out_len = len;
@@ -299,7 +301,7 @@ static proven_u8str_view_t rar4_name(proven_arena_t *arena, const uint8_t *name,
     }
     for (size_t i = 0; i < out_len; ++i) if (tmp[i] == '\\') tmp[i] = '/';
     proven_u8str_view_t r = arena_copy(arena, tmp, out_len);
-    free(tmp);
+    fa_release(alloc, tmp);
     return r;
 }
 
@@ -382,7 +384,7 @@ static perr_t rar4_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
             const key30_t *k = keys30(p->st, salt);
             if (!reserve(p, 16)) return P_MEMORY;
             memcpy(p->buf, d + pos + 8, 16);
-            void *aes = g_codec->aes_create(k->key, 128, k->iv);
+            void *aes = g_codec->aes_create(p->st->alloc, k->key, 128, k->iv);
             if (!aes) return P_MEMORY;
             g_codec->aes_decrypt(aes, p->buf, 16);
             hsize = rd16(p->buf + 5);
@@ -492,7 +494,7 @@ static perr_t rar4_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
             }
             fa_rar_entry_t proto = {0};
             bool legacy = false;
-            proto.name = rar4_name(p->arena, name, nlen, flags & 0x0200, &legacy);
+            proto.name = rar4_name(p->st->alloc, p->arena, name, nlen, flags & 0x0200, &legacy);
             if (!proto.name.ptr) return P_MEMORY;
             part_t pt = {0};
             pt.name = proto.name;
@@ -562,7 +564,7 @@ static perr_t rar5_header(parser_t *p, uint32_t vol, size_t pos, bool enc, const
         if (size - pos < 32) return P_END;
         if (!reserve(p, 16)) return P_MEMORY;
         memcpy(p->buf, d + pos + 16, 16);
-        void *aes = g_codec->aes_create(p->hkey, 256, d + pos);
+        void *aes = g_codec->aes_create(p->st->alloc, p->hkey, 256, d + pos);
         if (!aes) return P_MEMORY;
         g_codec->aes_decrypt(aes, p->buf, 16);
         rd5_t r = { p->buf + 4, 12, 0, false };
@@ -735,7 +737,7 @@ static fa_rar_err_t perr_map(perr_t e) {
     }
 }
 
-fa_rar_result_t fa_rar_open_volumes(proven_arena_t *arena, const fa_rar_volume_t *volumes,
+fa_rar_result_t fa_rar_open_volumes(proven_allocator_t alloc, proven_arena_t *arena, const fa_rar_volume_t *volumes,
                                                   size_t volume_count, proven_u8str_view_t password) {
     fa_rar_result_t out = { .err = FA_RAR_ERR_NOT_A_RAR };
     if (!arena || !volumes || volume_count == 0 || !volumes[0].data) return out;
@@ -746,9 +748,11 @@ fa_rar_result_t fa_rar_open_volumes(proven_arena_t *arena, const fa_rar_volume_t
     parser_t p = { .arena = arena, .vols = volumes, .vol_count = volume_count, .pending = -1 };
     p.entries.elem = sizeof(fa_rar_entry_t);
     p.pieces.elem = sizeof(fa_rar_piece_t);
+    p.entries.alloc = p.pieces.alloc = alloc;
     p.rar5 = fmt == 5;
-    p.st = (rar_state_t*)calloc(1, sizeof(rar_state_t));
+    p.st = fa_zalloc(alloc, 1, sizeof(rar_state_t));
     if (!p.st) { out.err = FA_RAR_ERR_OUT_OF_MEMORY; return out; }
+    p.st->alloc = alloc;
     p.st->next = SIZE_MAX;
     if (password.size > 0) { state_set_password(p.st, password); p.password_given = true; }
 
@@ -815,24 +819,24 @@ fa_rar_result_t fa_rar_open_volumes(proven_arena_t *arena, const fa_rar_volume_t
     for (size_t i = 0; i < a->entry_count; ++i) {
         if (a->entries[i].first_piece + a->entries[i].piece_count > a->piece_count) a->entries[i].split = true;
     }
-    free(p.entries.data);
-    free(p.pieces.data);
-    free(p.buf);
+    fa_release(alloc, p.entries.data);
+    fa_release(alloc, p.pieces.data);
+    fa_release(alloc, p.buf);
     out.err = FA_RAR_OK;
     return out;
 
 fail:
-    free(p.entries.data);
-    free(p.pieces.data);
-    free(p.buf);
+    fa_release(alloc, p.entries.data);
+    fa_release(alloc, p.pieces.data);
+    fa_release(alloc, p.buf);
     state_free(p.st);
     out.value = (fa_rar_archive_t){0};
     return out;
 }
 
-fa_rar_result_t fa_rar_open(proven_arena_t *arena, const uint8_t *data, size_t size) {
+fa_rar_result_t fa_rar_open(proven_allocator_t alloc, proven_arena_t *arena, const uint8_t *data, size_t size) {
     fa_rar_volume_t one = { .data = data, .size = size };
-    return fa_rar_open_volumes(arena, &one, 1, PROVEN_LIT(""));
+    return fa_rar_open_volumes(alloc, arena, &one, 1, PROVEN_LIT(""));
 }
 
 void fa_rar_close(fa_rar_archive_t *archive) {
@@ -1008,7 +1012,7 @@ static fa_rar_err_t extract_one(fa_rar_archive_t *a, size_t index, bool check,
     if (e->encrypted) {
         if (e->crypt == FA_RAR_CRYPT_30) {
             const key30_t *k = keys30(st, e->salt_set ? e->salt : NULL);
-            src.aes = g_codec->aes_create(k->key, 128, k->iv);
+            src.aes = g_codec->aes_create(st->alloc, k->key, 128, k->iv);
         } else {
             const key50_t *k = keys50(st, e->salt, e->lg2_count);
             if (!k) return FA_RAR_ERR_UNSUPPORTED;
@@ -1017,7 +1021,7 @@ static fa_rar_err_t extract_one(fa_rar_archive_t *a, size_t index, bool check,
                 g_codec->sha256(e->psw_check, 8, sum);
                 if (memcmp(sum, e->psw_check_sum, 4) == 0) return FA_RAR_ERR_BAD_PASSWORD;
             }
-            src.aes = g_codec->aes_create(k->key, 256, e->iv);
+            src.aes = g_codec->aes_create(st->alloc, k->key, 256, e->iv);
             const key50_t *m = memcmp(e->mac_salt, e->salt, 16) == 0 && e->mac_lg2 == e->lg2_count
                                    ? k : keys50(st, e->mac_salt, e->mac_lg2);
             if (m) { memcpy(hash_key, m->hash_key, 32); have_hash_key = true; }
@@ -1026,7 +1030,7 @@ static fa_rar_err_t extract_one(fa_rar_archive_t *a, size_t index, bool check,
     }
 
     sink_t sink = { .st = st, .limit = e->size, .write = write, .ctx = ctx };
-    if (check && e->has_hash && g_codec) sink.b2 = g_codec->blake2sp_create();
+    if (check && e->has_hash && g_codec) sink.b2 = g_codec->blake2sp_create(st->alloc);
 
     if (e->method == 0) {
         uint8_t buf[65536];
@@ -1042,7 +1046,7 @@ static fa_rar_err_t extract_one(fa_rar_archive_t *a, size_t index, bool check,
             if (!sink_write(&sink, buf, n)) { err = FA_RAR_ERR_CANCELLED; break; }
         }
     } else {
-        if (!st->unpack) st->unpack = g_codec->unpack_create();
+        if (!st->unpack) st->unpack = g_codec->unpack_create(st->alloc);
         if (!st->unpack) err = FA_RAR_ERR_OUT_OF_MEMORY;
         else {
             /* Spec 7.5: in a solid archive the stream runs to its end; so too when the next file says it continues. */
@@ -1101,7 +1105,7 @@ fa_rar_err_t fa_rar_extract(fa_rar_archive_t *archive, size_t index,
     return extract_one(archive, index, true, write, ctx);
 }
 
-typedef struct grow { uint8_t *p; size_t len, cap; uint64_t max; bool too_large; } grow_t;
+typedef struct grow { proven_allocator_t alloc; uint8_t *p; size_t len, cap; uint64_t max; bool too_large; } grow_t;
 
 static bool grow_write(void *ctx, const uint8_t *data, size_t size) {
     grow_t *g = (grow_t*)ctx;
@@ -1109,7 +1113,7 @@ static bool grow_write(void *ctx, const uint8_t *data, size_t size) {
     if (g->len + size > g->cap) {
         size_t cap = g->cap ? g->cap : 65536;
         while (cap < g->len + size) cap *= 2;
-        uint8_t *p = (uint8_t*)realloc(g->p, cap);
+        uint8_t *p = fa_resize(g->alloc, g->p, g->cap, cap);
         if (!p) return false;
         g->p = p;
         g->cap = cap;
@@ -1145,7 +1149,7 @@ fa_rar_data_result_t fa_rar_read_entry(proven_arena_t *arena, fa_rar_archive_t *
         out.data = (proven_mem_view_t){ .ptr = r.value.ptr, .size = f.len };
         return out;
     }
-    grow_t g = { .max = max_entry_bytes };
+    grow_t g = { .alloc = ((rar_state_t *)archive->state)->alloc, .max = max_entry_bytes };
     out.err = fa_rar_extract(archive, index, grow_write, &g);
     if (out.err == FA_RAR_ERR_CANCELLED && g.too_large) out.err = FA_RAR_ERR_TOO_LARGE;
     if (out.err == FA_RAR_OK) {
@@ -1153,7 +1157,7 @@ fa_rar_data_result_t fa_rar_read_entry(proven_arena_t *arena, fa_rar_archive_t *
         out.data = (proven_mem_view_t){ .ptr = c.ptr, .size = c.size };
         if (!out.data.ptr) { out.err = FA_RAR_ERR_OUT_OF_MEMORY; out.data = (proven_mem_view_t){ .ptr = (const proven_byte_t*)"", .size = 0 }; }
     }
-    free(g.p);
+    fa_release(g.alloc, g.p);
     return out;
 }
 

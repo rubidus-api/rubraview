@@ -187,7 +187,7 @@ bool rc_add_filter(rc_unpack_t *u, const rc_filter_t *f) {
     if (u->fcount >= RC_MAX_FILTERS) return false;
     if (u->fcount == u->fcap) {
         size_t cap = u->fcap ? u->fcap * 2 : 16;
-        rc_filter_t *nf = (rc_filter_t*)realloc(u->filters, cap * sizeof(*nf));
+        rc_filter_t *nf = fa_resize(u->alloc, u->filters, u->fcap * sizeof(*nf), cap * sizeof(*nf));
         if (!nf) return false;
         u->filters = nf;
         u->fcap = cap;
@@ -213,7 +213,8 @@ bool rc_flush(rc_unpack_t *u, bool all) {
             if (u->flushed == f->start && u->pos >= f->start + f->length) {
                 size_t n = (size_t)f->length;
                 if (u->fbuf_cap < n) {
-                    uint8_t *a = (uint8_t*)realloc(u->fbuf, n), *b2 = a ? (uint8_t*)realloc(u->fbuf2, n) : NULL;
+                    uint8_t *a = fa_resize(u->alloc, u->fbuf, u->fbuf_cap, n);
+                    uint8_t *b2 = a ? fa_resize(u->alloc, u->fbuf2, u->fbuf_cap, n) : NULL;
                     if (a) u->fbuf = a;
                     if (b2) u->fbuf2 = b2;
                     if (!a || !b2) return false;
@@ -270,24 +271,30 @@ const uint8_t rc_sdbits[8] = { 2, 2, 3, 4, 5, 6, 6, 6 };
 
 /* ---- the codec's entry points ---- */
 
-void *rc_unpack_create(void) {
-    rc_unpack_t *u = (rc_unpack_t*)calloc(1, sizeof(rc_unpack_t));
+static void *ppm_alloc(ISzAllocPtr p, size_t size) { return fa_alloc(((const rc_ppm_alloc_t *)(const void *)p)->a, size); }
+static void ppm_free(ISzAllocPtr p, void *a) { fa_release(((const rc_ppm_alloc_t *)(const void *)p)->a, a); }
+
+void *rc_unpack_create(proven_allocator_t alloc) {
+    rc_unpack_t *u = fa_zalloc(alloc, 1, sizeof(rc_unpack_t));
     if (!u) return NULL;
-    u->bits.buf = (uint8_t*)malloc(IN_CAP);
-    if (!u->bits.buf) { free(u); return NULL; }
+    u->alloc = alloc;
+    u->ppm_alloc = (rc_ppm_alloc_t){ .vt = { ppm_alloc, ppm_free }, .a = alloc };
+    u->bits.buf = fa_alloc(alloc, IN_CAP);
+    if (!u->bits.buf) { fa_release(alloc, u); return NULL; }
     return u;
 }
 
 void rc_unpack_destroy(void *p) {
     rc_unpack_t *u = (rc_unpack_t*)p;
     if (!u) return;
+    proven_allocator_t a = u->alloc;
     rc_unpack29_free(u);
-    free(u->win);
-    free(u->filters);
-    free(u->fbuf);
-    free(u->fbuf2);
-    free(u->bits.buf);
-    free(u);
+    fa_release(a, u->win);
+    fa_release(a, u->filters);
+    fa_release(a, u->fbuf);
+    fa_release(a, u->fbuf2);
+    fa_release(a, u->bits.buf);
+    fa_release(a, u);
 }
 
 /* RAR 1.5 (unpack version 15) is not part of FultaArc yet: the earlier black-box decoder is being redone from scratch
@@ -314,9 +321,9 @@ fa_rar_unpack_status_t rc_unpack_file(void *p, const fa_rar_unpack_params_t *prm
     if (need > SIZE_MAX) return FA_RAR_UNPACK_TOO_LARGE;
     if (solid && need > u->wsize) return FA_RAR_UNPACK_CORRUPT;   /* a solid file keeps the window */
     if (!u->win || u->wsize < need) {
-        free(u->win);
+        fa_release(u->alloc, u->win);   /* the old window's bytes are not kept: a fresh block, not a resize */
         u->wsize = 0;
-        u->win = (uint8_t*)malloc((size_t)need);
+        u->win = fa_alloc(u->alloc, (size_t)need);
         if (!u->win) { u->alive = false; return FA_RAR_UNPACK_NO_MEMORY; }
         u->wsize = need;
     }

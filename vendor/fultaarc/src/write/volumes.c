@@ -21,6 +21,7 @@ typedef struct fa_vol_part {
 } fa_vol_part_t;
 
 struct fa_vol {
+    proven_allocator_t alloc;  /* the volume table's (the writer's allocator) */
     const fulta_arc_volume_sink_t *vs;
     uint64_t vsize;
     bool zip;                 /* volumes close when settled, not when full */
@@ -29,6 +30,7 @@ struct fa_vol {
     uint32_t cap;
     fa_vol_part_t *v;
     uint64_t at;              /* logical bytes written */
+    uint32_t lo;              /* ZIP: the lowest volume past the first that may still be open (settle starts here) */
 };
 
 static fulta_arc_err_t vol_close(fa_vol_t *w, uint32_t i) {
@@ -45,7 +47,7 @@ static fulta_arc_err_t vol_open_next(fa_vol_t *w) {
     }
     if (w->n == w->cap) {
         uint32_t nc = w->cap ? w->cap * 2 : 16;
-        fa_vol_part_t *nv = realloc(w->v, (size_t)nc * sizeof *nv);
+        fa_vol_part_t *nv = fa_resize(w->alloc, w->v, (size_t)w->cap * sizeof *nv, (size_t)nc * sizeof *nv);
         if (!nv) return FULTA_ARC_ERR_NOMEM;
         w->v = nv; w->cap = nc;
     }
@@ -86,8 +88,11 @@ static fulta_arc_err_t fa_vol_patch(void *ctx, uint64_t off, const void *data, s
     fa_vol_t *w = ctx;
     const uint8_t *p = data;
     if (off > w->at || n > w->at - off) return FULTA_ARC_ERR_IO;
-    uint32_t i = 0;
-    while (i < w->n && w->v[i].start + w->v[i].len <= off) i++;   /* volumes are few next to the bytes in them */
+    /* patches go to the entry being written, so search from the last volume back (O(1) in the usual case) */
+    uint32_t i = w->n;
+    while (i > 0 && w->v[i - 1].start > off) i--;
+    if (i == 0) return FULTA_ARC_ERR_IO;
+    i--;
     while (n) {
         if (i >= w->n || !w->v[i].open) return FULTA_ARC_ERR_IO;     /* a closed volume: a writer bug */
         fa_vol_part_t *c = &w->v[i];
@@ -125,22 +130,22 @@ uint32_t fa_vol_count(const fa_vol_t *w) {
 }
 
 fulta_arc_err_t fa_vol_settle(fa_vol_t *w, uint64_t off) {
-    for (uint32_t i = 1; i + 1 < w->n; i++) {
-        if (w->v[i].open && w->v[i].start + w->v[i].len <= off) {
-            fulta_arc_err_t e = vol_close(w, i);
-            if (e) return e;
-        }
+    if (w->lo < 1) w->lo = 1;                              /* volume 0 stays open to the end (its marker) */
+    while (w->lo + 1 < w->n && w->v[w->lo].start + w->v[w->lo].len <= off) {   /* amortised O(1) per record */
+        fulta_arc_err_t e = vol_close(w, w->lo);
+        if (e) return e;
+        w->lo++;
     }
     return FULTA_ARC_OK;
 }
 
 /* Run `body` against a volume writer over `vs`, then close every volume and commit or discard the set. */
-fulta_arc_err_t fa_vol_run(fulta_arc_format_t format, uint64_t volume_size, const fulta_arc_volume_sink_t *vs,
+fulta_arc_err_t fa_vol_run(proven_allocator_t a, fulta_arc_format_t format, uint64_t volume_size, const fulta_arc_volume_sink_t *vs,
                            fulta_arc_err_t (*body)(void *ctx, const fulta_arc_write_sink_t *sink), void *ctx) {
     if (!vs || !vs->open || !vs->finish) return FULTA_ARC_ERR_INVALID_ARG;
     if (format != FULTA_ARC_FORMAT_ZIP && format != FULTA_ARC_FORMAT_7Z) return FULTA_ARC_ERR_INVALID_ARG;
     if (volume_size < FULTA_ARC_VOLUME_MIN) return FULTA_ARC_ERR_INVALID_ARG;
-    fa_vol_t w = {.vs = vs, .vsize = volume_size, .zip = format == FULTA_ARC_FORMAT_ZIP};
+    fa_vol_t w = {.alloc = a, .vs = vs, .vsize = volume_size, .zip = format == FULTA_ARC_FORMAT_ZIP};
     fulta_arc_write_sink_t front = {.ctx = &w, .write = fa_vol_write, .patch = fa_vol_patch};
     fulta_arc_err_t e = body(ctx, &front);
     if (!e && w.n > 65535u && w.zip) e = FULTA_ARC_ERR_LIMIT;   /* the reader takes no more disks than this */
@@ -150,7 +155,7 @@ fulta_arc_err_t fa_vol_run(fulta_arc_format_t format, uint64_t volume_size, cons
     }
     fulta_arc_err_t fe = vs->finish(vs->ctx, w.n, e == FULTA_ARC_OK);
     if (fe && !e) e = fe;
-    free(w.v);
+    fa_release(a, w.v);
     return e;
 }
 
@@ -189,6 +194,7 @@ typedef struct fv_file {
 } fv_file_t;
 
 typedef struct fv_set {
+    proven_allocator_t alloc;
     const char *path;
     fulta_arc_format_t format;
     fv_file_t **files;        /* one allocation each: a volume's sink keeps its address */
@@ -219,15 +225,15 @@ static fulta_arc_err_t fv_open(void *ctx, uint32_t index, fulta_arc_write_sink_t
     if (index != s->n) return FULTA_ARC_ERR_INVALID_ARG;
     if (s->n == s->cap) {
         uint32_t nc = s->cap ? s->cap * 2 : 16;
-        fv_file_t **nf = realloc(s->files, (size_t)nc * sizeof *nf);
+        fv_file_t **nf = fa_resize(s->alloc, s->files, (size_t)s->cap * sizeof *nf, (size_t)nc * sizeof *nf);
         if (!nf) return FULTA_ARC_ERR_NOMEM;
         s->files = nf; s->cap = nc;
     }
-    fv_file_t *f = malloc(sizeof *f);
+    fv_file_t *f = fa_alloc(s->alloc, sizeof *f);
     if (!f) return FULTA_ARC_ERR_NOMEM;
     proven_result_file_t r = proven_fs_open(proven_heap_allocator(), proven_u8str_view_from_cstr(fv_tmp_name(s, index)),
                                             PROVEN_FS_WRITE | PROVEN_FS_CREATE | PROVEN_FS_TRUNC);
-    if (r.err) { free(f); return FULTA_ARC_ERR_IO; }
+    if (r.err) { fa_release(s->alloc, f); return FULTA_ARC_ERR_IO; }
     *f = (fv_file_t){.f = r.value, .open = true};
     s->files[s->n++] = f;
     out->ctx = f;
@@ -257,7 +263,7 @@ static void fv_remove(const char *name) {
 static fulta_arc_err_t fv_finish(void *ctx, uint32_t count, int ok) {
     fv_set_t *s = ctx;
     fulta_arc_err_t e = ok ? FULTA_ARC_OK : FULTA_ARC_ERR_IO;
-    char *fin = malloc(s->tmpcap);
+    char *fin = fa_alloc(s->alloc, s->tmpcap);
     if (!fin) e = FULTA_ARC_ERR_NOMEM;
     /* a continuation volume past the new set's last would join it when read: refuse rather than delete it */
     if (!e && count) {
@@ -282,22 +288,22 @@ static fulta_arc_err_t fv_finish(void *ctx, uint32_t count, int ok) {
             if (!fulta_arc_volume_name(s->format, s->path, i, count, fin, s->tmpcap)) fv_remove(fin);
         for (uint32_t i = done; i < s->n; i++) fv_remove(fv_tmp_name(s, i));
     }
-    free(fin);
+    fa_release(s->alloc, fin);
     return e;
 }
 
-fulta_arc_err_t fa_vol_files(const char *path, fulta_arc_format_t format, uint64_t volume_size,
+fulta_arc_err_t fa_vol_files(proven_allocator_t a, const char *path, fulta_arc_format_t format, uint64_t volume_size,
                              fulta_arc_err_t (*body)(void *ctx, const fulta_arc_write_sink_t *sink), void *ctx) {
     if (!path) return FULTA_ARC_ERR_INVALID_ARG;
-    fv_set_t s = {.path = path, .format = format, .tmpcap = strlen(path) + 32};
-    s.tmp = malloc(s.tmpcap);
+    fv_set_t s = {.alloc = a, .path = path, .format = format, .tmpcap = strlen(path) + 32};
+    s.tmp = fa_alloc(a, s.tmpcap);
     if (!s.tmp) return FULTA_ARC_ERR_NOMEM;
     fulta_arc_volume_sink_t vs = {.ctx = &s, .open = fv_open, .close = fv_close, .finish = fv_finish};
-    fulta_arc_err_t e = fa_vol_run(format, volume_size, &vs, body, ctx);
+    fulta_arc_err_t e = fa_vol_run(a, format, volume_size, &vs, body, ctx);
     for (uint32_t i = 0; i < s.n; i++) {            /* fa_vol_run closed them all; free what they were */
         if (s.files[i]->open) { proven_err_t ig = proven_fs_close(s.files[i]->f); (void)ig; }
-        free(s.files[i]);
+        fa_release(a, s.files[i]);
     }
-    free(s.files); free(s.tmp);
+    fa_release(a, s.files); fa_release(a, s.tmp);
     return e;
 }

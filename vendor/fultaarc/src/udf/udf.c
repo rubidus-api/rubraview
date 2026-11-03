@@ -33,6 +33,7 @@ typedef struct udf_item {
 } udf_item_t;
 
 typedef struct udf_state {
+    proven_allocator_t alloc;   /* the archive's: this state and everything it holds */
     uint32_t part_start;            /* partition starting sector (absolute) */
     uint32_t part_len;              /* partition length in blocks */
     udf_item_t *items;
@@ -70,7 +71,7 @@ static bool udf_seen(udf_state_t *st, uint32_t blk) {
     if (st->nvis < UDF_MAX_DIRS) {
         if (st->nvis == st->capvis) {
             size_t nc = st->capvis ? st->capvis * 2 : 64;
-            uint32_t *p = fa_realloc(st->visited, nc * sizeof *p);
+            uint32_t *p = fa_resize(st->alloc, st->visited, st->capvis * sizeof *p, nc * sizeof *p);
             if (!p) return true;
             st->visited = p; st->capvis = nc;
         }
@@ -89,29 +90,29 @@ static bool udf_pr2abs(udf_state_t *st, uint32_t lbn, uint64_t *out) {
 }
 
 /* Decode an OSTA CS0 d-characters name (compression id 8 or 16) into UTF-8. Returns a fresh string or NULL. */
-static char *udf_name(const uint8_t *fi, uint8_t len) {
-    if (len == 0) return fa_strndup("", 0);
+static char *udf_name(proven_allocator_t a, const uint8_t *fi, uint8_t len) {
+    if (len == 0) return fa_strndup_a(a, "", 0);
     uint8_t comp = fi[0];
     if (comp == 8) {                                             /* 8-bit CS0 = Latin-1; CP_1252 is the nearest map */
-        return fa_codepage_to_utf8(fi + 1, len - 1, FULTA_ARC_CP_1252, FULTA_ARC_CP_1252);
+        return fa_codepage_to_utf8(a, fa_bytes(fi + 1, len - 1), FULTA_ARC_CP_1252, FULTA_ARC_CP_1252);
     } else if (comp == 16) {
         size_t units = (len - 1) / 2;
-        if (units == 0) return fa_strndup("", 0);
+        if (units == 0) return fa_strndup_a(a, "", 0);
         uint8_t stackbuf[512];
-        uint8_t *le = units * 2 <= sizeof stackbuf ? stackbuf : fa_malloc(units * 2);
+        uint8_t *le = units * 2 <= sizeof stackbuf ? stackbuf : fa_alloc(a, units * 2);
         if (!le) return NULL;
         for (size_t i = 0; i < units; i++) { le[2 * i] = fi[1 + 2 * i + 1]; le[2 * i + 1] = fi[1 + 2 * i]; }
-        char *u = fa_utf16le_to_utf8(le, units);
-        if (le != stackbuf) fa_free(le);
+        char *u = fa_utf16le_to_utf8(a, fa_bytes(le, units * 2));
+        if (le != stackbuf) fa_release(a, le);
         return u;
     }
-    return fa_strndup("", 0);                                     /* unknown compression: empty (skipped by caller) */
+    return fa_strndup_a(a, "", 0);                                     /* unknown compression: empty (skipped by caller) */
 }
 
 static udf_item_t *udf_add(udf_state_t *st) {
     if (st->n == st->cap) {
         size_t nc = st->cap ? st->cap * 2 : 64;
-        udf_item_t *q = fa_realloc(st->items, nc * sizeof *q);
+        udf_item_t *q = fa_resize(st->alloc, st->items, st->cap * sizeof *q, nc * sizeof *q);
         if (!q) return NULL;
         st->items = q; st->cap = nc;
     }
@@ -137,7 +138,7 @@ static fulta_arc_err_t udf_parse_fe(udf_state_t *st, const uint8_t *fe, uint16_t
     size_t stride = adtype == 0 ? 8 : 16;
     size_t cnt = len_ad / stride;
     if (cnt > UDF_MAX_EXT) return FULTA_ARC_ERR_CORRUPT;
-    udf_piece_t *pv = cnt ? fa_malloc(cnt * sizeof *pv) : NULL;
+    udf_piece_t *pv = cnt ? fa_alloc(st->alloc, cnt * sizeof *pv) : NULL;
     if (cnt && !pv) return FULTA_ARC_ERR_NOMEM;
     size_t np = 0;
     for (size_t i = 0; i < cnt; i++) {
@@ -146,12 +147,12 @@ static fulta_arc_err_t udf_parse_fe(udf_state_t *st, const uint8_t *fe, uint16_t
         uint32_t etype = fa_le32(a) >> 30;
         uint32_t blk = fa_le32(a + 4);          /* short_ad extent position / long_ad logical block (both at +4) */
         if (etype == 3) break;                  /* allocation-extent continuation: not followed (extract -> short) */
-        if (elen > (uint64_t)st->part_len * UDF_SS) { fa_free(pv); return FULTA_ARC_ERR_CORRUPT; }
+        if (elen > (uint64_t)st->part_len * UDF_SS) { fa_release(st->alloc, pv); return FULTA_ARC_ERR_CORRUPT; }
         if (etype != 0) {                        /* unallocated / not-recorded: a hole of `elen` zero bytes */
             pv[np].off = UINT64_MAX; pv[np].len = elen; np++; continue;
         }
         uint64_t off;
-        if (!udf_pr2abs(st, blk, &off)) { fa_free(pv); return FULTA_ARC_ERR_CORRUPT; }
+        if (!udf_pr2abs(st, blk, &off)) { fa_release(st->alloc, pv); return FULTA_ARC_ERR_CORRUPT; }
         pv[np].off = off; pv[np].len = elen; np++;
     }
     *pieces = pv; *npieces = np;
@@ -169,24 +170,24 @@ static fulta_arc_err_t udf_walk(fulta_arc_t *arc, udf_state_t *st, uint32_t dir_
     if (!udf_pr2abs(st, dir_fe_blk, &fe_off)) return FULTA_ARC_OK;
 
     uint8_t fe[UDF_SS];
-    if (fa_source_read_exact(src, fe_off, fe, UDF_SS)) return FULTA_ARC_OK;
+    if (fa_source_read_exact(src, fe_off, fa_bytes_mut(fe, UDF_SS))) return FULTA_ARC_OK;
     uint16_t id = 0;
     if (!udf_tag(fe, UDF_SS, &id) || (id != 261 && id != 266)) return FULTA_ARC_OK;
     uint8_t ftype; uint64_t dlen; udf_piece_t *dpieces = NULL; size_t dnp = 0;
     fulta_arc_err_t e = udf_parse_fe(st, fe, id, &ftype, &dlen, &dpieces, &dnp);
     if (e == FULTA_ARC_ERR_UNSUPPORTED) return FULTA_ARC_OK;     /* an exotic directory we cannot read: skip */
     if (e) return e;
-    if (ftype != 4 || dlen == 0 || dlen > UDF_MAX_DIR) { fa_free(dpieces); return FULTA_ARC_OK; }
+    if (ftype != 4 || dlen == 0 || dlen > UDF_MAX_DIR) { fa_release(arc->alloc, dpieces); return FULTA_ARC_OK; }
 
-    uint8_t *data = fa_malloc((size_t)dlen);                     /* gather the directory's FID bytes */
-    if (!data) { fa_free(dpieces); return FULTA_ARC_ERR_NOMEM; }
+    uint8_t *data = fa_alloc(arc->alloc, (size_t)dlen);                     /* gather the directory's FID bytes */
+    if (!data) { fa_release(arc->alloc, dpieces); return FULTA_ARC_ERR_NOMEM; }
     uint64_t got = 0;
     for (size_t i = 0; i < dnp && got < dlen; i++) {
         uint32_t want = (uint32_t)(dlen - got < dpieces[i].len ? dlen - got : dpieces[i].len);
-        if (dpieces[i].off + want > src->size || fa_source_read_exact(src, dpieces[i].off, data + got, want)) break;
+        if (dpieces[i].off + want > src->size || fa_source_read_exact(src, dpieces[i].off, fa_bytes_mut(data + got, want))) break;
         got += want;
     }
-    fa_free(dpieces);
+    fa_release(arc->alloc, dpieces);
     if (got < dlen) dlen = got;
 
     uint32_t p = 0;
@@ -203,8 +204,8 @@ static fulta_arc_err_t udf_walk(fulta_arc_t *arc, udf_state_t *st, uint32_t dir_
         if (p + 16 + fi_off + len_fi > dlen) break;
         if (++st->records > UDF_MAX_ENTRIES) break;
         if (!(fc & 0x08) && !(fc & 0x04)) {                     /* skip the parent entry and deleted entries */
-            char *nm = len_fi ? udf_name(b + fi_off, len_fi) : fa_strndup("", 0);
-            if (!nm) { fa_free(data); return FULTA_ARC_ERR_NOMEM; }
+            char *nm = len_fi ? udf_name(arc->alloc, b + fi_off, len_fi) : fa_strndup_a(arc->alloc, "", 0);
+            if (!nm) { fa_release(arc->alloc, data); return FULTA_ARC_ERR_NOMEM; }
             if (nm[0]) {
                 char path[1024];
                 size_t pl = strlen(prefix), nl = strlen(nm);
@@ -216,13 +217,13 @@ static fulta_arc_err_t udf_walk(fulta_arc_t *arc, udf_state_t *st, uint32_t dir_
                     else            e = udf_file(arc, st, blk, path);             /* regular file */
                 }
             }
-            fa_free(nm);
+            fa_release(arc->alloc, nm);
             if (e) break;
         }
         if (reclen < 38) break;
         p += reclen;
     }
-    fa_free(data);
+    fa_release(arc->alloc, data);
     return e;
 }
 
@@ -231,22 +232,22 @@ static fulta_arc_err_t udf_file(fulta_arc_t *arc, udf_state_t *st, uint32_t fe_b
     uint64_t fe_off;
     if (!udf_pr2abs(st, fe_blk, &fe_off)) return FULTA_ARC_OK;
     uint8_t fe[UDF_SS];
-    if (fa_source_read_exact(src, fe_off, fe, UDF_SS)) return FULTA_ARC_OK;
+    if (fa_source_read_exact(src, fe_off, fa_bytes_mut(fe, UDF_SS))) return FULTA_ARC_OK;
     uint16_t id = 0;
     if (!udf_tag(fe, UDF_SS, &id) || (id != 261 && id != 266)) return FULTA_ARC_OK;
     uint8_t ftype; uint64_t ilen; udf_piece_t *pieces = NULL; size_t np = 0;
     fulta_arc_err_t e = udf_parse_fe(st, fe, id, &ftype, &ilen, &pieces, &np);
     if (e == FULTA_ARC_ERR_UNSUPPORTED) { return FULTA_ARC_OK; }  /* list nothing we cannot read back */
     if (e) return e;
-    if (ftype != 5) { fa_free(pieces); return FULTA_ARC_OK; }     /* only regular files become entries */
+    if (ftype != 5) { fa_release(arc->alloc, pieces); return FULTA_ARC_OK; }     /* only regular files become entries */
 
-    char *safe = fa_strndup(path, strlen(path));
-    if (safe && !fa_sanitize_name(safe)) { fa_free(safe); safe = NULL; }
+    char *safe = fa_strndup_a(arc->alloc, path, strlen(path));
+    if (safe && !fa_sanitize_name(safe)) { fa_release(arc->alloc, safe); safe = NULL; }
     const char *use = safe && safe[0] ? safe : "data";
-    fa_entry_t *en = fa_add_entry(arc, (const uint8_t *)path, strlen(path), use, "store");
+    fa_entry_t *en = fa_add_entry(arc, fa_bytes((const uint8_t *)path, strlen(path)), use, "store");
     udf_item_t *it = udf_add(st);
-    fa_free(safe);
-    if (!en || !it) { fa_free(pieces); return FULTA_ARC_ERR_NOMEM; }
+    fa_release(arc->alloc, safe);
+    if (!en || !it) { fa_release(arc->alloc, pieces); return FULTA_ARC_ERR_NOMEM; }
     en->pub.size = ilen;
     en->pub.packed_size = ilen;
     it->ext = pieces; it->next = np; it->size = ilen;
@@ -259,7 +260,7 @@ static bool udf_present(const fulta_arc_source_t *src) {
         uint64_t o = (uint64_t)s * UDF_SS;
         if (o + 7 > src->size) break;
         uint8_t h[7];
-        if (fa_source_read_exact(src, o, h, 7)) break;
+        if (fa_source_read_exact(src, o, fa_bytes_mut(h, 7))) break;
         if (memcmp(h + 1, "NSR02", 5) == 0 || memcmp(h + 1, "NSR03", 5) == 0) return true;
         if (memcmp(h + 1, "TEA01", 5) == 0) break;              /* end of the extended area */
     }
@@ -273,14 +274,15 @@ static fulta_arc_err_t udf_open(fulta_arc_t *arc, uint64_t offset) {
     if (!udf_present(src)) return FULTA_ARC_ERR_NOT_ARCHIVE;
 
     uint8_t avdp[UDF_SS];
-    if (fa_source_read_exact(src, 256ull * UDF_SS, avdp, UDF_SS)) return FULTA_ARC_ERR_NOT_ARCHIVE;
+    if (fa_source_read_exact(src, 256ull * UDF_SS, fa_bytes_mut(avdp, UDF_SS))) return FULTA_ARC_ERR_NOT_ARCHIVE;
     uint16_t id = 0;
     if (!udf_tag(avdp, UDF_SS, &id) || id != 2) return FULTA_ARC_ERR_NOT_ARCHIVE;   /* Anchor VD Pointer */
     uint32_t vds_len = fa_le32(avdp + 16), vds_loc = fa_le32(avdp + 20);
     if (vds_loc == 0 || vds_len == 0) return FULTA_ARC_ERR_NOT_ARCHIVE;
 
-    udf_state_t *st = fa_calloc(1, sizeof *st);
+    udf_state_t *st = fa_zalloc(arc->alloc, 1, sizeof *st);
     if (!st) return FULTA_ARC_ERR_NOMEM;
+    st->alloc = arc->alloc;
     arc->state = st;
 
     bool have_part = false, have_lvd = false;
@@ -288,7 +290,7 @@ static fulta_arc_err_t udf_open(fulta_arc_t *arc, uint64_t offset) {
     uint32_t nsec = vds_len / UDF_SS; if (nsec > UDF_MAX_VDS) nsec = UDF_MAX_VDS;
     for (uint32_t i = 0; i < nsec; i++) {
         uint8_t d[UDF_SS];
-        if (fa_source_read_exact(src, ((uint64_t)vds_loc + i) * UDF_SS, d, UDF_SS)) break;
+        if (fa_source_read_exact(src, ((uint64_t)vds_loc + i) * UDF_SS, fa_bytes_mut(d, UDF_SS))) break;
         uint16_t t = 0;
         if (!udf_tag(d, UDF_SS, &t)) continue;                  /* skip an unreadable slot, keep scanning */
         if (t == 8) break;                                       /* Terminating Descriptor */
@@ -314,7 +316,7 @@ static fulta_arc_err_t udf_open(fulta_arc_t *arc, uint64_t offset) {
     uint64_t fsd_off;
     if (!udf_pr2abs(st, fsd_blk, &fsd_off)) { udf_close(arc); return FULTA_ARC_ERR_NOT_ARCHIVE; }
     uint8_t fsd[UDF_SS];
-    if (fa_source_read_exact(src, fsd_off, fsd, UDF_SS)) { udf_close(arc); return FULTA_ARC_ERR_NOT_ARCHIVE; }
+    if (fa_source_read_exact(src, fsd_off, fa_bytes_mut(fsd, UDF_SS))) { udf_close(arc); return FULTA_ARC_ERR_NOT_ARCHIVE; }
     if (!udf_tag(fsd, UDF_SS, &id) || id != 256) { udf_close(arc); return FULTA_ARC_ERR_NOT_ARCHIVE; }
     uint32_t root_blk = fa_le32(fsd + 16 + 384 + 4);             /* root directory ICB long_ad */
 
@@ -339,7 +341,7 @@ static fulta_arc_err_t udf_extract(fulta_arc_t *arc, size_t index, const fulta_a
             if (n > remain) n = (uint32_t)remain;
             if (hole) {
                 memset(buf, 0, n);
-            } else if (off + n > src->size || fa_source_read_exact(src, off, buf, n)) {
+            } else if (off + n > src->size || fa_source_read_exact(src, off, fa_bytes_mut(buf, n))) {
                 return FULTA_ARC_ERR_TRUNCATED;
             }
             fulta_arc_err_t e = sink->write(sink->ctx, buf, n);
@@ -354,10 +356,10 @@ static fulta_arc_err_t udf_extract(fulta_arc_t *arc, size_t index, const fulta_a
 static void udf_close(fulta_arc_t *arc) {
     udf_state_t *st = arc->state;
     if (!st) return;
-    for (size_t i = 0; i < st->n; i++) fa_free(st->items[i].ext);
-    fa_free(st->items);
-    fa_free(st->visited);
-    fa_free(st);
+    for (size_t i = 0; i < st->n; i++) fa_release(arc->alloc, st->items[i].ext);
+    fa_release(arc->alloc, st->items);
+    fa_release(arc->alloc, st->visited);
+    fa_release(arc->alloc, st);
     arc->state = NULL;
 }
 

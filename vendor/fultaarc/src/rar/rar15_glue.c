@@ -20,6 +20,7 @@
 #include "rar15/rar15arc.h"
 
 typedef struct rar15_glue {
+    proven_allocator_t alloc;   /* the archive's: the glue, its volume views and copies */
     fa_view_t *views;
     proven_mem_view_t *vols;
     size_t nvol;
@@ -35,15 +36,15 @@ static bool rar15_probe(const uint8_t *h, size_t n, uint64_t *off) {
 }
 
 static fulta_arc_err_t add_volume(rar15_glue_t *g, const fulta_arc_source_t *src) {
-    fa_view_t *v = fa_realloc(g->views, (g->nvol + 1) * sizeof *v);
+    fa_view_t *v = fa_resize(g->alloc, g->views, g->nvol * sizeof *v, (g->nvol + 1) * sizeof *v);
     if (!v) return FULTA_ARC_ERR_NOMEM;
     g->views = v;
-    proven_mem_view_t *mv = fa_realloc(g->vols, (g->nvol + 1) * sizeof *mv);
+    proven_mem_view_t *mv = fa_resize(g->alloc, g->vols, g->nvol * sizeof *mv, (g->nvol + 1) * sizeof *mv);
     if (!mv) return FULTA_ARC_ERR_NOMEM;
     g->vols = mv;
-    fulta_arc_err_t e = fa_view_open(src, &g->views[g->nvol]);
+    fulta_arc_err_t e = fa_view_open(g->alloc, src, &g->views[g->nvol]);
     if (e) return e;
-    g->vols[g->nvol] = (proven_mem_view_t){.ptr = g->views[g->nvol].data, .size = g->views[g->nvol].size};
+    g->vols[g->nvol] = g->views[g->nvol].bytes;
     g->nvol++;
     return FULTA_ARC_OK;
 }
@@ -75,24 +76,24 @@ static bool is_ours(const rar15_archive_t *a) {
 static fulta_arc_err_t collect_volumes(fulta_arc_t *arc, rar15_glue_t *g) {
     if (!(g->ar.main_flags & RAR15_MAIN_VOLUME) || !arc->opt.name) return FULTA_ARC_OK;
     size_t cap = strlen(arc->opt.name) + 64;
-    void *mem = fa_malloc(cap);
-    char *cur = fa_strndup(arc->opt.name, strlen(arc->opt.name));
+    void *mem = fa_alloc(arc->alloc, cap);
+    char *cur = fa_strndup_a(arc->alloc, arc->opt.name, strlen(arc->opt.name));
     fulta_arc_err_t e = mem && cur ? FULTA_ARC_OK : FULTA_ARC_ERR_NOMEM;
     for (uint32_t k = 1; !e && k < 100000; k++) {
         proven_arena_t arena = proven_arena_create((proven_mem_mut_t){.ptr = mem, .size = cap});
         proven_u8str_view_t next = fa_rar_next_volume(&arena, proven_u8str_view_from_cstr(cur), true);
         if (!next.ptr || !next.size) break;
-        char *path = fa_strndup((const char *)next.ptr, next.size);
+        char *path = fa_strndup_a(arc->alloc, (const char *)next.ptr, next.size);
         if (!path) { e = FULTA_ARC_ERR_NOMEM; break; }
-        fa_free(cur);
+        fa_release(arc->alloc, cur);
         cur = path;
         const fulta_arc_source_t *src;
         e = fa_volume(arc, k, path, &src);
         if (e == FULTA_ARC_ERR_VOLUME_MISSING) { e = FULTA_ARC_OK; break; }
         if (!e) e = add_volume(g, src);
     }
-    fa_free(cur);
-    fa_free(mem);
+    fa_release(arc->alloc, cur);
+    fa_release(arc->alloc, mem);
     if (e || g->nvol == 1) return e;
     e = open_archive(arc, g);                           /* again, over all the volumes */
     return e == FULTA_ARC_ERR_NOT_ARCHIVE ? FULTA_ARC_ERR_CORRUPT : e;
@@ -111,11 +112,11 @@ static fulta_arc_err_t list_entries(fulta_arc_t *arc, rar15_glue_t *g) {
         const rar15_entry_t *re = &a->entries[i];
         bool stored = re->method == (a->old_format ? 0 : 0x30);
         bool not_unicode = false;
-        char *name = fa_decode_name(arc, re->name.ptr, re->name.size, false, FULTA_ARC_CP_437, &not_unicode);
+        char *name = fa_decode_name(arc, fa_bytes(re->name.ptr, re->name.size), false, FULTA_ARC_CP_437, &not_unicode);
         if (!name) return FULTA_ARC_ERR_NOMEM;
         const char *method = stored ? "Store" : a->old_format ? "RAR1.4" : "RAR1.5";
-        fa_entry_t *en = fa_add_entry(arc, re->name.ptr, re->name.size, name, method);
-        fa_free(name);
+        fa_entry_t *en = fa_add_entry(arc, fa_bytes(re->name.ptr, re->name.size), name, method);
+        fa_release(arc->alloc, name);
         if (!en) return FULTA_ARC_ERR_NOMEM;
         bool dir = rar15_entry_is_dir(re);
         en->pub.size = dir ? 0 : re->size;
@@ -145,8 +146,9 @@ static fulta_arc_err_t list_entries(fulta_arc_t *arc, rar15_glue_t *g) {
 static void rar15_close(fulta_arc_t *arc);
 
 static fulta_arc_err_t rar15_open(fulta_arc_t *arc, uint64_t search) {
-    rar15_glue_t *g = fa_calloc(1, sizeof *g);
+    rar15_glue_t *g = fa_zalloc(arc->alloc, 1, sizeof *g);
     if (!g) return FULTA_ARC_ERR_NOMEM;
+    g->alloc = arc->alloc;
     arc->state = g;
     fulta_arc_err_t e = add_volume(g, arc->volumes[0]);
     if (!e) e = open_archive(arc, g);
@@ -177,9 +179,9 @@ static fulta_arc_err_t rar15_extract(fulta_arc_t *arc, size_t index, const fulta
         if (encrypted) {
             fulta_arc_err_t pe = fa_password(arc, attempt, &pw);
             if (pe) return attempt ? FULTA_ARC_ERR_PASSWORD_WRONG : pe;
-            char *copy = fa_strndup(pw, strlen(pw));
+            char *copy = fa_strndup_a(arc->alloc, pw, strlen(pw));
             if (!copy) return FULTA_ARC_ERR_NOMEM;
-            fa_free(g->password);
+            fa_release(arc->alloc, g->password);
             g->password = copy;
             rar15_archive_set_password(&g->ar, proven_u8str_view_from_cstr(g->password));
         }
@@ -217,11 +219,11 @@ static void rar15_close(fulta_arc_t *arc) {
     rar15_glue_t *g = arc->state;
     if (!g) return;
     close_archive(g);
-    fa_free(g->password);
+    fa_release(arc->alloc, g->password);
     for (size_t i = 0; i < g->nvol; i++) fa_view_close(&g->views[i]);
-    fa_free(g->views);
-    fa_free(g->vols);
-    fa_free(g);
+    fa_release(arc->alloc, g->views);
+    fa_release(arc->alloc, g->vols);
+    fa_release(arc->alloc, g);
     arc->state = NULL;
 }
 

@@ -13,6 +13,7 @@
 #include <stdio.h>
 
 typedef struct rar_glue {
+    proven_allocator_t alloc;   /* the archive's: the glue, its volume views and copies */
     proven_arena_t arena;
     void *backing;
     fa_view_t *views;
@@ -48,15 +49,15 @@ static fulta_arc_err_t map_err(fa_rar_err_t e) {
 }
 
 static fulta_arc_err_t add_volume(rar_glue_t *g, const fulta_arc_source_t *src) {
-    fa_view_t *v = fa_realloc(g->views, (g->nvol + 1) * sizeof *v);
+    fa_view_t *v = fa_resize(g->alloc, g->views, g->nvol * sizeof *v, (g->nvol + 1) * sizeof *v);
     if (!v) return FULTA_ARC_ERR_NOMEM;
     g->views = v;
-    fa_rar_volume_t *rv = fa_realloc(g->vols, (g->nvol + 1) * sizeof *rv);
+    fa_rar_volume_t *rv = fa_resize(g->alloc, g->vols, g->nvol * sizeof *rv, (g->nvol + 1) * sizeof *rv);
     if (!rv) return FULTA_ARC_ERR_NOMEM;
     g->vols = rv;
-    fulta_arc_err_t e = fa_view_open(src, &g->views[g->nvol]);
+    fulta_arc_err_t e = fa_view_open(g->alloc, src, &g->views[g->nvol]);
     if (e) return e;
-    g->vols[g->nvol] = (fa_rar_volume_t){g->views[g->nvol].data, g->views[g->nvol].size};
+    g->vols[g->nvol] = (fa_rar_volume_t){g->views[g->nvol].bytes.ptr, g->views[g->nvol].bytes.size};
     g->nvol++;
     return FULTA_ARC_OK;
 }
@@ -73,11 +74,11 @@ static fulta_arc_err_t collect_volumes(fulta_arc_t *arc, rar_glue_t *g) {
     for (uint32_t k = 1; k < 100000; k++) {
         proven_u8str_view_t next = fa_rar_next_volume(&g->arena, cur, old);
         if (!next.ptr || !next.size) break;
-        char *path = fa_strndup((const char *)next.ptr, next.size);
+        char *path = fa_strndup_a(arc->alloc, (const char *)next.ptr, next.size);
         if (!path) return FULTA_ARC_ERR_NOMEM;
         const fulta_arc_source_t *src;
         fulta_arc_err_t e = fa_volume(arc, k, path, &src);
-        fa_free(path);
+        fa_release(arc->alloc, path);
         if (e == FULTA_ARC_ERR_VOLUME_MISSING) break;
         if (e) return e;
         if ((e = add_volume(g, src))) return e;
@@ -87,8 +88,8 @@ static fulta_arc_err_t collect_volumes(fulta_arc_t *arc, rar_glue_t *g) {
 }
 
 static fulta_arc_err_t make_arena(rar_glue_t *g, size_t size) {
-    fa_free(g->backing);
-    g->backing = fa_malloc(size);
+    fa_release(g->alloc, g->backing);
+    g->backing = fa_alloc(g->alloc, size);
     if (!g->backing) return FULTA_ARC_ERR_NOMEM;
     g->arena = proven_arena_create((proven_mem_mut_t){.ptr = g->backing, .size = size});
     return FULTA_ARC_OK;
@@ -96,8 +97,9 @@ static fulta_arc_err_t make_arena(rar_glue_t *g, size_t size) {
 
 static fulta_arc_err_t rar_open(fulta_arc_t *arc, uint64_t search) {
     (void)search;   /* rar.c finds a signature after an SFX stub itself */
-    rar_glue_t *g = fa_calloc(1, sizeof *g);
+    rar_glue_t *g = fa_zalloc(arc->alloc, 1, sizeof *g);
     if (!g) return FULTA_ARC_ERR_NOMEM;
+    g->alloc = arc->alloc;
     arc->state = g;
     fa_rar_set_codec(fa_rarcodec());
     fulta_arc_err_t e = add_volume(g, arc->volumes[0]);
@@ -114,7 +116,7 @@ static fulta_arc_err_t rar_open(fulta_arc_t *arc, uint64_t search) {
             if (e) return attempt > 1 ? FULTA_ARC_ERR_PASSWORD_WRONG : e;
         }
         proven_arena_reset(&g->arena);
-        fa_rar_result_t r = fa_rar_open_volumes(&g->arena, g->vols, g->nvol, proven_u8str_view_from_cstr(pw));
+        fa_rar_result_t r = fa_rar_open_volumes(g->alloc, &g->arena, g->vols, g->nvol, proven_u8str_view_from_cstr(pw));
         if (r.err == FA_RAR_ERR_OUT_OF_MEMORY && arena_size < ((size_t)1 << 30)) {
             arena_size *= 4;
             if ((e = make_arena(g, arena_size))) return e;
@@ -131,21 +133,21 @@ static fulta_arc_err_t rar_open(fulta_arc_t *arc, uint64_t search) {
         if (*pw) fa_password_ok(arc, pw);
         break;
     }
-    g->map = fa_calloc(g->ar.entry_count ? g->ar.entry_count : 1, sizeof *g->map);
+    g->map = fa_zalloc(arc->alloc, g->ar.entry_count ? g->ar.entry_count : 1, sizeof *g->map);
     if (!g->map) return FULTA_ARC_ERR_NOMEM;
     uint32_t rar_group = 0;   /* solid-group counter (API: per-entry solid_group) */
     for (size_t i = 0; i < g->ar.entry_count; i++) {
         const fa_rar_entry_t *re = &g->ar.entries[i];
         bool name_nu = false;
         char *uname = re->name_is_legacy
-                          ? fa_decode_name(arc, re->name.ptr, re->name.size, false, FULTA_ARC_CP_437, &name_nu)
-                          : fa_strndup((const char *)re->name.ptr, re->name.size);
+                          ? fa_decode_name(arc, fa_bytes(re->name.ptr, re->name.size), false, FULTA_ARC_CP_437, &name_nu)
+                          : fa_strndup_a(arc->alloc, (const char *)re->name.ptr, re->name.size);
         if (!uname) return FULTA_ARC_ERR_NOMEM;
         char method[32];
         if (re->method == 0) snprintf(method, sizeof method, "Store");
         else snprintf(method, sizeof method, "RAR%u.%u", re->method / 10, re->method % 10);
-        fa_entry_t *en = fa_add_entry(arc, re->name.ptr, re->name.size, uname, method);
-        fa_free(uname);
+        fa_entry_t *en = fa_add_entry(arc, fa_bytes(re->name.ptr, re->name.size), uname, method);
+        fa_release(arc->alloc, uname);
         if (!en) return FULTA_ARC_ERR_NOMEM;
         en->pub.size = re->size == FA_RAR_SIZE_UNKNOWN ? 0 : re->size;
         en->pub.packed_size = re->packed_size;
@@ -203,11 +205,11 @@ static void rar_close(fulta_arc_t *arc) {
     if (!g) return;
     if (g->open) fa_rar_close(&g->ar);
     for (size_t i = 0; i < g->nvol; i++) fa_view_close(&g->views[i]);
-    fa_free(g->views);
-    fa_free(g->vols);
-    fa_free(g->map);
-    fa_free(g->backing);
-    fa_free(g);
+    fa_release(arc->alloc, g->views);
+    fa_release(arc->alloc, g->vols);
+    fa_release(arc->alloc, g->map);
+    fa_release(arc->alloc, g->backing);
+    fa_release(arc->alloc, g);
     arc->state = NULL;
 }
 

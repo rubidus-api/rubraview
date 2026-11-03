@@ -132,6 +132,7 @@ static void wipe(void *p, size_t n) {
 }
 
 typedef struct alz_state {
+    proven_allocator_t alloc;   /* the archive's */
     uint8_t *password;
     size_t password_len;
     bool password_ok;
@@ -141,7 +142,7 @@ static void state_forget(alz_state_t *s) {
     if (!s) return;
     if (s->password) {
         wipe(s->password, s->password_len);
-        free(s->password);
+        fa_release(s->alloc, s->password);
     }
     s->password = NULL;
     s->password_len = 0;
@@ -204,7 +205,7 @@ static fa_alz_err_t copy_stored(packed_reader_t *r, uint8_t *out, uint64_t size)
 
 /* Spec 3.1: raw deflate, until the size is reached or the stream ends. */
 static fa_alz_err_t inflate_raw(packed_reader_t *r, uint8_t *out, uint64_t size) {
-    tinfl_decompressor *d = (tinfl_decompressor*)malloc(sizeof(*d));
+    tinfl_decompressor *d = fa_alloc(r->a->alloc, sizeof(*d));
     if (!d) return FA_ALZ_ERR_OUT_OF_MEMORY;
     tinfl_init(d);
     fa_alz_err_t err = FA_ALZ_ERR_CORRUPT_STREAM;
@@ -229,14 +230,25 @@ static fa_alz_err_t inflate_raw(packed_reader_t *r, uint8_t *out, uint64_t size)
         if (st == TINFL_STATUS_NEEDS_MORE_INPUT && in_len == 0 && r->left == 0) break;   /* cut short */
         if (in_bytes == 0 && out_bytes == 0 && in_len > 0) break;                         /* stuck */
     }
-    free(d);
+    fa_release(r->a->alloc, d);
     return err;
 }
+
+/* bzip2's own state goes to the archive's allocator too (D-038); bzip2 adopts its libc default only when bzalloc is
+   left NULL. */
+static void *alz_bz_alloc(void *opaque, int n, int m) {
+    if (n < 0 || m < 0) return NULL;
+    return fa_alloc(*(const proven_allocator_t *)opaque, (size_t)n * (size_t)m);
+}
+static void alz_bz_free(void *opaque, void *p) { fa_release(*(const proven_allocator_t *)opaque, p); }
 
 /* Spec 3.2: the cut-down bzip2, through vendor/bzip2. */
 static fa_alz_err_t bunzip_alz(packed_reader_t *r, uint8_t *out, uint64_t size) {
     bz_stream s;
     memset(&s, 0, sizeof(s));
+    s.bzalloc = alz_bz_alloc;
+    s.bzfree = alz_bz_free;
+    s.opaque = (void *)(uintptr_t)&r->a->alloc;
     int init = BZ2_bzDecompressInit(&s, 0, 0);
     if (init == BZ_MEM_ERROR) return FA_ALZ_ERR_OUT_OF_MEMORY;
     if (init != BZ_OK) return FA_ALZ_ERR_CORRUPT_STREAM;
@@ -282,8 +294,8 @@ static fa_alz_err_t decode(const fa_alz_archive_t *a, const fa_alz_entry_t *e,
     fa_alz_err_t err = FA_ALZ_OK;
     if (e->encrypted) {
         if (!password) return FA_ALZ_ERR_ENCRYPTED;
-        keys = (zip_keys_t*)malloc(sizeof(*keys));
-        buf = (uint8_t*)malloc(ALZ_CHUNK);
+        keys = fa_alloc(a->alloc, sizeof(*keys));
+        buf = fa_alloc(a->alloc, ALZ_CHUNK);
         if (!keys || !buf) { err = FA_ALZ_ERR_OUT_OF_MEMORY; goto done; }
         err = keys_for(a, e, password, password_len, keys);
         if (err != FA_ALZ_OK) goto done;
@@ -307,8 +319,8 @@ static fa_alz_err_t decode(const fa_alz_archive_t *a, const fa_alz_entry_t *e,
         if (crc != e->crc32) err = FA_ALZ_ERR_CORRUPT_STREAM;
     }
 done:
-    if (keys) { wipe(keys, sizeof(*keys)); free(keys); }
-    if (buf) { wipe(buf, ALZ_CHUNK); free(buf); }
+    if (keys) { wipe(keys, sizeof(*keys)); fa_release(a->alloc, keys); }
+    if (buf) { wipe(buf, ALZ_CHUNK); fa_release(a->alloc, buf); }
     return err;
 }
 
@@ -335,6 +347,7 @@ static bool name_is_safe(const uint8_t *p, size_t n) {
 }
 
 typedef struct entry_buf {
+    proven_allocator_t alloc;
     fa_alz_entry_t *data;
     size_t count, cap;
 } entry_buf_t;
@@ -342,7 +355,7 @@ typedef struct entry_buf {
 static bool entry_push(entry_buf_t *b, const fa_alz_entry_t *e) {
     if (b->count == b->cap) {
         size_t cap = b->cap ? b->cap * 2 : 32;
-        fa_alz_entry_t *grown = (fa_alz_entry_t*)realloc(b->data, cap * sizeof(*grown));
+        fa_alz_entry_t *grown = fa_resize(b->alloc, b->data, b->cap * sizeof(*grown), cap * sizeof(*grown));
         if (!grown) return false;
         b->data = grown;
         b->cap = cap;
@@ -351,12 +364,12 @@ static bool entry_push(entry_buf_t *b, const fa_alz_entry_t *e) {
     return true;
 }
 
-fa_alz_result_t fa_alz_open(proven_arena_t *arena, const uint8_t *data, size_t size) {
+fa_alz_result_t fa_alz_open(proven_allocator_t alloc, proven_arena_t *arena, const uint8_t *data, size_t size) {
     fa_alz_volume_t one = { .data = data, .size = size };
-    return fa_alz_open_volumes(arena, &one, 1);
+    return fa_alz_open_volumes(alloc, arena, &one, 1);
 }
 
-fa_alz_result_t fa_alz_open_volumes(proven_arena_t *arena, const fa_alz_volume_t *volumes,
+fa_alz_result_t fa_alz_open_volumes(proven_allocator_t alloc, proven_arena_t *arena, const fa_alz_volume_t *volumes,
                                                   size_t volume_count) {
     fa_alz_result_t result = { .err = FA_ALZ_ERR_NOT_AN_ALZ };
     if (!arena || !volumes || volume_count == 0 || !fa_alz_is_alz(volumes[0].data, volumes[0].size)) return result;
@@ -376,7 +389,7 @@ fa_alz_result_t fa_alz_open_volumes(proven_arena_t *arena, const fa_alz_volume_t
 
     /* Record loop, from the black-box reader (fultaarc-cleanroom-alzegg ae_alz.c, docs/spec/alz.md 2): file
        records "BLZ" 01, the comment record "ELZ" 01, then the end record "CLZ" 02/03 inside the volume tail. */
-    entry_buf_t list = {0};
+    entry_buf_t list = {.alloc = alloc};
     bool ended = false;
     uint64_t off = 8;                                  /* "ALZ" 01, version byte 0x0A 0x00, the volume number u16 */
     while (!ended) {
@@ -441,10 +454,10 @@ fa_alz_result_t fa_alz_open_volumes(proven_arena_t *arena, const fa_alz_volume_t
         /* folders are listed too (attribute 0x10 decides; their name may end in a separator) - ALZip lists them */
         if (have_name && name_is_safe(name, name_len)) {
             proven_result_mem_mut_t nres = proven_arena_alloc(arena, name_len);
-            if (!proven_is_ok(nres.err)) { free(list.data); result.err = FA_ALZ_ERR_OUT_OF_MEMORY; return result; }
+            if (!proven_is_ok(nres.err)) { fa_release(alloc, list.data); result.err = FA_ALZ_ERR_OUT_OF_MEMORY; return result; }
             memcpy(nres.value.ptr, name, name_len);
             e.name = (proven_u8str_view_t){ .ptr = nres.value.ptr, .size = name_len };
-            if (!entry_push(&list, &e)) { free(list.data); result.err = FA_ALZ_ERR_OUT_OF_MEMORY; return result; }
+            if (!entry_push(&list, &e)) { fa_release(alloc, list.data); result.err = FA_ALZ_ERR_OUT_OF_MEMORY; return result; }
         }
         if (e.truncated) break;
         off += e.packed_size;
@@ -453,12 +466,13 @@ fa_alz_result_t fa_alz_open_volumes(proven_arena_t *arena, const fa_alz_volume_t
 
     if (list.count > 0) {
         proven_result_mem_mut_t eres = fa_alz_arena_alloc_array(arena, list.count, sizeof(fa_alz_entry_t));
-        if (!proven_is_ok(eres.err)) { free(list.data); result.err = FA_ALZ_ERR_OUT_OF_MEMORY; return result; }
+        if (!proven_is_ok(eres.err)) { fa_release(alloc, list.data); result.err = FA_ALZ_ERR_OUT_OF_MEMORY; return result; }
         a.entries = (fa_alz_entry_t*)(void*)eres.value.ptr;
         memcpy(a.entries, list.data, list.count * sizeof(*a.entries));
         a.entry_count = list.count;
     }
-    free(list.data);
+    fa_release(alloc, list.data);
+    a.alloc = alloc;
     result.err = FA_ALZ_OK;
     result.value = a;
     return result;
@@ -479,19 +493,20 @@ fa_alz_err_t fa_alz_set_password(fa_alz_archive_t *archive, proven_u8str_view_t 
     if (!archive) return FA_ALZ_ERR_BAD_INDEX;
     alz_state_t *s = (alz_state_t*)archive->state;
     if (!s) {
-        s = (alz_state_t*)calloc(1, sizeof(*s));
+        s = fa_zalloc(archive->alloc, 1, sizeof(*s));
         if (!s) return FA_ALZ_ERR_OUT_OF_MEMORY;
+        s->alloc = archive->alloc;
         archive->state = s;
     }
     state_forget(s);
-    s->password = (uint8_t*)malloc(password.size ? password.size : 1);
+    s->password = fa_alloc(s->alloc, password.size ? password.size : 1);
     if (!s->password) return FA_ALZ_ERR_OUT_OF_MEMORY;
     if (password.size) memcpy(s->password, password.ptr, password.size);
     s->password_len = password.size;
 
     /* Every encrypted file's check byte: one byte each, so a wrong password
        that passes them all is rare once there are a few. */
-    zip_keys_t *z = (zip_keys_t*)malloc(sizeof(*z));
+    zip_keys_t *z = fa_alloc(s->alloc, sizeof(*z));
     if (!z) { state_forget(s); return FA_ALZ_ERR_OUT_OF_MEMORY; }
     const fa_alz_entry_t *smallest = NULL;
     fa_alz_err_t err = FA_ALZ_OK;
@@ -504,16 +519,16 @@ fa_alz_err_t fa_alz_set_password(fa_alz_archive_t *archive, proven_u8str_view_t 
             smallest = e;
     }
     wipe(z, sizeof(*z));
-    free(z);
+    fa_release(s->alloc, z);
 
     /* Then one of them decoded, and its CRC-32 compared (spec 4.2). */
     if (err == FA_ALZ_OK && smallest) {
-        uint8_t *out = (uint8_t*)malloc((size_t)smallest->size + 1);
+        uint8_t *out = fa_alloc(s->alloc, (size_t)smallest->size + 1);
         if (!out) err = FA_ALZ_ERR_OUT_OF_MEMORY;
         else {
             err = decode(archive, smallest, s->password, s->password_len, out);
             wipe(out, (size_t)smallest->size);
-            free(out);
+            fa_release(s->alloc, out);
             if (err == FA_ALZ_ERR_CORRUPT_STREAM) err = FA_ALZ_ERR_BAD_PASSWORD;
         }
     }
@@ -579,7 +594,7 @@ void fa_alz_close(fa_alz_archive_t *archive) {
     alz_state_t *s = (alz_state_t*)archive->state;
     if (s) {
         state_forget(s);
-        free(s);
+        fa_release(s->alloc, s);
     }
     archive->state = NULL;
 }

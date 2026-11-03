@@ -75,7 +75,7 @@ void rc_wipe(void *p, size_t n);
 fa_rar_unpack_status_t rc_unpack_file(void *unpack, const fa_rar_unpack_params_t *params,
                                              fa_rar_read_fn read, void *read_ctx,
                                              fa_rar_write_fn write, void *write_ctx);
-void *rc_unpack_create(void);
+void *rc_unpack_create(proven_allocator_t alloc);
 void rc_unpack_destroy(void *unpack);
 
 #endif

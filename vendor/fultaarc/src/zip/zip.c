@@ -14,6 +14,7 @@ typedef struct zip_item {
 } zip_item_t;
 
 typedef struct zip_state {
+    proven_allocator_t alloc;   /* the archive's: this state and everything it holds */
     fa_range_t range;                  /* all disks joined (one piece for a single file) */
     zip_item_t *items;
     size_t nitems;
@@ -36,18 +37,18 @@ static size_t strong_key_len(uint16_t alg, uint16_t bits) {
 }
 
 static fulta_arc_err_t read_range(zip_state_t *z, uint64_t off, void *buf, size_t n) {
-    return fa_range_read_exact(&z->range, off, buf, n);
+    return fa_range_read_exact(&z->range, off, fa_bytes_mut(buf, n));
 }
 
 /* Find the end record in the last `n` bytes (zip.md section 2). */
-static fulta_arc_err_t find_eocd(const fulta_arc_source_t *src, uint64_t *pos, uint8_t eocd[22]) {
+static fulta_arc_err_t find_eocd(proven_allocator_t a, const fulta_arc_source_t *src, uint64_t *pos, uint8_t eocd[22]) {
     uint64_t size = src->size;
     if (size < 22) return FULTA_ARC_ERR_NOT_ARCHIVE;
     size_t tail = size < 22 + 65535 ? (size_t)size : 22 + 65535;
-    uint8_t *b = fa_malloc(tail);
+    uint8_t *b = fa_alloc(a, tail);
     if (!b) return FULTA_ARC_ERR_NOMEM;
-    fulta_arc_err_t e = fa_source_read_exact(src, size - tail, b, tail);
-    if (e) { fa_free(b); return e; }
+    fulta_arc_err_t e = fa_source_read_exact(src, size - tail, fa_bytes_mut(b, tail));
+    if (e) { fa_release(a, b); return e; }
     e = FULTA_ARC_ERR_NOT_ARCHIVE;
     /* first a record whose comment reaches the end exactly; then, for bytes appended after the archive, the last
      * record whose comment fits (zip.md section 2) */
@@ -61,24 +62,24 @@ static fulta_arc_err_t find_eocd(const fulta_arc_source_t *src, uint64_t *pos, u
                 break;
             }
         }
-    fa_free(b);
+    fa_release(a, b);
     return e;
 }
 
 static char *zip_name(fulta_arc_t *arc, const uint8_t *raw, size_t n, uint16_t flags, const uint8_t *ex, size_t exlen,
                       bool *not_unicode) {
     *not_unicode = false;
-    if (flags & 0x0800) return fa_codepage_to_utf8(raw, n, FULTA_ARC_CP_UTF8, FULTA_ARC_CP_UTF8);
+    if (flags & 0x0800) return fa_codepage_to_utf8(arc->alloc, fa_bytes(raw, n), FULTA_ARC_CP_UTF8, FULTA_ARC_CP_UTF8);
     /* Info-ZIP Unicode path extra field, used only when its CRC matches the header name (zip.md section 4) */
     for (size_t p = 0; p + 4 <= exlen;) {
         uint16_t id = fa_le16(ex + p), sz = fa_le16(ex + p + 2);
         if (p + 4 + sz > exlen) break;
-        if (id == 0x7075 && sz >= 5 && ex[p + 4] == 1 && fa_le32(ex + p + 5) == fa_crc32(0, raw, n) &&
-            fa_utf8_valid(ex + p + 9, sz - 5))
-            return fa_strndup((const char *)ex + p + 9, sz - 5u);
+        if (id == 0x7075 && sz >= 5 && ex[p + 4] == 1 && fa_le32(ex + p + 5) == fa_crc32(0, fa_bytes(raw, n)) &&
+            fa_utf8_valid(fa_bytes(ex + p + 9, sz - 5)))
+            return fa_strndup_a(arc->alloc, (const char *)ex + p + 9, sz - 5u);
         p += 4u + sz;
     }
-    return fa_decode_name(arc, raw, n, false, FULTA_ARC_CP_437, not_unicode);
+    return fa_decode_name(arc, fa_bytes(raw, n), false, FULTA_ARC_CP_437, not_unicode);
 }
 
 static const char *method_name(uint16_t m) {
@@ -108,7 +109,7 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
     uint8_t eocd[22] = {0};
     uint64_t epos = 0;                        /* find_eocd fills both on success; zero-init keeps -O1 -Werror
                                                  (-Wmaybe-uninitialized can't correlate the OK return with the writes) */
-    fulta_arc_err_t e = find_eocd(last, &epos, eocd);
+    fulta_arc_err_t e = find_eocd(arc->alloc, last, &epos, eocd);
     if (e) return e;
     uint32_t disk = fa_le16(eocd + 4), cd_disk = fa_le16(eocd + 6);
     uint64_t total = fa_le16(eocd + 10), cd_size = fa_le32(eocd + 12), cd_off = fa_le32(eocd + 16);
@@ -116,14 +117,14 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
     bool z64 = false;
     if (epos >= 20) {
         uint8_t loc[20];
-        if (!fa_source_read_exact(last, epos - 20, loc, 20) && loc[0] == 'P' && loc[1] == 'K' && loc[2] == 6 && loc[3] == 7) {
+        if (!fa_source_read_exact(last, epos - 20, fa_bytes_mut(loc, 20)) && loc[0] == 'P' && loc[1] == 'K' && loc[2] == 6 && loc[3] == 7) {
             uint64_t zoff = fa_le64(loc + 8);
             uint8_t rec[56];
             /* the record normally sits right before the locator; its stored offset is relative to its disk */
             uint64_t cand = epos >= 20 + 56 ? epos - 20 - 56 : 0;
             bool found = false;
-            if (!fa_source_read_exact(last, cand, rec, 56) && fa_le32(rec) == 0x06064b50) found = true;
-            else if (zoff + 56 <= last->size && !fa_source_read_exact(last, zoff, rec, 56) && fa_le32(rec) == 0x06064b50) {
+            if (!fa_source_read_exact(last, cand, fa_bytes_mut(rec, 56)) && fa_le32(rec) == 0x06064b50) found = true;
+            else if (zoff + 56 <= last->size && !fa_source_read_exact(last, zoff, fa_bytes_mut(rec, 56)) && fa_le32(rec) == 0x06064b50) {
                 cand = zoff;
                 found = true;
             }
@@ -138,16 +139,17 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
             }
         }
     }
-    zip_state_t *z = fa_calloc(1, sizeof *z);
+    zip_state_t *z = fa_zalloc(arc->alloc, 1, sizeof *z);
     if (!z) return FULTA_ARC_ERR_NOMEM;
+    z->alloc = arc->alloc;
     arc->state = z;
 
     /* disks: .z01 .. .zNN, then this file (zip.md 7.4) */
     uint32_t ndisks = disk + 1;
     if (ndisks > 4096) return FULTA_ARC_ERR_CORRUPT;
-    z->range.pieces = fa_calloc(ndisks, sizeof *z->range.pieces);
+    z->range.pieces = fa_zalloc(arc->alloc, ndisks, sizeof *z->range.pieces);
     if (!z->range.pieces) return FULTA_ARC_ERR_NOMEM;
-    uint64_t *disk_start = fa_calloc(ndisks, sizeof *disk_start);
+    uint64_t *disk_start = fa_zalloc(arc->alloc, ndisks, sizeof *disk_start);
     if (!disk_start) return FULTA_ARC_ERR_NOMEM;
     for (uint32_t d = 0; d < ndisks; d++) {
         const fulta_arc_source_t *src = last;
@@ -155,16 +157,16 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
             char *vname = NULL;
             if (arc->opt.name) {
                 size_t L = strlen(arc->opt.name);
-                vname = fa_malloc(L + 8);
-                if (!vname) { fa_free(disk_start); return FULTA_ARC_ERR_NOMEM; }
+                vname = fa_alloc(arc->alloc, L + 8);
+                if (!vname) { fa_release(arc->alloc, disk_start); return FULTA_ARC_ERR_NOMEM; }
                 memcpy(vname, arc->opt.name, L + 1);
                 char *dot = strrchr(vname, '.');
                 if (!dot || strchr(dot, '/') || strchr(dot, '\\')) dot = vname + L;
                 snprintf(dot, 8, ".z%02u", (unsigned)(d + 1));
             }
             e = fa_volume(arc, d + 1, vname, &src);
-            fa_free(vname);
-            if (e) { fa_free(disk_start); return e; }
+            fa_release(arc->alloc, vname);
+            if (e) { fa_release(arc->alloc, disk_start); return e; }
         }
         disk_start[d] = z->range.size;
         z->range.pieces[d] = (fa_piece_t){.src = src, .offset = 0, .size = src->size};
@@ -177,24 +179,24 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
     uint64_t cd_pos;
     if (ndisks == 1) {
         if (!z64 && cd_off == 0xFFFFFFFFu) {
-            if (cd_size > anchor) { fa_free(disk_start); return FULTA_ARC_ERR_CORRUPT; }
+            if (cd_size > anchor) { fa_release(arc->alloc, disk_start); return FULTA_ARC_ERR_CORRUPT; }
             cd_pos = anchor - cd_size;
         } else {
-            if (cd_off + cd_size > anchor) { fa_free(disk_start); return FULTA_ARC_ERR_CORRUPT; }
+            if (cd_off + cd_size > anchor) { fa_release(arc->alloc, disk_start); return FULTA_ARC_ERR_CORRUPT; }
             shift = anchor - (cd_off + cd_size);
             cd_pos = cd_off + shift;
         }
     } else {
         cd_pos = base + cd_off;
     }
-    if (cd_size > 0x40000000u || cd_pos + cd_size > z->range.size) { fa_free(disk_start); return FULTA_ARC_ERR_CORRUPT; }
-    uint8_t *cd = fa_malloc((size_t)cd_size);
-    if (!cd) { fa_free(disk_start); return FULTA_ARC_ERR_NOMEM; }
+    if (cd_size > 0x40000000u || cd_pos + cd_size > z->range.size) { fa_release(arc->alloc, disk_start); return FULTA_ARC_ERR_CORRUPT; }
+    uint8_t *cd = fa_alloc(arc->alloc, (size_t)cd_size);
+    if (!cd) { fa_release(arc->alloc, disk_start); return FULTA_ARC_ERR_NOMEM; }
     e = read_range(z, cd_pos, cd, (size_t)cd_size);
-    if (e) { fa_free(cd); fa_free(disk_start); return e; }
+    if (e) { fa_release(arc->alloc, cd); fa_release(arc->alloc, disk_start); return e; }
     if (total > cd_size / 46) total = cd_size / 46;   /* more entries than fit is corrupt; read what fits */
-    z->items = fa_calloc(total ? total : 1, sizeof *z->items);
-    if (!z->items) { fa_free(cd); fa_free(disk_start); return FULTA_ARC_ERR_NOMEM; }
+    z->items = fa_zalloc(arc->alloc, total ? total : 1, sizeof *z->items);
+    if (!z->items) { fa_release(arc->alloc, cd); fa_release(arc->alloc, disk_start); return FULTA_ARC_ERR_NOMEM; }
     size_t p = 0;
     for (uint64_t i = 0; i < total; i++) {
         if (p + 46 > cd_size || fa_le32(cd + p) != 0x02014b50) { e = FULTA_ARC_ERR_CORRUPT; break; }
@@ -248,8 +250,8 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
         bool strong = (it.flags & 0x40) && strong_key_len(it.strong_alg, it.strong_bits);
         snprintf(mname, sizeof mname, "%s%s", method_name(it.real_method),
                  it.method == 99 ? ":AES" : strong ? ":PKAES" : (it.encrypted ? ":ZipCrypto" : ""));
-        fa_entry_t *en = fa_add_entry(arc, name, nlen, uname, mname);
-        fa_free(uname);
+        fa_entry_t *en = fa_add_entry(arc, fa_bytes(name, nlen), uname, mname);
+        fa_release(arc->alloc, uname);
         if (!en) { e = FULTA_ARC_ERR_NOMEM; break; }
         en->pub.size = it.usize;
         en->pub.packed_size = it.csize;
@@ -275,8 +277,8 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
         z->items[z->nitems++] = it;
         p += 46u + nlen + xlen + klen;
     }
-    fa_free(cd);
-    fa_free(disk_start);
+    fa_release(arc->alloc, cd);
+    fa_release(arc->alloc, disk_start);
     if (e) return e;
     return FULTA_ARC_OK;
 }
@@ -350,9 +352,9 @@ static fulta_arc_err_t strong_begin(zip_state_t *z, const zip_item_t *it, uint64
     uint32_t size = fa_le32(h + 18);
     if (size < 14 + 4 + 2 || size > 0x10000 || 22 + (uint64_t)size > it->csize) return FULTA_ARC_ERR_CORRUPT;
     memcpy(iv, h + 2, 16);
-    uint8_t *b = fa_malloc(size);
+    uint8_t *b = fa_alloc(z->alloc, size);
     if (!b) return FULTA_ARC_ERR_NOMEM;
-    if ((e = read_range(z, start + 22, b, size))) { fa_free(b); return e; }
+    if ((e = read_range(z, start + 22, b, size))) { fa_release(z->alloc, b); return e; }
     e = FULTA_ARC_ERR_CORRUPT;
     uint16_t fmt = fa_le16(b), alg = fa_le16(b + 2), bits = fa_le16(b + 4), flags = fa_le16(b + 6), erds = fa_le16(b + 8);
     size_t q = 10;
@@ -384,13 +386,13 @@ static fulta_arc_err_t strong_begin(zip_state_t *z, const zip_item_t *it, uint64
     memcpy(last, vd + vs - 16, 16);
     memcpy(ivc, iv, 16);
     cbc_decrypt(key, kl, ivc, vd, vs);
-    if (fa_crc32(0, vd, vs - 4u) != fa_le32(vd + vs - 4)) { e = FULTA_ARC_ERR_PASSWORD_WRONG; goto done; }
+    if (fa_crc32(0, fa_bytes(vd, vs - 4u)) != fa_le32(vd + vs - 4)) { e = FULTA_ARC_ERR_PASSWORD_WRONG; goto done; }
     memcpy(iv, last, 16);
     *hdr_len = 22 + (uint64_t)size;
     e = FULTA_ARC_OK;
 done:
     memset(b, 0, size);
-    fa_free(b);
+    fa_release(z->alloc, b);
     memset(mk, 0, sizeof mk);
     return e;
 }
@@ -423,7 +425,7 @@ static fulta_arc_err_t zip_extract(fulta_arc_t *arc, size_t index, const fulta_a
                 if (e == FULTA_ARC_ERR_PASSWORD_WRONG) continue;
                 if (e) return e;
                 fa_password_ok(arc, pw);
-                if ((e = fa_stream_range(&z->range, start + hl, csize - hl, &s))) return e;
+                if ((e = fa_stream_range(arc->alloc, &z->range, start + hl, csize - hl, &s))) return e;
                 e = fa_dec_aes_cbc(s, key, kl, iv, &s);
                 memset(key, 0, sizeof key);
                 if (e) return e;
@@ -443,7 +445,7 @@ static fulta_arc_err_t zip_extract(fulta_arc_t *arc, size_t index, const fulta_a
                 /* the MAC covers all the ciphertext: check it in one pass before decoding (crypto.md 2) */
                 fa_hmac_sha1_t mac;
                 fa_hmac_sha1_init(&mac, k + kl, kl);
-                if ((e = fa_stream_range(&z->range, start + sl + 2, csize - sl - 2 - 10, &s))) return e;
+                if ((e = fa_stream_range(arc->alloc, &z->range, start + sl + 2, csize - sl - 2 - 10, &s))) return e;
                 if ((e = fa_stream_hmac_tap(s, &mac, &s))) return e;
                 e = fa_pump(s, csize - sl - 2 - 10, false, 0, NULL, arc, false);
                 fa_stream_destroy(s);
@@ -452,7 +454,7 @@ static fulta_arc_err_t zip_extract(fulta_arc_t *arc, size_t index, const fulta_a
                 uint8_t m[20];
                 fa_hmac_sha1_final(&mac, m);
                 if (memcmp(m, want_mac, 10) != 0) return FULTA_ARC_ERR_CHECKSUM;
-                if ((e = fa_stream_range(&z->range, start + sl + 2, csize - sl - 2 - 10, &s))) return e;
+                if ((e = fa_stream_range(arc->alloc, &z->range, start + sl + 2, csize - sl - 2 - 10, &s))) return e;
                 if ((e = fa_dec_ctr(s, FA_CTR_AES_LE1, k, kl, &s))) return e;
                 break;
             }
@@ -465,12 +467,12 @@ static fulta_arc_err_t zip_extract(fulta_arc_t *arc, size_t index, const fulta_a
             uint8_t want = (it->flags & 8) ? (uint8_t)(it->mtime >> 8) : (uint8_t)(it->crc >> 24);
             if (hdr[11] != want) continue;
             fa_password_ok(arc, pw);
-            if ((e = fa_stream_range(&z->range, start + 12, csize - 12, &s))) return e;
+            if ((e = fa_stream_range(arc->alloc, &z->range, start + 12, csize - 12, &s))) return e;
             if ((e = fa_dec_zipcrypto(s, &keys, &s))) return e;
             break;
         }
     } else {
-        if ((e = fa_stream_range(&z->range, start, csize, &s))) return e;
+        if ((e = fa_stream_range(arc->alloc, &z->range, start, csize, &s))) return e;
     }
     uint64_t usize = it->usize;
     /* the decoders own their input: on failure they destroy it and `s` stays NULL */
@@ -486,7 +488,7 @@ static fulta_arc_err_t zip_extract(fulta_arc_t *arc, size_t index, const fulta_a
         int min_len = 0;
         if ((it->flags & 6) == 4 && !it->encrypted) {
             fa_stream_t *t;
-            if (!(e = fa_stream_range(&z->range, start, csize, &t)) && !(e = fa_dec_explode(t, it->flags, 3, usize, &t))) {
+            if (!(e = fa_stream_range(arc->alloc, &z->range, start, csize, &t)) && !(e = fa_dec_explode(t, it->flags, 3, usize, &t))) {
                 e = fa_pump(t, usize, true, it->crc, NULL, arc, false);
                 fa_stream_destroy(t);
             }
@@ -501,9 +503,9 @@ static fulta_arc_err_t zip_extract(fulta_arc_t *arc, size_t index, const fulta_a
     case 12: e = fa_dec_bzip2(raw, usize, &arc->limits, &s); break;
     case 14: {
         uint8_t h[4], props[5];
-        e = fa_stream_read_exact(raw, h, 4);
+        e = fa_stream_read_exact(raw, fa_bytes_mut(h, 4));
         if (!e && fa_le16(h + 2) != 5) e = FULTA_ARC_ERR_UNSUPPORTED;
-        if (!e) e = fa_stream_read_exact(raw, props, 5);
+        if (!e) e = fa_stream_read_exact(raw, fa_bytes_mut(props, 5));
         if (e) { fa_stream_destroy(raw); break; }
         e = fa_dec_lzma(raw, props, usize, &arc->limits, &s);
         break;
@@ -529,9 +531,9 @@ static fulta_arc_err_t zip_extract(fulta_arc_t *arc, size_t index, const fulta_a
 static void zip_close(fulta_arc_t *arc) {
     zip_state_t *z = arc->state;
     if (!z) return;
-    fa_free(z->range.pieces);
-    fa_free(z->items);
-    fa_free(z);
+    fa_release(arc->alloc, z->range.pieces);
+    fa_release(arc->alloc, z->items);
+    fa_release(arc->alloc, z);
     arc->state = NULL;
 }
 

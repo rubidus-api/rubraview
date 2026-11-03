@@ -6,31 +6,40 @@
 #include "rc_internal.h"
 #include <stdlib.h>
 
-static void *aes_create(const uint8_t *key, unsigned key_bits, const uint8_t iv[16]) {
-    rc_aes_t *a = (rc_aes_t*)malloc(sizeof(*a));
-    if (a && !rc_aes_init(a, key, key_bits, iv)) { free(a); a = NULL; }
+/* The objects carry the allocator they came from (the state first, so the codec's pointer is the object's). */
+typedef struct { rc_aes_t aes; proven_allocator_t alloc; } rc_aes_obj_t;
+typedef struct { rc_blake2sp_t b2; proven_allocator_t alloc; } rc_b2_obj_t;
+
+static void *aes_create(proven_allocator_t alloc, const uint8_t *key, unsigned key_bits, const uint8_t iv[16]) {
+    rc_aes_obj_t *a = fa_alloc(alloc, sizeof(*a));
+    if (!a) return NULL;
+    a->alloc = alloc;
+    if (!rc_aes_init(&a->aes, key, key_bits, iv)) { fa_release(alloc, a); return NULL; }
     return a;
 }
 
-static void aes_decrypt(void *aes, uint8_t *data, size_t size) { rc_aes_cbc_decrypt((rc_aes_t*)aes, data, size); }
+static void aes_decrypt(void *aes, uint8_t *data, size_t size) { rc_aes_cbc_decrypt(&((rc_aes_obj_t*)aes)->aes, data, size); }
 
 static void aes_destroy(void *aes) {
     if (!aes) return;
-    rc_wipe(aes, sizeof(rc_aes_t));
-    free(aes);
+    proven_allocator_t alloc = ((rc_aes_obj_t*)aes)->alloc;
+    rc_wipe(aes, sizeof(rc_aes_obj_t));
+    fa_release(alloc, aes);
 }
 
-static void *b2_create(void) {
-    rc_blake2sp_t *s = (rc_blake2sp_t*)malloc(sizeof(*s));
-    if (s) rc_blake2sp_init(s);
+static void *b2_create(proven_allocator_t alloc) {
+    rc_b2_obj_t *s = fa_alloc(alloc, sizeof(*s));
+    if (!s) return NULL;
+    s->alloc = alloc;
+    rc_blake2sp_init(&s->b2);
     return s;
 }
 
-static void b2_update(void *s, const void *data, size_t size) { rc_blake2sp_update((rc_blake2sp_t*)s, data, size); }
+static void b2_update(void *s, const void *data, size_t size) { rc_blake2sp_update(&((rc_b2_obj_t*)s)->b2, data, size); }
 
 static void b2_final(void *s, uint8_t digest[32]) {
-    rc_blake2sp_final((rc_blake2sp_t*)s, digest);
-    free(s);
+    rc_blake2sp_final(&((rc_b2_obj_t*)s)->b2, digest);
+    fa_release(((rc_b2_obj_t*)s)->alloc, s);
 }
 
 static const fa_rar_codec_t CODEC = {

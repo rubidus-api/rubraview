@@ -48,14 +48,14 @@ typedef struct cur { const fa_range_t *r; uint64_t pos; fulta_arc_err_t err; } c
 
 static uint32_t c_u32(cur_t *c) {
     uint8_t b[4];
-    if (!c->err) c->err = fa_range_read_exact(c->r, c->pos, b, 4);
+    if (!c->err) c->err = fa_range_read_exact(c->r, c->pos, fa_bytes_mut(b, 4));
     c->pos += 4;
     return c->err ? 0 : fa_le32(b);
 }
 static uint64_t c_u64(cur_t *c) { uint64_t lo = c_u32(c); return lo | ((uint64_t)c_u32(c) << 32); }
 static uint8_t c_u8(cur_t *c) {
     uint8_t b = 0;
-    if (!c->err) c->err = fa_range_read_exact(c->r, c->pos, &b, 1);
+    if (!c->err) c->err = fa_range_read_exact(c->r, c->pos, fa_bytes_mut(&b, 1));
     c->pos++;
     return b;
 }
@@ -83,7 +83,7 @@ static fulta_arc_err_t read_sub(cur_t *c, sub_t *s, bool *end) {
     }
     s->len = len;
     if (len <= sizeof s->data) {
-        if (!c->err) c->err = fa_range_read_exact(c->r, c->pos, s->data, len);
+        if (!c->err) c->err = fa_range_read_exact(c->r, c->pos, fa_bytes_mut(s->data, len));
     }
     c->pos += len;
     return c->err;
@@ -107,13 +107,13 @@ static fulta_arc_err_t read_block(cur_t *c, egg_block_t *b) {
  * or split sub-record - the checks skip the bare "EGGA" letters the program itself contains. */
 static fulta_arc_err_t egg_find_header(const fulta_arc_source_t *src, uint64_t *base) {
     uint8_t mz[2];
-    if (src->size < 18 || fa_source_read_exact(src, 0, mz, 2) || mz[0] != 'M' || mz[1] != 'Z')
+    if (src->size < 18 || fa_source_read_exact(src, 0, fa_bytes_mut(mz, 2)) || mz[0] != 'M' || mz[1] != 'Z')
         return FULTA_ARC_ERR_NOT_ARCHIVE;
     enum { CH = 16384, OV = 18 };
     uint8_t buf[CH + OV];
     for (uint64_t pos = 0; pos + 18 <= src->size;) {
         size_t want = (size_t)(src->size - pos < CH + OV ? src->size - pos : CH + OV);
-        if (fa_source_read_exact(src, pos, buf, want)) return FULTA_ARC_ERR_NOT_ARCHIVE;
+        if (fa_source_read_exact(src, pos, fa_bytes_mut(buf, want))) return FULTA_ARC_ERR_NOT_ARCHIVE;
         size_t limit = want >= 18 ? want - 18 + 1 : 0;
         for (size_t i = 0; i < limit; i++) {
             if (fa_le32(buf + i) != SIG_ARCHIVE || fa_le32(buf + i + 6) == 0 || fa_le32(buf + i + 10) != 0) continue;
@@ -128,13 +128,13 @@ static fulta_arc_err_t egg_find_header(const fulta_arc_source_t *src, uint64_t *
 
 static fulta_arc_err_t join_volumes(fulta_arc_t *arc, egg_state_t *st, uint64_t base) {
     const fulta_arc_source_t *first = arc->volumes[0];
-    st->range.pieces = fa_calloc(1, sizeof *st->range.pieces);
+    st->range.pieces = fa_zalloc(arc->alloc, 1, sizeof *st->range.pieces);
     if (!st->range.pieces) return FULTA_ARC_ERR_NOMEM;
     st->range.pieces[0] = (fa_piece_t){first, base, first->size - base};
     st->range.count = 1;
     st->range.size = first->size - base;
     uint8_t h[33];
-    if (first->size - base < 33 || fa_source_read_exact(first, base, h, 33)) return FULTA_ARC_OK;
+    if (first->size - base < 33 || fa_source_read_exact(first, base, fa_bytes_mut(h, 33))) return FULTA_ARC_OK;
     if (fa_le32(h + 14) != SIG_SPLIT) return FULTA_ARC_OK;            /* not a split archive */
     /* first volume: NAME.vol1.egg, or NAME.vol1.exe for a self-extracting split set (egg.md 8.1) */
     const char *nm = arc->opt.name;
@@ -143,19 +143,19 @@ static fulta_arc_err_t join_volumes(fulta_arc_t *arc, egg_state_t *st, uint64_t 
         return FULTA_ARC_OK;
     uint32_t prev_id = fa_le32(h + 6), next = fa_le32(h + 25);
     for (uint32_t k = 2; next && k < 100000; k++) {
-        char *vn = fa_malloc(L + 16);
+        char *vn = fa_alloc(arc->alloc, L + 16);
         if (!vn) return FULTA_ARC_ERR_NOMEM;
         snprintf(vn, L + 16, "%.*s.vol%u.egg", (int)(L - 9), nm, (unsigned)k);
         const fulta_arc_source_t *src;
         fulta_arc_err_t e = fa_volume(arc, k - 1, vn, &src);
-        fa_free(vn);
+        fa_release(arc->alloc, vn);
         if (e) return e;
         uint8_t v[33];
-        if ((e = fa_source_read_exact(src, 0, v, 33))) return e;
+        if ((e = fa_source_read_exact(src, 0, fa_bytes_mut(v, 33)))) return e;
         if (fa_le32(v) != SIG_ARCHIVE || fa_le32(v + 14) != SIG_SPLIT || fa_le32(v + 21) != prev_id ||
             fa_le32(v + 6) != next)
             return FULTA_ARC_ERR_CORRUPT;                             /* the id chain (egg.md 7) */
-        fa_piece_t *p = fa_realloc(st->range.pieces, (st->range.count + 1) * sizeof *p);
+        fa_piece_t *p = fa_resize(arc->alloc, st->range.pieces, st->range.count * sizeof *p, (st->range.count + 1) * sizeof *p);
         if (!p) return FULTA_ARC_ERR_NOMEM;
         st->range.pieces = p;
         p[st->range.count++] = (fa_piece_t){src, 33, src->size - 33};
@@ -172,7 +172,7 @@ static fulta_arc_err_t egg_open(fulta_arc_t *arc, uint64_t search) {
         fulta_arc_err_t fe = egg_find_header(arc->volumes[0], &base);
         if (fe) return fe;
     }
-    egg_state_t *st = fa_calloc(1, sizeof *st);
+    egg_state_t *st = fa_zalloc(arc->alloc, 1, sizeof *st);
     if (!st) return FULTA_ARC_ERR_NOMEM;
     arc->state = st;
     fulta_arc_err_t e = join_volumes(arc, st, base);
@@ -221,7 +221,7 @@ static fulta_arc_err_t egg_open(fulta_arc_t *arc, uint64_t search) {
         bool has_time = false;
         egg_file_t f = {.crypt = 0xFF, .size = size, .offset_in_solid = solid_total};
         for (;;) {
-            if ((e = read_sub(&c, &s, &end))) { fa_free(name); return e; }
+            if ((e = read_sub(&c, &s, &end))) { fa_release(arc->alloc, name); return e; }
             if (end) break;
             if (s.sig == SIG_NAME && s.len <= sizeof namebuf) { memcpy(namebuf, s.data, s.len); nlen = s.len; }
             else if (s.sig == SIG_TIME && s.len == 9) { ft = fa_le64(s.data); attr = s.data[8]; has_time = true; }
@@ -230,31 +230,31 @@ static fulta_arc_err_t egg_open(fulta_arc_t *arc, uint64_t search) {
         if (!st->solid) {
             uint64_t got = 0;
             while (got < size) {
-                if (c_u32(&c) != SIG_BLOCK) { fa_free(f.blocks); return c.err ? c.err : FULTA_ARC_ERR_CORRUPT; }
+                if (c_u32(&c) != SIG_BLOCK) { fa_release(arc->alloc, f.blocks); return c.err ? c.err : FULTA_ARC_ERR_CORRUPT; }
                 egg_block_t b;
-                if ((e = read_block(&c, &b))) { fa_free(f.blocks); return e; }
-                egg_block_t *nb = fa_realloc(f.blocks, (f.nblocks + 1) * sizeof *nb);
-                if (!nb) { fa_free(f.blocks); return FULTA_ARC_ERR_NOMEM; }
+                if ((e = read_block(&c, &b))) { fa_release(arc->alloc, f.blocks); return e; }
+                egg_block_t *nb = fa_resize(arc->alloc, f.blocks, f.nblocks * sizeof *nb, (f.nblocks + 1) * sizeof *nb);
+                if (!nb) { fa_release(arc->alloc, f.blocks); return FULTA_ARC_ERR_NOMEM; }
                 f.blocks = nb;
                 f.blocks[f.nblocks++] = b;
                 got += b.out;
-                if (!b.out) { fa_free(f.blocks); return FULTA_ARC_ERR_CORRUPT; }
+                if (!b.out) { fa_release(arc->alloc, f.blocks); return FULTA_ARC_ERR_CORRUPT; }
             }
-            if (got != size) { fa_free(f.blocks); return FULTA_ARC_ERR_CORRUPT; }
+            if (got != size) { fa_release(arc->alloc, f.blocks); return FULTA_ARC_ERR_CORRUPT; }
         } else {
             solid_total += size;
         }
-        name = fa_codepage_to_utf8(namebuf, nlen, FULTA_ARC_CP_UTF8, FULTA_ARC_CP_UTF8);
-        if (!name) { fa_free(f.blocks); return FULTA_ARC_ERR_NOMEM; }
+        name = fa_codepage_to_utf8(arc->alloc, fa_bytes(namebuf, nlen), FULTA_ARC_CP_UTF8, FULTA_ARC_CP_UTF8);
+        if (!name) { fa_release(arc->alloc, f.blocks); return FULTA_ARC_ERR_NOMEM; }
         char method[48] = "";
         uint8_t m = st->solid ? 0xFF : (f.nblocks ? f.blocks[0].method : 0);
         const char *mn = m == 0 ? "Store" : m == 1 ? "Deflate" : m == 2 ? "BZip2" : m == 3 ? "AZO" : m == 4 ? "LZMA" : "";
         const char *cn = f.crypt == 0 ? ":ZipCrypto" : f.crypt == 1 ? ":AES128" : f.crypt == 2 ? ":AES256"
                        : f.crypt == 5 ? ":LEA128" : f.crypt == 6 ? ":LEA256" : "";
         snprintf(method, sizeof method, "%s%s", mn, cn);
-        fa_entry_t *en = fa_add_entry(arc, namebuf, nlen, name, method);
-        fa_free(name);
-        if (!en) { fa_free(f.blocks); return FULTA_ARC_ERR_NOMEM; }
+        fa_entry_t *en = fa_add_entry(arc, fa_bytes(namebuf, nlen), name, method);
+        fa_release(arc->alloc, name);
+        if (!en) { fa_release(arc->alloc, f.blocks); return FULTA_ARC_ERR_NOMEM; }
         en->pub.size = size;
         if (has_time) {
             /* egg.md 4.2: a FILETIME count of the local wall-clock time, whole seconds */
@@ -278,8 +278,8 @@ static fulta_arc_err_t egg_open(fulta_arc_t *arc, uint64_t search) {
         if (f.crypt != 0xFF && f.nblocks > 1) en->pub.flags |= FULTA_ARC_ENTRY_UNSUPPORTED;   /* unobserved */
         if (arc->count > cap) {
             size_t nc = cap ? cap * 2 : 64;
-            egg_file_t *nf = fa_realloc(st->files, nc * sizeof *nf);
-            if (!nf) { fa_free(f.blocks); return FULTA_ARC_ERR_NOMEM; }
+            egg_file_t *nf = fa_resize(arc->alloc, st->files, cap * sizeof *nf, nc * sizeof *nf);
+            if (!nf) { fa_release(arc->alloc, f.blocks); return FULTA_ARC_ERR_NOMEM; }
             memset(nf + cap, 0, (nc - cap) * sizeof *nf);
             st->files = nf;
             cap = nc;
@@ -316,7 +316,7 @@ static fulta_arc_err_t decrypt_open(fulta_arc_t *arc, const egg_file_t *f, const
         /* ALZip stores a password as the writer's CP949 bytes, never UTF-8 (egg.md 5, reader-note 3): try the
          * CP949 encoding first, then the raw UTF-8 as a courtesy. A password outside CP949 does not encode
          * (NULL) and only UTF-8 is tried. */
-        char *cp949 = fa_utf8_to_codepage(pw, FULTA_ARC_CP_949);
+        char *cp949 = fa_utf8_to_codepage(arc->alloc, pw, FULTA_ARC_CP_949);
         const char *cand[2];
         size_t nc = 0;
         if (cp949) cand[nc++] = cp949;
@@ -332,7 +332,7 @@ static fulta_arc_err_t decrypt_open(fulta_arc_t *arc, const egg_file_t *f, const
                 fa_zipcrypto_decrypt(&k, h, 12);
                 if (h[11] != (uint8_t)(fa_le32(f->cdata + 12) >> 24)) continue;
                 fa_password_ok(arc, pw);
-                fa_free(cp949);
+                fa_release(arc->alloc, cp949);
                 *handed = true;
                 return fa_dec_zipcrypto(*s, &k, s);
             }
@@ -341,12 +341,12 @@ static fulta_arc_err_t decrypt_open(fulta_arc_t *arc, const egg_file_t *f, const
             fa_pbkdf2_sha1(pwb, pl, f->cdata, sl, 1000, key, 2 * kl + 2);
             if (key[2 * kl] != f->cdata[sl] || key[2 * kl + 1] != f->cdata[sl + 1]) continue;
             fa_password_ok(arc, pw);
-            fa_free(cp949);
+            fa_release(arc->alloc, cp949);
             /* MAC over the ciphertext, checked in a pass before decoding */
             fa_hmac_sha1_t mac;
             fa_hmac_sha1_init(&mac, key + kl, kl);
             fa_stream_t *t;
-            if ((e = fa_stream_range(&((egg_state_t *)arc->state)->range, b->data, b->in, &t))) return e;
+            if ((e = fa_stream_range(arc->alloc, &((egg_state_t *)arc->state)->range, b->data, b->in, &t))) return e;
             if ((e = fa_stream_hmac_tap(t, &mac, &t))) return e;
             e = fa_pump(t, b->in, false, 0, NULL, arc, false);
             fa_stream_destroy(t);
@@ -357,7 +357,7 @@ static fulta_arc_err_t decrypt_open(fulta_arc_t *arc, const egg_file_t *f, const
             *handed = true;
             return fa_dec_ctr(*s, f->crypt <= 2 ? FA_CTR_AES_LE1 : FA_CTR_LEA_BE0, key, kl, s);
         }
-        fa_free(cp949);
+        fa_release(arc->alloc, cp949);
     }
 }
 
@@ -373,9 +373,9 @@ static fulta_arc_err_t decoder(fulta_arc_t *arc, const egg_block_t *b, fa_stream
     }
     case 4: {
         uint8_t h[4], props[5];
-        fulta_arc_err_t e = fa_stream_read_exact(in, h, 4);
+        fulta_arc_err_t e = fa_stream_read_exact(in, fa_bytes_mut(h, 4));
         if (!e && fa_le16(h + 2) != 5) e = FULTA_ARC_ERR_UNSUPPORTED;
-        if (!e) e = fa_stream_read_exact(in, props, 5);
+        if (!e) e = fa_stream_read_exact(in, fa_bytes_mut(props, 5));
         if (e) { fa_stream_destroy(in); return e; }
         return fa_dec_lzma(in, props, b->out, &arc->limits, out);
     }
@@ -387,7 +387,7 @@ typedef struct crc_sink { const fulta_arc_sink_t *inner; uint32_t crc; } crc_sin
 
 static fulta_arc_err_t crc_write(void *ctx, const void *d, size_t n) {
     crc_sink_t *c = ctx;
-    c->crc = fa_crc32(c->crc, d, n);
+    c->crc = fa_crc32(c->crc, fa_bytes(d, n));
     return c->inner && c->inner->write ? c->inner->write(c->inner->ctx, d, n) : FULTA_ARC_OK;
 }
 
@@ -400,7 +400,7 @@ static fulta_arc_err_t egg_extract(fulta_arc_t *arc, size_t index, const fulta_a
         for (size_t k = 0; k < f->nblocks; k++) {
             const egg_block_t *b = &f->blocks[k];
             fa_stream_t *s;
-            if ((e = fa_stream_range(&st->range, b->data, b->in, &s))) return e;
+            if ((e = fa_stream_range(arc->alloc, &st->range, b->data, b->in, &s))) return e;
             if (f->crypt != 0xFF && (e = decrypt(arc, f, b, &s))) return e;
             if ((e = decoder(arc, b, s, &s))) return e;
             e = fa_pump(s, b->out, true, b->crc, sink, arc, true);           /* each block has its own CRC (egg.md 5) */
@@ -414,7 +414,7 @@ static fulta_arc_err_t egg_extract(fulta_arc_t *arc, size_t index, const fulta_a
         fa_stream_destroy(st->cur);
         st->cur = NULL;
         fa_stream_t *s;
-        if ((e = fa_stream_range(&st->range, st->solid_block.data, st->solid_block.in, &s))) return e;
+        if ((e = fa_stream_range(arc->alloc, &st->range, st->solid_block.data, st->solid_block.in, &s))) return e;
         if ((e = decoder(arc, &st->solid_block, s, &st->cur))) return e;
         st->cur_pos = 0;
         st->cur_crc = 0;
@@ -439,10 +439,10 @@ static void egg_close(fulta_arc_t *arc) {
     egg_state_t *st = arc->state;
     if (!st) return;
     fa_stream_destroy(st->cur);
-    for (size_t i = 0; i < arc->count && st->files; i++) fa_free(st->files[i].blocks);
-    fa_free(st->files);
-    fa_free(st->range.pieces);
-    fa_free(st);
+    for (size_t i = 0; i < arc->count && st->files; i++) fa_release(arc->alloc, st->files[i].blocks);
+    fa_release(arc->alloc, st->files);
+    fa_release(arc->alloc, st->range.pieces);
+    fa_release(arc->alloc, st);
     arc->state = NULL;
 }
 

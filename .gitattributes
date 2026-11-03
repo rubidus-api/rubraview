@@ -1,0 +1,3 @@
+# Vendored snapshots are upstream's bytes, never edited here (each VENDORED.md): the LZMA SDK's CRLF lines are
+# not whitespace errors of ours (D-265).
+vendor/** -whitespace

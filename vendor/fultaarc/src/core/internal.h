@@ -7,6 +7,7 @@
 #include "proven/hash.h"
 #include "proven/allocator.h"
 #include "proven/heap.h"
+#include "proven/u8str.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -29,18 +30,27 @@ static inline void fa_put_le32(uint8_t *p, uint32_t v) {
 }
 static inline void fa_put_le64(uint8_t *p, uint64_t v) { fa_put_le32(p, (uint32_t)v); fa_put_le32(p + 4, (uint32_t)(v >> 32)); }
 
+/* Slice views (proven's proven_mem_view_t / proven_mem_mut_t) over a pointer and a length. */
+static inline proven_mem_view_t fa_bytes(const void *p, size_t n) {
+    return (proven_mem_view_t){.ptr = (const proven_byte_t *)p, .size = n};
+}
+static inline proven_mem_mut_t fa_bytes_mut(void *p, size_t n) {
+    return (proven_mem_mut_t){.ptr = (proven_byte_t *)p, .size = n};
+}
+
 /* ---- memory ------------------------------------------------------------------------------------------------- */
 
-/* One fixed allocation alignment for both the fa_malloc seam and the budget allocator: fundamental alignment, which
- * covers every string, buffer, byte array and codec state. A block is allocated, reallocated and freed at this one
- * class, as proven's allocator trait requires. */
-#define FA_ALIGN (alignof(max_align_t))
 
-void *fa_malloc(size_t n);                 /* NULL on failure; n == 0 gives a valid pointer */
-void *fa_calloc(size_t count, size_t n);   /* checks the multiplication */
-void *fa_realloc(void *p, size_t n);
-void fa_free(void *p);
-char *fa_strndup(const char *s, size_t n);
+#include "fa_alloc.h"
+
+/* The allocator a caller's fulta_arc_allocator_t (all three functions, or none) stands for: the bridge, else
+ * proven's heap. INVALID_ARG when one or two of the functions are set. */
+fulta_arc_err_t fa_allocator_pick(const fulta_arc_allocator_t *ua, proven_allocator_t *out);
+
+/* The allocator a caller's fulta_arc_allocator_t (all three functions, or none) stands for: the bridge, else
+ * proven's heap. INVALID_ARG when one or two of the functions are set. */
+fulta_arc_err_t fa_allocator_pick(const fulta_arc_allocator_t *ua, proven_allocator_t *out);
+
 
 /* A per-archive memory budget for the vendored codecs' own buffers (the attacker-driven allocations: PPMd models,
  * LZMA/bzip2/zstd state and windows). `fa_budget_as_allocator(b)` exposes it as proven's allocator trait (as
@@ -48,7 +58,7 @@ char *fa_strndup(const char *s, size_t n);
  * trait-generic world and with each codec's own alloc/free hook. It allocates from `backing`, counts live bytes and
  * refuses once `limit` would be passed (`limit == 0` is unlimited). A block carries an FA_ALIGN-sized size prefix so
  * the trait's free/realloc can credit the counter (proven's free_fn is handed only a pointer); the returned pointer
- * stays FA_ALIGN-aligned. Its blocks live and die inside one codec's hook, so they never meet fa_free or libc free.
+ * stays FA_ALIGN-aligned. Its blocks live and die inside one codec's hook, so they never meet fa_release.
  * `exceeded` marks a refusal as the budget's doing (not a backing OOM), so the dec paths report FULTA_ARC_ERR_LIMIT
  * rather than NOMEM. See D-021 and docs/plans/active/2026-10-13-proven-allocator-seam.md. */
 typedef struct fa_budget {
@@ -66,14 +76,15 @@ void fa_budget_arm(fa_budget_t *b);   /* clear the sticky `exceeded` before a fr
 proven_allocator_t fa_allocator_from_user(const fulta_arc_allocator_t *ua);
 
 /* A growable byte buffer. */
-typedef struct fa_buf { uint8_t *data; size_t size, cap; } fa_buf_t;
-fulta_arc_err_t fa_buf_append(fa_buf_t *b, const void *data, size_t n);
+/* A growing byte buffer in `alloc` (set it when the buffer is made: `(fa_buf_t){.alloc = a}`). */
+typedef struct fa_buf { proven_allocator_t alloc; uint8_t *data; size_t size, cap; } fa_buf_t;
+fulta_arc_err_t fa_buf_append(fa_buf_t *b, proven_mem_view_t data);
 fulta_arc_err_t fa_buf_byte(fa_buf_t *b, uint8_t v);
 void fa_buf_free(fa_buf_t *b);
 
 /* ---- checksums ---------------------------------------------------------------------------------------------- */
 
-uint32_t fa_crc32(uint32_t crc, const void *data, size_t n);   /* ISO 3309; start with 0 */
+uint32_t fa_crc32(uint32_t crc, proven_mem_view_t data);   /* ISO 3309; start with 0 */
 
 /* ---- input: a "segment list" over one or more sources ------------------------------------------------------- */
 
@@ -87,13 +98,13 @@ typedef struct fa_range {
 } fa_range_t;
 
 fulta_arc_err_t fa_range_read(const fa_range_t *r, uint64_t offset, void *buf, size_t n, size_t *got);
-fulta_arc_err_t fa_range_read_exact(const fa_range_t *r, uint64_t offset, void *buf, size_t n);
-fulta_arc_err_t fa_source_read_exact(const fulta_arc_source_t *s, uint64_t offset, void *buf, size_t n);
+fulta_arc_err_t fa_range_read_exact(const fa_range_t *r, uint64_t offset, proven_mem_mut_t buf);
+fulta_arc_err_t fa_source_read_exact(const fulta_arc_source_t *s, uint64_t offset, proven_mem_mut_t buf);
 
 /* A whole source as bytes in memory, for readers that index their input directly (RAR, ALZ, EGG): memory sources
  * as they are, files mapped (proven_c_lib's mmap), other sources read in once. */
-typedef struct fa_view { const uint8_t *data; size_t size; int kind; void *priv; } fa_view_t;
-fulta_arc_err_t fa_view_open(const fulta_arc_source_t *s, fa_view_t *v);
+typedef struct fa_view { proven_mem_view_t bytes; int kind; void *priv; proven_allocator_t alloc; } fa_view_t;
+fulta_arc_err_t fa_view_open(proven_allocator_t a, const fulta_arc_source_t *s, fa_view_t *v);
 void fa_view_close(fa_view_t *v);
 
 /* ---- streams: every decoder is a pull stream ---------------------------------------------------------------- */
@@ -103,16 +114,23 @@ struct fa_stream {
     /* Produce up to `n` bytes; *got = 0 means the end. */
     fulta_arc_err_t (*read)(fa_stream_t *s, void *buf, size_t n, size_t *got);
     void (*destroy)(fa_stream_t *s);
+    proven_allocator_t alloc;   /* the stream object and its buffers live here; a decoder takes its input's */
 };
 
-fulta_arc_err_t fa_stream_read_exact(fa_stream_t *s, void *buf, size_t n);   /* TRUNCATED if it ends early */
+/* A zeroed stream object of `size` bytes whose first member is its fa_stream_t, living in `a`, with read/destroy
+ * set; NULL on failure. fa_stream_release gives the object back (from its destroy). */
+void *fa_stream_new(proven_allocator_t a, size_t size, fulta_arc_err_t (*read)(fa_stream_t *, void *, size_t, size_t *),
+                    void (*destroy)(fa_stream_t *));
+static inline void fa_stream_release(fa_stream_t *s) { fa_release(s->alloc, s); }
+
+fulta_arc_err_t fa_stream_read_exact(fa_stream_t *s, proven_mem_mut_t buf);   /* TRUNCATED if it ends early */
 fulta_arc_err_t fa_stream_skip(fa_stream_t *s, uint64_t n);
 void fa_stream_destroy(fa_stream_t *s);
 
 /* A stream over a range (owns a copy of the piece list). */
-fulta_arc_err_t fa_stream_range(const fa_range_t *r, uint64_t offset, uint64_t size, fa_stream_t **out);
+fulta_arc_err_t fa_stream_range(proven_allocator_t a, const fa_range_t *r, uint64_t offset, uint64_t size, fa_stream_t **out);
 /* A stream over memory (not copied). */
-fulta_arc_err_t fa_stream_memory(const void *data, size_t size, fa_stream_t **out);
+fulta_arc_err_t fa_stream_memory(proven_allocator_t a, const void *data, size_t size, fa_stream_t **out);
 
 /* Buffered byte reader over a stream, for decoders that read byte by byte. */
 typedef struct fa_bytes {
@@ -124,12 +142,18 @@ typedef struct fa_bytes {
     uint64_t consumed;
 } fa_bytes_t;
 void fa_bytes_init(fa_bytes_t *b, fa_stream_t *in);
-int fa_bytes_get(fa_bytes_t *b);      /* 0..255, or -1 at the end or on error (b->err set on error) */
+int fa_bytes_fill(fa_bytes_t *b);     /* the slow path of fa_bytes_get: refill the buffer, then the next byte */
+/* 0..255, or -1 at the end or on error (b->err set on error). The common case stays inline: no call per byte. */
+static inline int fa_bytes_get(fa_bytes_t *b) {
+    if (b->pos < b->len) { b->consumed++; return b->buf[b->pos++]; }
+    return fa_bytes_fill(b);
+}
 
 /* ---- decoders (src/codec) ----------------------------------------------------------------------------------- */
 
 typedef struct fa_limits {
     uint64_t max_dictionary; int (*cancel)(void *); void *cancel_ctx;
+    proven_allocator_t alloc;   /* the owning archive's allocator: decoders and streams allocate from it */
     fa_budget_t *budget;   /* the owning archive's codec memory budget; may be NULL (unlimited). A pointer, never
                               embedded by value: fa_limits_t is copied (e.g. the xz decoder keeps its own), and all
                               copies must share one live counter. */
@@ -147,7 +171,7 @@ fulta_arc_err_t fa_dec_deflate_dict(fa_stream_t *in, uint64_t out_size, const ui
  * folder's cumulative output buffer (matches reference into it); fa_lzx_chunk is called once per CFDATA with its
  * payload and uncompressed size; fa_lzx_finish runs the E8 x86 post-pass. See cab.md, [MS-PATCH]. */
 typedef struct fa_lzx fa_lzx_t;
-fulta_arc_err_t fa_lzx_create(unsigned window_bits, uint8_t *out, uint64_t out_cap, fa_lzx_t **lzx);
+fulta_arc_err_t fa_lzx_create(proven_allocator_t a, unsigned window_bits, uint8_t *out, uint64_t out_cap, fa_lzx_t **lzx);
 fulta_arc_err_t fa_lzx_chunk(fa_lzx_t *lzx, const uint8_t *in, size_t in_len, uint64_t uncomp);
 void fa_lzx_finish(fa_lzx_t *lzx);
 void fa_lzx_destroy(fa_lzx_t *lzx);
@@ -158,7 +182,7 @@ void fa_lzx_destroy(fa_lzx_t *lzx);
  * cbUncomp, a source before the stream start, or a block that runs out of bits is an error (the measured
  * behaviour of Windows' reader). See cab.md. */
 typedef struct fa_quantum fa_quantum_t;
-fulta_arc_err_t fa_quantum_create(unsigned window_bits, uint8_t *out, uint64_t out_cap, fa_quantum_t **q);
+fulta_arc_err_t fa_quantum_create(proven_allocator_t a, unsigned window_bits, uint8_t *out, uint64_t out_cap, fa_quantum_t **q);
 fulta_arc_err_t fa_quantum_chunk(fa_quantum_t *q, const uint8_t *in, size_t in_len, uint64_t uncomp);
 uint64_t fa_quantum_produced(const fa_quantum_t *q);
 void fa_quantum_destroy(fa_quantum_t *q);
@@ -225,7 +249,7 @@ bool fa_random_bytes(void *buf, size_t n);
 
 /* 7zAES key derivation: SHA-256 iterated 2^power times over (salt | password-as-UTF-16LE | counter_le64).
  * `power` <= 24; shared by the 7z reader and the writer. */
-fulta_arc_err_t fa_7z_derive_key(const char *pw, const uint8_t *salt, size_t salt_len, uint32_t power,
+fulta_arc_err_t fa_7z_derive_key(proven_allocator_t a, const char *pw, const uint8_t *salt, size_t salt_len, uint32_t power,
                                  uint8_t key[32]);
 void fa_aes_decrypt(const fa_aes_t *a, const uint8_t in[16], uint8_t out[16]);
 
@@ -270,15 +294,16 @@ fulta_arc_err_t fa_dec_ctr(fa_stream_t *in, fa_ctr_kind_t kind, const uint8_t *k
 
 /* ---- text --------------------------------------------------------------------------------------------------- */
 
-bool fa_utf8_valid(const uint8_t *s, size_t n);
+bool fa_utf8_valid(proven_mem_view_t s);
 /* Append the UTF-8 form of code point `cp` (invalid code points become U+FFFD). */
 fulta_arc_err_t fa_utf8_put(fa_buf_t *b, uint32_t cp);
 /* UTF-16LE (n code units) to a NUL-terminated UTF-8 string (malloc'd). */
-char *fa_utf16le_to_utf8(const uint8_t *s, size_t units);
+char *fa_utf16le_to_utf8(proven_allocator_t a, proven_mem_view_t s);   /* s.size / 2 code units */
 /* Bytes in a code page to a NUL-terminated UTF-8 string (malloc'd); unknown bytes become U+FFFD. */
-char *fa_codepage_to_utf8(const uint8_t *s, size_t n, fulta_arc_codepage_t cp, fulta_arc_codepage_t fallback);
+char *fa_codepage_to_utf8(proven_allocator_t a, proven_mem_view_t s, fulta_arc_codepage_t cp,
+                          fulta_arc_codepage_t fallback);
 /* UTF-8 to a code page (passwords stored in an archiver's code page); NULL when a character has no mapping. */
-char *fa_utf8_to_codepage(const char *utf8, fulta_arc_codepage_t cp);
+char *fa_utf8_to_codepage(proven_allocator_t a, const char *utf8, fulta_arc_codepage_t cp);
 /* Make a stored name safe: '\\' -> '/', drop leading '/', drive letters, "." parts; ".." parts make it unsafe.
  * Returns false when nothing safe remains (the caller uses a placeholder). Edits in place. */
 bool fa_sanitize_name(char *name);
@@ -295,6 +320,7 @@ typedef struct fa_entry {
 } fa_entry_t;
 
 struct fulta_arc {
+    proven_allocator_t alloc;            /* every block of this archive (D-038): the caller's, else proven's heap */
     fulta_arc_format_t format;
     const fa_format_ops_t *ops;
     void *state;                         /* the format reader's own state */
@@ -338,7 +364,7 @@ extern const fa_format_ops_t fa_zip_ops, fa_7z_ops, fa_rar_ops, fa_alz_ops, fa_e
 
 /* A memory source that OWNS its buffer: close() frees the buffer too (unlike fulta_arc_source_memory, which only
  * references the caller's data). Used to back an unwrapped stream for the reprobe layer. Takes ownership of `buf`. */
-fulta_arc_source_t fa_source_memory_owned(uint8_t *buf, size_t size);
+fulta_arc_source_t fa_source_memory_owned(proven_allocator_t a, uint8_t *buf, size_t size);   /* buf from `a` */
 
 /* True when `h` (n bytes, needs >= 512) looks like a tar header block: not all-zero and the ustar checksum matches.
  * The reprobe layer uses this to decide whether an unwrapped stream is a tar before fully decompressing it. */
@@ -399,6 +425,7 @@ fulta_arc_err_t fa_7z_copy_read(fulta_arc_t *arc, uint64_t off, void *buf, size_
  * regenerated); ENCODE pulls `reader` and (re)compresses. `name` (UTF-8) overrides the entry's name, or is NULL to
  * keep the source name (COPY only). */
 typedef struct fa_edit_item {
+    bool removed;          /* the plan keeps an original in its slot and marks it; the writers never see these */
     bool is_copy;
     fulta_arc_t *src;
     size_t src_index;
@@ -444,17 +471,22 @@ uint64_t fa_vol_disk_offset(const fa_vol_t *w);
 uint32_t fa_vol_count(const fa_vol_t *w);
 fulta_arc_err_t fa_vol_settle(fa_vol_t *w, uint64_t off);
 /* Run `body` with a volume writer over `vs` (fa_vol_run) or over files named after `path` (fa_vol_files). */
-fulta_arc_err_t fa_vol_run(fulta_arc_format_t format, uint64_t volume_size, const fulta_arc_volume_sink_t *vs,
+fulta_arc_err_t fa_vol_run(proven_allocator_t a, fulta_arc_format_t format, uint64_t volume_size, const fulta_arc_volume_sink_t *vs,
                            fulta_arc_err_t (*body)(void *ctx, const fulta_arc_write_sink_t *sink), void *ctx);
-fulta_arc_err_t fa_vol_files(const char *path, fulta_arc_format_t format, uint64_t volume_size,
+fulta_arc_err_t fa_vol_files(proven_allocator_t a, const char *path, fulta_arc_format_t format, uint64_t volume_size,
                              fulta_arc_err_t (*body)(void *ctx, const fulta_arc_write_sink_t *sink), void *ctx);
+
+/* The writer's allocator for these options (the caller's fulta_arc_allocator_t, else proven's heap) and whether the
+ * options' allocator is usable (not one or two of its functions set). src/write/write.c. */
+proven_allocator_t fa_write_alloc(const fulta_arc_write_options_t *opt);
+bool fa_write_alloc_ok(const fulta_arc_write_options_t *opt);
 
 /* fulta_arc_write_file with options->volume_size set (src/write/write.c). */
 fulta_arc_err_t fa_write_file_split(const char *path, fulta_arc_format_t format, const fulta_arc_write_entry_t *entries,
                                     size_t count, const fulta_arc_write_options_t *options);
 
 /* Add an entry; strings are copied. Returns the new entry or NULL (no memory). */
-fa_entry_t *fa_add_entry(fulta_arc_t *arc, const uint8_t *raw_name, size_t raw_size, const char *utf8_name,
+fa_entry_t *fa_add_entry(fulta_arc_t *arc, proven_mem_view_t raw_name, const char *utf8_name,
                          const char *method);
 /* Volume `index` (0 = the first), asking the resolver when needed. */
 fulta_arc_err_t fa_volume(fulta_arc_t *arc, uint32_t index, const char *name, const fulta_arc_source_t **out);
@@ -471,7 +503,7 @@ void fa_progress(fulta_arc_t *arc, uint64_t delta);
 /* Decode a stored name: if its bytes are valid UTF-8 use them; else decode through opt.codepage, or, when that is
    AUTO, through opt.auto_codepage if set else `fallback`; sets *not_unicode when the code-page path was taken.
    Returns a malloc'd UTF-8 string or NULL. `unicode_flagged` true means the format marked the name UTF-8/Unicode. */
-char *fa_decode_name(const fulta_arc_t *arc, const uint8_t *raw, size_t n, bool unicode_flagged,
+char *fa_decode_name(const fulta_arc_t *arc, proven_mem_view_t raw, bool unicode_flagged,
                      fulta_arc_codepage_t fallback, bool *not_unicode);
 
 /* DOS date/time (local) to nanoseconds since the epoch as if UTC; FILETIME to nanoseconds since the epoch. */
