@@ -18,6 +18,6 @@
 - Built as FultaArc's own Makefile builds it: `vendor/bzip2_alz` is ALZ's altered bzip2 decoder, compiled with
   `-include vendor/bzip2_alz/alz_bzip2_rename.h` so that it stands beside the ordinary one; `src/lha/lhadec/src` with
   `-include src/lha/lhadec_shim.h`; Zstandard is the whole `zstd.c` (FultaArc reads `.zst` and writes none).
-- Not taken: its tests, tools and documents, and its `vendor/proven` — v0.108.0 (`1d9989c4`), the very snapshot
-  Rubraview's `vendor/proven` is (D-264), which FultaArc is built on here.
+- Not taken: its tests, tools and documents, and its `vendor/proven` — v0.108.0 (`1d9989c4`); FultaArc is built
+  here on Rubraview's `vendor/proven` (v0.110.0 since D-273), unchanged, its tests passing.
 - Unmodified. Never edit it here; report defects upstream and resync.

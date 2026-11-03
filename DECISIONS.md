@@ -3246,3 +3246,12 @@ Do not store credentials, private infrastructure details, personal data, private
   remote display runs at 32 Hz, a 31.968 film matched 1.001x, a 29.97 one left as it is, nothing with the setting
   off, no worse than 1.39.81 (T346). The owner's screen and films decide whether it is seen.
 - Not done: interpolation (frames blended for 24 on 60 Hz); offered when the numbers ask for it.
+
+## 2026-11-03: D-273 proven_c_lib v0.110.0 vendored (W-20261103-0700)
+
+- Status: Accepted (owner 2026-11-03: "proven c lib 최신 버젼인지 확인하고 아니면 재벤더링하고 ...").
+- Decision: `vendor/proven` resynced from v0.108.0 to the newest tag, v0.110.0 (`cbbaf08d`), unmodified. The
+  viewer and FultaArc build against it unchanged; every host test passes under ASan and UBSan, the Windows build
+  too; the licence notices are unchanged; the VM smoke matches the 1.39.82 release (T347). Its `proven_fmt_to`
+  (snprintf's shape over `{}` formats) and the `{:.N}` precision on views are what the conversion the owner asked
+  for next would use; that conversion is planned on its own (T3), not done here.
