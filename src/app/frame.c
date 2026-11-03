@@ -268,6 +268,6 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
         double wait = rubraview_media_redraw_wait(now - fc->last_render_seconds) * 1000.0;
         rubraview_pal_window_wait_event(app->window, wait < 1.0 ? 1u : wait > 20.0 ? 20u : (uint32_t)wait);
     } else {
-        rubraview_pal_time_sleep_ms(4);
+        rubraview_pal_window_wait_event(app->window, 4);   /* RV-215 (D-269): the same yield, but a key or a click wakes it */
     }
 }

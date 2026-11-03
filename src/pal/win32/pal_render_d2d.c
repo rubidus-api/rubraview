@@ -33,6 +33,8 @@ static const GUID RV_IID_IDXGIDevice =
     { 0x54ec77fa, 0x1377, 0x44e6, { 0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c } };
 static const GUID RV_IID_IDXGIFactory2 =
     { 0x50c83a1c, 0xe072, 0x4c48, { 0x87, 0xb0, 0x36, 0x30, 0xfa, 0x36, 0xa6, 0xd0 } };
+static const GUID RV_IID_IDXGISwapChain2 =   /* RV-215: the frame-latency waitable object */
+    { 0xa8be2ac4, 0x199f, 0x4946, { 0xb3, 0x31, 0x79, 0x59, 0x9f, 0xb9, 0x8d, 0xe7 } };
 static const GUID RV_IID_IDXGISurface =
     { 0xcafcb56c, 0x6ac3, 0x4889, { 0xbf, 0x47, 0x9e, 0x23, 0xbb, 0xd2, 0x60, 0xec } };
 #include "rubraview/pal/pal_render.h"
@@ -109,6 +111,9 @@ struct rubraview_renderer {
     bool force_lost;               /* the next present is treated as a lost device (a test's trigger) */
     IDXGISwapChain1 *swap_chain;
     int32_t present_model;         /* RUBRAVIEW_PRESENT_*: how the swap chain hands frames to the compositor */
+    UINT swap_flags;               /* RV-215: the chain's flags, given again to ResizeBuffers as it must be */
+    double wait_seconds;           /* RV-215: this frame's wait for the screen, before it was begun */
+    HANDLE frame_wait;             /* RV-215: signalled when the screen can take a frame (flip model), or NULL */
     ID2D1Bitmap1 *back_buffer;     /* Direct2D's target: the swap chain's buffer, or (HDR) the scene */
     /* RV-153 (D-183): the window sent to an HDR screen as scRGB, FP16 */
     bool hdr;                      /* in that mode */
@@ -368,9 +373,15 @@ static bool create_device(struct rubraview_renderer *r) {
         { DXGI_SWAP_EFFECT_DISCARD, RUBRAVIEW_PRESENT_COPY },
     };
     bool layered = (GetWindowLongPtrW(r->hwnd, GWL_EXSTYLE) & WS_EX_LAYERED) != 0;
+    /* RV-215 (D-269): a flip chain says when the screen can take a frame, and holds one at most; the frame is then
+       begun when it can be shown, and Present no longer blocks the loop for a refresh. RUBRAVIEW_PACING_OLD keeps
+       the old way, to compare. */
+    wchar_t old_way[4];
+    bool waitable = GetEnvironmentVariableW(L"RUBRAVIEW_PACING_OLD", old_way, 4) == 0;
     hr = E_FAIL;
     for (size_t i = layered ? 2 : 0; i < sizeof(effects) / sizeof(effects[0]); i++) {
         desc.SwapEffect = effects[i].effect;
+        desc.Flags = waitable && effects[i].model != RUBRAVIEW_PRESENT_COPY ? DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT : 0;
         hr = IDXGIFactory2_CreateSwapChainForHwnd(dxgi_factory, (IUnknown*)r->d3d, r->hwnd,
                                                   &desc, NULL, NULL, &r->swap_chain);
         if (SUCCEEDED(hr) && r->swap_chain) { r->present_model = effects[i].model; break; }
@@ -378,6 +389,15 @@ static bool create_device(struct rubraview_renderer *r) {
     }
     IDXGIFactory2_Release(dxgi_factory);
     if (FAILED(hr) || !r->swap_chain) return fail_step("creating the swap chain for the window", hr);
+    r->swap_flags = desc.Flags;
+    r->frame_wait = NULL;
+    if (r->swap_flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT) {
+        IDXGISwapChain2 *two = NULL;
+        if (SUCCEEDED(IDXGISwapChain1_QueryInterface(r->swap_chain, &RV_IID_IDXGISwapChain2, (void**)&two)) && two) {
+            if (SUCCEEDED(IDXGISwapChain2_SetMaximumFrameLatency(two, 1))) r->frame_wait = IDXGISwapChain2_GetFrameLatencyWaitableObject(two);
+            IDXGISwapChain2_Release(two);
+        }
+    }
 
     return bind_back_buffer(r);
 }
@@ -461,6 +481,7 @@ void rubraview_pal_render_destroy(rubraview_renderer_t *renderer) {
     release_back_buffer(renderer);
     rubraview_pal_hdr_present_free(renderer->hdr_present);
     renderer->hdr_present = NULL;
+    if (renderer->frame_wait) { CloseHandle(renderer->frame_wait); renderer->frame_wait = NULL; }
     if (renderer->swap_chain) { IDXGISwapChain1_Release(renderer->swap_chain); renderer->swap_chain = NULL; }
     if (renderer->target) { ID2D1RenderTarget_Release((ID2D1RenderTarget*)renderer->target); renderer->target = NULL; }
     if (renderer->device) { ID2D1Resource_Release((ID2D1Resource*)renderer->device); renderer->device = NULL; }
@@ -486,7 +507,7 @@ bool rubraview_pal_render_resize(rubraview_renderer_t *renderer, int32_t width, 
        a surface still referenced cannot be replaced. */
     release_back_buffer(renderer);
     HRESULT hr = IDXGISwapChain1_ResizeBuffers(renderer->swap_chain, 0, (UINT)width, (UINT)height,
-                                               DXGI_FORMAT_UNKNOWN, 0);
+                                               DXGI_FORMAT_UNKNOWN, renderer->swap_flags);
     if (FAILED(hr)) return false;
     return bind_back_buffer(renderer);
 }
@@ -497,6 +518,17 @@ void rubraview_pal_render_begin(rubraview_renderer_t *renderer, uint32_t clear_a
     if (!renderer || !renderer->target) return;
 
     ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+    /* RV-215 (D-269): the frame begun when the screen can take it, so what is drawn is what is newest when shown;
+       the wait counts as waiting for the screen (the Live rows), a minimised window's never-signalled one cut short */
+    renderer->wait_seconds = 0.0;
+    if (renderer->frame_wait) {
+        LARGE_INTEGER f, a, b;
+        QueryPerformanceFrequency(&f);
+        QueryPerformanceCounter(&a);
+        WaitForSingleObjectEx(renderer->frame_wait, 100, TRUE);
+        QueryPerformanceCounter(&b);
+        renderer->wait_seconds = (double)(b.QuadPart - a.QuadPart) / (double)f.QuadPart;
+    }
     bool drop[RUBRAVIEW_SCREENCOPY_SLOTS];
     rubraview_screencopy_frame(&renderer->screencopy, drop);   /* RV-166: copies not drawn last frame go */
     free_copies(renderer, drop);
@@ -514,8 +546,12 @@ void rubraview_pal_render_begin(rubraview_renderer_t *renderer, uint32_t clear_a
     ID2D1RenderTarget_Clear(rt, &color);
 }
 
+bool rubraview_pal_render_paced(const rubraview_renderer_t *renderer) {
+    return renderer && renderer->frame_wait != NULL;
+}
+
 double rubraview_pal_render_present_seconds(const rubraview_renderer_t *renderer) {
-    return renderer ? renderer->present_seconds : 0.0;
+    return renderer ? renderer->wait_seconds + renderer->present_seconds : 0.0;   /* RV-215: the wait before, Present's own */
 }
 
 bool rubraview_pal_render_end(rubraview_renderer_t *renderer) {
@@ -555,7 +591,8 @@ bool rubraview_pal_render_end(rubraview_renderer_t *renderer) {
         renderer->hdr = false;   /* RV-153: the new chain starts in SDR; the caller asks again */
         rubraview_pal_hdr_present_free(renderer->hdr_present);
         renderer->hdr_present = NULL;
-        if (renderer->swap_chain) { IDXGISwapChain1_Release(renderer->swap_chain); renderer->swap_chain = NULL; }
+        if (renderer->frame_wait) { CloseHandle(renderer->frame_wait); renderer->frame_wait = NULL; }
+    if (renderer->swap_chain) { IDXGISwapChain1_Release(renderer->swap_chain); renderer->swap_chain = NULL; }
         if (renderer->target) { ID2D1RenderTarget_Release((ID2D1RenderTarget*)renderer->target); renderer->target = NULL; }
         if (renderer->device) { ID2D1Resource_Release((ID2D1Resource*)renderer->device); renderer->device = NULL; }
         if (renderer->d3d) { ID3D11Device_Release(renderer->d3d); renderer->d3d = NULL; }
@@ -1700,7 +1737,7 @@ bool rubraview_pal_render_set_hdr(rubraview_renderer_t *r, bool on, double sdr_w
             r->hdr = true;
             r->hdr_sdr_white = sdr_white_nits;
             /* the colour space is asked of the chain once it is FP16: a BGRA chain refuses scRGB */
-            if (FAILED(IDXGISwapChain1_ResizeBuffers(r->swap_chain, 0, (UINT)r->width, (UINT)r->height, DXGI_FORMAT_R16G16B16A16_FLOAT, 0)))
+            if (FAILED(IDXGISwapChain1_ResizeBuffers(r->swap_chain, 0, (UINT)r->width, (UINT)r->height, DXGI_FORMAT_R16G16B16A16_FLOAT, r->swap_flags)))
                 *why = N_("the window could not be made FP16");
             else if (FAILED(IDXGISwapChain3_CheckColorSpaceSupport(three, DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709, &support)) ||
                      !(support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) ||
@@ -1715,7 +1752,7 @@ bool rubraview_pal_render_set_hdr(rubraview_renderer_t *r, bool on, double sdr_w
     if (!ok && (r->hdr || !on)) {   /* off, or back from a half-made HDR chain */
         release_back_buffer(r);
         r->hdr = false;
-        bool back = SUCCEEDED(IDXGISwapChain1_ResizeBuffers(r->swap_chain, 0, (UINT)r->width, (UINT)r->height, DXGI_FORMAT_B8G8R8A8_UNORM, 0));
+        bool back = SUCCEEDED(IDXGISwapChain1_ResizeBuffers(r->swap_chain, 0, (UINT)r->width, (UINT)r->height, DXGI_FORMAT_B8G8R8A8_UNORM, r->swap_flags));
         IDXGISwapChain3_SetColorSpace1(three, DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
         back = back && bind_back_buffer(r);
         if (!on) ok = back;

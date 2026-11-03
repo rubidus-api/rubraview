@@ -3198,3 +3198,18 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: Open with several picked opens the files the viewer shows together, as before, and each other file in
   the program Windows opens it with (as one opened alone, D-258): twenty at most, a program, script or type Windows
   calls dangerous never; the line says how many went where and how many were not opened.
+
+## 2026-11-03: D-269 Frames begun when the screen can take them (RV-215 step 1) (W-20261103-0400)
+
+- Status: Accepted (owner 2026-11-03, from the list offered: "RV-215 영상 끊김 재개"; the plan
+  `docs/plans/active/2026-10-31-RV-215-frame-pacing.md`, its first step).
+- Decision: a flip swap chain is made with `DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT` and
+  `SetMaximumFrameLatency(1)`; `rubraview_pal_render_begin` waits on its object (100 ms at most, a minimised window's
+  never signalling) before drawing, so Present returns at once and at most one frame waits to be shown. The flags go
+  to every `ResizeBuffers` (HDR's FP16 and back too). The wait is counted with Present's in the Live rows' "waiting
+  for the screen". The copy model (a layered window) keeps the old way, and `RUBRAVIEW_PACING_OLD` (any value) does
+  too, to compare. The busy loop's `Sleep(4)` became a 4 ms wait that a message ends.
+- Evidence: on the VM (WARP, no graphics card) the new way is on (720p30: waiting 17-21 ms before each frame where it
+  was 0.1 ms) and nothing is worse against the 1.39.79 release and the old way in the same build (frames a second,
+  slowest gap, 33 pictures a second turned); the VM's software decode caps films at 10-12 frames a second, so it
+  cannot show the gain. The owner's film on the owner's PC decides step 2 (the picture chosen for when it is seen).

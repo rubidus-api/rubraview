@@ -109,6 +109,9 @@ void rubraview_pal_render_begin(rubraview_renderer_t *renderer, uint32_t clear_a
 bool rubraview_pal_render_end(rubraview_renderer_t *renderer);
 /** RV-215: how long the last end's Present took, the wait for the screen's refresh included (0 when none). */
 double rubraview_pal_render_present_seconds(const rubraview_renderer_t *renderer);
+/* RV-215 (D-269): whether frames are begun when the screen can take them (a flip chain's waitable object), the wait
+   then counted in present_seconds. */
+bool rubraview_pal_render_paced(const rubraview_renderer_t *renderer);
 
 /**
  * Draw a whole texture under `transform` (typically from
