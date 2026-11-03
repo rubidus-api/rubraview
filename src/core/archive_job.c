@@ -142,6 +142,15 @@ static bool set_exists_fn(proven_u8str_view_t path) {
     return rubraview_pal_fs_exists(path) || !volume_name(g_set_format, set, 0, first, sizeof first) || rubraview_pal_fs_exists(view(first));
 }
 
+size_t rubraview_pack_set_parts(rubraview_pack_format_t format, const char *set, char (*out)[RUBRAVIEW_PACK_PART_PATH], size_t cap) {
+    size_t n = 0;
+    char name[RUBRAVIEW_PACK_PART_PATH];
+    for (uint32_t i = 0; i < 1000 && n < cap && volume_name(format, set, i, name, sizeof name); ++i)   /* gaps too: older sets' */
+        if (rubraview_pal_fs_exists(view(name))) snprintf(out[n++], RUBRAVIEW_PACK_PART_PATH, "%s", name);
+    if (format == RUBRAVIEW_PACK_ZIP && n < cap && rubraview_pal_fs_exists(view(set))) snprintf(out[n++], RUBRAVIEW_PACK_PART_PATH, "%s", set);
+    return n;
+}
+
 /* Every volume of a set and the set's own name, deleted (a set that failed its check). */
 static void delete_set(rubraview_pack_format_t format, const char *set) {
     char name[RUBRAVIEW_ARCHIVE_PATH + 16];
@@ -783,7 +792,8 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
         return;
     }
     job->files = job->folders = 0;
-    job->why[0] = job->written[0] = '\0';
+    job->why[0] = job->written[0] = job->set_name[0] = '\0';
+    job->older_parts = false;
     atomic_store(&job->phase, 0);
     pack_list_t list = { 0 };
     for (size_t s = 0; s < job->source_count && !list.failed; ++s) {
@@ -886,6 +896,8 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
         (void)rubraview_pal_fs_delete(view(job->written));   /* FultaArc renames only a whole one over it; nothing of ours stays */
         job->result = err == FULTA_ARC_ERR_CANCELLED || atomic_load(&job->cancel) ? RUBRAVIEW_ARCHIVE_CANCELLED
                     : job->why[0] ? RUBRAVIEW_ARCHIVE_CANNOT_READ : RUBRAVIEW_ARCHIVE_CANNOT_WRITE;
+        job->older_parts = err == FULTA_ARC_ERR_EXISTS;
+        if (split) snprintf(job->set_name, sizeof job->set_name, "%s", job->written);
         if (err == FULTA_ARC_ERR_EXISTS) say(job->why, sizeof job->why, T("a later part of an older split set of that name is there: move it away first"), job->written);
         if (!job->why[0] && job->result == RUBRAVIEW_ARCHIVE_CANNOT_WRITE) say(job->why, sizeof job->why, fulta_arc_strerror(err), job->written);
         job->written[0] = '\0';

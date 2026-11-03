@@ -1616,6 +1616,11 @@ void audio_track_set(app_state_t *app, int32_t next) {
 void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     size_t reading_done = 0, reading_count = 0;
     bool reading_sizes = true;
+    if (app->pack_ask) {   /* D-267: Enter recycles the older parts and compresses, Esc gives up; nothing else meanwhile */
+        if (key_is(combo, "Enter")) archwork_pack_ask_answer(app, true);
+        else if (key_is(combo, "Escape")) archwork_pack_ask_answer(app, false);
+        return;
+    }
     if (key_is(combo, "Escape") && combo.modifiers == 0 && !app->rename_active &&   /* an open text box keeps its Esc */
         shape_waiting(app, &reading_done, &reading_count, &reading_sizes)) {
         shape_stop(app);   /* the owner (2026-11-02): the reading Shape waits for, stopped */

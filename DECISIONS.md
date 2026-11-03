@@ -3170,3 +3170,31 @@ Do not store credentials, private infrastructure details, personal data, private
 - The LZMA SDK's files keep their CRLF lines as upstream ships them; `.gitattributes` turns git's whitespace check off
   under `vendor/` (the gate's `git diff --check` took them for trailing spaces).
 - Rejected: lowering the level when memory is short, and keeping the old dictionaries (the owner chose 7-Zip's).
+
+## 2026-11-03: D-266 The Compress window's choices kept across starts (W-20261103-0300)
+
+- Status: Accepted (owner 2026-11-03, picked from the list offered: "압축 선택 기억").
+- Decision: six rows in Settings › Files › Compressing (`archive.pack_format` zip | 7z, `pack_level` store ... ultra,
+  `pack_method` first | deflate | bzip2 | lzma | lzma2 | ppmd | zstd, `pack_solid` solid | file, `pack_split` none |
+  10mb | 100mb | 700mb | 4gb, `pack_names` readable | encrypted), read when the window opens (the format gives the
+  offered name's ending) and written at each chip and at Enter. The password is never kept. Explorer's Compress to
+  a ZIP stays ZIP at the normal level. (`hidden` is the settings language's own word, so the names row says
+  `encrypted`.)
+
+## 2026-11-03: D-267 An older split set's parts in the way: offered to the Recycle Bin (W-20261103-0300)
+
+- Status: Accepted (owner 2026-11-03: "예전 분할 조각 지우기 제안").
+- Decision: when FultaArc refuses a split set because a later volume of an older set of that name is there
+  (`FULTA_ARC_ERR_EXISTS`), the job says so (`older_parts`, `set_name`) and the work is kept; a question over the
+  screen (the open-file screen too) names the set and how many of its parts are there
+  (`rubraview_pack_set_parts`: every existing volume name of the set, gaps included), with "Recycle them and
+  compress" (Enter) and Cancel (Esc). Yes sends them all to the Recycle Bin and runs the same work again; one that
+  will not go stops it.
+
+## 2026-11-03: D-268 Several picked files the viewer does not show open in their Windows programs (W-20261103-0300)
+
+- Status: Accepted (owner 2026-11-03: ".ext 메뉴 정리", offered as: picked by extension, a document's files opened
+  said "pick some files first").
+- Decision: Open with several picked opens the files the viewer shows together, as before, and each other file in
+  the program Windows opens it with (as one opened alone, D-258): twenty at most, a program, script or type Windows
+  calls dangerous never; the line says how many went where and how many were not opened.

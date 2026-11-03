@@ -154,6 +154,10 @@ bool rubraview_pack_split_supported(rubraview_pack_format_t format);
 /* D-261: a 7z's names hidden behind its password (7-Zip's -mhe): FultaArc writes no encrypted header yet (asked for);
    ZIP has no standard way. A job asking is refused. */
 bool rubraview_pack_names_hidden_supported(rubraview_pack_format_t format);
+/* D-267: the files there that are volumes of the split set `set` ("x.7z": x.7z.001 ...; "x.zip": x.z01 ... and
+   x.zip itself), up to `cap`, each in `out[i]`. Returns how many. */
+#define RUBRAVIEW_PACK_PART_PATH (RUBRAVIEW_ARCHIVE_PATH + 16)
+size_t rubraview_pack_set_parts(rubraview_pack_format_t format, const char *set, char (*out)[RUBRAVIEW_PACK_PART_PATH], size_t cap);
 /* D-262 (owner, 2026-11-02: "압축할 때는 영문 숫자 기호만"): a new archive's password is English letters, digits and
    symbols, `!` to `~`: no space, no Hangul, nothing other programs might encode another way. */
 bool rubraview_pack_password_plain(proven_u8str_view_t password);
@@ -171,7 +175,7 @@ typedef struct rubraview_compress_job {
     rubraview_pack_method_t method;    /* D-260: DEFAULT, or one rubraview_pack_method_fits and _ready */
     bool solid_off;                    /* D-260, 7z: one block a file (the default packs them together) */
     uint64_t volume_bytes;             /* D-260: 0 one file; otherwise volumes of this size (not written yet) */
-    bool names_hidden;                 /* D-261: with a password, the 7z's names encrypted too (not written yet) */
+    bool names_hidden;                 /* D-261: with a password, the 7z's names encrypted (D-263) */
     const char *password;              /* NULL or "": none. ZIP: WinZip AES-256; 7z: AES-256 (its names stay readable) */
     /* while it runs */
     _Atomic bool cancel;
@@ -181,6 +185,8 @@ typedef struct rubraview_compress_job {
     rubraview_archive_result_t result;
     uint32_t files, folders;
     char written[RUBRAVIEW_ARCHIVE_PATH];   /* the archive made */
+    char set_name[RUBRAVIEW_ARCHIVE_PATH];  /* D-267: a split set's name ("x.7z"), kept when it failed too */
+    bool older_parts;                       /* D-267: refused for an older set's later volume where this one ends */
     char why[256];
 } rubraview_compress_job_t;
 

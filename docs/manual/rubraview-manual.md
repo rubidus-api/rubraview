@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.78.exe              the viewer, as built
-dist/rubraview-v1.39.78/                 the release bundle
-dist/rubraview-v1.39.78.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.79.exe              the viewer, as built
+dist/rubraview-v1.39.79/                 the release bundle
+dist/rubraview-v1.39.79.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1656,7 +1656,10 @@ readable or hidden by the password (7z: then it is not even listed without
 it); `Enter` compresses. A new archive's
 password takes English letters, digits and symbols only (Hangul and other
 letters are dropped, and the screen says so). The password is AES-256; a ZIP with one needs 7-Zip or Bandizip, not Windows' own. A ZIP packs each file on its own and cannot hide its names: those chips are
-greyed for it. Maximum and Ultra with LZMA or LZMA2 pack as 7-Zip does: a large
+greyed for it. The window keeps what you chose for the next time (Settings ›
+Files › Compressing), the password never. When parts of an older split archive
+of the same name are in the way, it asks to send them to the Recycle Bin and
+compress again. Maximum and Ultra with LZMA or LZMA2 pack as 7-Zip does: a large
 file may take about 1.5 GB or 3 GB of memory, and the window says so. The bar at the foot has **Extract** (the way Settings › Files ›
 Extracting says) and **Compress**, when they fit what is picked. **Look inside
 (an archive)** (or `Shift+Enter`) lists all of an archive's folders and
@@ -1697,7 +1700,8 @@ Above the tiles (and the rows) is a line of column heads — Name, Type,
 Size, Created, Modified, Resolution, Length, as many as the width holds.
 A click on a head sorts by that column, and again the other way round
 (▲ rising, ▼ falling). **Open**, at the bottom right, opens what is picked — several files open
-together as one set — or, with nothing picked, the one in focus;
+together as one set, and the files the viewer does not show (documents,
+settings files) each in its Windows program, up to twenty, a program never — or, with nothing picked, the one in focus;
 **Cancel** beside it closes the screen. Opened while an archive is being
 read, the screen shows what the archive holds.
 `Ctrl+Z` here takes back a rename, a move or a copy made here; a move or a

@@ -264,6 +264,7 @@ static void offered_name(app_state_t *app, archwork_t *w, const char *ext, char 
 }
 
 static archwork_t *g_packing;   /* the work being set up by the Compress box and its password */
+static archwork_t *g_older;     /* D-267: the work refused for an older set's parts, waiting for the answer */
 
 static void pack_start(app_state_t *app, archwork_t *w, rubraview_pack_format_t format, int level, rubraview_pack_method_t method,
                        bool solid_off, const char *password) {
@@ -312,6 +313,27 @@ void archwork_compress_paths(app_state_t *app, const proven_u8str_view_t *paths,
     compress_go(app, w, ask);
 }
 
+/* D-266 (owner, 2026-11-03: "압축 선택 기억"): the Compress window's choices, kept in Settings › Files › Compressing. */
+static void pack_choices_load(app_state_t *app) {
+    app->pack_level = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_level")));
+    if (app->pack_level < 0 || app->pack_level >= RUBRAVIEW_PACK_LEVEL_STEPS) app->pack_level = RUBRAVIEW_PACK_LEVEL_NORMAL;
+    app->pack_method = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_method")));
+    if (app->pack_method < RUBRAVIEW_PACK_METHOD_DEFAULT || app->pack_method > RUBRAVIEW_PACK_METHOD_ZSTD) app->pack_method = RUBRAVIEW_PACK_METHOD_DEFAULT;
+    app->pack_solid_off = rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_solid")) > 0.5;
+    app->pack_split = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_split")));
+    if (app->pack_split < 0 || app->pack_split > 4) app->pack_split = 0;
+    app->pack_names_hidden = rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_names")) > 0.5;
+}
+
+static void pack_choices_save(app_state_t *app) {
+    static const char *const KEYS[] = { "pack_format", "pack_level", "pack_method", "pack_solid", "pack_split", "pack_names" };
+    double v[] = { archwork_pack_is_7z(app) ? 1.0 : 0.0, app->pack_level, app->pack_method, app->pack_solid_off ? 1.0 : 0.0,
+                   app->pack_split, app->pack_names_hidden ? 1.0 : 0.0 };
+    for (size_t i = 0; i < sizeof KEYS / sizeof *KEYS; ++i)
+        rubraview_settings_set(&app->settings, PROVEN_LIT("archive"), proven_u8str_view_from_cstr(KEYS[i]), v[i]);
+    settings_write_if_changed(app, false);
+}
+
 static void compress_go(app_state_t *app, archwork_t *w, bool ask) {
     if (w->source_count == 0) { work_free(w); osd_say(app, TU8("pick the files to compress first")); return; }
     sources_dir(w);
@@ -321,7 +343,8 @@ static void compress_go(app_state_t *app, archwork_t *w, bool ask) {
         return;
     }
     char offer[RUBRAVIEW_ARCHIVE_PATH];
-    offered_name(app, w, "zip", offer, sizeof offer);
+    pack_choices_load(app);
+    offered_name(app, w, rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_format")) > 0.5 ? "7z" : "zip", offer, sizeof offer);
     if (g_packing) work_free(g_packing);
     g_packing = w;
     if (app->rename_active) rename_end(app);
@@ -333,7 +356,6 @@ static void compress_go(app_state_t *app, archwork_t *w, bool ask) {
     app->pack_focus = 0;   /* D-261: the name first; the password fields empty */
     secure_wipe(app->pack_pw, sizeof app->pack_pw);
     app->pack_pw_len[0] = app->pack_pw_len[1] = 0;
-    if (app->pack_level < 0 || app->pack_level >= RUBRAVIEW_PACK_LEVEL_STEPS) app->pack_level = RUBRAVIEW_PACK_LEVEL_NORMAL;
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, true);
     osd_say(app, TU8("where the new archive goes, and how it is packed (Tab: the password)"));
@@ -440,6 +462,7 @@ bool pack_window_press(app_state_t *app, double x, double y) {
             case PACK_ROW_NAMES:  app->pack_names_hidden = k == 1; break;
             default:              break;
         }
+        pack_choices_save(app);   /* D-266 */
         return true;
     }
     for (int32_t f = 0; f < 3; ++f) if (pal_rect_has(app->pack_field[f], x, y)) { archwork_pack_focus(app, f); return true; }   /* D-261 */
@@ -459,6 +482,7 @@ void archwork_pack_typed(app_state_t *app) {
         archwork_pack_focus(app, app->pack_pw_len[0] ? 2 : 1);
         return;
     }
+    pack_choices_save(app);   /* D-266: the format the name's ending says, too */
     archwork_t *w = g_packing;
     g_packing = NULL;
     proven_u8str_view_t t = { .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len };
@@ -492,6 +516,26 @@ void archwork_pack_typed(app_state_t *app) {
                    archwork_pack_method(app, sevenz), sevenz && app->pack_solid_off, pw);
     }
     secure_wipe(pw, sizeof pw);
+}
+
+/* D-267 (owner, 2026-11-03: "예전 분할 조각 지우기 제안"): the older set's parts to the Recycle Bin and the same work
+   again, or nothing. */
+void archwork_pack_ask_answer(app_state_t *app, bool yes) {
+    archwork_t *w = g_older;
+    g_older = NULL;
+    app->pack_ask = false;
+    if (!w) return;
+    if (!yes) { osd_say(app, TU8("not compressed")); work_free(w); return; }
+    char parts[64][RUBRAVIEW_PACK_PART_PATH];
+    size_t n = rubraview_pack_set_parts(w->pk.format, w->pk.set_name, parts, 64), gone = 0;
+    for (size_t i = 0; i < n; ++i) gone += rubraview_pal_fs_recycle(proven_u8str_view_from_cstr(parts[i])) ? 1u : 0u;
+    if (gone < n) { osd_say(app, TU8("the older parts could not all be moved to the Recycle Bin")); work_free(w); return; }
+    w->pk.result = RUBRAVIEW_ARCHIVE_DONE;
+    w->pk.why[0] = w->pk.written[0] = '\0';
+    w->pk.older_parts = false;
+    w->pk.files = w->pk.folders = 0;
+    atomic_store(&w->pk.cancel, false);
+    if (work_start(app, w)) osd_say(app, TU8("older parts recycled: compressing again"));
 }
 
 void archwork_pack_cancelled(app_state_t *app) {
@@ -538,6 +582,15 @@ void archwork_poll(app_state_t *app, bool quitting) {
     char line[512];
     if (w->compress) {
         rubraview_archive_result_t r = w->pk.result;
+        if (r != RUBRAVIEW_ARCHIVE_DONE && w->pk.older_parts && w->pk.set_name[0]) {   /* D-267: asked, the work kept */
+            char parts[64][RUBRAVIEW_PACK_PART_PATH];
+            app->pack_ask_parts = rubraview_pack_set_parts(w->pk.format, w->pk.set_name, parts, 64);
+            snprintf(app->pack_ask_set, sizeof app->pack_ask_set, "%s", w->pk.set_name);
+            if (g_older) work_free(g_older);
+            g_older = w;
+            app->pack_ask = true;
+            return;
+        }
         if (r == RUBRAVIEW_ARCHIVE_DONE) {
             proven_u8str_view_t name = rubraview_path_basename(proven_u8str_view_from_cstr(w->pk.written));
             snprintf(line, sizeof line, T("compressed: %.*s (%u files, %u folders)"), (int)name.size, (const char *)name.ptr, w->pk.files, w->pk.folders);

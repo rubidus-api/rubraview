@@ -617,6 +617,8 @@ void picker_hold_tick(app_state_t *app) {
 /* One of the buttons along the bottom was pressed. */
 /* 1.23.0 (owner, 2026-10-19: "자체 파일 탐색기에서 열기 버튼이 없어요"): the Open button. One picked, or
    none and the focus on one: that, as a tap opens it (a folder is gone into). Many: their files, as one set. */
+#define PICKER_SHELL_OPEN_MAX 20
+
 static void picker_open_picked(app_state_t *app) {
     size_t picked = 0, one = 0;
     for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i)
@@ -628,11 +630,31 @@ static void picker_open_picked(app_state_t *app) {
     }
     if (picked == 1) { picker_activate(app, one); return; }
     rubraview_fs_entry_t *entries = NULL;
-    size_t n = picker_picked_entries(app, &entries), files = 0;
-    for (size_t i = 0; i < n; ++i) if (!entries[i].is_directory && picker_viewer_opens(entries[i].name)) entries[files++] = entries[i];   /* D-258 */
-    if (files == 0) { osd_say(app, TU8("pick some files first")); return; }
-    char line[64];
-    int k = snprintf(line, sizeof(line), T("%zu files opened together"), files);
+    size_t n = picker_picked_entries(app, &entries), files = 0, shell = 0, refused = 0, others = 0;
+    /* D-268 (owner, 2026-11-03: ".ext 메뉴 정리"): what the viewer does not show goes to its Windows program, as one
+       such file opened alone does (D-258); a program or script never, and twenty at most */
+    for (size_t i = 0; i < n; ++i) {
+        if (entries[i].is_directory) continue;
+        if (picker_viewer_opens(entries[i].name)) { entries[files++] = entries[i]; continue; }
+        if (++others > PICKER_SHELL_OPEN_MAX) continue;
+        bool dangerous = false;
+        if (rubraview_shell_runs_program(entries[i].name) || !rubraview_pal_shell_open_file(entries[i].path, &dangerous)) refused++;
+        else shell++;
+    }
+    char line[160];
+    int k = files == 0 ? snprintf(line, sizeof(line), T("%zu opened in their Windows programs"), shell)
+          : shell == 0 ? snprintf(line, sizeof(line), T("%zu files opened together"), files)
+                       : snprintf(line, sizeof(line), T("%zu files opened together, %zu in their Windows programs"), files, shell);
+    if (k > 0 && (size_t)k < sizeof line && refused > 0)
+        k += snprintf(line + k, sizeof line - (size_t)k, T(";  %zu not opened (programs, or Windows would not)"), refused);
+    if (k > 0 && (size_t)k < sizeof line && others > PICKER_SHELL_OPEN_MAX)
+        k += snprintf(line + k, sizeof line - (size_t)k, T(";  only the first %d of the others"), PICKER_SHELL_OPEN_MAX);
+    if (k >= (int)sizeof line) k = (int)sizeof line - 1;
+    if (files == 0) {
+        if (others == 0) osd_say(app, TU8("pick some files first"));   /* folders alone */
+        else osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = k > 0 ? (size_t)k : 0 });
+        return;
+    }
     app->picker_open = false;
     open_set_from_entries(app, entries, files, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = k > 0 ? (size_t)k : 0 });
 }

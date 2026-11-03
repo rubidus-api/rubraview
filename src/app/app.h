@@ -1169,6 +1169,10 @@ typedef struct app_state {
     size_t                 pack_pw_len[2];
     bool                   pack_names_hidden;       /* 7z: its names behind the password (not written yet) */
     rubraview_pal_rect_t   pack_field[3];           /* the name box, the password's, the repeat's */
+    bool                   pack_ask;                /* D-267: an older split set's parts in the way: recycle them? */
+    size_t                 pack_ask_parts;
+    char                   pack_ask_set[RUBRAVIEW_ARCHIVE_PATH];
+    rubraview_pal_rect_t   pack_ask_btn[2];
     struct archwork       *archwork;                /* the extracting or compressing under way */
     char                   password_for[1024];
     size_t                 password_for_len;
@@ -2080,6 +2084,8 @@ void password_eye_toggle(app_state_t *app);
 void archwork_pack_set_format(app_state_t *app, bool sevenz);
 rubraview_pack_method_t archwork_pack_method(const app_state_t *app, bool sevenz);
 bool pack_window_press(app_state_t *app, double x, double y);   /* D-260: a chip of the Compress window */
+void archwork_pack_ask_answer(app_state_t *app, bool yes);     /* D-267 */
+bool pack_ask_press(app_state_t *app, double x, double y);
 bool archwork_password_box(app_state_t *app, bool entered, proven_u8str_view_t typed);
 void filmcache_for(app_state_t *app, proven_u8str_view_t path);   /* RV-216 (D-249): the cache's settings for a film about to open */
 void live_start(app_state_t *app);  /* RV-215: a fresh second's measuring */

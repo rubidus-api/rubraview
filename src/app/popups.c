@@ -532,6 +532,8 @@ double name_scale(const app_state_t *app) {
 }
 
 /* What Shape (or a sort by length) waits for, under the button pressed: how many of how many, a bar, Esc. */
+static void draw_pack_ask(app_state_t *app, double win_w, double win_h, double dpi);   /* D-267, below */
+
 void draw_reading(app_state_t *app, double win_w, double win_h, double dpi) {
     size_t done = 0, count = 0;
     bool sizes = true;
@@ -562,6 +564,7 @@ void draw_reading(app_state_t *app, double win_w, double win_h, double dpi) {
 
 void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi) {
     draw_reading(app, win_w, win_h, chrome_dpi);
+    draw_pack_ask(app, win_w, win_h, chrome_dpi);   /* D-267 */
     if (app->notice_seconds > 0.0 && app->notice_length > 0) {
         double k = name_scale(app);   /* 1.25.0 */
         int before = place_font_begin(app, PF_NAME, NULL);
@@ -714,6 +717,43 @@ static void draw_pack_window(app_state_t *app, rubraview_pal_rect_t name_label, 
     rubraview_pal_render_draw_text(app->renderer, cstr(note2),
                                    (rubraview_pal_rect_t){ panel.x + pad, ny + note_h, panel.width - 2.0 * pad, note_h },
                                    13.0 * dpi, 0x90F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+}
+
+/* D-267: an older split set's parts in the way, asked about over everything (the open-file screen too). */
+static void draw_pack_ask(app_state_t *app, double win_w, double win_h, double dpi) {
+    if (!app->pack_ask) return;
+    double box_w = 640.0 * dpi, box_h = 170.0 * dpi;
+    if (box_w > win_w - 16.0 * dpi) box_w = win_w - 16.0 * dpi;
+    rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, (win_h - box_h) * 0.5, box_w, box_h };
+    rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+    rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_CLOSE_HOVER, 2.0, 3.0);
+    char line[1200];
+    proven_u8str_view_t set = rubraview_path_basename(proven_u8str_view_from_cstr(app->pack_ask_set));
+    int n = snprintf(line, sizeof line, T("Parts of an older split %.*s are in the way (%zu files)."), (int)set.size, (const char *)set.ptr,
+                     app->pack_ask_parts);
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)(n < (int)sizeof line ? n : (int)sizeof line - 1) },
+                                              (rubraview_pal_rect_t){ box.x + 12.0 * dpi, box.y + 14.0 * dpi, box.width - 24.0 * dpi, 30.0 * dpi },
+                                              16.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    const char *words[2] = { T("Recycle them and compress  (Enter)"), T("Cancel  (Esc)") };
+    double gap = 12.0 * dpi, bh = 52.0 * dpi, bw = (box.width - 3.0 * gap) / 2.0, by = box.y + 60.0 * dpi;
+    for (int i = 0; i < 2; ++i) {
+        rubraview_pal_rect_t b = { box.x + gap + (double)i * (bw + gap), by, bw, bh };
+        app->pack_ask_btn[i] = b;
+        bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
+        rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? (over ? COLOR_CLOSE_HOVER : 0xC0802030u) : over ? 0x50FFFFFFu : COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 3.0);
+        rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, 15.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+    rubraview_pal_render_draw_text(app->renderer, TU8("They would be read as part of the new set; the Recycle Bin can give them back."),
+                                   (rubraview_pal_rect_t){ box.x, by + bh + 12.0 * dpi, box.width, 26.0 * dpi },
+                                   13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+}
+
+bool pack_ask_press(app_state_t *app, double x, double y) {
+    if (!app->pack_ask) return false;
+    if (pal_rect_has(app->pack_ask_btn[0], x, y)) archwork_pack_ask_answer(app, true);
+    else if (pal_rect_has(app->pack_ask_btn[1], x, y)) archwork_pack_ask_answer(app, false);
+    return true;   /* nothing under it while it asks */
 }
 
 void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
