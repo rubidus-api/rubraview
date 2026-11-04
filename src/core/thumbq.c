@@ -1,14 +1,15 @@
 /*
  * The picker's thumbnail requests (D-34). See thumbq.h.
  */
+#include "rubraview/core.h"
 #include "rubraview/thumbq.h"
 #include <string.h>
 #include <stdlib.h>
 
 /* A request dropped, not taken: its bytes go with it. */
 static void remove_at(rubraview_thumbq_t *q, size_t i) {
-    free(q->jobs[i].bytes);
-    memmove(&q->jobs[i], &q->jobs[i + 1], (q->count - i - 1) * sizeof(q->jobs[0]));
+    rubraview_free(q->jobs[i].bytes);
+    proven_sys_mem_move(&q->jobs[i], &q->jobs[i + 1], (q->count - i - 1) * sizeof(q->jobs[0]));
     q->count--;
 }
 
@@ -26,7 +27,7 @@ bool rubraview_thumbq_push(rubraview_thumbq_t *q, uint32_t generation, size_t in
     job->folder = folder;
     job->aspect = aspect;
     job->path_len = path.size;
-    memcpy(job->path, path.ptr, path.size);
+    proven_sys_mem_copy(job->path, path.ptr, path.size);
     job->bytes = NULL;
     job->bytes_len = 0;
     job->inner_at = 0;
@@ -37,8 +38,8 @@ bool rubraview_thumbq_push_entry(rubraview_thumbq_t *q, uint32_t generation, siz
                                  proven_u8str_view_t archive, proven_u8str_view_t inner) {
     if (archive.size == 0 || inner.size == 0 || archive.size + inner.size > RUBRAVIEW_THUMBQ_PATH) return false;
     char both[RUBRAVIEW_THUMBQ_PATH];
-    memcpy(both, archive.ptr, archive.size);
-    memcpy(both + archive.size, inner.ptr, inner.size);
+    proven_sys_mem_copy(both, archive.ptr, archive.size);
+    proven_sys_mem_copy(both + archive.size, inner.ptr, inner.size);
     if (!rubraview_thumbq_push(q, generation, index, false, aspect,
                                (proven_u8str_view_t){ .ptr = (const proven_byte_t *)both, .size = archive.size + inner.size })) return false;
     q->jobs[q->count - 1].inner_at = archive.size;
@@ -46,9 +47,11 @@ bool rubraview_thumbq_push_entry(rubraview_thumbq_t *q, uint32_t generation, siz
 }
 
 bool rubraview_thumbq_push_bytes(rubraview_thumbq_t *q, uint32_t generation, size_t index,
-                                 double aspect, uint8_t *bytes, size_t len) {
+                                 double aspect, proven_mem_mut_t bytes_view) {
+    uint8_t *bytes = (uint8_t *)bytes_view.ptr;
+    size_t len = (size_t)bytes_view.size;
     if (!q || !q->jobs || q->capacity == 0 || generation != q->generation || !bytes || len == 0) {
-        free(bytes);
+        rubraview_free(bytes);
         return false;
     }
     for (size_t i = 0; i < q->count; ++i) {

@@ -20,9 +20,9 @@ void draw_box_grip(app_state_t *app, const rubraview_box_t *box, const rubraview
     if (!box->grip_active) return;
     rubraview_tile_metrics_t sized = rubraview_box_metrics(box, metrics);
     char line[64];
-    int n = snprintf(line, sizeof(line), T("%d a row, %d%%"),
-                     box->kind == RUBRAVIEW_BOX_TOOLBOX ? sized.strip_columns : sized.columns,
-                     (int)lround((box->scale > 0.0 ? box->scale : 1.0) * 100.0));
+    int n = rubraview_fmt(line, sizeof(line), T("{} a row, {}%"),
+                     PROVEN_ARG((int)(box->kind == RUBRAVIEW_BOX_TOOLBOX ? sized.strip_columns : sized.columns)),
+                     PROVEN_ARG((int)lround((box->scale > 0.0 ? box->scale : 1.0) * 100.0)));
     if (n <= 0) return;
     double w = gr.width * 3.2;
     /* On the side away from the box, so it covers none of it. */
@@ -153,7 +153,7 @@ void draw_seekfan(app_state_t *app, rubraview_renderer_t *r, bool detached) {
         rubraview_pal_render_fill_rect(r, rect, on ? COLOR_TILE_CURRENT : 0xF0202020u, 3.0);
         rubraview_pal_render_stroke_rect(r, rect, on ? COLOR_TEXT : COLOR_BOX_BORDER, 1.0, 3.0);
         char caption[8];
-        int n = snprintf(caption, sizeof(caption), "%s%s", app->seekfan.forward ? "+" : "-", rubraview_seekfan_label(i));
+        int n = rubraview_fmt(caption, sizeof(caption), "{}{}", PROVEN_ARG(app->seekfan.forward ? "+" : "-"), PROVEN_ARG(rubraview_seekfan_label(i)));
         if (n > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)caption, .size = (size_t)n }, rect,
                                                   rect.height * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }

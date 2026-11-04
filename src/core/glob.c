@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/glob.h"
 #include <ctype.h>
 
@@ -12,7 +13,7 @@ bool rubraview_glob_match(proven_u8str_view_t name, proven_u8str_view_t pattern)
     while (n < name.size) {
         if (p < pattern.size &&
             (pattern.ptr[p] == '?' ||
-             tolower((unsigned char)pattern.ptr[p]) == tolower((unsigned char)name.ptr[n]))) {
+             rubraview_ascii_tolower((unsigned char)pattern.ptr[p]) == rubraview_ascii_tolower((unsigned char)name.ptr[n]))) {
             n++;
             p++;
         } else if (p < pattern.size && pattern.ptr[p] == '*') {

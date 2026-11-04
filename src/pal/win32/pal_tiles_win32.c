@@ -5,6 +5,7 @@
  */
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/core.h"
 #include <windows.h>
 #include <wincodec.h>
 #include <objbase.h>
@@ -54,7 +55,7 @@ static uint8_t *read_whole(const char *path, size_t path_len, size_t *out_size) 
     char narrow[MAX_PATH * 4];
     WCHAR wide[MAX_PATH * 2];
     if (path_len == 0 || path_len >= sizeof(narrow)) return NULL;
-    memcpy(narrow, path, path_len);
+    proven_sys_mem_copy(narrow, path, path_len);
     narrow[path_len] = '\0';
     if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return NULL;
     HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -63,7 +64,7 @@ static uint8_t *read_whole(const char *path, size_t path_len, size_t *out_size) 
     LARGE_INTEGER size;
     uint8_t *bytes = NULL;
     if (GetFileSizeEx(file, &size) && size.QuadPart > 0 && (uint64_t)size.QuadPart <= TILES_MAX_FILE) {
-        bytes = (uint8_t*)malloc((size_t)size.QuadPart);
+        bytes = (uint8_t*)rubraview_alloc((size_t)size.QuadPart);
         size_t total = 0;
         while (bytes && total < (size_t)size.QuadPart) {
             DWORD got = 0;
@@ -74,7 +75,7 @@ static uint8_t *read_whole(const char *path, size_t path_len, size_t *out_size) 
         if (bytes && total == (size_t)size.QuadPart) {
             *out_size = total;
         } else {
-            free(bytes);
+            rubraview_free(bytes);
             bytes = NULL;
         }
     }
@@ -86,15 +87,15 @@ static void post_result(rubraview_tiles_t *t, rubraview_tile_result_t result) {
     AcquireSRWLockExclusive(&t->lock);
     if (result.generation == t->generation) {
         if (t->result_count == TILES_RESULTS) {   /* nobody is reading: the oldest goes */
-            free(t->results[0].bgra);
-            memmove(&t->results[0], &t->results[1], (TILES_RESULTS - 1) * sizeof(t->results[0]));
+            rubraview_free(t->results[0].bgra);
+            proven_sys_mem_move(&t->results[0], &t->results[1], (TILES_RESULTS - 1) * sizeof(t->results[0]));
             t->result_count--;
         }
         t->results[t->result_count++] = result;
         result.bgra = NULL;
     }
     ReleaseSRWLockExclusive(&t->lock);
-    free(result.bgra);   /* made for a page that is gone */
+    rubraview_free(result.bgra);   /* made for a page that is gone */
     if (t->wake) t->wake(t->context);
 }
 
@@ -120,11 +121,11 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
         uint32_t generation = t->generation;
         uint32_t serial = t->want_serial;
         size_t count = t->want_count;
-        memcpy(work, t->want, count * sizeof(work[0]));
+        proven_sys_mem_copy(work, t->want, count * sizeof(work[0]));
         bool reload = t->source_changed || bytes_generation != generation;
         char path[MAX_PATH * 4];
         size_t path_len = t->path_len;
-        memcpy(path, t->path, path_len);
+        proven_sys_mem_copy(path, t->path, path_len);
         bool exif = t->exif;
         int32_t pw = t->picture_w, ph = t->picture_h;
         t->source_changed = false;
@@ -139,16 +140,16 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
         ReleaseSRWLockExclusive(&t->lock);
 
         if (reload) {
-            if (tiff_owner) rubraview_wic_own_tiff_free(tiff_owner); else free(bytes);
+            if (tiff_owner) rubraview_wic_own_tiff_free(tiff_owner); else rubraview_free(bytes);
             tiff_owner = NULL;
             byte_count = given_size;
             bytes = given ? given : read_whole(path, path_len, &byte_count);
             bytes_generation = generation;
             size_t tiff_size = 0;
             void *owner = NULL;
-            uint8_t *tiff = bytes ? rubraview_wic_own_tiff(factory, bytes, byte_count, &tiff_size, &owner) : NULL;
+            uint8_t *tiff = bytes ? rubraview_wic_own_tiff(factory, rubraview_mem_view(bytes, byte_count), &tiff_size, &owner) : NULL;
             if (tiff) {
-                free(bytes);
+                rubraview_free(bytes);
                 bytes = tiff;
                 byte_count = tiff_size;
                 tiff_owner = owner;
@@ -158,7 +159,7 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
         /* One band per tile row: the rows above it are decoded to reach it
            either way, so a row is read once and cut, not tile by tile. */
         bool superseded = false;
-        memset(finished, 0, sizeof(finished));
+        proven_sys_mem_set(finished, 0, sizeof(finished));
         for (size_t i = 0; i < count && !superseded; ++i) {
             if (finished[i]) continue;   /* done as part of an earlier row */
             if (work[i].level < 0) {
@@ -175,7 +176,7 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
                     uint8_t *part = (uint8_t*)rubraview_malloc_product((size_t)sw, (size_t)sh, 4u);
                     result.bgra = (uint8_t*)rubraview_malloc_product((size_t)ow, (size_t)oh, 4u);
                     if (part && result.bgra &&
-                        rubraview_wic_region_pbgra(factory, bytes, byte_count, exif, sx0, sy0, sw, sh, sw, sh,
+                        rubraview_wic_region_pbgra(factory, rubraview_mem_view(bytes, byte_count), exif, sx0, sy0, sw, sh, sw, sh,
                                                    part, (uint32_t)sw * 4u) &&
                         rubraview_enlarge_region(part, sw, sh, (size_t)sw * 4u, factor,
                                                  (x - sx0) * factor, (y - sy0) * factor, ow, oh,
@@ -183,10 +184,10 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
                         result.width = ow;
                         result.height = oh;
                     } else {
-                        free(result.bgra);
+                        rubraview_free(result.bgra);
                         result.bgra = NULL;
                     }
-                    free(part);
+                    rubraview_free(part);
                 }
                 post_result(t, result);
                 finished[i] = true;
@@ -214,10 +215,10 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
                    in the row may be narrower. */
                 band_w = (tx1 - tx0) * RUBRAVIEW_TILE_SIDE + bow;
                 band = (uint8_t*)rubraview_malloc_product((size_t)band_w, (size_t)band_h, 4u);
-                if (band && !rubraview_wic_region_pbgra(factory, bytes, byte_count, exif,
+                if (band && !rubraview_wic_region_pbgra(factory, rubraview_mem_view(bytes, byte_count), exif,
                                                         ax, ay, bx + bw - ax, ah, band_w, band_h,
                                                         band, (uint32_t)band_w * 4u)) {
-                    free(band);
+                    rubraview_free(band);
                     band = NULL;
                 }
             }
@@ -230,7 +231,7 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
                     if (result.bgra) {
                         size_t left = (size_t)(work[j].tx - tx0) * RUBRAVIEW_TILE_SIDE * 4u;
                         for (int32_t r = 0; r < oh; ++r) {
-                            memcpy(result.bgra + (size_t)r * (size_t)ow * 4u,
+                            proven_sys_mem_copy(result.bgra + (size_t)r * (size_t)ow * 4u,
                                    band + (size_t)r * (size_t)band_w * 4u + left, (size_t)ow * 4u);
                         }
                         result.width = ow;
@@ -240,7 +241,7 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
                 post_result(t, result);
                 finished[j] = true;
             }
-            free(band);
+            rubraview_free(band);
 
             AcquireSRWLockExclusive(&t->lock);
             superseded = t->stop || t->want_serial != serial || t->generation != generation;
@@ -252,21 +253,21 @@ static DWORD WINAPI tiles_thread(LPVOID param) {
         ReleaseSRWLockExclusive(&t->lock);
     }
 
-    if (tiff_owner) rubraview_wic_own_tiff_free(tiff_owner); else free(bytes);
+    if (tiff_owner) rubraview_wic_own_tiff_free(tiff_owner); else rubraview_free(bytes);
     if (factory) IWICImagingFactory_Release(factory);
     if (com) CoUninitialize();
     return 0;
 }
 
 rubraview_tiles_t *rubraview_pal_tiles_start(rubraview_tiles_wake_fn wake, void *context) {
-    rubraview_tiles_t *t = (rubraview_tiles_t*)calloc(1, sizeof(*t));
+    rubraview_tiles_t *t = (rubraview_tiles_t*)rubraview_alloc_zero(1, sizeof(*t));
     if (!t) return NULL;
     InitializeSRWLock(&t->lock);
     InitializeConditionVariable(&t->wake_worker);
     t->wake = wake;
     t->context = context;
     t->thread = CreateThread(NULL, 0, tiles_thread, t, 0, NULL);
-    if (!t->thread) { free(t); return NULL; }
+    if (!t->thread) { rubraview_free(t); return NULL; }
     /* Below the viewer: a tile must never slow a page turn. */
     SetThreadPriority(t->thread, THREAD_PRIORITY_BELOW_NORMAL);
     return t;
@@ -281,20 +282,22 @@ void rubraview_pal_tiles_stop(rubraview_tiles_t *t) {
     /* A band may be decoding; it is waited for, briefly. */
     if (WaitForSingleObject(t->thread, 3000) == WAIT_OBJECT_0) {
         CloseHandle(t->thread);
-        for (size_t i = 0; i < t->result_count; ++i) free(t->results[i].bgra);
-        free(t->given);
-        free(t);
+        for (size_t i = 0; i < t->result_count; ++i) rubraview_free(t->results[i].bgra);
+        rubraview_free(t->given);
+        rubraview_free(t);
     }
     /* Otherwise the thread still holds `t`; it is left, not freed under it. */
 }
 
-static void set_source(rubraview_tiles_t *t, uint32_t generation, proven_u8str_view_t path, uint8_t *bytes, size_t size,
+static void set_source(rubraview_tiles_t *t, uint32_t generation, proven_u8str_view_t path, proven_mem_mut_t bytes_view,
                        bool apply_exif_orientation, int32_t picture_w, int32_t picture_h) {
+    uint8_t *bytes = (uint8_t *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
     AcquireSRWLockExclusive(&t->lock);
     t->generation = generation;
     t->path_len = path.size < sizeof(t->path) ? path.size : 0;
-    if (t->path_len) memcpy(t->path, path.ptr, t->path_len);
-    free(t->given);   /* a page never taken: the thread was still on another */
+    if (t->path_len) proven_sys_mem_copy(t->path, path.ptr, t->path_len);
+    rubraview_free(t->given);   /* a page never taken: the thread was still on another */
     t->given = bytes;
     t->given_size = bytes ? size : 0;
     t->exif = apply_exif_orientation;
@@ -303,7 +306,7 @@ static void set_source(rubraview_tiles_t *t, uint32_t generation, proven_u8str_v
     t->source_changed = true;
     t->want_count = 0;
     t->want_serial++;
-    for (size_t i = 0; i < t->result_count; ++i) free(t->results[i].bgra);
+    for (size_t i = 0; i < t->result_count; ++i) rubraview_free(t->results[i].bgra);
     t->result_count = 0;
     ReleaseSRWLockExclusive(&t->lock);
 }
@@ -311,13 +314,15 @@ static void set_source(rubraview_tiles_t *t, uint32_t generation, proven_u8str_v
 void rubraview_pal_tiles_source(rubraview_tiles_t *t, uint32_t generation, proven_u8str_view_t path,
                                 bool apply_exif_orientation, int32_t picture_w, int32_t picture_h) {
     if (!t) return;
-    set_source(t, generation, path, NULL, 0, apply_exif_orientation, picture_w, picture_h);
+    set_source(t, generation, path, rubraview_mem_mut(NULL, 0), apply_exif_orientation, picture_w, picture_h);
 }
 
-void rubraview_pal_tiles_source_bytes(rubraview_tiles_t *t, uint32_t generation, uint8_t *bytes, size_t size,
+void rubraview_pal_tiles_source_bytes(rubraview_tiles_t *t, uint32_t generation, proven_mem_mut_t bytes_view,
                                       bool apply_exif_orientation, int32_t picture_w, int32_t picture_h) {
-    if (!t) { free(bytes); return; }
-    set_source(t, generation, PROVEN_LIT(""), bytes, size,
+    uint8_t *bytes = (uint8_t *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
+    if (!t) { rubraview_free(bytes); return; }
+    set_source(t, generation, PROVEN_LIT(""), rubraview_mem_mut(bytes, size),
                apply_exif_orientation, picture_w, picture_h);
 }
 
@@ -328,7 +333,7 @@ void rubraview_pal_tiles_want(rubraview_tiles_t *t, uint32_t generation,
     AcquireSRWLockExclusive(&t->lock);
     bool ok = generation == t->generation;
     if (ok) {
-        if (count) memcpy(t->want, keys, count * sizeof(t->want[0]));
+        if (count) proven_sys_mem_copy(t->want, keys, count * sizeof(t->want[0]));
         t->want_count = count;
         t->want_serial++;
     }
@@ -342,7 +347,7 @@ bool rubraview_pal_tiles_take(rubraview_tiles_t *t, rubraview_tile_result_t *out
     AcquireSRWLockExclusive(&t->lock);
     if (t->result_count > 0) {
         *out = t->results[0];
-        memmove(&t->results[0], &t->results[1], (t->result_count - 1) * sizeof(t->results[0]));
+        proven_sys_mem_move(&t->results[0], &t->results[1], (t->result_count - 1) * sizeof(t->results[0]));
         t->result_count--;
         got = true;
     }

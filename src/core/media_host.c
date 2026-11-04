@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/media_host.h"
 #include <math.h>
 #include <stdio.h>
@@ -35,13 +36,13 @@ bool rubraview_mhost_block_ok(const rubraview_mhost_block_t *b, uint64_t mapped_
 
 void rubraview_mhost_text_put(char *dst, size_t cap, const char *src) {
     if (!dst || cap == 0) return;
-    size_t n = src ? strlen(src) : 0;
+    size_t n = src ? proven_cstr_len(src) : 0;
     if (n >= cap) {
         n = cap - 1;
         while (n > 0 && ((unsigned char)src[n] & 0xC0u) == 0x80u) n--;   /* not inside a character */
     }
-    if (n) memcpy(dst, src, n);
-    memset(dst + n, 0, cap - n);
+    if (n) proven_sys_mem_copy(dst, src, n);
+    proven_sys_mem_set(dst + n, 0, cap - n);
 }
 
 void rubraview_mhost_text_take(char *dst, size_t cap, const char *src, size_t src_cap) {
@@ -58,7 +59,7 @@ void rubraview_mhost_text_take(char *dst, size_t cap, const char *src, size_t sr
         bool ok = proven_is_ok(c.err) && c.cp >= 0x20u && c.cp != 0x7Fu && !(c.cp >= 0x80u && c.cp < 0xA0u);
         if (ok) {
             if (out + c.len >= cap) break;
-            memcpy(dst + out, src + pos, c.len);
+            proven_sys_mem_copy(dst + out, src + pos, c.len);
             out += c.len;
         } else {
             if (out + 1 >= cap) break;
@@ -71,16 +72,16 @@ void rubraview_mhost_text_take(char *dst, size_t cap, const char *src, size_t sr
 
 void rubraview_mhost_log(rubraview_mhost_block_t *b, const char *line) {
     if (!b || !line) return;
-    size_t n = strlen(line);
+    size_t n = proven_cstr_len(line);
     if (n >= RUBRAVIEW_MHOST_LOG / 2) n = RUBRAVIEW_MHOST_LOG / 2 - 1;
     uint32_t used = atomic_load_explicit(&b->log_used, memory_order_relaxed);
     if (used > RUBRAVIEW_MHOST_LOG) used = 0;
     if (used + n + 1 > RUBRAVIEW_MHOST_LOG) {   /* the older half goes */
         uint32_t keep = used > RUBRAVIEW_MHOST_LOG / 2 ? RUBRAVIEW_MHOST_LOG / 2 : used;
-        memmove(b->log, b->log + used - keep, keep);
+        proven_sys_mem_move(b->log, b->log + used - keep, keep);
         used = keep;
     }
-    memcpy(b->log + used, line, n);
+    proven_sys_mem_copy(b->log + used, line, n);
     b->log[used + n] = '\n';
     atomic_store_explicit(&b->log_used, used + (uint32_t)n + 1, memory_order_release);
 }
@@ -89,7 +90,7 @@ void rubraview_mhost_log(rubraview_mhost_block_t *b, const char *line) {
 
 void rubraview_mhost_info_put(rubraview_mhost_info_t *w, const rubraview_media_info_t *info) {
     if (!w || !info) return;
-    memset(w, 0, sizeof(*w));
+    proven_sys_mem_set(w, 0, sizeof(*w));
     w->backend = (int32_t)info->backend;
     w->width = info->width;
     w->height = info->height;
@@ -119,7 +120,7 @@ static bool finite_at_least(double v, double lo) { return isfinite(v) && v >= lo
 
 bool rubraview_mhost_info_take(const rubraview_mhost_info_t *w, rubraview_media_info_t *out) {
     if (!w || !out) return false;
-    memset(out, 0, sizeof(*out));
+    proven_sys_mem_set(out, 0, sizeof(*out));
     if (w->has_video > 1 || w->has_audio > 1 || w->audio_output > 1 || w->hardware_decode > 1 || w->hdr_tone_mapped > 1 ||
         w->hdr_output > 1 || w->live > 1) return false;
     if (w->has_video && (w->width <= 0 || w->height <= 0 || w->width > RUBRAVIEW_MHOST_MAX_SIDE || w->height > RUBRAVIEW_MHOST_MAX_SIDE))
@@ -156,7 +157,7 @@ bool rubraview_mhost_info_take(const rubraview_mhost_info_t *w, rubraview_media_
 
 void rubraview_mhost_tracks_put(rubraview_mhost_block_t *b, const rubraview_track_set_t *tracks) {
     if (!b) return;
-    memset(b->tracks, 0, sizeof b->tracks);
+    proven_sys_mem_set(b->tracks, 0, sizeof b->tracks);
     b->track_count = 0;
     b->current_video = b->current_audio = b->current_subtitle = -1;
     if (!tracks) return;
@@ -174,7 +175,7 @@ void rubraview_mhost_tracks_put(rubraview_mhost_block_t *b, const rubraview_trac
         char *dst[3] = { w->language, w->title, w->codec };
         for (int k = 0; k < 3; ++k) {
             size_t len = parts[k].size < sizeof tmp - 1 ? parts[k].size : sizeof tmp - 1;
-            if (len) memcpy(tmp, parts[k].ptr, len);
+            if (len) proven_sys_mem_copy(tmp, parts[k].ptr, len);
             tmp[len] = '\0';
             rubraview_mhost_text_put(dst[k], RUBRAVIEW_MHOST_TEXT, tmp);
         }
@@ -204,9 +205,9 @@ bool rubraview_mhost_tracks_take(const rubraview_mhost_track_t *w, int32_t count
         out->tracks[i] = (rubraview_track_t){
             .kind = (rubraview_track_kind_t)t->kind, .stream_index = t->stream_index, .channels = t->channels,
             .is_default = t->is_default, .is_forced = t->is_forced, .is_external = false,
-            .language = { (const proven_byte_t *)text[i][0], strlen(text[i][0]) },
-            .title    = { (const proven_byte_t *)text[i][1], strlen(text[i][1]) },
-            .codec    = { (const proven_byte_t *)text[i][2], strlen(text[i][2]) },
+            .language = { (const proven_byte_t *)text[i][0], proven_cstr_len(text[i][0]) },
+            .title    = { (const proven_byte_t *)text[i][1], proven_cstr_len(text[i][1]) },
+            .codec    = { (const proven_byte_t *)text[i][2], proven_cstr_len(text[i][2]) },
         };
     }
     out->count = (size_t)count;
@@ -218,7 +219,7 @@ bool rubraview_mhost_tracks_take(const rubraview_mhost_track_t *w, int32_t count
 
 void rubraview_mhost_details_put(rubraview_mhost_block_t *b, const rubraview_details_t *details) {
     if (!b) return;
-    memset(b->details, 0, sizeof b->details);
+    proven_sys_mem_set(b->details, 0, sizeof b->details);
     b->detail_count = 0;
     if (!details) return;
     size_t n = details->count < RUBRAVIEW_DETAIL_MAX ? details->count : RUBRAVIEW_DETAIL_MAX;
@@ -246,7 +247,7 @@ bool rubraview_mhost_details_take(const rubraview_mhost_detail_t *w, uint32_t co
 
 bool rubraview_mhost_opened_take(const rubraview_mhost_block_t *b, rubraview_mhost_opened_t *out) {
     if (!b || !out) return false;
-    memset(out, 0, sizeof(*out));
+    proven_sys_mem_set(out, 0, sizeof(*out));
     /* copied out of the block first: what is checked is what is used */
     int32_t failure = b->open_failure;
     int32_t count = b->track_count, video = b->current_video, audio = b->current_audio, subtitle = b->current_subtitle;
@@ -256,10 +257,10 @@ bool rubraview_mhost_opened_take(const rubraview_mhost_block_t *b, rubraview_mho
     static _Thread_local rubraview_mhost_track_t tracks[RUBRAVIEW_MAX_TRACKS];
     static _Thread_local rubraview_mhost_detail_t details[RUBRAVIEW_DETAIL_MAX];
     char map[RUBRAVIEW_MHOST_NAME];
-    memcpy(&info, &b->info, sizeof info);
-    memcpy(tracks, b->tracks, sizeof tracks);
-    memcpy(details, b->details, sizeof details);
-    memcpy(map, b->frame_map, sizeof map);
+    proven_sys_mem_copy(&info, &b->info, sizeof info);
+    proven_sys_mem_copy(tracks, b->tracks, sizeof tracks);
+    proven_sys_mem_copy(details, b->details, sizeof details);
+    proven_sys_mem_copy(map, b->frame_map, sizeof map);
 
     if (failure < RUBRAVIEW_MEDIA_OPENED || failure > RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG) { out->why = "its failure"; return false; }
     out->failure = (rubraview_media_failure_t)failure;
@@ -270,7 +271,7 @@ bool rubraview_mhost_opened_take(const rubraview_mhost_block_t *b, rubraview_mho
     if (out->info.has_video) {
         if (frame_bytes != (uint64_t)out->info.width * (uint64_t)out->info.height * 4u) { out->why = "its pictures' size"; return false; }
         if (!rubraview_mhost_map_name_ok(map, sizeof map)) { out->why = "its pictures' name"; return false; }
-        memcpy(out->frame_map, map, sizeof map);
+        proven_sys_mem_copy(out->frame_map, map, sizeof map);
         out->frame_bytes = frame_bytes;
     }
     return true;
@@ -281,7 +282,7 @@ bool rubraview_mhost_opened_take(const rubraview_mhost_block_t *b, rubraview_mho
 bool rubraview_mhost_slot_take(const rubraview_mhost_slot_t *w, rubraview_mhost_slot_t *out) {
     if (!w || !out) return false;
     rubraview_mhost_slot_t s;
-    memcpy(&s, w, sizeof s);
+    proven_sys_mem_copy(&s, w, sizeof s);
     if (s.on_gpu > 1 || !isfinite(s.pts) || !isfinite(s.duration) || s.duration < 0.0 || s.duration > 3600.0) return false;
     if (s.pts < -86400.0 || s.pts > 1e9) return false;
     if (s.on_gpu && s.shared_handle == 0) return false;
@@ -321,7 +322,7 @@ bool rubraview_mhost_observed_take(const rubraview_mhost_observed_t *o, rubravie
     for (int tries = 0; tries < 8 && !steady; ++tries) {
         uint32_t before = atomic_load_explicit(&((rubraview_mhost_observed_t *)o)->seq, memory_order_acquire);
         if (before & 1u) continue;
-        memcpy((char *)&copy + sizeof(copy.seq), (const char *)o + sizeof(copy.seq), sizeof copy - sizeof copy.seq);
+        proven_sys_mem_copy((char *)&copy + sizeof(copy.seq), (const char *)o + sizeof(copy.seq), sizeof copy - sizeof copy.seq);
         atomic_thread_fence(memory_order_acquire);
         uint32_t after = atomic_load_explicit(&((rubraview_mhost_observed_t *)o)->seq, memory_order_relaxed);
         steady = before == after;
@@ -347,7 +348,7 @@ bool rubraview_mhost_observed_take(const rubraview_mhost_observed_t *o, rubravie
 void rubraview_mhost_audio_take(const rubraview_mhost_audio_t *w, rubraview_audio_chain_config_t *chain, double *speed,
                                 double *volume, bool *muted, uint32_t *latency_ms) {
     rubraview_mhost_audio_t a;
-    memcpy(&a, w, sizeof a);
+    proven_sys_mem_copy(&a, w, sizeof a);
     *speed = a.speed_permille >= 250 && a.speed_permille <= 4000 ? a.speed_permille / 1000.0 : 1.0;
     *volume = a.volume_permille <= 1000 ? a.volume_permille / 1000.0 : 1.0;
     *muted = a.muted != 0;
@@ -367,7 +368,7 @@ void rubraview_mhost_tap_put(rubraview_mhost_tap_t *t, const float *samples, siz
     uint32_t seq = atomic_load_explicit(&t->seq, memory_order_relaxed);
     atomic_store_explicit(&t->seq, seq + 1, memory_order_relaxed);
     atomic_thread_fence(memory_order_release);
-    if (count && samples) memcpy(t->samples, samples, count * sizeof(float));
+    if (count && samples) proven_sys_mem_copy(t->samples, samples, count * sizeof(float));
     t->count = (uint32_t)count;
     atomic_store_explicit(&t->seq, seq + 2, memory_order_release);
 }
@@ -380,7 +381,7 @@ size_t rubraview_mhost_tap_take(const rubraview_mhost_tap_t *t, float *out, size
         uint32_t n = t->count;
         if (n > RUBRAVIEW_MHOST_TAP) return 0;
         size_t take = n < count ? n : count;
-        memcpy(out, t->samples + (n - take), take * sizeof(float));   /* the latest */
+        proven_sys_mem_copy(out, t->samples + (n - take), take * sizeof(float));   /* the latest */
         atomic_thread_fence(memory_order_acquire);
         if (atomic_load_explicit(&((rubraview_mhost_tap_t *)t)->seq, memory_order_relaxed) != before) continue;
         for (size_t i = 0; i < take; ++i) out[i] = isfinite(out[i]) ? (out[i] > 4.0f ? 4.0f : out[i] < -4.0f ? -4.0f : out[i]) : 0.0f;
@@ -394,7 +395,7 @@ size_t rubraview_mhost_tap_take(const rubraview_mhost_tap_t *t, float *out, size
 #define MAP_PREFIX "Local\\rubraview-mh-"
 
 void rubraview_mhost_map_name(char out[RUBRAVIEW_MHOST_NAME], uint32_t pid, const uint8_t random16[16]) {
-    int n = snprintf(out, RUBRAVIEW_MHOST_NAME, MAP_PREFIX "%u-", (unsigned)pid);
+    int n = rubraview_fmt(out, RUBRAVIEW_MHOST_NAME, MAP_PREFIX "{}-", PROVEN_ARG((unsigned)pid));
     for (int i = 0; i < 16 && n > 0 && n + 2 < RUBRAVIEW_MHOST_NAME; ++i) {
         static const char HEX[] = "0123456789abcdef";
         out[n++] = HEX[random16[i] >> 4];
@@ -409,7 +410,7 @@ bool rubraview_mhost_map_name_ok(const char *name, size_t cap) {
     while (len < cap && name[len]) len++;
     if (len == cap) return false;   /* not ended inside its field */
     size_t p = sizeof(MAP_PREFIX) - 1;
-    if (len <= p || memcmp(name, MAP_PREFIX, p) != 0) return false;
+    if (len <= p || proven_sys_mem_cmp(name, MAP_PREFIX, p) != 0) return false;
     size_t digits = 0;
     while (p < len && name[p] >= '0' && name[p] <= '9') { p++; digits++; }
     if (digits == 0 || digits > 10 || p >= len || name[p] != '-') return false;
@@ -429,21 +430,25 @@ size_t rubraview_mhost_frames_head(uint32_t count) {
     return 4u + (size_t)count * 24u;
 }
 
-static uint32_t get_u32(const uint8_t *p) { uint32_t v; memcpy(&v, p, 4); return v; }
-static int32_t get_i32(const uint8_t *p) { int32_t v; memcpy(&v, p, 4); return v; }
-static uint64_t get_u64(const uint8_t *p) { uint64_t v; memcpy(&v, p, 8); return v; }
-static double get_f64(const uint8_t *p) { double v; memcpy(&v, p, 8); return v; }
+static uint32_t get_u32(const uint8_t *p) { uint32_t v; proven_sys_mem_copy(&v, p, 4); return v; }
+static int32_t get_i32(const uint8_t *p) { int32_t v; proven_sys_mem_copy(&v, p, 4); return v; }
+static uint64_t get_u64(const uint8_t *p) { uint64_t v; proven_sys_mem_copy(&v, p, 8); return v; }
+static double get_f64(const uint8_t *p) { double v; proven_sys_mem_copy(&v, p, 8); return v; }
 
-uint32_t rubraview_mhost_frame_count(const uint8_t *payload, size_t size) {
+uint32_t rubraview_mhost_frame_count(proven_mem_view_t payload_view) {
+    const uint8_t *payload = (const uint8_t *)payload_view.ptr;
+    size_t size = (size_t)payload_view.size;
     if (!payload || size < 4) return 0;
     uint32_t count = get_u32(payload);
     if (count > RUBRAVIEW_MHOST_FRAMES_MAX || rubraview_mhost_frames_head(count) > size) return 0;
     return count;
 }
 
-bool rubraview_mhost_frame_at(const uint8_t *payload, size_t size, uint32_t index, int32_t max_side,
+bool rubraview_mhost_frame_at(proven_mem_view_t payload_view, uint32_t index, int32_t max_side,
                               rubraview_mhost_frame_ref_t *out) {
-    uint32_t count = rubraview_mhost_frame_count(payload, size);
+    const uint8_t *payload = (const uint8_t *)payload_view.ptr;
+    size_t size = (size_t)payload_view.size;
+    uint32_t count = rubraview_mhost_frame_count(rubraview_mem_view(payload, size));
     if (!out || index >= count) return false;
     const uint8_t *e = payload + 4 + (size_t)index * 24u;
     rubraview_mhost_frame_ref_t f = { get_i32(e), get_i32(e + 4), get_f64(e + 8), get_u64(e + 16) };
@@ -464,17 +469,19 @@ bool rubraview_mhost_frame_at(const uint8_t *payload, size_t size, uint32_t inde
 
 typedef struct packer { uint8_t *out; size_t cap, used; bool full; } packer_t;
 
-static void pk_bytes(packer_t *p, const void *b, size_t n) {
+static void pk_bytes(packer_t *p, proven_mem_view_t b_view) {
+    const void *b = (const void *)b_view.ptr;
+    size_t n = (size_t)b_view.size;
     if (p->full || n > p->cap - p->used) { p->full = true; return; }
-    if (p->out && n) memcpy(p->out + p->used, b, n);
+    if (p->out && n) proven_sys_mem_copy(p->out + p->used, b, n);
     p->used += n;
 }
-static void pk_u32(packer_t *p, uint32_t v) { pk_bytes(p, &v, 4); }
-static void pk_f64(packer_t *p, double v) { pk_bytes(p, &v, 8); }
+static void pk_u32(packer_t *p, uint32_t v) { pk_bytes(p, rubraview_mem_view(&v, 4)); }
+static void pk_f64(packer_t *p, double v) { pk_bytes(p, rubraview_mem_view(&v, 8)); }
 static void pk_str(packer_t *p, proven_u8str_view_t s) {
     size_t n = s.size < CAT_STRING_MAX ? s.size : CAT_STRING_MAX;
     pk_u32(p, (uint32_t)n);
-    pk_bytes(p, s.ptr, n);
+    pk_bytes(p, rubraview_mem_view(s.ptr, n));
 }
 
 size_t rubraview_mhost_catalog_pack(const rubraview_ffilter_catalog_t *catalog, uint8_t *out, size_t cap) {
@@ -532,15 +539,17 @@ static proven_u8str_view_t rd_str(reader_t *r, proven_arena_t *arena) {
     char *s = (char *)res.value.ptr;
     /* the same safety as a fixed field: valid UTF-8, no control bytes */
     char raw[CAT_STRING_MAX + 1];
-    memcpy(raw, r->data + r->at, n);
+    proven_sys_mem_copy(raw, r->data + r->at, n);
     raw[n] = '\0';
     r->at += n;
     rubraview_mhost_text_take(s, (size_t)n + 1, raw, n);
-    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = strlen(s) };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = proven_cstr_len(s) };
 }
 
-bool rubraview_mhost_catalog_unpack(proven_arena_t *arena, const uint8_t *data, size_t size,
+bool rubraview_mhost_catalog_unpack(proven_arena_t *arena, proven_mem_view_t data_view,
                                     rubraview_ffilter_catalog_t *out) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!arena || !data || !out) return false;
     *out = (rubraview_ffilter_catalog_t){ 0 };
     reader_t r = { data, size, 0, false };

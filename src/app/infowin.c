@@ -41,13 +41,13 @@ static void info_add_details(proven_arena_t *a, rubraview_info_t *info, const ru
     for (size_t i = 0; details && i < details->count; ++i) {
         const rubraview_detail_t *line = &details->lines[i];
         if (line->heading) rubraview_info_heading(a, info, line->label);
-        else rubraview_info_add(a, info, line->label, (proven_u8str_view_t){ (const proven_byte_t *)line->value, strlen(line->value) });
+        else rubraview_info_add(a, info, line->label, (proven_u8str_view_t){ (const proven_byte_t *)line->value, proven_cstr_len(line->value) });
     }
 }
 
 static void info_gather(app_state_t *app) {
     if (!app->info_mem) {
-        app->info_mem = malloc(INFO_ARENA_BYTES);
+        app->info_mem = rubraview_alloc(INFO_ARENA_BYTES);
         if (!app->info_mem) return;
         app->info_arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)app->info_mem, .size = INFO_ARENA_BYTES });
     }
@@ -69,16 +69,16 @@ static void info_gather(app_state_t *app) {
         rubraview_info_heading(a, &info, in_archive ? T("Page") : T("File"));
         rubraview_info_add(a, &info, T("Name"), in_archive ? ref->name : rubraview_path_basename(path));
         if (!in_archive) rubraview_info_add(a, &info, T("Folder"), rubraview_path_dirname(path));
-        rubraview_info_addf(a, &info, T("Position"), "%d of %zu", index + 1, page_count(app));
+        rubraview_info_addf(a, &info, T("Position"), "{} of {}", PROVEN_ARG((int)(index + 1)), PROVEN_ARG((size_t)(page_count(app))));
         uint64_t file_bytes = 0;
         rubraview_fs_entry_t entry;
         if (!in_archive && rubraview_pal_fs_stat(a, path, &entry)) {
             file_bytes = entry.size_bytes;
             rubraview_info_add(a, &info, T("Size"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_bytes(b, sizeof(b), entry.size_bytes) });
             info_local_time(b, sizeof(b), entry.mtime);
-            rubraview_info_add(a, &info, T("Modified"), (proven_u8str_view_t){ (const proven_byte_t *)b, strlen(b) });
+            rubraview_info_add(a, &info, T("Modified"), (proven_u8str_view_t){ (const proven_byte_t *)b, proven_cstr_len(b) });
             info_local_time(b, sizeof(b), entry.ctime);
-            rubraview_info_add(a, &info, T("Created"), (proven_u8str_view_t){ (const proven_byte_t *)b, strlen(b) });
+            rubraview_info_add(a, &info, T("Created"), (proven_u8str_view_t){ (const proven_byte_t *)b, proven_cstr_len(b) });
         }
         if (in_archive) {
             file_bytes = rubraview_page_source_entry_size(&app->source, (size_t)index);
@@ -89,8 +89,8 @@ static void info_gather(app_state_t *app) {
                    solid block has no packed size of its page's own. */
                 char packed[96];
                 rubraview_info_bytes(packed, sizeof(packed), en->packed_size);
-                if (en->packed_size > 0) rubraview_info_addf(a, &info, T("In the archive"), "%s, %s", en->method ? en->method : "?", packed);
-                else rubraview_info_addf(a, &info, T("In the archive"), "%s", en->method ? en->method : "?");
+                if (en->packed_size > 0) rubraview_info_addf(a, &info, T("In the archive"), "{}, {}", PROVEN_ARG(en->method ? en->method : "?"), PROVEN_ARG(packed));
+                else rubraview_info_addf(a, &info, T("In the archive"), "{}", PROVEN_ARG(en->method ? en->method : "?"));
             }
             rubraview_info_heading(a, &info, T("Archive"));
             rubraview_info_add(a, &info, T("Name"), rubraview_path_basename(app->source.archive_path));
@@ -105,12 +105,12 @@ static void info_gather(app_state_t *app) {
             uint64_t archive_bytes = app->archive_map.size, set_bytes = 0;
             size_t volumes = rubraview_page_source_volumes(&app->source, &set_bytes);
             if (volumes > 1) {
-                rubraview_info_addf(a, &info, T("Volumes"), T("%zu, read as one"), volumes);
+                rubraview_info_addf(a, &info, T("Volumes"), T("{}, read as one"), PROVEN_ARG((size_t)volumes));
                 archive_bytes = set_bytes;   /* a set: the volumes read so far */
             }
             if (rubraview_page_source_is_encrypted(&app->source)) rubraview_info_add(a, &info, T("Encrypted"), TU8("yes"));
             rubraview_info_add(a, &info, T("Size"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_bytes(b, sizeof(b), archive_bytes) });
-            rubraview_info_addf(a, &info, T("Pages"), "%zu", page_count(app));
+            rubraview_info_addf(a, &info, T("Pages"), "{}", PROVEN_ARG((size_t)(page_count(app))));
             /* the book's own summary: its folders and what it holds unpacked */
             uint64_t unpacked = 0;
             size_t folders = 0;
@@ -118,9 +118,9 @@ static void info_gather(app_state_t *app) {
             for (size_t p = 0; p < page_count(app); ++p) {
                 unpacked += rubraview_page_source_entry_size(&app->source, p);
                 proven_u8str_view_t dir = rubraview_path_dirname(app->source.pages[p].name);
-                if (dir.size > 0 && !(dir.size == last.size && memcmp(dir.ptr, last.ptr, dir.size) == 0)) { folders++; last = dir; }
+                if (dir.size > 0 && !(dir.size == last.size && proven_sys_mem_cmp(dir.ptr, last.ptr, dir.size) == 0)) { folders++; last = dir; }
             }
-            if (folders) rubraview_info_addf(a, &info, T("Folders inside"), "%zu", folders);
+            if (folders) rubraview_info_addf(a, &info, T("Folders inside"), "{}", PROVEN_ARG((size_t)folders));
             rubraview_info_add(a, &info, T("Pages unpacked"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_bytes(b, sizeof(b), unpacked) });
         }
 
@@ -133,24 +133,24 @@ static void info_gather(app_state_t *app) {
             if (m->has_video) {
                 char code[32];
                 rubraview_info_fourcc(code, sizeof(code), m->video_fourcc);
-                rubraview_info_addf(a, &info, T("Picture"), T("%d x %d, %.3g frames a second"), m->width, m->height, m->frame_rate);
-                rubraview_info_add(a, &info, T("Picture codec"), (proven_u8str_view_t){ (const proven_byte_t *)code, strlen(code) });
+                rubraview_info_addf(a, &info, T("Picture"), T("{} x {}, {} frames a second"), PROVEN_ARG((int)m->width), PROVEN_ARG((int)m->height), PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(m->frame_rate), 3)));
+                rubraview_info_add(a, &info, T("Picture codec"), (proven_u8str_view_t){ (const proven_byte_t *)code, proven_cstr_len(code) });
                 rubraview_info_add(a, &info, T("Decoded"), m->hardware_decode ? TU8("on the graphics card") : TU8("in software"));
             }
             if (m->has_audio && m->audio_sample_rate) {
-                rubraview_info_addf(a, &info, T("Sound"), T("%u Hz, %u channel%s"), (unsigned)m->audio_sample_rate,
-                                    (unsigned)m->audio_channels, m->audio_channels == 1 ? "" : TC("plural", "s"));
+                rubraview_info_addf(a, &info, T("Sound"), T("{} Hz, {} channel{}"), PROVEN_ARG((unsigned)m->audio_sample_rate),
+                                    PROVEN_ARG((unsigned)m->audio_channels), PROVEN_ARG(m->audio_channels == 1 ? "" : TC("plural", "s")));
             }
             {   /* 1.25.1: the device moved to another format since (the decoder said one thing, the samples another) */
                 uint32_t pr = 0, pc = 0;
                 if (m->has_audio && rubraview_pal_media_audio_format(app->media, &pr, &pc) && pr > 0 &&
                     (pr != m->audio_sample_rate || pc != m->audio_channels))
-                    rubraview_info_addf(a, &info, T("Sound played at"), T("%u Hz, %u channel%s"), (unsigned)pr, (unsigned)pc,
-                                        pc == 1 ? "" : TC("plural", "s"));
+                    rubraview_info_addf(a, &info, T("Sound played at"), T("{} Hz, {} channel{}"), PROVEN_ARG((unsigned)pr), PROVEN_ARG((unsigned)pc),
+                                        PROVEN_ARG(pc == 1 ? "" : TC("plural", "s")));
             }
             uint32_t kbps = m->bitrate_kbps;
             if (!kbps && file_bytes && m->duration_seconds > 0.0) kbps = (uint32_t)((double)file_bytes * 8.0 / m->duration_seconds / 1000.0);
-            if (kbps) rubraview_info_addf(a, &info, T("Bitrate"), "%u kbit/s%s", (unsigned)kbps, m->bitrate_kbps ? "" : T(" (size over length)"));
+            if (kbps) rubraview_info_addf(a, &info, T("Bitrate"), "{} kbit/s{}", PROVEN_ARG((unsigned)kbps), PROVEN_ARG(m->bitrate_kbps ? "" : T(" (size over length)")));
             rubraview_info_add(a, &info, T("Opened by"), m->backend == RUBRAVIEW_BACKEND_FFMPEG ? PROVEN_LIT("FFmpeg") : PROVEN_LIT("Media Foundation"));
             if (m->has_video) {
                 /* 1.25.1 (owner, 2026-10-20: "어떤 백엔드나 다이렉트x 같은거 어떻게 하여 화면에 출력해 주는지도 자세한 정보"):
@@ -158,9 +158,9 @@ static void info_gather(app_state_t *app) {
                 rubraview_info_heading(a, &info, T("Display"));
                 if (m->path_decoder[0]) {
                     char dec[256];
-                    int dn = snprintf(dec, sizeof(dec), "%s", rubraview_tr(m->path_decoder));
-                    if (dn > 0 && m->decode_threads > 0) snprintf(dec + dn, sizeof(dec) - (size_t)dn, T(", %d threads"), (int)m->decode_threads);
-                    else if (dn > 0 && m->decode_threads < 0) snprintf(dec + dn, sizeof(dec) - (size_t)dn, "%s", T(", a thread a core"));
+                    int dn = rubraview_fmt(dec, sizeof(dec), "{}", PROVEN_ARG(rubraview_tr(m->path_decoder)));
+                    if (dn > 0 && m->decode_threads > 0) rubraview_fmt(dec + dn, sizeof(dec) - (size_t)dn, T(", {} threads"), PROVEN_ARG((int)m->decode_threads));
+                    else if (dn > 0 && m->decode_threads < 0) rubraview_fmt(dec + dn, sizeof(dec) - (size_t)dn, "{}", PROVEN_ARG(T(", a thread a core")));
                     rubraview_info_add(a, &info, T("Decoder"), cstr(dec));
                 }
                 if (m->path_colours[0]) rubraview_info_add(a, &info, T("Colours"), cstr(rubraview_tr(m->path_colours)));
@@ -168,45 +168,45 @@ static void info_gather(app_state_t *app) {
                 rubraview_render_facts_t rf;
                 if (rubraview_pal_render_facts(app->renderer, &rf)) {
                     unsigned fl = rf.feature_level;
-                    rubraview_info_addf(a, &info, T("Drawn by"), T("Direct2D 1.1 on Direct3D 11 (feature level %u_%u), %s"),
-                                        (fl >> 12) & 0xFu, (fl >> 8) & 0xFu, rf.warp ? T("WARP, Windows' software rasteriser") : rf.adapter);
+                    rubraview_info_addf(a, &info, T("Drawn by"), T("Direct2D 1.1 on Direct3D 11 (feature level {}_{}), {}"),
+                                        PROVEN_ARG((unsigned)((fl >> 12) & 0xFu)), PROVEN_ARG((unsigned)((fl >> 8) & 0xFu)), PROVEN_ARG(rf.warp ? T("WARP, Windows' software rasteriser") : rf.adapter));
                     if (rf.video_memory > 0)
-                        rubraview_info_addf(a, &info, T("Video memory"), "%llu MB", (unsigned long long)(rf.video_memory >> 20));
+                        rubraview_info_addf(a, &info, T("Video memory"), "{} MB", PROVEN_ARG((unsigned long long)(rf.video_memory >> 20)));
                     if (rf.hdr_output)   /* RV-153 */
-                        rubraview_info_addf(a, &info, T("Presented"), T("DXGI swap chain, %d buffers, scRGB FP16 for an HDR screen (SDR white at %.0f nits), %s"),
-                                            rf.buffers, rf.hdr_sdr_white, rf.vsync ? T("with the screen's refresh (vsync)") : T("as soon as drawn"));
+                        rubraview_info_addf(a, &info, T("Presented"), T("DXGI swap chain, {} buffers, scRGB FP16 for an HDR screen (SDR white at {:.0} nits), {}"),
+                                            PROVEN_ARG((int)rf.buffers), PROVEN_ARG((double)rf.hdr_sdr_white), PROVEN_ARG(rf.vsync ? T("with the screen's refresh (vsync)") : T("as soon as drawn")));
                     else
-                    rubraview_info_addf(a, &info, T("Presented"), T("DXGI swap chain, %d buffers, BGRA, %s, %s"), rf.buffers,
-                                        rf.present_model == RUBRAVIEW_PRESENT_FLIP_DISCARD ? T("flip model (flip discard)")
+                    rubraview_info_addf(a, &info, T("Presented"), T("DXGI swap chain, {} buffers, BGRA, {}, {}"), PROVEN_ARG((int)rf.buffers),
+                                        PROVEN_ARG(rf.present_model == RUBRAVIEW_PRESENT_FLIP_DISCARD ? T("flip model (flip discard)")
                                         : rf.present_model == RUBRAVIEW_PRESENT_FLIP_SEQUENTIAL ? T("flip model (flip sequential)")
-                                        : T("copy model (blt)"),
-                                        rf.vsync ? T("with the screen's refresh (vsync)") : T("as soon as drawn"));
-                    if (rf.decode_device) rubraview_info_addf(a, &info, T("Card's decoders"), T("%u kinds (Direct3D 11 video)"), (unsigned)rf.decoder_profiles);
+                                        : T("copy model (blt)")),
+                                        PROVEN_ARG(rf.vsync ? T("with the screen's refresh (vsync)") : T("as soon as drawn")));
+                    if (rf.decode_device) rubraview_info_addf(a, &info, T("Card's decoders"), T("{} kinds (Direct3D 11 video)"), PROVEN_ARG((unsigned)rf.decoder_profiles));
                 }
                 int gm = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hardware_decode")));
                 const char *mode = gm <= 0 ? TC("choice", "off") : gm == 1 ? TC("choice", "on") : TC("choice", "always");
-                rubraview_info_addf(a, &info, T("GPU decoding"), "%s%s%s", mode,
-                                    m->path_why_software[0] ? " - " : "", m->path_why_software[0] ? rubraview_tr(m->path_why_software) : "");
+                rubraview_info_addf(a, &info, T("GPU decoding"), "{}{}{}", PROVEN_ARG(mode),
+                                    PROVEN_ARG(m->path_why_software[0] ? " - " : ""), PROVEN_ARG(m->path_why_software[0] ? rubraview_tr(m->path_why_software) : ""));
                 if (m->hdr_transfer) {   /* RV-150 */
                     const char *kind = m->hdr_transfer == RUBRAVIEW_HDR_PQ ? "PQ (HDR10)" : "HLG";
                     double peak = 0.0;
                     if (m->hdr_tone_mapped && m->hdr_output && rubraview_pal_media_hdr_peak(app->media, &peak))   /* RV-153 */
-                        rubraview_info_addf(a, &info, T("HDR"), T("%s, peak %.0f nits, sent to the screen as HDR: tone mapped on the graphics card (BT.2390) to its peak of %.0f nits"),
-                                            kind, peak, app->media_hdr_screen.hdr && app->media_hdr_screen.peak_nits > 0.0 ? app->media_hdr_screen.peak_nits
-                                            : app->media_hdr_screen.hdr ? RUBRAVIEW_HDR_DEFAULT_PEAK : app->media_hdr_screen.sdr_white_nits);
+                        rubraview_info_addf(a, &info, T("HDR"), T("{}, peak {:.0} nits, sent to the screen as HDR: tone mapped on the graphics card (BT.2390) to its peak of {:.0} nits"),
+                                            PROVEN_ARG(kind), PROVEN_ARG((double)peak), PROVEN_ARG((double)(app->media_hdr_screen.hdr && app->media_hdr_screen.peak_nits > 0.0 ? app->media_hdr_screen.peak_nits
+                                            : app->media_hdr_screen.hdr ? RUBRAVIEW_HDR_DEFAULT_PEAK : app->media_hdr_screen.sdr_white_nits)));
                     else if (m->hdr_tone_mapped && rubraview_pal_media_hdr_peak(app->media, &peak))
-                        rubraview_info_addf(a, &info, T("HDR"), T("%s, peak %.0f nits, tone mapped on the graphics card (BT.2390) to a %.0f-nit white"),
-                                            kind, peak, RUBRAVIEW_SDR_WHITE_NITS);
+                        rubraview_info_addf(a, &info, T("HDR"), T("{}, peak {:.0} nits, tone mapped on the graphics card (BT.2390) to a {:.0}-nit white"),
+                                            PROVEN_ARG(kind), PROVEN_ARG((double)peak), PROVEN_ARG((double)RUBRAVIEW_SDR_WHITE_NITS));
                     else
-                        rubraview_info_addf(a, &info, T("HDR"), T("%s, not tone mapped - %s"), kind,
-                                            m->path_hdr_why[0] ? rubraview_tr(m->path_hdr_why) : T("Windows' decoder does not tone map"));
+                        rubraview_info_addf(a, &info, T("HDR"), T("{}, not tone mapped - {}"), PROVEN_ARG(kind),
+                                            PROVEN_ARG(m->path_hdr_why[0] ? rubraview_tr(m->path_hdr_why) : T("Windows' decoder does not tone map")));
                     if (m->hdr_tone_mapped && !m->hdr_output) {   /* RV-153: why not as HDR */
                         int ho = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hdr_output")));
                         const char *why = ho <= 0 ? T("HDR output is off (Settings > Video)")
                                         : app->hdr_output_refused && app->hdr_output_why ? rubraview_tr(app->hdr_output_why)
                                         : !app->media_hdr_screen.hdr ? T("this screen is not in HDR (Windows' display settings)")
                                         : T("not for this film");
-                        rubraview_info_addf(a, &info, T("HDR output"), T("off - %s"), why);
+                        rubraview_info_addf(a, &info, T("HDR output"), T("off - {}"), PROVEN_ARG(why));
                     }
                     if (app->media_hdr_handed == 1)
                         rubraview_info_add(a, &info, T("Handed over"), TU8("Windows' decoder found it HDR; FFmpeg took it to tone map it"));
@@ -221,11 +221,11 @@ static void info_gather(app_state_t *app) {
                 for (size_t t = 0; t < app->tracks.count && t < 32; ++t) {
                     const rubraview_track_t *tr = &app->tracks.tracks[t];
                     char label[24];
-                    snprintf(label, sizeof(label), "%s %zu", track_kind_name(tr->kind), t + 1);
-                    int n = snprintf(b, sizeof(b), "%.*s", (int)tr->codec.size, tr->codec.ptr);
-                    if (tr->channels > 0 && n > 0) n += snprintf(b + n, sizeof(b) - (size_t)n, T(", %d ch"), tr->channels);
-                    if (tr->language.size && n > 0) n += snprintf(b + n, sizeof(b) - (size_t)n, ", %.*s", (int)tr->language.size, tr->language.ptr);
-                    if (tr->title.size && n > 0) n += snprintf(b + n, sizeof(b) - (size_t)n, ", \"%.*s\"", (int)tr->title.size, tr->title.ptr);
+                    rubraview_fmt(label, sizeof(label), "{} {}", PROVEN_ARG(track_kind_name(tr->kind)), PROVEN_ARG((size_t)(t + 1)));
+                    int n = rubraview_fmt(b, sizeof(b), "{}", PROVEN_ARG(rubraview_bytes_view(tr->codec.ptr, (int)tr->codec.size)));
+                    if (tr->channels > 0 && n > 0) n += rubraview_fmt(b + n, sizeof(b) - (size_t)n, T(", {} ch"), PROVEN_ARG((int)tr->channels));
+                    if (tr->language.size && n > 0) n += rubraview_fmt(b + n, sizeof(b) - (size_t)n, ", {}", PROVEN_ARG(rubraview_bytes_view(tr->language.ptr, (int)tr->language.size)));
+                    if (tr->title.size && n > 0) n += rubraview_fmt(b + n, sizeof(b) - (size_t)n, ", \"{}\"", PROVEN_ARG(rubraview_bytes_view(tr->title.ptr, (int)tr->title.size)));
                     if (n > 0) rubraview_info_add(a, &info, label, (proven_u8str_view_t){ (const proven_byte_t *)b, (size_t)n < sizeof(b) ? (size_t)n : sizeof(b) - 1 });
                 }
             }
@@ -239,7 +239,7 @@ static void info_gather(app_state_t *app) {
                 rubraview_info_add(a, &info, T("Track"), g->track_number);
                 rubraview_info_add(a, &info, T("Genre"), g->genre);
                 rubraview_info_add(a, &info, T("Codec"), g->codec);
-                if (g->bits_per_sample) rubraview_info_addf(a, &info, T("Bits"), "%u", (unsigned)g->bits_per_sample);
+                if (g->bits_per_sample) rubraview_info_addf(a, &info, T("Bits"), "{}", PROVEN_ARG((unsigned)g->bits_per_sample));
                 if (g->art_size) rubraview_info_add(a, &info, T("Cover"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_bytes(b, sizeof(b), g->art_size) });
             }
         } else if (!is_media_path(path) && !is_text_path(path)) {
@@ -255,38 +255,38 @@ static void info_gather(app_state_t *app) {
                 if (pb.ok) { bytes = (const uint8_t*)pb.data.ptr; size = pb.data.size; }
             }
             rubraview_image_desc_t d;
-            bool described = bytes && rubraview_pal_image_describe(in_archive ? PROVEN_LIT("") : path, bytes, size, &d);
-            if (!described && !in_archive) described = rubraview_pal_image_describe(path, NULL, 0, &d);
+            bool described = bytes && rubraview_pal_image_describe(in_archive ? PROVEN_LIT("") : path, rubraview_mem_view(bytes, size), &d);
+            if (!described && !in_archive) described = rubraview_pal_image_describe(path, rubraview_mem_view(NULL, 0), &d);
             /* The file's own account of how it was made (read below too, for the ratio). */
             static rubraview_details_t details;
             uint32_t raw_bits = 0;
-            memset(&details, 0, sizeof(details));
-            bool known = bytes && rubraview_image_details(bytes, size, &details, &raw_bits);
+            proven_sys_mem_set(&details, 0, sizeof(details));
+            bool known = bytes && rubraview_image_details(rubraview_mem_view(bytes, size), &details, &raw_bits);
             /* D-120: an AVIF or a JPEG XL decoded by our own readers reaches
                Windows as a TIFF made in memory; that carrier's name and
                pixel format are not the file's. */
             const char *own = known && details.count > 0 && details.lines[0].heading ? details.lines[0].label : "";
-            bool carried = described && strcmp(d.format, "TIFF") == 0 && own[0] && strcmp(own, "TIFF") != 0;
+            bool carried = described && rubraview_cstr_cmp(d.format, "TIFF") == 0 && own[0] && rubraview_cstr_cmp(own, "TIFF") != 0;
             rubraview_info_heading(a, &info, T("Picture"));
             if (described) {
-                rubraview_info_add(a, &info, T("Format"), carried ? cstr(own) : (proven_u8str_view_t){ (const proven_byte_t *)d.format, strlen(d.format) });
-                rubraview_info_addf(a, &info, T("Pixels"), T("%d x %d (%.1f megapixels)"), d.width, d.height,
-                                    (double)d.width * (double)d.height / 1e6);
+                rubraview_info_add(a, &info, T("Format"), carried ? cstr(own) : (proven_u8str_view_t){ (const proven_byte_t *)d.format, proven_cstr_len(d.format) });
+                rubraview_info_addf(a, &info, T("Pixels"), T("{} x {} ({:.1} megapixels)"), PROVEN_ARG((int)d.width), PROVEN_ARG((int)d.height),
+                                    PROVEN_ARG((double)d.width * (double)d.height / 1e6));
                 rubraview_info_add(a, &info, T("Aspect ratio"), (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_aspect(b, sizeof(b), d.width, d.height) });
-                if (!carried) rubraview_info_add(a, &info, T("Pixel format"), (proven_u8str_view_t){ (const proven_byte_t *)d.pixels, strlen(d.pixels) });
+                if (!carried) rubraview_info_add(a, &info, T("Pixel format"), (proven_u8str_view_t){ (const proven_byte_t *)d.pixels, proven_cstr_len(d.pixels) });
                 if (d.dpi_x > 0.0) {
-                    rubraview_info_addf(a, &info, T("Resolution"), T("%.0f x %.0f dpi"), d.dpi_x, d.dpi_y);
+                    rubraview_info_addf(a, &info, T("Resolution"), T("{:.0} x {:.0} dpi"), PROVEN_ARG((double)d.dpi_x), PROVEN_ARG((double)d.dpi_y));
                     rubraview_info_add(a, &info, T("Print size"),
                                        (proven_u8str_view_t){ (const proven_byte_t *)b, rubraview_info_print_size(b, sizeof(b), d.width, d.height, d.dpi_x, d.dpi_y) });
                 }
-                if (d.frames > 1) rubraview_info_addf(a, &info, T("Frames"), "%u", (unsigned)d.frames);
+                if (d.frames > 1) rubraview_info_addf(a, &info, T("Frames"), "{}", PROVEN_ARG((unsigned)d.frames));
                 rubraview_info_add(a, &info, T("Colour profile"), d.color_profile ? TU8("embedded") : TU8("none"));
             } else if (in_archive && !bytes) {
                 rubraview_info_add(a, &info, T("Details"), TU8("not read: far inside a solid 7z block"));
             }
             const app_page_t *page = &app->pages[index];
             if (page->loaded && page->reduced) {
-                rubraview_info_addf(a, &info, T("On screen"), T("reduced to %d x %d (the graphics card's limit)"), page->width, page->height);
+                rubraview_info_addf(a, &info, T("On screen"), T("reduced to {} x {} (the graphics card's limit)"), PROVEN_ARG((int)page->width), PROVEN_ARG((int)page->height));
             }
             if (page->loaded && page->width > 0 && page->height > 0) {
                 rubraview_info_add(a, &info, T("In memory"),
@@ -298,18 +298,18 @@ static void info_gather(app_state_t *app) {
             if (bytes && described && d.frames <= 1 && d.width > 0 && d.height > 0 &&
                 (double)d.width * (double)d.height <= 24e6) {
                 size_t need = picture_bytes((size_t)d.width, (size_t)d.height, 4u, 4u << 20);
-                void *work = malloc(need);
+                void *work = rubraview_alloc(need);
                 if (work) {
                     proven_arena_t wa = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work, .size = need });
                     double t0 = rubraview_pal_time_now_seconds();
-                    rubraview_pixbuf_t px = rubraview_pal_image_read_pixels(&wa, in_archive ? PROVEN_LIT("") : path, bytes, size, false);
+                    rubraview_pixbuf_t px = rubraview_pal_image_read_pixels(&wa, in_archive ? PROVEN_LIT("") : path, rubraview_mem_view(bytes, size), false);
                     double ms = (rubraview_pal_time_now_seconds() - t0) * 1000.0;
                     if (px.pixels) {
-                        rubraview_info_addf(a, &info, T("Decoded in"), T("%.0f ms"), ms);
+                        rubraview_info_addf(a, &info, T("Decoded in"), T("{:.0} ms"), PROVEN_ARG((double)ms));
                         uint32_t colours = rubraview_info_unique_colours(&wa, &px);
-                        if (colours) rubraview_info_addf(a, &info, T("Unique colours"), "%u", (unsigned)colours);
+                        if (colours) rubraview_info_addf(a, &info, T("Unique colours"), "{}", PROVEN_ARG((unsigned)colours));
                     }
-                    free(work);
+                    rubraview_free(work);
                 }
             }
             if (bytes) {
@@ -317,9 +317,9 @@ static void info_gather(app_state_t *app) {
                 if (described && d.width > 0 && d.height > 0) {
                     double pixels = (double)d.width * (double)d.height * (d.frames > 1 ? (double)d.frames : 1.0);
                     char ratio[96];
-                    rubraview_info_addf(a, &info, T("Stored at"), T("%.2f bits a pixel"), (double)size * 8.0 / pixels);
+                    rubraview_info_addf(a, &info, T("Stored at"), T("{:.2} bits a pixel"), PROVEN_ARG((double)size * 8.0 / pixels));
                     if (rubraview_detail_ratio(ratio, sizeof(ratio), (double)size, pixels * (raw_bits ? raw_bits : 24) / 8.0)) {
-                        rubraview_info_addf(a, &info, T("Compression"), T("%s, at %u bits a pixel"), ratio, (unsigned)(raw_bits ? raw_bits : 24));
+                        rubraview_info_addf(a, &info, T("Compression"), T("{}, at {} bits a pixel"), PROVEN_ARG(ratio), PROVEN_ARG((unsigned)(raw_bits ? raw_bits : 24)));
                     }
                 }
             }
@@ -332,10 +332,10 @@ static void info_gather(app_state_t *app) {
             if (bytes && known) info_add_details(a, &info, &details);
             if (bytes) {
                 rubraview_exif_info_t exif;
-                if (rubraview_exif_read(bytes, size, &exif)) rubraview_info_add_exif(a, &info, &exif);
+                if (rubraview_exif_read(rubraview_mem_view(bytes, size), &exif)) rubraview_info_add_exif(a, &info, &exif);
                 else rubraview_info_add(a, &info, T("EXIF"), TU8("none in this file"));
                 static rubraview_iptc_info_t iptc;
-                if (rubraview_iptc_read(bytes, size, &iptc)) rubraview_info_add_iptc(a, &info, &iptc);
+                if (rubraview_iptc_read(rubraview_mem_view(bytes, size), &iptc)) rubraview_info_add_iptc(a, &info, &iptc);
             }
             /* 1.18.0: what Rubraview kept beside it, shown as the file's own */
             rubraview_details_src_t beside;
@@ -343,16 +343,16 @@ static void info_gather(app_state_t *app) {
             if (!in_archive && details_beside(a, path, &beside, &beside_path)) {
                 proven_u8str_view_t beside_name = rubraview_path_basename(beside_path);
                 char title[400];
-                snprintf(title, sizeof(title), T("Kept beside it in %.*s"), (int)(beside_name.size < 300 ? beside_name.size : 300), beside_name.ptr);
+                rubraview_fmt(title, sizeof(title), T("Kept beside it in {}"), PROVEN_ARG(rubraview_bytes_view(beside_name.ptr, (int)(beside_name.size < 300 ? beside_name.size : 300))));
                 rubraview_info_heading(a, &info, title);
                 for (size_t i = 0; i < beside.info.count; ++i) {
                     const rubraview_info_line_t *l = &beside.info.lines[i];
                     if (l->heading) rubraview_info_heading(a, &info, (const char *)l->label.ptr);
                     else rubraview_info_add(a, &info, (const char *)l->label.ptr, l->value);
                 }
-                if (beside.xmp.size > 0) rubraview_info_addf(a, &info, T("XMP"), T("%zu bytes"), beside.xmp.size);
+                if (beside.xmp.size > 0) rubraview_info_addf(a, &info, T("XMP"), T("{} bytes"), PROVEN_ARG((size_t)beside.xmp.size));
             }
-            free(mem);
+            rubraview_free(mem);
             rubraview_pal_fs_unmap(&map);
         }
     }
@@ -382,11 +382,11 @@ static void info_gather(app_state_t *app) {
 void info_live(app_state_t *app) {
     if (!app->info_open) return;
     if (!app->info_live_mem) {
-        app->info_live_mem = malloc(INFO_LIVE_BYTES);
-        app->info_all_rows = malloc((INFO_MAX_ROWS + INFO_LIVE_ROWS) * sizeof(proven_u8str_view_t));
-        app->info_all_heading = malloc((INFO_MAX_ROWS + INFO_LIVE_ROWS) * sizeof(bool));
+        app->info_live_mem = rubraview_alloc(INFO_LIVE_BYTES);
+        app->info_all_rows = rubraview_alloc((INFO_MAX_ROWS + INFO_LIVE_ROWS) * sizeof(proven_u8str_view_t));
+        app->info_all_heading = rubraview_alloc((INFO_MAX_ROWS + INFO_LIVE_ROWS) * sizeof(bool));
         if (!app->info_live_mem || !app->info_all_rows || !app->info_all_heading) {
-            free(app->info_live_mem); free(app->info_all_rows); free(app->info_all_heading);
+            rubraview_free(app->info_live_mem); rubraview_free(app->info_all_rows); rubraview_free(app->info_all_heading);
             app->info_live_mem = NULL; app->info_all_rows = NULL; app->info_all_heading = NULL;
             app->info_count = 0;
             return;
@@ -416,11 +416,11 @@ enum { INFO_PICTURES, INFO_FILMS, INFO_SONGS, INFO_ARCHIVES, INFO_FOLDERS, INFO_
 
 static void info_folder_summary(app_state_t *app, proven_u8str_view_t dir) {
     if (dir.size == 0 || dir.size >= sizeof(app->info_folder)) return;
-    if (strlen(app->info_folder) == dir.size && memcmp(app->info_folder, dir.ptr, dir.size) == 0) return;   /* the same one */
-    memset(app->info_counts, 0, sizeof(app->info_counts));
-    memset(app->info_bytes, 0, sizeof(app->info_bytes));
+    if (proven_cstr_len(app->info_folder) == dir.size && proven_sys_mem_cmp(app->info_folder, dir.ptr, dir.size) == 0) return;   /* the same one */
+    proven_sys_mem_set(app->info_counts, 0, sizeof(app->info_counts));
+    proven_sys_mem_set(app->info_bytes, 0, sizeof(app->info_bytes));
     size_t budget = 64u * 1024u * 1024u;
-    void *mem = malloc(budget);
+    void *mem = rubraview_alloc(budget);
     if (!mem) return;
     proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(&scratch, dir);
@@ -439,8 +439,8 @@ static void info_folder_summary(app_state_t *app, proven_u8str_view_t dir) {
             app->info_counts[INFO_ALL]++;
         }
     }
-    free(mem);
-    memcpy(app->info_folder, dir.ptr, dir.size);
+    rubraview_free(mem);
+    proven_sys_mem_copy(app->info_folder, dir.ptr, dir.size);
     app->info_folder[dir.size] = '\0';
 }
 
@@ -450,9 +450,9 @@ static void info_add_summary(app_state_t *app, proven_arena_t *a, rubraview_info
     char size[96];
     for (int k = 0; k <= INFO_ALL; ++k) {
         if (app->info_counts[k] == 0) continue;
-        if (k == INFO_FOLDERS) { rubraview_info_addf(a, info, NAME[k], "%llu", (unsigned long long)app->info_counts[k]); continue; }
+        if (k == INFO_FOLDERS) { rubraview_info_addf(a, info, NAME[k], "{}", PROVEN_ARG((unsigned long long)app->info_counts[k])); continue; }
         rubraview_info_bytes(size, sizeof(size), app->info_bytes[k]);
-        rubraview_info_addf(a, info, NAME[k], "%llu, %s", (unsigned long long)app->info_counts[k], size);
+        rubraview_info_addf(a, info, NAME[k], "{}, {}", PROVEN_ARG((unsigned long long)app->info_counts[k]), PROVEN_ARG(size));
     }
 }
 
@@ -587,8 +587,8 @@ void draw_info_window(app_state_t *app) {
         info_text(app, app->info_rows[index], x0, y, app->info_heading[index] ? INFO_HEADING : INFO_TEXT);
     }
     char foot[160];
-    int n = snprintf(foot, sizeof(foot), T(" %s%sdrag to mark   |   Ctrl+C copies (all when nothing is marked)   |   Ctrl+A   |   Esc"),
-                     app->info_message, app->info_message[0] ? "   |   " : "");
+    int n = rubraview_fmt(foot, sizeof(foot), T(" {}{}drag to mark   |   Ctrl+C copies (all when nothing is marked)   |   Ctrl+A   |   Esc"),
+                     PROVEN_ARG(app->info_message), PROVEN_ARG(app->info_message[0] ? "   |   " : ""));
     if (n > 0) rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ (const proven_byte_t *)foot, (size_t)n < sizeof(foot) ? (size_t)n : sizeof(foot) - 1 },
                                                    0.0, (double)h - ch * 1.2, app->info_font, INFO_DIM);
     draw_scrollbar(app, r, RVSB_INFO, app->info_px, app->info_py);   /* RV-170 */
@@ -597,14 +597,14 @@ void draw_info_window(app_state_t *app) {
 
 /* Ctrl+C: what is marked, or everything; the rows as they are drawn. */
 static void info_copy(app_state_t *app) {
-    char *text = (char*)malloc(65536);
+    char *text = (char*)rubraview_alloc(65536);
     if (!text) return;
     rubraview_grid_selection_t all = { true, 0, 0, (int32_t)app->info_count, INT32_MAX / 2 };
     const rubraview_grid_selection_t *sel = app->info_sel.active ? &app->info_sel : &all;
     size_t n = rubraview_grid_selection_copy(sel, app->info_rows, (int32_t)app->info_count, text, 65536);
     bool ok = n > 0 && rubraview_pal_clipboard_set_text(app->info_window, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n });
-    snprintf(app->info_message, sizeof(app->info_message), "%s", ok ? (app->info_sel.active ? T("copied") : T("copied everything")) : T("nothing to copy"));
-    free(text);
+    rubraview_fmt(app->info_message, sizeof(app->info_message), "{}", PROVEN_ARG(ok ? (app->info_sel.active ? T("copied") : T("copied everything")) : T("nothing to copy")));
+    rubraview_free(text);
     app->info_dirty = true;
 }
 
@@ -716,7 +716,7 @@ static void help_rebuild(app_state_t *app) {
     }
     for (size_t i = 0; i < notice_count && app->help_count < room; ++i) {
         app->help_lines[app->help_count++] = (rubraview_help_line_t){
-            .kind = RUBRAVIEW_HELP_NOTE, .text = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)notices[i], .size = strlen(notices[i]) } };
+            .kind = RUBRAVIEW_HELP_NOTE, .text = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)notices[i], .size = proven_cstr_len(notices[i]) } };
     }
     /* The second column starts after the longest key list there is, so a
        binding with three keys does not run into what it does. */
@@ -728,17 +728,16 @@ static void help_rebuild(app_state_t *app) {
     if (app->help_key_cols < 20) app->help_key_cols = 20;
     if (app->help_key_cols > 48) app->help_key_cols = 48;
     /* The rows as drawn: two cells in, the keys, the text from its column. */
-    if (!app->help_row_text) app->help_row_text = (char (*)[256])calloc(2048, 256);
+    if (!app->help_row_text) app->help_row_text = (char (*)[256])rubraview_alloc_zero(2048, 256);
     for (size_t i = 0; i < app->help_count && app->help_row_text; ++i) {
         const rubraview_help_line_t *l = &app->help_lines[i];
         char *row = app->help_row_text[i];
         int n = 0;
         if (l->kind == RUBRAVIEW_HELP_ENTRY) {
             int pad = app->help_key_cols - 2 - (int)l->keys.size;
-            n = snprintf(row, 256, "  %.*s%*s%.*s", (int)l->keys.size, l->keys.ptr, pad > 1 ? pad : 1, "",
-                         (int)l->text.size, l->text.ptr);
+            n = rubraview_fmt(row, 256, "  {}{}{}", PROVEN_ARG(l->keys), PROVEN_ARG(rubraview_spaces(pad > 1 ? pad : 1)), PROVEN_ARG(l->text));
         } else if (l->kind != RUBRAVIEW_HELP_BLANK) {
-            n = snprintf(row, 256, "  %.*s", (int)l->text.size, l->text.ptr);
+            n = rubraview_fmt(row, 256, "  {}", PROVEN_ARG(rubraview_bytes_view(l->text.ptr, (int)l->text.size)));
         }
         if (n < 0) n = 0;
         if (n > 255) n = 255;
@@ -828,7 +827,7 @@ void draw_help_window(app_state_t *app) {
     double text_col = cw * (double)app->help_key_cols;
     {
         char top[160];
-        int n = snprintf(top, sizeof(top), T("Rubraview %s, released %s"), RUBRAVIEW_VERSION_STRING, RUBRAVIEW_RELEASE_DATE);
+        int n = rubraview_fmt(top, sizeof(top), T("Rubraview {}, released {}"), PROVEN_ARG(RUBRAVIEW_VERSION_STRING), PROVEN_ARG(RUBRAVIEW_RELEASE_DATE));
         if (n > 0) rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ (const proven_byte_t *)top, (size_t)n }, keys_col, 0.0, fs, HELP_HEADING);
         proven_u8str_view_t url = PROVEN_LIT(RUBRAVIEW_PROJECT_URL);
         rubraview_pal_render_draw_text_mono(r, url, keys_col, ch, fs, HELP_LINK);
@@ -868,8 +867,8 @@ void draw_help_window(app_state_t *app) {
 
     /* The bottom line says how to move and how to leave. */
     char foot[128];
-    int written = snprintf(foot, sizeof(foot), T(" %s%skeys, then the licences at the end   |   drag to mark, Ctrl+C copies   |   ? or Esc closes"),
-                           app->help_message, app->help_message[0] ? "   |   " : "");
+    int written = rubraview_fmt(foot, sizeof(foot), T(" {}{}keys, then the licences at the end   |   drag to mark, Ctrl+C copies   |   ? or Esc closes"),
+                           PROVEN_ARG(app->help_message), PROVEN_ARG(app->help_message[0] ? "   |   " : ""));
     if (written > 0) {
         rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, (double)h - ch, (double)w, ch },
                                        0xFF1E1E1Eu, 0.0);
@@ -909,8 +908,8 @@ size_t help_pump(app_state_t *app) {
                 int32_t col = (int32_t)(event.mouse.x / app->help_cell_w);
                 int32_t screen_row = (int32_t)(event.mouse.y / app->help_cell_h);
                 if (screen_row == 1 && event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN && event.mouse.button == RUBRAVIEW_MOUSE_LEFT &&
-                    col >= 2 && col < 2 + (int32_t)strlen(RUBRAVIEW_PROJECT_URL)) {   /* the project's page */
-                    if (!rubraview_pal_shell_open_web(RUBRAVIEW_PROJECT_URL)) snprintf(app->help_message, sizeof(app->help_message), "%s", T("the page could not be opened"));
+                    col >= 2 && col < 2 + (int32_t)proven_cstr_len(RUBRAVIEW_PROJECT_URL)) {   /* the project's page */
+                    if (!rubraview_pal_shell_open_web(RUBRAVIEW_PROJECT_URL)) rubraview_fmt(app->help_message, sizeof(app->help_message), "{}", PROVEN_ARG(T("the page could not be opened")));
                     app->help_dirty = true;
                     break;
                 }
@@ -945,15 +944,15 @@ size_t help_pump(app_state_t *app) {
                     break;
                 }
                 if (ctrl && key_is(combo, "C")) {
-                    char *text = (char*)malloc(131072);
+                    char *text = (char*)rubraview_alloc(131072);
                     if (!text) break;
                     rubraview_grid_selection_t all = { true, 0, 0, (int32_t)app->help_count, INT32_MAX / 2 };
                     size_t n = rubraview_grid_selection_copy(app->help_sel.active ? &app->help_sel : &all,
                                                              app->help_rows, (int32_t)app->help_count, text, 131072);
                     bool ok = n > 0 && rubraview_pal_clipboard_set_text(app->help_window, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n });
-                    snprintf(app->help_message, sizeof(app->help_message), "%s",
-                             ok ? (app->help_sel.active ? T("copied") : T("copied everything")) : T("nothing to copy"));
-                    free(text);
+                    rubraview_fmt(app->help_message, sizeof(app->help_message), "{}",
+                             PROVEN_ARG(ok ? (app->help_sel.active ? T("copied") : T("copied everything")) : T("nothing to copy")));
+                    rubraview_free(text);
                     app->help_dirty = true;
                     break;
                 }

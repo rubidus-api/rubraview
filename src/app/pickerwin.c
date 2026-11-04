@@ -244,20 +244,20 @@ proven_u8str_view_t picker_tool_label(const app_state_t *app, int which, char *b
     bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
     int n = 0;
     switch (which) {
-        case PICKER_TOOL_EXT:        n = snprintf(buf, cap, ".ext \xE2\x96\xBE"); break;   /* RV-204 */
-        case PICKER_TOOL_ALL:        n = snprintf(buf, cap, "%s", T("All")); break;
-        case PICKER_TOOL_INDIVIDUAL: n = snprintf(buf, cap, "%s", T("Individual")); break;
-        case PICKER_TOOL_RANGE:      n = snprintf(buf, cap, "%s", T("Range")); break;
-        case PICKER_TOOL_SAME:       n = snprintf(buf, cap, "%s", T("Same type")); break;
-        case PICKER_TOOL_MEDIA:      n = snprintf(buf, cap, "%s", T("Media")); break;
-        case PICKER_TOOL_SHAPE:      n = snprintf(buf, cap, "%s \xE2\x96\xBE", T("Shape")); break;   /* RV-192 */
+        case PICKER_TOOL_EXT:        n = rubraview_fmt(buf, cap, ".ext \xE2\x96\xBE"); break;   /* RV-204 */
+        case PICKER_TOOL_ALL:        n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("All"))); break;
+        case PICKER_TOOL_INDIVIDUAL: n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Individual"))); break;
+        case PICKER_TOOL_RANGE:      n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Range"))); break;
+        case PICKER_TOOL_SAME:       n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Same type"))); break;
+        case PICKER_TOOL_MEDIA:      n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Media"))); break;
+        case PICKER_TOOL_SHAPE:      n = rubraview_fmt(buf, cap, "{} \xE2\x96\xBE", PROVEN_ARG(T("Shape"))); break;   /* RV-192 */
         case PICKER_TOOL_SORT:
-            n = snprintf(buf, cap, "%s \xE2\x96\xBE", key >= 0 && key < RUBRAVIEW_PICKER_SORT_COUNT
-                                                       ? rubraview_picker_sort_name((rubraview_picker_sort_key_t)key) : T("Sort by"));
+            n = rubraview_fmt(buf, cap, "{} \xE2\x96\xBE", PROVEN_ARG(key >= 0 && key < RUBRAVIEW_PICKER_SORT_COUNT
+                                                       ? rubraview_picker_sort_name((rubraview_picker_sort_key_t)key) : T("Sort by")));
             break;
-        case PICKER_TOOL_ORDER:      n = snprintf(buf, cap, "%s \xE2\x96\xBE", desc ? T("Falling") : T("Rising")); break;
-        case PICKER_TOOL_VIEW:       n = snprintf(buf, cap, "%s", picker_details(app) ? T("Tiles") : T("Details")); break;
-        case PICKER_TOOL_SHOWN:      n = snprintf(buf, cap, "%s", picker_every_file(app) ? T("Every file") : T("Viewer's files")); break;
+        case PICKER_TOOL_ORDER:      n = rubraview_fmt(buf, cap, "{} \xE2\x96\xBE", PROVEN_ARG(desc ? T("Falling") : T("Rising"))); break;
+        case PICKER_TOOL_VIEW:       n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(picker_details(app) ? T("Tiles") : T("Details"))); break;
+        case PICKER_TOOL_SHOWN:      n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(picker_every_file(app) ? T("Every file") : T("Viewer's files"))); break;
         default: break;
     }
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
@@ -284,7 +284,7 @@ void picker_thumbs_free(app_state_t *app) {
     for (size_t i = 0; i < app->picker_thumb_count; ++i) {
         if (app->picker_thumbs[i].texture) rubraview_pal_texture_destroy(app->picker_thumbs[i].texture);
     }
-    free(app->picker_thumbs);
+    rubraview_free(app->picker_thumbs);
     app->picker_thumbs = NULL;
     app->picker_thumb_count = 0;
 }
@@ -324,7 +324,7 @@ static void picker_reinstall(app_state_t *app) {
     app->picker_generation++;
     if (app->thumbs) rubraview_pal_thumbs_generation(app->thumbs, app->picker_generation);
     size_t n = app->picker_listing.count;
-    app->picker_thumbs = (struct picker_thumb *)calloc(n ? n : 1, sizeof(*app->picker_thumbs));
+    app->picker_thumbs = (struct picker_thumb *)rubraview_alloc_zero(n ? n : 1, sizeof(*app->picker_thumbs));
     app->picker_thumb_count = app->picker_thumbs ? n : 0;
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
@@ -348,9 +348,9 @@ static void picker_filter_sync(app_state_t *app) {
 }
 
 static void picker_filter_free(app_state_t *app) {
-    free(app->picker_filtered); app->picker_filtered = NULL;
-    free(app->picker_filtered_selected); app->picker_filtered_selected = NULL;
-    free(app->picker_map); app->picker_map = NULL;
+    rubraview_free(app->picker_filtered); app->picker_filtered = NULL;
+    rubraview_free(app->picker_filtered_selected); app->picker_filtered_selected = NULL;
+    rubraview_free(app->picker_map); app->picker_map = NULL;
 }
 
 /* A folder read: it is the whole of what a filter is taken from; no filter yet. */
@@ -376,7 +376,7 @@ void picker_filter_set(app_state_t *app, proven_u8str_view_t text) {
     picker_filter_sync(app);
     picker_filter_free(app);
     size_t keep = text.size < sizeof(app->picker_filter) ? text.size : sizeof(app->picker_filter) - 1;
-    memcpy(app->picker_filter, text.ptr, keep);
+    proven_sys_mem_copy(app->picker_filter, text.ptr, keep);
     app->picker_filter[keep] = '\0';
     if (keep == 0) {
         app->picker_listing = app->picker_full;
@@ -385,9 +385,9 @@ void picker_filter_set(app_state_t *app, proven_u8str_view_t text) {
         return;
     }
     size_t n = app->picker_full.count;
-    app->picker_filtered = (rubraview_fs_entry_t *)malloc((n ? n : 1) * sizeof(rubraview_fs_entry_t));
-    app->picker_filtered_selected = (bool *)calloc(n ? n : 1, sizeof(bool));
-    app->picker_map = (size_t *)malloc((n ? n : 1) * sizeof(size_t));
+    app->picker_filtered = (rubraview_fs_entry_t *)rubraview_alloc((n ? n : 1) * sizeof(rubraview_fs_entry_t));
+    app->picker_filtered_selected = (bool *)rubraview_alloc_zero(n ? n : 1, sizeof(bool));
+    app->picker_map = (size_t *)rubraview_alloc((n ? n : 1) * sizeof(size_t));
     if (!app->picker_filtered || !app->picker_filtered_selected || !app->picker_map) {
         picker_filter_free(app);
         app->picker_filter[0] = '\0';
@@ -435,8 +435,8 @@ void picker_filter_follow(app_state_t *app) {
 
 /* The filter's chip at the path bar's right end: the words, and where its X is. */
 rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, double dpi, proven_u8str_view_t *out_label, char *buf, size_t cap) {
-    int n = app->picker_filter[0] ? snprintf(buf, cap, T("Filter: %s   \xC3\x97"), app->picker_filter)
-                                  : snprintf(buf, cap, "%s", T("Filter names (Ctrl+F)"));
+    int n = app->picker_filter[0] ? rubraview_fmt(buf, cap, T("Filter: {}   \xC3\x97"), PROVEN_ARG(app->picker_filter))
+                                  : rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Filter names (Ctrl+F)")));
     *out_label = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
     double w = picker_chip_width(*out_label, dpi);
     double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
@@ -480,7 +480,7 @@ void picker_select_everything(app_state_t *app) {
     }
     for (size_t i = 0; i < app->picker_listing.count; ++i) app->picker_selected[i] = !all && !picker_is_up(app, i);
     char line[64];
-    int k = all ? snprintf(line, sizeof(line), "%s", T("nothing picked")) : snprintf(line, sizeof(line), T("%zu picked"), rows);
+    int k = all ? rubraview_fmt(line, sizeof(line), "{}", PROVEN_ARG(T("nothing picked"))) : rubraview_fmt(line, sizeof(line), T("{} picked"), PROVEN_ARG((size_t)rows));
     if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
 }
 
@@ -503,7 +503,7 @@ static void picker_select_media(app_state_t *app) {
         if (!e->is_directory && rubraview_glob_match_list(e->name, cstr(KINDS))) app->picker_selected[i] = pick;
     }
     char line[96];
-    int k = snprintf(line, sizeof(line), pick ? T("%zu pictures, films, songs and texts picked") : T("%zu let go"), found);
+    int k = rubraview_fmt(line, sizeof(line), pick ? T("{} pictures, films, songs and texts picked") : T("{} let go"), PROVEN_ARG((size_t)found));
     if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
 }
 
@@ -513,7 +513,7 @@ void picker_add_to_list(app_state_t *app) {
     size_t n = picker_picked_entries(app, &entries);
     if (n == 0) { osd_say(app, TU8("pick some files first")); return; }
     size_t cap = 4096, count = 0;
-    proven_u8str_view_t *paths = (proven_u8str_view_t *)malloc(cap * sizeof(proven_u8str_view_t));
+    proven_u8str_view_t *paths = (proven_u8str_view_t *)rubraview_alloc(cap * sizeof(proven_u8str_view_t));
     if (!paths) return;
     char kinds_buf[1024];
     const char *const KINDS = (const char * const)kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER).ptr;
@@ -528,15 +528,15 @@ void picker_add_to_list(app_state_t *app) {
             if (!e->is_directory && rubraview_glob_match_list(e->name, cstr(KINDS))) paths[count++] = e->path;
         }
     }
-    if (count == 0) { free(paths); osd_say(app, TU8("nothing in them to add")); return; }
+    if (count == 0) { rubraview_free(paths); osd_say(app, TU8("nothing in them to add")); return; }
     bool closing = app->picker_add_mode;
     if (closing) { app->picker_open = false; app->picker_add_mode = false; }
     listwin_sync(app);
     list_insert_paths(app, paths, count, page_count(app));
     char line[64];
-    int k = snprintf(line, sizeof(line), T("%zu added to the list"), count);
+    int k = rubraview_fmt(line, sizeof(line), T("{} added to the list"), PROVEN_ARG((size_t)count));
     if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
-    free(paths);
+    rubraview_free(paths);
 }
 
 /* The whole paths of what is picked, a line each, to the clipboard. */
@@ -546,16 +546,16 @@ void picker_copy_paths(app_state_t *app) {
     if (n == 0) return;
     size_t len = 0;
     for (size_t i = 0; i < n; ++i) len += entries[i].path.size + 2u;
-    char *text = (char *)malloc(len + 1u);
+    char *text = (char *)rubraview_alloc(len + 1u);
     if (!text) return;
     size_t at = 0;
     for (size_t i = 0; i < n; ++i) {
-        memcpy(text + at, entries[i].path.ptr, entries[i].path.size);
+        proven_sys_mem_copy(text + at, entries[i].path.ptr, entries[i].path.size);
         at += entries[i].path.size;
         if (i + 1 < n) { text[at++] = '\r'; text[at++] = '\n'; }
     }
     bool ok = rubraview_pal_clipboard_set_text(app->window, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = at });
-    free(text);
+    rubraview_free(text);
     osd_say(app, ok ? (n == 1 ? TU8("its whole path is on the clipboard") : TU8("their whole paths are on the clipboard"))
                     : TU8("the clipboard would not take it"));
 }
@@ -642,13 +642,13 @@ static void picker_open_picked(app_state_t *app) {
         else shell++;
     }
     char line[160];
-    int k = files == 0 ? snprintf(line, sizeof(line), T("%zu opened in their Windows programs"), shell)
-          : shell == 0 ? snprintf(line, sizeof(line), T("%zu files opened together"), files)
-                       : snprintf(line, sizeof(line), T("%zu files opened together, %zu in their Windows programs"), files, shell);
+    int k = files == 0 ? rubraview_fmt(line, sizeof(line), T("{} opened in their Windows programs"), PROVEN_ARG((size_t)shell))
+          : shell == 0 ? rubraview_fmt(line, sizeof(line), T("{} files opened together"), PROVEN_ARG((size_t)files))
+                       : rubraview_fmt(line, sizeof(line), T("{} files opened together, {} in their Windows programs"), PROVEN_ARG((size_t)files), PROVEN_ARG((size_t)shell));
     if (k > 0 && (size_t)k < sizeof line && refused > 0)
-        k += snprintf(line + k, sizeof line - (size_t)k, T(";  %zu not opened (programs, or Windows would not)"), refused);
+        k += rubraview_fmt(line + k, sizeof line - (size_t)k, T(";  {} not opened (programs, or Windows would not)"), PROVEN_ARG((size_t)refused));
     if (k > 0 && (size_t)k < sizeof line && others > PICKER_SHELL_OPEN_MAX)
-        k += snprintf(line + k, sizeof line - (size_t)k, T(";  only the first %d of the others"), PICKER_SHELL_OPEN_MAX);
+        k += rubraview_fmt(line + k, sizeof line - (size_t)k, T(";  only the first {} of the others"), PROVEN_ARG((int)PICKER_SHELL_OPEN_MAX));
     if (k >= (int)sizeof line) k = (int)sizeof line - 1;
     if (files == 0) {
         if (others == 0) osd_say(app, TU8("pick some files first"));   /* folders alone */
@@ -721,7 +721,7 @@ void picker_button(app_state_t *app, picker_button_t button) {
                 rubraview_picker_set_mode(&app->picker, RUBRAVIEW_PICK_INDIVIDUAL);
             }
             size_t n = rubraview_picker_select_extension(&app->picker, ext, true);
-            int written = snprintf(line, sizeof(line), T("%zu %.*s file(s) picked"), n, (int)ext.size, ext.ptr);
+            int written = rubraview_fmt(line, sizeof(line), T("{} {} file(s) picked"), PROVEN_ARG((size_t)n), PROVEN_ARG(rubraview_bytes_view(ext.ptr, (int)ext.size)));
             if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
             break;
         }
@@ -756,7 +756,7 @@ void picker_button(app_state_t *app, picker_button_t button) {
             } else {
                 if (app->picker.mode == RUBRAVIEW_PICK_SINGLE) rubraview_picker_set_mode(&app->picker, RUBRAVIEW_PICK_INDIVIDUAL);
                 char line[48];
-                int k = snprintf(line, sizeof(line), T("%zu files picked"), rubraview_picker_select_all(&app->picker));
+                int k = rubraview_fmt(line, sizeof(line), T("{} files picked"), PROVEN_ARG((size_t)(rubraview_picker_select_all(&app->picker))));
                 if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
             }
             break;
@@ -813,14 +813,14 @@ void picker_open(app_state_t *app) {
 /* RV-207: into an archive, its whole tree listed as folders and files, without reading it (owner: "압축파일 열기";
    right-click Look inside, or Shift+Enter). A picture or a film in it opens the book there. */
 bool picker_enter_archive(app_state_t *app, proven_u8str_view_t path) {
-    char *p = malloc(path.size + 1);
-    rubraview_archive_index_t *ix = calloc(1, sizeof *ix);
-    if (!p || !ix) { free(p); free(ix); return false; }
-    memcpy(p, path.ptr, path.size);
+    char *p = rubraview_alloc(path.size + 1);
+    rubraview_archive_index_t *ix = rubraview_alloc_zero(1, sizeof *ix);
+    if (!p || !ix) { rubraview_free(p); rubraview_free(ix); return false; }
+    proven_sys_mem_copy(p, path.ptr, path.size);
     p[path.size] = '\0';
     rubraview_archive_result_t r = (rubraview_archive_result_t)picker_index_read(app, p, app->archive_codepage, ix);   /* names locked: the session's passwords */
     if (r != RUBRAVIEW_ARCHIVE_DONE) {
-        free(p); free(ix);
+        rubraview_free(p); rubraview_free(ix);
         osd_say(app, r == RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED || r == RUBRAVIEW_ARCHIVE_PASSWORD_WRONG
                      ? TU8("its names are locked: extract it, and its password is asked") : TU8("that archive cannot be read"));
         return false;
@@ -845,7 +845,7 @@ bool picker_enter_book(app_state_t *app, size_t index) {
 static bool archive_has_nothing_to_show(app_state_t *app, proven_u8str_view_t path) {
     char p[RUBRAVIEW_ARCHIVE_PATH];
     if (path.size >= sizeof p) return false;
-    memcpy(p, path.ptr, path.size);
+    proven_sys_mem_copy(p, path.ptr, path.size);
     p[path.size] = '\0';
     rubraview_archive_index_t ix;
     if (rubraview_archive_index_read(p, app->archive_codepage, NULL, &ix) != RUBRAVIEW_ARCHIVE_DONE) return false;
@@ -869,10 +869,10 @@ static void archive_open_entry(app_state_t *app, const rubraview_fs_entry_t *ent
     }
     proven_u8str_view_t archive = app_keep(app, proven_u8str_view_from_cstr(app->picker_arc_path));
     /* opened there by open_path, now or after its password is typed */
-    free(app->open_wanted_archive);
-    free(app->open_wanted_entry);
-    app->open_wanted_archive = strdup(app->picker_arc_path);
-    app->open_wanted_entry = strdup(rel);
+    rubraview_free(app->open_wanted_archive);
+    rubraview_free(app->open_wanted_entry);
+    app->open_wanted_archive = rubraview_strdup(app->picker_arc_path);
+    app->open_wanted_entry = rubraview_strdup(rel);
     app->picker_open = false;
     open_path(app, archive);
 }

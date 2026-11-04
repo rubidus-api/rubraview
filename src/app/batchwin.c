@@ -9,16 +9,14 @@
    file, and they are read back through the command line's own parser. */
 
 
-static void batch_token(batch_tokens_t *tk, const char *format, ...) {
+static void batch_token_args(batch_tokens_t *tk, const char *format, const proven_arg_t *fmt_args, size_t fmt_count) {
     if (tk->n >= sizeof(tk->v) / sizeof(tk->v[0]) || tk->used >= sizeof(tk->store)) return;
-    va_list ap;
-    va_start(ap, format);
-    int n = vsnprintf(tk->store + tk->used, sizeof(tk->store) - tk->used, format, ap);
-    va_end(ap);
+    int n = rubraview_fmt_length(proven_fmt_to_internal(tk->store + tk->used, sizeof(tk->store) - tk->used, format, fmt_args, fmt_count));
     if (n <= 0 || (size_t)n >= sizeof(tk->store) - tk->used) return;
     tk->v[tk->n++] = tk->store + tk->used;
     tk->used += (size_t)n + 1;
 }
+#define batch_token(tk, format, ...) batch_token_args(tk, format, RUBRAVIEW_FMT_ARGS(__VA_ARGS__))
 
 static const char *const BATCH_FILTER_WORDS[4] = { "nearest", "bilinear", "bicubic", "lanczos3" };
 static const uint32_t BATCH_FRAME_RGB[3] = { 0xFFFFFF, 0x000000, 0x808080 };
@@ -28,89 +26,89 @@ void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk) {
     tk->n = 0; tk->used = 0;
     /* RV-187 (D-220): Edit's steps first; what they run (gmic.exe, the plug-ins) as the viewer has it */
     if (b->steps_from > 0 && b->steps_file[0]) {
-        batch_token(tk, "--steps=%s", b->steps_file);
-        if (g_gmic_exe[0]) batch_token(tk, "--gmic-exe=%s", g_gmic_exe);
-        if (g_plugin_folder[0]) batch_token(tk, "--plugin-folder=%s", g_plugin_folder);
+        batch_token(tk, "--steps={}", PROVEN_ARG(b->steps_file));
+        if (g_gmic_exe[0]) batch_token(tk, "--gmic-exe={}", PROVEN_ARG(g_gmic_exe));
+        if (g_plugin_folder[0]) batch_token(tk, "--plugin-folder={}", PROVEN_ARG(g_plugin_folder));
     }
     double v = b->size_value;
     switch (b->size_by) {
-        case 1: if (fabs(v - 100.0) > 0.001) batch_token(tk, "--resize=%g%%", v); break;
-        case 2: batch_token(tk, "--resize=l%d", (int)lround(v)); break;
-        case 3: batch_token(tk, "--resize=s%d", (int)lround(v)); break;
-        case 4: batch_token(tk, "--resize=w%d", (int)lround(v)); break;
-        case 5: batch_token(tk, "--resize=h%d", (int)lround(v)); break;
-        case 6: batch_token(tk, "--resize=%dx%d", (int)lround(v), (int)lround(b->box_h)); break;
-        case 7: batch_token(tk, "--resize=%gmp", v); break;
+        case 1: if (fabs(v - 100.0) > 0.001) batch_token(tk, "--resize={}%", PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(v), 6))); break;
+        case 2: batch_token(tk, "--resize=l{}", PROVEN_ARG((int)lround(v))); break;
+        case 3: batch_token(tk, "--resize=s{}", PROVEN_ARG((int)lround(v))); break;
+        case 4: batch_token(tk, "--resize=w{}", PROVEN_ARG((int)lround(v))); break;
+        case 5: batch_token(tk, "--resize=h{}", PROVEN_ARG((int)lround(v))); break;
+        case 6: batch_token(tk, "--resize={}x{}", PROVEN_ARG((int)lround(v)), PROVEN_ARG((int)lround(b->box_h))); break;
+        case 7: batch_token(tk, "--resize={}mp", PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(v), 6))); break;
         default: break;
     }
     if (tk->n > 0) {
-        if (b->filter >= 0 && b->filter <= 3) batch_token(tk, "--filter=%s", BATCH_FILTER_WORDS[b->filter]);
+        if (b->filter >= 0 && b->filter <= 3) batch_token(tk, "--filter={}", PROVEN_ARG(BATCH_FILTER_WORDS[b->filter]));
         if (b->linear) batch_token(tk, "--linear");
         if (b->no_enlarge) batch_token(tk, "--no-enlarge");
     }
-    if (b->sharpen > 0.5) batch_token(tk, "--sharpen=%d", (int)lround(b->sharpen));
-    if (b->rotate >= 1 && b->rotate <= 3) batch_token(tk, "--rotate=%d", b->rotate * 90);
+    if (b->sharpen > 0.5) batch_token(tk, "--sharpen={}", PROVEN_ARG((int)lround(b->sharpen)));
+    if (b->rotate >= 1 && b->rotate <= 3) batch_token(tk, "--rotate={}", PROVEN_ARG((int)(b->rotate * 90)));
     if (b->rotate == 4) batch_token(tk, "--rotate=exif");
     if (b->flip == 1) batch_token(tk, "--flip=h");
     if (b->flip == 2) batch_token(tk, "--flip=v");
-    if (b->crop[0]) batch_token(tk, "--crop=%s", b->crop);
+    if (b->crop[0]) batch_token(tk, "--crop={}", PROVEN_ARG(b->crop));
     if (b->autocrop) batch_token(tk, "--autocrop");
     if (b->auto_colour) batch_token(tk, "--auto-colour");
     if (b->grayscale) batch_token(tk, "--grayscale");
     if (b->negative) batch_token(tk, "--negative");
     if (b->effect > 0 && b->effect < RUBRAVIEW_EFFECT_COUNT)
-        batch_token(tk, "--effect=%s:%g", rubraview_effect_key((rubraview_effect_t)b->effect), b->effect_amount);
-    if (b->canvas[0]) batch_token(tk, "--canvas=%s,%06X", b->canvas, (unsigned)BATCH_FRAME_RGB[b->frame_colour % 3]);
-    if (b->border > 0.5) batch_token(tk, "--border=%d,%06X", (int)lround(b->border), (unsigned)BATCH_FRAME_RGB[b->frame_colour % 3]);
-    if (b->mark[0]) batch_token(tk, "--watermark=%s,%s,%d", b->mark, (const char *[]){ "br", "bl", "tr", "tl", "c" }[b->mark_corner % 5],
-                                (int)lround(b->mark_opacity));
+        batch_token(tk, "--effect={}:{}", PROVEN_ARG(rubraview_effect_key((rubraview_effect_t)b->effect)), PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(b->effect_amount), 6)));
+    if (b->canvas[0]) batch_token(tk, "--canvas={},{:06X}", PROVEN_ARG(b->canvas), PROVEN_ARG((unsigned)BATCH_FRAME_RGB[b->frame_colour % 3]));
+    if (b->border > 0.5) batch_token(tk, "--border={},{:06X}", PROVEN_ARG((int)lround(b->border)), PROVEN_ARG((unsigned)BATCH_FRAME_RGB[b->frame_colour % 3]));
+    if (b->mark[0]) batch_token(tk, "--watermark={},{},{}", PROVEN_ARG(b->mark), PROVEN_ARG(((const char *[]){ "br", "bl", "tr", "tl", "c" }[b->mark_corner % 5])),
+                                PROVEN_ARG((int)lround(b->mark_opacity)));
     if (b->text[0]) {
         static const uint32_t TEXT_RGB[3] = { 0xFFFFFF, 0x000000, 0xFFD400 };
-        batch_token(tk, "--text=%s,%s,%d,%06X", b->text, (const char *[]){ "br", "bl", "tr", "tl", "c" }[b->text_corner % 5],
-                    (int)lround(b->text_size), (unsigned)TEXT_RGB[b->text_colour % 3]);
+        batch_token(tk, "--text={},{},{},{:06X}", PROVEN_ARG(b->text), PROVEN_ARG(((const char *[]){ "br", "bl", "tr", "tl", "c" }[b->text_corner % 5])),
+                    PROVEN_ARG((int)lround(b->text_size)), PROVEN_ARG((unsigned)TEXT_RGB[b->text_colour % 3]));
     }
-    if (b->dpi >= 1.0) batch_token(tk, "--dpi=%d", (int)lround(b->dpi));
+    if (b->dpi >= 1.0) batch_token(tk, "--dpi={}", PROVEN_ARG((int)lround(b->dpi)));
     if (b->format > 0 && b->format < RUBRAVIEW_EXPORT_FORMATS) {
         proven_u8str_view_t ext = rubraview_export_extension((rubraview_export_format_t)b->format);
-        batch_token(tk, "--format=%.*s", (int)ext.size, ext.ptr);
+        batch_token(tk, "--format={}", PROVEN_ARG(rubraview_bytes_view(ext.ptr, (int)ext.size)));
     }
-    if (b->quality >= 1.0 && fabs(b->quality - 90.0) > 0.5) batch_token(tk, "--quality=%d", (int)lround(b->quality));
+    if (b->quality >= 1.0 && fabs(b->quality - 90.0) > 0.5) batch_token(tk, "--quality={}", PROVEN_ARG((int)lround(b->quality)));
     {   /* RV-140, 1.17.0: what differs from how they come, in the command line's words */
         const rubraview_export_options_t *o = &b->more, d = rubraview_export_defaults();
         static const char *const DEPTHS[] = { "rgba", "rgb", "palette", "gray" }, *const SUBS[] = { "auto", "420", "422", "444" };
         static const char *const FILTERS[] = { "level", "none", "sub", "up", "average", "paeth", "adaptive" };
         static const char *const TIFFS[] = { "auto", "none", "lzw", "zip" }, *const BMPS[] = { "32", "24", "8" }, *const KEEP[] = { "drop", "file", "txt" };
         if (o->jpeg_progressive) batch_token(tk, "--progressive");
-        if (o->png_depth != d.png_depth && (unsigned)o->png_depth < 4u) batch_token(tk, "--png-depth=%s", DEPTHS[o->png_depth]);
+        if (o->png_depth != d.png_depth && (unsigned)o->png_depth < 4u) batch_token(tk, "--png-depth={}", PROVEN_ARG(DEPTHS[o->png_depth]));
         if (o->webp_lossless) batch_token(tk, "--lossless");
-        if (o->webp_effort != d.webp_effort) batch_token(tk, "--effort=%d", (int)o->webp_effort);
-        if (o->jpeg_subsampling != d.jpeg_subsampling && (unsigned)o->jpeg_subsampling < 4u) batch_token(tk, "--subsampling=%s", SUBS[o->jpeg_subsampling]);
+        if (o->webp_effort != d.webp_effort) batch_token(tk, "--effort={}", PROVEN_ARG((int)o->webp_effort));
+        if (o->jpeg_subsampling != d.jpeg_subsampling && (unsigned)o->jpeg_subsampling < 4u) batch_token(tk, "--subsampling={}", PROVEN_ARG(SUBS[o->jpeg_subsampling]));
         if (o->jpeg_grey) batch_token(tk, "--grey-jpeg");
         if (o->jpeg_optimise) batch_token(tk, "--optimise");
-        if (o->jpeg_restart_rows > 0) batch_token(tk, "--restart=%d", (int)o->jpeg_restart_rows);
-        if (o->png_filter != d.png_filter && (unsigned)o->png_filter < 7u) batch_token(tk, "--png-filter=%s", FILTERS[o->png_filter]);
+        if (o->jpeg_restart_rows > 0) batch_token(tk, "--restart={}", PROVEN_ARG((int)o->jpeg_restart_rows));
+        if (o->png_filter != d.png_filter && (unsigned)o->png_filter < 7u) batch_token(tk, "--png-filter={}", PROVEN_ARG(FILTERS[o->png_filter]));
         if (o->png_interlace) batch_token(tk, "--interlace");
-        if (o->colours != d.colours) batch_token(tk, "--colours=%d", (int)o->colours);
+        if (o->colours != d.colours) batch_token(tk, "--colours={}", PROVEN_ARG((int)o->colours));
         if (!o->dither) batch_token(tk, "--no-dither");
-        if (o->tiff_compression != d.tiff_compression && (unsigned)o->tiff_compression < 4u) batch_token(tk, "--tiff=%s", TIFFS[o->tiff_compression]);
-        if (o->bmp_depth != d.bmp_depth && (unsigned)o->bmp_depth < 3u) batch_token(tk, "--bmp=%s", BMPS[o->bmp_depth]);
-        if (o->webp_near_lossless != d.webp_near_lossless) batch_token(tk, "--near-lossless=%d", (int)o->webp_near_lossless);
-        if (o->webp_alpha_quality != d.webp_alpha_quality) batch_token(tk, "--alpha-quality=%d", (int)o->webp_alpha_quality);
+        if (o->tiff_compression != d.tiff_compression && (unsigned)o->tiff_compression < 4u) batch_token(tk, "--tiff={}", PROVEN_ARG(TIFFS[o->tiff_compression]));
+        if (o->bmp_depth != d.bmp_depth && (unsigned)o->bmp_depth < 3u) batch_token(tk, "--bmp={}", PROVEN_ARG(BMPS[o->bmp_depth]));
+        if (o->webp_near_lossless != d.webp_near_lossless) batch_token(tk, "--near-lossless={}", PROVEN_ARG((int)o->webp_near_lossless));
+        if (o->webp_alpha_quality != d.webp_alpha_quality) batch_token(tk, "--alpha-quality={}", PROVEN_ARG((int)o->webp_alpha_quality));
         if (o->webp_sharp_yuv) batch_token(tk, "--sharp-yuv");
-        if (o->keep_details != d.keep_details && (unsigned)o->keep_details < 3u) batch_token(tk, "--details=%s", KEEP[o->keep_details]);
+        if (o->keep_details != d.keep_details && (unsigned)o->keep_details < 3u) batch_token(tk, "--details={}", PROVEN_ARG(KEEP[o->keep_details]));
         static const char *const PRESETS[] = { "none", "picture", "photo", "drawing", "icon", "text" };
-        if (o->webp_preset > 0 && o->webp_preset < 6) batch_token(tk, "--webp-preset=%s", PRESETS[o->webp_preset]);
+        if (o->webp_preset > 0 && o->webp_preset < 6) batch_token(tk, "--webp-preset={}", PROVEN_ARG(PRESETS[o->webp_preset]));
         if (o->avif_chroma == 1) batch_token(tk, "--avif-chroma=444");   /* 1.31.0 */
         if (o->avif_bits == 10) batch_token(tk, "--avif-bits=10");
-        if (o->target_kb > 0) batch_token(tk, "--target-kb=%d", (int)o->target_kb);
+        if (o->target_kb > 0) batch_token(tk, "--target-kb={}", PROVEN_ARG((int)o->target_kb));
         if (o->tiff_cmyk) batch_token(tk, "--cmyk");
     }
     if (b->privacy) batch_token(tk, "--privacy-clean");
-    if (b->name[0] && strcmp(b->name, "{name}.{ext}") != 0) batch_token(tk, "--name=%s", b->name);
-    if (b->start > 1.5) batch_token(tk, "--start=%d", (int)lround(b->start));
+    if (b->name[0] && rubraview_cstr_cmp(b->name, "{name}.{ext}") != 0) batch_token(tk, "--name={}", PROVEN_ARG(b->name));
+    if (b->start > 1.5) batch_token(tk, "--start={}", PROVEN_ARG((int)lround(b->start)));
     for (size_t r = 0; r < RUBRAVIEW_BATCH_MAX_REPLACES; ++r)   /* RV-194: several, in order */
-        if (b->replace[r][0] && strchr(b->replace[r], ',') && b->replace[r][0] != ',') batch_token(tk, "--replace=%s", b->replace[r]);
-    if (b->n_step > 1.5) batch_token(tk, "--n-step=%d", (int)lround(b->n_step));
+        if (b->replace[r][0] && rubraview_cstr_chr(b->replace[r], ',') && b->replace[r][0] != ',') batch_token(tk, "--replace={}", PROVEN_ARG(b->replace[r]));
+    if (b->n_step > 1.5) batch_token(tk, "--n-step={}", PROVEN_ARG((int)lround(b->n_step)));
     if (b->name_case == 1) batch_token(tk, "--case=lower");
     if (b->name_case == 2) batch_token(tk, "--case=upper");
     if (b->no_spaces) batch_token(tk, "--no-spaces");
@@ -119,14 +117,14 @@ void batch_tokens(const struct batch_ui *b, batch_tokens_t *tk) {
     if (b->keep_dates) batch_token(tk, "--keep-dates");
     if (b->recursive) batch_token(tk, "--recursive");
     if (b->subfolders) batch_token(tk, "--subfolders");
-    if (b->out[0]) batch_token(tk, "--out=%s", b->out);
+    if (b->out[0]) batch_token(tk, "--out={}", PROVEN_ARG(b->out));
 }
 
 static void batch_defaults(struct batch_ui *b) {
     *b = (struct batch_ui){ .loaded = true, .size_by = 0, .size_value = 100.0, .box_h = 1080.0, .filter = 3, .effect_amount = 0.0,
                             .mark_corner = 0, .mark_opacity = 50.0, .quality = 90.0, .start = 1.0, .text_size = 4.0,
                             .n_step = 1.0, .digits = 1.0, .p_name = true };
-    snprintf(b->name, sizeof(b->name), "%s", "{name}.{ext}");
+    rubraview_fmt(b->name, sizeof(b->name), "{}", PROVEN_ARG("{name}.{ext}"));
     b->more = rubraview_export_defaults();
 }
 
@@ -172,17 +170,17 @@ static bool batch_from_text(app_state_t *app, struct batch_ui *b, proven_u8str_v
             b->privacy = true;
         } else if (a->kind == RUBRAVIEW_BATCH_EXTRA) {
             const rubraview_batch_extra_params_t *x = &a->params.extra;
-            if (x->crop) snprintf(b->crop, sizeof(b->crop), "%d,%d,%d,%d", (int)x->crop_x, (int)x->crop_y, (int)x->crop_w, (int)x->crop_h);
+            if (x->crop) rubraview_fmt(b->crop, sizeof(b->crop), "{},{},{},{}", PROVEN_ARG((int)x->crop_x), PROVEN_ARG((int)x->crop_y), PROVEN_ARG((int)x->crop_w), PROVEN_ARG((int)x->crop_h));
             b->autocrop = x->autocrop; b->auto_colour = x->auto_colour; b->negative = x->negative;
             b->effect = x->effect; b->effect_amount = x->effect_amount;
-            if (x->canvas_w > 0) snprintf(b->canvas, sizeof(b->canvas), "%dx%d", (int)x->canvas_w, (int)x->canvas_h);
+            if (x->canvas_w > 0) rubraview_fmt(b->canvas, sizeof(b->canvas), "{}x{}", PROVEN_ARG((int)x->canvas_w), PROVEN_ARG((int)x->canvas_h));
             b->border = x->border_px;
             uint32_t rgb = x->border_px > 0 ? x->border_rgb : x->canvas_rgb;
             b->frame_colour = rgb == 0 ? 1 : rgb == 0x808080 ? 2 : 0;
-            if (x->watermark.size > 0) snprintf(b->mark, sizeof(b->mark), "%.*s", (int)x->watermark.size, x->watermark.ptr);
+            if (x->watermark.size > 0) rubraview_fmt(b->mark, sizeof(b->mark), "{}", PROVEN_ARG(rubraview_bytes_view(x->watermark.ptr, (int)x->watermark.size)));
             b->mark_corner = (int32_t)x->watermark_corner; b->mark_opacity = x->watermark_opacity;
             if (x->text.size > 0) {
-                snprintf(b->text, sizeof(b->text), "%.*s", (int)x->text.size, x->text.ptr);
+                rubraview_fmt(b->text, sizeof(b->text), "{}", PROVEN_ARG(rubraview_bytes_view(x->text.ptr, (int)x->text.size)));
                 b->text_corner = (int32_t)x->text_corner; b->text_size = x->text_size;
                 b->text_colour = x->text_rgb == 0 ? 1 : x->text_rgb == 0xFFD400 ? 2 : 0;
             }
@@ -193,21 +191,21 @@ static bool batch_from_text(app_state_t *app, struct batch_ui *b, proven_u8str_v
     if (r.export_options.jpeg_quality > 0) b->quality = r.export_options.jpeg_quality;
     b->dpi = r.export_options.dpi;
     b->more = r.export_options;
-    if (r.job.naming_pattern.size > 0) snprintf(b->name, sizeof(b->name), "%.*s", (int)r.job.naming_pattern.size, r.job.naming_pattern.ptr);
+    if (r.job.naming_pattern.size > 0) rubraview_fmt(b->name, sizeof(b->name), "{}", PROVEN_ARG(rubraview_bytes_view(r.job.naming_pattern.ptr, (int)r.job.naming_pattern.size)));
     b->start = r.job.counter_start > 0 ? r.job.counter_start : 1;
     for (size_t k = 0; k < r.job.replace_count && k < RUBRAVIEW_BATCH_MAX_REPLACES; ++k)
-        snprintf(b->replace[k], sizeof(b->replace[k]), "%.*s,%.*s", (int)r.job.replaces[k].from.size, r.job.replaces[k].from.ptr,
-                 (int)r.job.replaces[k].to.size, r.job.replaces[k].to.ptr);
+        rubraview_fmt(b->replace[k], sizeof(b->replace[k]), "{},{}", PROVEN_ARG(rubraview_bytes_view(r.job.replaces[k].from.ptr, (int)r.job.replaces[k].from.size)),
+                 PROVEN_ARG(rubraview_bytes_view(r.job.replaces[k].to.ptr, (int)r.job.replaces[k].to.size)));
     b->n_step = r.job.counter_step > 0 ? r.job.counter_step : 1;   /* RV-194 */
     b->name_case = r.job.name_case;
     b->no_spaces = r.job.spaces_to_underscore;
-    b->own_pattern = strcmp(b->name, "{name}.{ext}") != 0;   /* a pattern from before: shown as typed */
+    b->own_pattern = rubraview_cstr_cmp(b->name, "{name}.{ext}") != 0;   /* a pattern from before: shown as typed */
     b->exists = r.exists; b->keep_dates = r.keep_dates; b->recursive = r.recursive; b->subfolders = r.subfolders;
     if (r.steps_file.size > 0) {   /* RV-187: the steps in Edit, or a file of them */
-        snprintf(b->steps_file, sizeof(b->steps_file), "%.*s", (int)r.steps_file.size, r.steps_file.ptr);
+        rubraview_fmt(b->steps_file, sizeof(b->steps_file), "{}", PROVEN_ARG(rubraview_bytes_view(r.steps_file.ptr, (int)r.steps_file.size)));
         b->steps_from = proven_u8str_view_eq(rubraview_path_basename(r.steps_file), PROVEN_LIT("batch-steps.rvsteps")) ? 1 : 2;
     }
-    if (r.output_dir.size > 0) snprintf(b->out, sizeof(b->out), "%.*s", (int)r.output_dir.size, r.output_dir.ptr);
+    if (r.output_dir.size > 0) rubraview_fmt(b->out, sizeof(b->out), "{}", PROVEN_ARG(rubraview_bytes_view(r.output_dir.ptr, (int)r.output_dir.size)));
     return true;
 }
 
@@ -218,7 +216,7 @@ proven_u8str_view_t batch_text(app_state_t *app) {
     char out[8192];
     size_t at = 0;
     for (size_t i = 0; i < tk.n; ++i) {
-        int n = snprintf(out + at, sizeof(out) - at, "%s\n", tk.v[i]);
+        int n = rubraview_fmt(out + at, sizeof(out) - at, "{}\n", PROVEN_ARG(tk.v[i]));
         if (n <= 0 || (size_t)n >= sizeof(out) - at) break;
         at += (size_t)n;
     }
@@ -226,7 +224,7 @@ proven_u8str_view_t batch_text(app_state_t *app) {
 }
 
 static proven_u8str_view_t batch_row_label(char *buf, size_t cap, const char *what, const char *value, const char *empty) {
-    int n = snprintf(buf, cap, "%s: %s...", what, value && value[0] ? value : empty);
+    int n = rubraview_fmt(buf, cap, "{}: {}...", PROVEN_ARG(what), PROVEN_ARG(value && value[0] ? value : empty));
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? ((size_t)n < cap ? (size_t)n : cap - 1) : 0 };
 }
 
@@ -278,24 +276,24 @@ void panel_open_batch(app_state_t *app) {
     rubraview_panel_add_heading(pn, TU8("1. The files"));
     size_t total = 0, pictures = batch_list_pictures(app, NULL, 0, &total);
     if (app->batch_list_count > 0)   /* D-86: "Convert..." from Explorer: these files */
-        snprintf(labels[8], sizeof(labels[8]), T("The %zu files chosen in Explorer"), app->batch_list_count);
+        rubraview_fmt(labels[8], sizeof(labels[8]), T("The {} files chosen in Explorer"), PROVEN_ARG((size_t)app->batch_list_count));
     else if (total == 0)
-        snprintf(labels[8], sizeof(labels[8]), "%s", T("Nothing is open: open pictures or a playlist first (press: the list)"));
+        rubraview_fmt(labels[8], sizeof(labels[8]), "{}", PROVEN_ARG(T("Nothing is open: open pictures or a playlist first (press: the list)")));
     else
-        snprintf(labels[8], sizeof(labels[8]), T("The %zu pictures of the list now open, in its order (of %zu: films, music and text left out). Press: show the list (Ctrl+L)"),
-                 pictures, total);
+        rubraview_fmt(labels[8], sizeof(labels[8]), T("The {} pictures of the list now open, in its order (of {}: films, music and text left out). Press: show the list (Ctrl+L)"),
+                 PROVEN_ARG((size_t)pictures), PROVEN_ARG((size_t)total));
     rubraview_panel_add_button(pn, PANEL_BATCH_SHOW_LIST, cstr(labels[8]));
 
     /* RV-194: second, Edit's steps — what they are and where they are made */
     rubraview_panel_add_heading(pn, TU8("2. Edit's steps, first"));
-    snprintf(labels[9], sizeof(labels[9]), T("Every step in Edit's list is applied, in that order, to every picture: %zu step%s in Edit now. Press: open Edit (E)"),
-             app->edit_steps.cursor, app->edit_steps.cursor == 1 ? "" : TC("plural", "s"));
+    rubraview_fmt(labels[9], sizeof(labels[9]), T("Every step in Edit's list is applied, in that order, to every picture: {} step{} in Edit now. Press: open Edit (E)"),
+             PROVEN_ARG((size_t)app->edit_steps.cursor), PROVEN_ARG(app->edit_steps.cursor == 1 ? "" : TC("plural", "s")));
     rubraview_panel_add_button(pn, PANEL_BATCH_OPEN_EDIT, cstr(labels[9]));
     rubraview_panel_add_choice(pn, PANEL_BATCH_STEPS, TU8("Edit's steps"), b->steps_from, 3);
     if (b->steps_from == 2) {
         proven_u8str_view_t base = rubraview_path_basename(cstr(b->steps_file));
         char shown[300];
-        snprintf(shown, sizeof(shown), "%.*s", (int)(base.size < 200 ? base.size : 200), base.ptr);
+        rubraview_fmt(shown, sizeof(shown), "{}", PROVEN_ARG(rubraview_bytes_view(base.ptr, (int)(base.size < 200 ? base.size : 200))));
         rubraview_panel_add_button(pn, PANEL_BATCH_STEPS_FILE, batch_row_label(labels[0], sizeof(labels[0]), T("  Steps file"), shown, T("choose a .rvsteps file")));
     }
 
@@ -321,8 +319,8 @@ void panel_open_batch(app_state_t *app) {
     /* RV-187: a crop and an effect are Edit's steps now; ones from choices saved before still run, until dropped */
     if (b->crop[0] || b->effect > 0) {
         char kept[160];
-        snprintf(kept, sizeof(kept), T("Kept from saved choices: %s%s%s (press: drop them)"), b->crop[0] ? T("a crop") : "",
-                 b->crop[0] && b->effect > 0 ? ", " : "", b->effect > 0 ? effect_word(b->effect) : "");
+        rubraview_fmt(kept, sizeof(kept), T("Kept from saved choices: {}{}{} (press: drop them)"), PROVEN_ARG(b->crop[0] ? T("a crop") : ""),
+                 PROVEN_ARG(b->crop[0] && b->effect > 0 ? ", " : ""), PROVEN_ARG(b->effect > 0 ? effect_word(b->effect) : ""));
         rubraview_panel_add_button(pn, PANEL_BATCH_CROP, app_keep(app, cstr(kept)));
     }
     rubraview_panel_add_button(pn, PANEL_BATCH_CANVAS, batch_row_label(labels[1], sizeof(labels[1]), T("Canvas WxH"), b->canvas, T("none")));
@@ -331,7 +329,7 @@ void panel_open_batch(app_state_t *app) {
     {
         proven_u8str_view_t base = rubraview_path_basename(cstr(b->mark));
         char shown[300];
-        snprintf(shown, sizeof(shown), "%.*s", (int)(base.size < 200 ? base.size : 200), base.ptr);
+        rubraview_fmt(shown, sizeof(shown), "{}", PROVEN_ARG(rubraview_bytes_view(base.ptr, (int)(base.size < 200 ? base.size : 200))));
         rubraview_panel_add_button(pn, PANEL_BATCH_MARK, batch_row_label(labels[2], sizeof(labels[2]), T("Watermark"), shown, T("none (choose a picture)")));
     }
     if (b->mark[0]) {
@@ -366,9 +364,9 @@ void panel_open_batch(app_state_t *app) {
     rubraview_panel_add_button(pn, PANEL_BATCH_SAVE, TU8("Save these choices..."));
     rubraview_panel_add_button(pn, PANEL_BATCH_LOAD, TU8("Load choices..."));
     if (app->batch_list_count > 0) {
-        snprintf(labels[6], sizeof(labels[6]), T("Run on the %zu chosen file%s"), app->batch_list_count, app->batch_list_count == 1 ? "" : TC("plural", "s"));
+        rubraview_fmt(labels[6], sizeof(labels[6]), T("Run on the {} chosen file{}"), PROVEN_ARG((size_t)app->batch_list_count), PROVEN_ARG(app->batch_list_count == 1 ? "" : TC("plural", "s")));
     } else {
-        snprintf(labels[6], sizeof(labels[6]), T("Run on the %zu picture%s"), pictures, pictures == 1 ? "" : TC("plural", "s"));
+        rubraview_fmt(labels[6], sizeof(labels[6]), T("Run on the {} picture{}"), PROVEN_ARG((size_t)pictures), PROVEN_ARG(pictures == 1 ? "" : TC("plural", "s")));
     }
     rubraview_panel_add_button(pn, PANEL_BATCH_RUN, cstr(labels[6]));
     if (app->batch_window) rubraview_panel_add_button(pn, PANEL_BATCH_CLOSE, TU8("Close (Esc)"));
@@ -388,7 +386,7 @@ void batch_compose_name(app_state_t *app) {
         .name = b->p_name, .parent = b->p_parent, .counter = b->p_counter, .size = b->p_size, .taken = b->p_taken,
         .digits = (int32_t)lround(b->digits), .taken_form = b->taken_form };
     proven_u8str_view_t made = rubraview_batch_compose_pattern(app->arena, &parts);
-    snprintf(b->name, sizeof(b->name), "%.*s", (int)made.size, (const char *)made.ptr);
+    rubraview_fmt(b->name, sizeof(b->name), "{}", PROVEN_ARG(rubraview_bytes_view((const char *)made.ptr, (int)made.size)));
     b->own_pattern = false;
 }
 
@@ -397,7 +395,7 @@ void batch_replaces_pack(struct batch_ui *b) {
     size_t to = 0;
     for (size_t r = 0; r < RUBRAVIEW_BATCH_MAX_REPLACES; ++r) {
         if (!b->replace[r][0]) continue;
-        if (to != r) { memcpy(b->replace[to], b->replace[r], sizeof(b->replace[0])); b->replace[r][0] = '\0'; }
+        if (to != r) { proven_sys_mem_copy(b->replace[to], b->replace[r], sizeof(b->replace[0])); b->replace[r][0] = '\0'; }
         to++;
     }
 }
@@ -461,11 +459,11 @@ static void batch_typed_in(app_state_t *app) {
     size_t cap = 0;
     char *dst = batch_field(app, id, &cap);
     char was[1024];
-    snprintf(was, sizeof(was), "%s", dst);
+    rubraview_fmt(was, sizeof(was), "{}", PROVEN_ARG(dst));
     size_t n = text.size < cap - 1 ? text.size : cap - 1;
-    memcpy(dst, text.ptr, n);
+    proven_sys_mem_copy(dst, text.ptr, n);
     dst[n] = '\0';
-    if ((id == PANEL_BATCH_NAME || id == PANEL_NAMES_PATTERN) && n == 0) snprintf(dst, cap, "%s", "{name}.{ext}");
+    if ((id == PANEL_BATCH_NAME || id == PANEL_NAMES_PATTERN) && n == 0) rubraview_fmt(dst, cap, "{}", PROVEN_ARG("{name}.{ext}"));
     if (id == PANEL_NAMES_PATTERN) app->batch.own_pattern = true;                   /* RV-194: typed whole */
     if (id == PANEL_NAMES_BEFORE || id == PANEL_NAMES_AFTER) batch_compose_name(app); /* a part: the pattern made again */
     if (id >= PANEL_NAMES_REPLACE0 && id <= PANEL_NAMES_REPLACE7) batch_replaces_pack(&app->batch);
@@ -482,7 +480,7 @@ static void batch_typed_in(app_state_t *app) {
     static rubraview_cli_result_t r;
     rubraview_cli_parse(&r, app->arena, argc, argv);
     if (r.err != RUBRAVIEW_CLI_OK) {
-        snprintf(dst, cap, "%s", was);
+        rubraview_fmt(dst, cap, "{}", PROVEN_ARG(was));
         osd_say(app, TU8("that is not a value this takes; left as it was"));
     }
     if (app->panel_is_names) names_panel_build(app); else panel_open_batch(app);
@@ -517,7 +515,7 @@ int64_t batch_taken_of(proven_arena_t *arena, proven_u8str_view_t path) {
     proven_u8str_view_t bytes = rubraview_pal_fs_read_file(arena, path, 64u << 20);
     if (bytes.size > 0) {
         rubraview_exif_info_t exif;
-        if (rubraview_exif_read((const uint8_t *)bytes.ptr, bytes.size, &exif) && exif.date_taken[0]) {
+        if (rubraview_exif_read(rubraview_mem_view((const uint8_t *)bytes.ptr, bytes.size), &exif) && exif.date_taken[0]) {
             int64_t v = rubraview_batch_taken_from_text(cstr(exif.date_taken));
             if (v > 0) return v;
         }
@@ -539,15 +537,15 @@ void batch_preview_files(app_state_t *app) {
         if (n > 12) n = 12;
     }
     app->names_file_count = n;
-    void *mem = malloc(80u << 20);
+    void *mem = rubraview_alloc(80u << 20);
     proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t *)mem, .size = mem ? 80u << 20 : 0 });
-    bool dates = strstr(app->batch.name, "{taken") != NULL || app->batch.p_taken;
+    bool dates = rubraview_cstr_str(app->batch.name, "{taken") != NULL || app->batch.p_taken;
     for (size_t i = 0; i < n; ++i) {
         app->names_files[i] = app_keep(app, pics[i]);
         if (mem) proven_arena_reset(&scratch);
         app->names_taken[i] = dates && mem ? batch_taken_of(&scratch, pics[i]) : 0;
     }
-    free(mem);
+    rubraview_free(mem);
 }
 
 /* The new name of the preview's `i`-th file, as the run makes it (its size still {w}x{h}). */
@@ -580,7 +578,7 @@ void batch_save_or_load(app_state_t *app, bool saving) {
     if (saving) {
         if (!rubraview_path_has_ext(rubraview_path_basename(path), ".rvbatch")) {
             char with[1100];
-            int n = snprintf(with, sizeof(with), "%.*s.rvbatch", (int)path.size, path.ptr);
+            int n = rubraview_fmt(with, sizeof(with), "{}.rvbatch", PROVEN_ARG(rubraview_bytes_view(path.ptr, (int)path.size)));
             if (n > 0 && (size_t)n < sizeof(with)) path = app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)with, .size = (size_t)n });
         }
         osd_say(app, rubraview_pal_fs_write_file(path, batch_text(app)) ? TU8("the choices were saved") : TU8("could not write the file"));
@@ -605,7 +603,7 @@ bool batch_steps_write(app_state_t *app) {
     proven_u8str_view_t text = rubraview_edit_steps_serialize(app->arena, &app->edit_steps);
     proven_u8str_view_t path = batch_steps_path(app);
     if (text.size == 0 || !rubraview_pal_fs_write_file_atomic(path, text)) return false;
-    snprintf(app->batch.steps_file, sizeof(app->batch.steps_file), "%.*s", (int)path.size, (const char *)path.ptr);
+    rubraview_fmt(app->batch.steps_file, sizeof(app->batch.steps_file), "{}", PROVEN_ARG(rubraview_bytes_view((const char *)path.ptr, (int)path.size)));
     return true;
 }
 
@@ -720,7 +718,7 @@ void batch_window_toggle(app_state_t *app, bool from_explorer) {
     if (!from_explorer) app->batch_list_count = 0;   /* opened by hand: the list now open */
     bool fresh = !app->batch_window;
     if (!batch_window_show(app)) { panel_open_batch(app); return; }   /* no window: the panel in the viewer, as before */
-    if (fresh) memset(app->batch_panel.column_scroll, 0, sizeof(app->batch_panel.column_scroll));   /* opened again: from its top */
+    if (fresh) proven_sys_mem_set(app->batch_panel.column_scroll, 0, sizeof(app->batch_panel.column_scroll));   /* opened again: from its top */
     batch_refresh(app);
 }
 
@@ -907,7 +905,7 @@ void names_window_open(app_state_t *app) {
     ui_font_apply_all(app);
     app->names_px = app->names_py = -1.0;
     batch_preview_files(app);
-    memset(app->names_panel.column_scroll, 0, sizeof(app->names_panel.column_scroll));   /* from its top */
+    proven_sys_mem_set(app->names_panel.column_scroll, 0, sizeof(app->names_panel.column_scroll));   /* from its top */
     owned_panel_in(app, 2);
     names_panel_build(app);
     owned_panel_out(app);
@@ -947,15 +945,15 @@ void names_panel_build(app_state_t *app) {
     rubraview_panel_add_toggle(pn, PANEL_NAMES_SPACES, TU8("Spaces become _"), b->no_spaces);
     size_t used = 0;
     for (size_t r = 0; r < RUBRAVIEW_BATCH_MAX_REPLACES && b->replace[r][0]; ++r, ++used) {
-        const char *comma = strchr(b->replace[r], ',');
-        snprintf(labels[2 + r], sizeof(labels[2 + r]), T("Replace \"%.*s\" with \"%s\" (press: change; empty: remove)"),
-                 comma ? (int)(comma - b->replace[r]) : (int)strlen(b->replace[r]), b->replace[r], comma ? comma + 1 : "");
+        const char *comma = rubraview_cstr_chr(b->replace[r], ',');
+        rubraview_fmt(labels[2 + r], sizeof(labels[2 + r]), T("Replace \"{}\" with \"{}\" (press: change; empty: remove)"),
+                 PROVEN_ARG(rubraview_bytes_view(b->replace[r], comma ? (int)(comma - b->replace[r]) : (int)proven_cstr_len(b->replace[r]))), PROVEN_ARG(comma ? comma + 1 : ""));
         rubraview_panel_add_button(pn, PANEL_NAMES_REPLACE0 + (int32_t)r, cstr(labels[2 + r]));
     }
     if (used < RUBRAVIEW_BATCH_MAX_REPLACES) rubraview_panel_add_button(pn, PANEL_NAMES_ADD_REPLACE, TU8("Replace words in the name..."));
     rubraview_panel_add_choice(pn, PANEL_BATCH_EXISTS, TU8("A name already there"), b->exists, 3);
     rubraview_panel_add_heading(pn, TU8("The pattern"));
-    snprintf(labels[10], sizeof(labels[10]), "%s%s", b->name, b->own_pattern ? T("  (typed: a part changed makes it again)") : "");
+    rubraview_fmt(labels[10], sizeof(labels[10]), "{}{}", PROVEN_ARG(b->name), PROVEN_ARG(b->own_pattern ? T("  (typed: a part changed makes it again)") : ""));
     rubraview_panel_add_button(pn, PANEL_NAMES_PATTERN, batch_row_label(labels[11], sizeof(labels[11]), T("Pattern (press: type your own)"), labels[10], "{name}.{ext}"));
     rubraview_panel_add_button(pn, PANEL_NAMES_DONE, TU8("Done (Esc)"));
     owned_measure_labels(app, app->names_renderer, app->names_window);
@@ -983,7 +981,7 @@ void draw_names_preview(app_state_t *app, double win_w, double win_h, double dpi
         rubraview_pal_render_draw_text(app->renderer, TU8("no pictures in the list now open"), (rubraview_pal_rect_t){ x0, y, w, row }, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         return;
     }
-    void *mem = malloc(4u << 20);
+    void *mem = rubraview_alloc(4u << 20);
     if (!mem) return;
     proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t *)mem, .size = 4u << 20 });
     proven_u8str_view_t made[12];
@@ -998,20 +996,20 @@ void draw_names_preview(app_state_t *app, double win_w, double win_h, double dpi
         if (twice || there) clashes++;
         proven_u8str_view_t old = rubraview_path_basename(app->names_files[i]);
         char line[700];
-        int n = snprintf(line, sizeof(line), "%.*s", (int)old.size, (const char *)old.ptr);
+        int n = rubraview_fmt(line, sizeof(line), "{}", PROVEN_ARG(rubraview_bytes_view((const char *)old.ptr, (int)old.size)));
         rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 },
                                        (rubraview_pal_rect_t){ x0, y, w, row }, font, 0xFFB0B0B0u, RUBRAVIEW_TEXT_LEFT);
         y += row * 0.85;
-        n = snprintf(line, sizeof(line), "  -> %.*s%s", (int)made[i].size, (const char *)made[i].ptr,
-                     twice ? T("   ! the same as another") : there ? T("   ! there already") : "");
+        n = rubraview_fmt(line, sizeof(line), "  -> {}{}", PROVEN_ARG(rubraview_bytes_view((const char *)made[i].ptr, (int)made[i].size)),
+                     PROVEN_ARG(twice ? T("   ! the same as another") : there ? T("   ! there already") : ""));
         rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 },
                                        (rubraview_pal_rect_t){ x0, y, w, row }, font, twice || there ? 0xFFFF7070u : COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         y += row * 1.1;
     }
     char foot[300];
-    int n = snprintf(foot, sizeof(foot), "%s%s", rubraview_batch_name_wants_size(made[0]) ? T("{w}x{h}: the size each file comes out at. ") : "",
-                     clashes ? T("A marked name follows \"A name already there\".") : "");
+    int n = rubraview_fmt(foot, sizeof(foot), "{}{}", PROVEN_ARG(rubraview_batch_name_wants_size(made[0]) ? T("{w}x{h}: the size each file comes out at. ") : ""),
+                     PROVEN_ARG(clashes ? T("A marked name follows \"A name already there\".") : ""));
     if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)foot, .size = (size_t)n },
                                               (rubraview_pal_rect_t){ x0, y + row * 0.4, w, row * 2.0 }, font, 0xFFB0B0B0u, RUBRAVIEW_TEXT_LEFT);
-    free(mem);
+    rubraview_free(mem);
 }

@@ -81,8 +81,8 @@ bool cue_step(app_state_t *app, int direction) {
     media_seek_to(app, cue->tracks[target].start_seconds);
     app->media_position = cue->tracks[target].start_seconds;
     char line[160];
-    int n = snprintf(line, sizeof(line), "%d / %zu  %.*s", cue->tracks[target].number, cue->count,
-                     (int)cue->tracks[target].title.size, cue->tracks[target].title.ptr);
+    int n = rubraview_fmt(line, sizeof(line), "{} / {}  {}", PROVEN_ARG((int)cue->tracks[target].number), PROVEN_ARG((size_t)cue->count),
+                     PROVEN_ARG(rubraview_bytes_view(cue->tracks[target].title.ptr, (int)cue->tracks[target].title.size)));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)(n < (int)sizeof(line) ? n : (int)sizeof(line) - 1) });
     return true;
 }
@@ -150,9 +150,9 @@ proven_u8str_view_t ab_part(const app_state_t *app, int32_t side, int32_t part) 
 }
 
 static void ab_part_set(app_state_t *app, int32_t side, int32_t part, const char *text) {
-    size_t n = strlen(text);
+    size_t n = proven_cstr_len(text);
     if (n >= sizeof(app->ab_edit_text[0][0])) n = sizeof(app->ab_edit_text[0][0]) - 1;
-    memcpy(app->ab_edit_text[side][part], text, n);
+    proven_sys_mem_copy(app->ab_edit_text[side][part], text, n);
     app->ab_edit_text[side][part][n] = '\0';
     app->ab_edit_length[side][part] = n;
 }
@@ -166,9 +166,9 @@ static void ab_edit_fill(app_state_t *app, int32_t side, double seconds) {
     double sec = 0.0;
     rubraview_timecode_split(seconds, &h, &m, &sec);
     char text[16];
-    snprintf(text, sizeof(text), "%d", (int)h);     ab_part_set(app, side, 0, text);
-    snprintf(text, sizeof(text), "%02d", (int)m);   ab_part_set(app, side, 1, text);
-    snprintf(text, sizeof(text), "%06.3f", sec);    ab_part_set(app, side, 2, text);
+    rubraview_fmt(text, sizeof(text), "{}", PROVEN_ARG((int)h));     ab_part_set(app, side, 0, text);
+    rubraview_fmt(text, sizeof(text), "{:02}", PROVEN_ARG((int)m));   ab_part_set(app, side, 1, text);
+    rubraview_fmt(text, sizeof(text), "{:06.3}", PROVEN_ARG((double)sec));    ab_part_set(app, side, 2, text);
 }
 
 /* The point a side's fields say: -1 when all three are empty; false when one is not a number. */
@@ -229,9 +229,9 @@ static bool ab_edit_commit(app_state_t *app) {
     app->ab_a = a;
     app->ab_b = b;
     char line[96];
-    int n = a < 0.0 ? snprintf(line, sizeof(line), T("repeat off"))
-          : b < 0.0 ? snprintf(line, sizeof(line), T("repeat from %.3f s"), a)
-                    : snprintf(line, sizeof(line), T("repeating %.3f - %.3f s"), a, b);
+    int n = a < 0.0 ? rubraview_fmt(line, sizeof(line), T("repeat off"))
+          : b < 0.0 ? rubraview_fmt(line, sizeof(line), T("repeat from {:.3} s"), PROVEN_ARG((double)a))
+                    : rubraview_fmt(line, sizeof(line), T("repeating {:.3} - {:.3} s"), PROVEN_ARG((double)a), PROVEN_ARG((double)b));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     return true;
 }
@@ -302,7 +302,7 @@ void ab_edit_text_typed(app_state_t *app, proven_u8str_view_t text) {
         bool point = c == '.' || c == ',';
         if (!(c >= '0' && c <= '9') && !(point && p == 2)) continue;
         if (app->ab_edit_fresh) { ab_part_set(app, f, p, ""); app->ab_edit_fresh = false; }
-        if (point && memchr(app->ab_edit_text[f][p], '.', app->ab_edit_length[f][p])) continue;
+        if (point && rubraview_mem_chr(app->ab_edit_text[f][p], '.', app->ab_edit_length[f][p])) continue;
         if (app->ab_edit_length[f][p] >= MOST[p]) continue;
         app->ab_edit_text[f][p][app->ab_edit_length[f][p]++] = point ? '.' : c;
         app->ab_edit_text[f][p][app->ab_edit_length[f][p]] = '\0';
@@ -367,7 +367,7 @@ static void mini_cover_load(app_state_t *app) {
     const rubraview_tags_t *tags = mini_tags(app);
     if (!app->mini_renderer || !tags->art || tags->art_size == 0) return;
     rubraview_image_load_result_t art = rubraview_pal_image_load_texture_from_memory(
-        app->mini_renderer, tags->art, tags->art_size, false);
+        app->mini_renderer, rubraview_mem_view(tags->art, tags->art_size), false);
     if (art.texture) {
         app->mini_cover = art.texture;
         app->mini_cover_w = art.width;
@@ -622,7 +622,7 @@ void draw_mini_window(app_state_t *app) {
         rubraview_pal_render_fill_rect(r, done, COLOR_TILE_CURRENT, 2.0);
     }
     char clock[64];
-    proven_u8str_view_t at = rubraview_format_timecode(clock, sizeof(clock), mini_position(app), false);
+    proven_u8str_view_t at = rubraview_format_timecode(rubraview_mem_mut(clock, sizeof(clock)), mini_position(app), false);
     rubraview_pal_rect_t time_rect = { strip.x + strip.width + 4.0 * dpi, h - 20.0 * dpi,
                                        (double)w - (strip.x + strip.width) - 8.0 * dpi, 16.0 * dpi };
     rubraview_pal_render_draw_text(r, at, time_rect, 11.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);

@@ -1,5 +1,7 @@
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include <windows.h>
 #include <d2d1.h>
 #include <d2d1_1.h>
@@ -86,7 +88,7 @@ static bool fail_step(const char *what, HRESULT hr) {
 
 proven_u8str_view_t rubraview_pal_render_last_error(void) {
     if (!g_last_error) return PROVEN_LIT("");
-    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)g_last_error, .size = strlen(g_last_error) };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)g_last_error, .size = proven_cstr_len(g_last_error) };
 }
 
 uint32_t rubraview_pal_render_last_hresult(void) {
@@ -161,7 +163,7 @@ rubraview_texture_t *rubraview_d2d_texture_wrap(rubraview_renderer_t *renderer, 
     } else {
         /* Its own memory, recycled through the free list: the arena the
            renderer was made with may fill and be left behind (2026-09-29). */
-        tex = (struct rubraview_texture*)calloc(1, sizeof(struct rubraview_texture));
+        tex = (struct rubraview_texture*)rubraview_alloc_zero(1, sizeof(struct rubraview_texture));
         if (!tex) return NULL;
     }
 
@@ -169,7 +171,7 @@ rubraview_texture_t *rubraview_d2d_texture_wrap(rubraview_renderer_t *renderer, 
        note on this function in pal_render_d2d_internal.h. */
     tex->bitmap = bitmap;
     tex->d3d = NULL;
-    memset(tex->sources, 0, sizeof(tex->sources));
+    proven_sys_mem_set(tex->sources, 0, sizeof(tex->sources));
     tex->width = width;
     tex->height = height;
     tex->content = ++renderer->content_serial;
@@ -423,17 +425,19 @@ static bool create_device(struct rubraview_renderer *r) {
  * exposes the effect interfaces in C, this is where the graph would go.
  */
 
-proven_u8str_view_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, char *buffer, size_t buffer_size) {
+proven_u8str_view_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, proven_mem_mut_t buffer_view) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     if (!buffer || buffer_size < 32) return PROVEN_LIT("");
 
-    int written = snprintf(buffer, buffer_size,
-        "driver: %s   feature level: 0x%04X   size: %dx%d   swap chain: %s   text: %s",
-        g_used_warp ? "WARP (software)" : "hardware",
-        (unsigned)g_feature_level,
-        renderer ? renderer->width : 0,
-        renderer ? renderer->height : 0,
-        (renderer && renderer->swap_chain) ? "yes" : "no",
-        (renderer && renderer->dwrite) ? "DirectWrite" : "unavailable");
+    int written = rubraview_fmt(buffer, buffer_size,
+        "driver: {}   feature level: 0x{:04X}   size: {}x{}   swap chain: {}   text: {}",
+        PROVEN_ARG(g_used_warp ? "WARP (software)" : "hardware"),
+        PROVEN_ARG((unsigned)g_feature_level),
+        PROVEN_ARG((int)(renderer ? renderer->width : 0)),
+        PROVEN_ARG((int)(renderer ? renderer->height : 0)),
+        PROVEN_ARG((renderer && renderer->swap_chain) ? "yes" : "no"),
+        PROVEN_ARG((renderer && renderer->dwrite) ? "DirectWrite" : "unavailable"));
 
     if (written <= 0) return PROVEN_LIT("");
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = (size_t)written };
@@ -450,7 +454,7 @@ rubraview_renderer_t *rubraview_pal_render_create(proven_arena_t *arena, void *n
     proven_result_mem_mut_t res = proven_arena_alloc(arena, sizeof(struct rubraview_renderer));
     if (!proven_is_ok(res.err)) return NULL;
     struct rubraview_renderer *r = (struct rubraview_renderer*)(void*)res.value.ptr;
-    memset(r, 0, sizeof(*r));
+    proven_sys_mem_set(r, 0, sizeof(*r));
 
     r->arena = arena;
     r->hwnd = (HWND)native_window_handle;
@@ -1141,7 +1145,7 @@ static proven_u8str_view_t family_name(proven_arena_t *arena, IDWriteLocalizedSt
     if (n <= 0) return PROVEN_LIT("");
     proven_result_mem_mut_t m = proven_arena_alloc(arena, (size_t)n);
     if (!proven_is_ok(m.err)) return PROVEN_LIT("");
-    memcpy(m.value.ptr, utf8, (size_t)n);
+    proven_sys_mem_copy(m.value.ptr, utf8, (size_t)n);
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)m.value.ptr, .size = (size_t)n };
 }
 
@@ -1314,11 +1318,11 @@ static UINT32 block_u16(const rubraview_text_block_t *b, size_t u8) {
 rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *renderer, proven_u8str_view_t text,
                                                       const rubraview_text_style_t *style) {
     if (!renderer || !renderer->dwrite || !style || text.size > 0x7FFFFFF0u) return NULL;
-    rubraview_text_block_t *b = (rubraview_text_block_t *)calloc(1, sizeof(*b));
+    rubraview_text_block_t *b = (rubraview_text_block_t *)rubraview_alloc_zero(1, sizeof(*b));
     if (!b) return NULL;
-    WCHAR *wide = (WCHAR *)malloc((text.size + 1) * sizeof(WCHAR));
-    b->u8_of = (uint32_t *)malloc((text.size + 2) * sizeof(uint32_t));
-    if (!wide || !b->u8_of) { free(wide); free(b->u8_of); free(b); return NULL; }
+    WCHAR *wide = (WCHAR *)rubraview_alloc((text.size + 1) * sizeof(WCHAR));
+    b->u8_of = (uint32_t *)rubraview_alloc((text.size + 2) * sizeof(uint32_t));
+    if (!wide || !b->u8_of) { rubraview_free(wide); rubraview_free(b->u8_of); rubraview_free(b); return NULL; }
     /* UTF-8 to UTF-16 by hand, keeping where each unit came from. */
     const uint8_t *s = (const uint8_t *)text.ptr;
     UINT32 w = 0;
@@ -1350,7 +1354,7 @@ rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *rend
                                                style->weight >= 100 ? weight_of(style->weight) : family[0] ? DWRITE_FONT_WEIGHT_NORMAL : face_weight(renderer),
                                                style->italic ? DWRITE_FONT_STYLE_ITALIC : family[0] ? DWRITE_FONT_STYLE_NORMAL : renderer->ui_style,
                                                DWRITE_FONT_STRETCH_NORMAL, (FLOAT)size, L"", &format)) || !format) {
-        free(wide); free(b->u8_of); free(b);
+        rubraview_free(wide); rubraview_free(b->u8_of); rubraview_free(b);
         return NULL;
     }
     double spacing = size * (style->line_spacing > 0.5 ? style->line_spacing : 1.5);
@@ -1362,8 +1366,8 @@ rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *rend
     HRESULT hr = IDWriteFactory_CreateTextLayout(renderer->dwrite, w > 0 ? wide : space, w > 0 ? w : 1, format,
                                                  (FLOAT)width, 1.0e7f, &b->layout);
     IDWriteTextFormat_Release(format);
-    free(wide);
-    if (FAILED(hr) || !b->layout) { free(b->u8_of); free(b); return NULL; }
+    rubraview_free(wide);
+    if (FAILED(hr) || !b->layout) { rubraview_free(b->u8_of); rubraview_free(b); return NULL; }
     DWRITE_TEXT_METRICS m;
     if (SUCCEEDED(IDWriteTextLayout_GetMetrics(b->layout, &m))) {
         b->width = (double)m.widthIncludingTrailingWhitespace;
@@ -1375,8 +1379,8 @@ rubraview_text_block_t *rubraview_pal_text_block_make(rubraview_renderer_t *rend
 void rubraview_pal_text_block_free(rubraview_text_block_t *block) {
     if (!block) return;
     if (block->layout) IDWriteTextLayout_Release(block->layout);
-    free(block->u8_of);
-    free(block);
+    rubraview_free(block->u8_of);
+    rubraview_free(block);
 }
 
 void rubraview_pal_text_block_size(const rubraview_text_block_t *block, double *width, double *height) {
@@ -1431,7 +1435,7 @@ bool rubraview_pal_text_block_last_line(const rubraview_text_block_t *block, siz
     UINT32 lines = 0;
     IDWriteTextLayout_GetLineMetrics(block->layout, NULL, 0, &lines);
     if (lines == 0) return false;
-    DWRITE_LINE_METRICS *m = (DWRITE_LINE_METRICS*)malloc(lines * sizeof(*m));
+    DWRITE_LINE_METRICS *m = (DWRITE_LINE_METRICS*)rubraview_alloc(lines * sizeof(*m));
     if (!m) return false;
     bool ok = SUCCEEDED(IDWriteTextLayout_GetLineMetrics(block->layout, m, lines, &lines)) && lines > 0;
     if (ok) {
@@ -1442,7 +1446,7 @@ bool rubraview_pal_text_block_last_line(const rubraview_text_block_t *block, siz
         if (start) *start = block->u8_of[at];
         if (top) *top = (double)y;
     }
-    free(m);
+    rubraview_free(m);
     return ok;
 }
 
@@ -1596,7 +1600,7 @@ bool rubraview_pal_texture_upload_bgra(rubraview_texture_t *texture, const uint8
             }
         }
         bool ok = SUCCEEDED(ID2D1Bitmap_CopyFromMemory(texture->bitmap, NULL, half, (UINT32)row));
-        free(half);
+        rubraview_free(half);
         return ok;
     }
     return SUCCEEDED(ID2D1Bitmap_CopyFromMemory(texture->bitmap, NULL, pixels, (UINT32)stride));
@@ -1714,15 +1718,15 @@ static const GUID RV_IID_IDXGIFactory1 =
 static double sdr_white_of(const WCHAR *gdi_name) {
     UINT32 paths = 0, modes = 0;
     if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &paths, &modes) != ERROR_SUCCESS || paths == 0) return 0.0;
-    DISPLAYCONFIG_PATH_INFO *path = (DISPLAYCONFIG_PATH_INFO*)calloc(paths, sizeof(*path));
-    DISPLAYCONFIG_MODE_INFO *mode = (DISPLAYCONFIG_MODE_INFO*)calloc(modes ? modes : 1, sizeof(*mode));
+    DISPLAYCONFIG_PATH_INFO *path = (DISPLAYCONFIG_PATH_INFO*)rubraview_alloc_zero(paths, sizeof(*path));
+    DISPLAYCONFIG_MODE_INFO *mode = (DISPLAYCONFIG_MODE_INFO*)rubraview_alloc_zero(modes ? modes : 1, sizeof(*mode));
     double nits = 0.0;
     if (path && mode && QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &paths, path, &modes, mode, NULL) == ERROR_SUCCESS) {
         for (UINT32 i = 0; i < paths && nits == 0.0; ++i) {
             DISPLAYCONFIG_SOURCE_DEVICE_NAME source = { .header = {
                 .type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, .size = sizeof(source),
                 .adapterId = path[i].sourceInfo.adapterId, .id = path[i].sourceInfo.id } };
-            if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS || wcscmp(source.viewGdiDeviceName, gdi_name) != 0) continue;
+            if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS || rubraview_wcmp(source.viewGdiDeviceName, gdi_name) != 0) continue;
             DISPLAYCONFIG_SDR_WHITE_LEVEL white = { .header = {
                 .type = DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL, .size = sizeof(white),
                 .adapterId = path[i].targetInfo.adapterId, .id = path[i].targetInfo.id } };
@@ -1730,8 +1734,8 @@ static double sdr_white_of(const WCHAR *gdi_name) {
                 nits = (double)white.SDRWhiteLevel / 1000.0 * 80.0;
         }
     }
-    free(path);
-    free(mode);
+    rubraview_free(path);
+    rubraview_free(mode);
     return nits;
 }
 
@@ -1958,7 +1962,7 @@ bool rubraview_pal_texture_read_video(rubraview_texture_t *texture, uint8_t *dst
                         out[x * 4 + 3] = 255;
                     }
                 } else {
-                    memcpy(dst + (size_t)y * stride, row, (size_t)texture->width * 4u);
+                    proven_sys_mem_copy(dst + (size_t)y * stride, row, (size_t)texture->width * 4u);
                 }
             }
             ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)staging, 0);

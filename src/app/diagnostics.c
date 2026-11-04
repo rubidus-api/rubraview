@@ -18,13 +18,12 @@ void report_startup_failure(void) {
     uint32_t hr = rubraview_pal_render_last_hresult();
 
     char message[512];
-    int n = snprintf(message, sizeof(message),
+    int n = rubraview_fmt(message, sizeof(message),
         "Rubraview " RUBRAVIEW_VERSION_STRING " could not start its graphics.\r\n\r\n"
-        "It failed while %.*s.\r\n"
-        "Windows reported error 0x%08lX.\r\n\r\n"
+        "It failed while {}.\r\n"
+        "Windows reported error 0x{:08X}.\r\n\r\n"
         "This has been written to rubraview-diag.txt next to the program.",
-        (int)where.size, where.size > 0 ? (const char *)where.ptr : "starting up",
-        (unsigned long)hr);
+        PROVEN_ARG(where.size > 0 ? where : PROVEN_LIT("starting up")), PROVEN_ARG((unsigned long)hr));
     if (n <= 0) return;
 
     /* The file first: a message box can be dismissed before it is read,
@@ -107,21 +106,21 @@ int probe_media_file(proven_arena_t *arena, proven_u8str_view_t path) {
         rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i], NULL);
         if (!opened.media) {
             proven_u8str_view_t why = rubraview_media_failure_text_with(opened.failure, rubraview_pal_ffmpeg_refused());
-            snprintf(line, sizeof(line), "%s: cannot open — %.*s", name, (int)why.size, why.ptr);
+            rubraview_fmt(line, sizeof(line), "{}: cannot open — {}", PROVEN_ARG(name), PROVEN_ARG(rubraview_bytes_view(why.ptr, (int)why.size)));
             console_line(line);
             if (order[i] == RUBRAVIEW_BACKEND_FFMPEG && rubraview_pal_ffmpeg_remote() && rubraview_pal_media_host_why()[0]) {
-                snprintf(line, sizeof(line), "FFmpeg's process (RV-176): %s", rubraview_pal_media_host_why());   /* why, for a report */
+                rubraview_fmt(line, sizeof(line), "FFmpeg's process (RV-176): {}", PROVEN_ARG(rubraview_pal_media_host_why()));   /* why, for a report */
                 console_line(line);
             }
             continue;
         }
 
-        snprintf(line, sizeof(line), "%s: opened — %dx%d, %.3f s, %.2f fps, picture %s, sound %s%s",
-                 name, opened.info.width, opened.info.height, opened.info.duration_seconds,
-                 opened.info.frame_rate, opened.info.has_video ? "yes" : "no",
-                 opened.info.has_audio ? "yes" : "no",
-                 opened.info.has_audio
-                     ? (opened.info.audio_output ? " (going to a device)" : " (no audio device here)") : "");
+        rubraview_fmt(line, sizeof(line), "{}: opened — {}x{}, {:.3} s, {:.2} fps, picture {}, sound {}{}",
+                 PROVEN_ARG(name), PROVEN_ARG((int)opened.info.width), PROVEN_ARG((int)opened.info.height), PROVEN_ARG((double)opened.info.duration_seconds),
+                 PROVEN_ARG((double)opened.info.frame_rate), PROVEN_ARG(opened.info.has_video ? "yes" : "no"),
+                 PROVEN_ARG(opened.info.has_audio ? "yes" : "no"),
+                 PROVEN_ARG(opened.info.has_audio
+                     ? (opened.info.audio_output ? " (going to a device)" : " (no audio device here)") : ""));
         console_line(line);
 
         /* §3.16.2: what the container holds, as the menu would show it. */
@@ -129,17 +128,17 @@ int probe_media_file(proven_arena_t *arena, proven_u8str_view_t path) {
         if (rubraview_pal_media_tracks(opened.media, &set) && set.count > 0) {
             for (size_t t = 0; t < set.count; ++t) {
                 char label[160];
-                proven_u8str_view_t text = rubraview_track_label(label, sizeof(label), &set, (int32_t)t);
+                proven_u8str_view_t text = rubraview_track_label(rubraview_mem_mut(label, sizeof(label)), &set, (int32_t)t);
                 bool current = (int32_t)t == set.current_video || (int32_t)t == set.current_audio;
                 const char *kind = set.tracks[t].kind == RUBRAVIEW_TRACK_AUDIO ? "sound"
                                  : set.tracks[t].kind == RUBRAVIEW_TRACK_SUBTITLE ? "subtitle"
                                  : "picture";
-                snprintf(line, sizeof(line), "%s: %-8s %s %.*s", name, kind,
-                         current ? "*" : " ", (int)text.size, text.ptr);
+                rubraview_fmt(line, sizeof(line), "{}: {:<8} {} {}", PROVEN_ARG(name), PROVEN_ARG(kind),
+                         PROVEN_ARG(current ? "*" : " "), PROVEN_ARG(rubraview_bytes_view(text.ptr, (int)text.size)));
                 console_line(line);
             }
         } else {
-            snprintf(line, sizeof(line), "%s: the track list is empty", name);
+            rubraview_fmt(line, sizeof(line), "{}: the track list is empty", PROVEN_ARG(name));
             console_line(line);
         }
 
@@ -159,9 +158,9 @@ int probe_media_file(proven_arena_t *arena, proven_u8str_view_t path) {
             rubraview_pal_time_sleep_ms(10);
         }
         if (opened.info.has_video) {
-            snprintf(line, sizeof(line), "%s: %d picture(s) decoded, %.3f s to %.3f s", name, frames, first, last);
+            rubraview_fmt(line, sizeof(line), "{}: {} picture(s) decoded, {:.3} s to {:.3} s", PROVEN_ARG(name), PROVEN_ARG((int)frames), PROVEN_ARG((double)first), PROVEN_ARG((double)last));
         } else {
-            snprintf(line, sizeof(line), "%s: sound only — nothing to decode into pictures", name);
+            rubraview_fmt(line, sizeof(line), "{}: sound only — nothing to decode into pictures", PROVEN_ARG(name));
         }
         console_line(line);
         rubraview_pal_media_close(opened.media);
@@ -173,11 +172,11 @@ int probe_media_file(proven_arena_t *arena, proven_u8str_view_t path) {
     const char *why = NULL;
     rubraview_subtitle_track_t track = subtitle_find(arena, path, &sub_name, &why);
     if (track.count == 0) {
-        snprintf(line, sizeof(line), "Subtitles: none — %s", why ? why : "not looked for");
+        rubraview_fmt(line, sizeof(line), "Subtitles: none — {}", PROVEN_ARG(why ? why : "not looked for"));
     } else {
-        snprintf(line, sizeof(line), "Subtitles: %.*s — %zu line(s), the first %.3f s to %.3f s",
-                 (int)sub_name.size, sub_name.ptr, track.count,
-                 track.cues[0].start_seconds, track.cues[0].end_seconds);
+        rubraview_fmt(line, sizeof(line), "Subtitles: {} — {} line(s), the first {:.3} s to {:.3} s",
+                 PROVEN_ARG(rubraview_bytes_view(sub_name.ptr, (int)sub_name.size)), PROVEN_ARG((size_t)track.count),
+                 PROVEN_ARG((double)track.cues[0].start_seconds), PROVEN_ARG((double)track.cues[0].end_seconds));
     }
     console_line(line);
     return 0;
@@ -195,15 +194,15 @@ int probe_media_file(proven_arena_t *arena, proven_u8str_view_t path) {
 void probe_gpu_resize(void) {
     char line[256];
     bool on = rubraview_pal_gpu_resample_start(RUBRAVIEW_GPU_RESIZE_ON);
-    snprintf(line, sizeof(line), "gpu resize with gpu_resize = on: %s%s", rubraview_pal_gpu_resample_describe(),
-             on ? "" : " (not used)");
+    rubraview_fmt(line, sizeof(line), "gpu resize with gpu_resize = on: {}{}", PROVEN_ARG(rubraview_pal_gpu_resample_describe()),
+             PROVEN_ARG(on ? "" : " (not used)"));
     console_line(line);
     bool started = rubraview_pal_gpu_resample_start(RUBRAVIEW_GPU_RESIZE_ALWAYS);
-    snprintf(line, sizeof(line), "gpu resize with gpu_resize = always: %s", rubraview_pal_gpu_resample_describe());
+    rubraview_fmt(line, sizeof(line), "gpu resize with gpu_resize = always: {}", PROVEN_ARG(rubraview_pal_gpu_resample_describe()));
     console_line(line);
     if (!started) return;
     size_t cap = (size_t)96 << 20;
-    void *memory = malloc(cap);
+    void *memory = rubraview_alloc(cap);
     if (!memory) return;
     static const struct { int32_t sw, sh, dw, dh; } SIZES[] = { {1600, 1200, 2400, 1800}, {1600, 1200, 1000, 750}, {1600, 1200, 320, 240} };
     static const rubraview_resample_filter_t FILTERS[2] = { RUBRAVIEW_FILTER_BICUBIC, RUBRAVIEW_FILTER_LANCZOS3 };
@@ -237,14 +236,14 @@ void probe_gpu_resize(void) {
                 if (d) changed++;
                 if (d > worst) worst = d;
             }
-            snprintf(line, sizeof(line), "gpu resize %s %dx%d -> %dx%d: %s; cpu %.3f s, card %.3f s; max diff %d, %.4f%% of bytes differ",
-                     f ? "lanczos3" : "bicubic", SIZES[k].sw, SIZES[k].sh, SIZES[k].dw, SIZES[k].dh,
-                     ok ? "done on the card" : "the card refused (CPU would do it)", t1 - t0, t2 - t1, worst,
-                     n ? 100.0 * (double)changed / (double)n : 0.0);
+            rubraview_fmt(line, sizeof(line), "gpu resize {} {}x{} -> {}x{}: {}; cpu {:.3} s, card {:.3} s; max diff {}, {:.4}% of bytes differ",
+                     PROVEN_ARG(f ? "lanczos3" : "bicubic"), PROVEN_ARG((int)SIZES[k].sw), PROVEN_ARG((int)SIZES[k].sh), PROVEN_ARG((int)SIZES[k].dw), PROVEN_ARG((int)SIZES[k].dh),
+                     PROVEN_ARG(ok ? "done on the card" : "the card refused (CPU would do it)"), PROVEN_ARG((double)(t1 - t0)), PROVEN_ARG((double)(t2 - t1)), PROVEN_ARG((int)worst),
+                     PROVEN_ARG((double)(n ? 100.0 * (double)changed / (double)n : 0.0)));
             console_line(line);
         }
     }
-    free(memory);
+    rubraview_free(memory);
     rubraview_pal_gpu_resample_stop();
 }
 
@@ -291,8 +290,8 @@ int probe_gpu_file(proven_arena_t *arena, proven_u8str_view_t path) {
         console_line("no Direct3D 11 device at all, with or without video support");
         return 2;
     }
-    snprintf(line, sizeof(line), "Device: %s, feature level %u.%u",
-             kind, (unsigned)(level >> 12) & 0xF, (unsigned)(level >> 8) & 0xF);
+    rubraview_fmt(line, sizeof(line), "Device: {}, feature level {}.{}",
+             PROVEN_ARG(kind), PROVEN_ARG((unsigned)(level >> 12) & 0xF), PROVEN_ARG((unsigned)(level >> 8) & 0xF));
     console_line(line);
 
     IDXGIDevice *dxgi = NULL;
@@ -303,8 +302,8 @@ int probe_gpu_file(proven_arena_t *arena, proven_u8str_view_t path) {
             if (SUCCEEDED(IDXGIAdapter_GetDesc(adapter, &desc))) {
                 char name[256] = {0};
                 WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, name, (int)sizeof(name), NULL, NULL);
-                snprintf(line, sizeof(line), "Adapter: %s (%u MB of its own memory)",
-                         name, (unsigned)(desc.DedicatedVideoMemory / (1024u * 1024u)));
+                rubraview_fmt(line, sizeof(line), "Adapter: {} ({} MB of its own memory)",
+                         PROVEN_ARG(name), PROVEN_ARG((unsigned)(desc.DedicatedVideoMemory / (1024u * 1024u))));
                 console_line(line);
             }
             IDXGIAdapter_Release(adapter);
@@ -318,7 +317,7 @@ int probe_gpu_file(proven_arena_t *arena, proven_u8str_view_t path) {
     if (SUCCEEDED(ID3D11Device_QueryInterface(device, &IID_ID3D11VideoDevice, (void**)&video)) && video) {
         UINT profiles = ID3D11VideoDevice_GetVideoDecoderProfileCount(video);
         profile_count = profiles;
-        snprintf(line, sizeof(line), "Decoder profiles the card offers: %u", profiles);
+        rubraview_fmt(line, sizeof(line), "Decoder profiles the card offers: {}", PROVEN_ARG((unsigned)profiles));
         console_line(line);
         ID3D11VideoDevice_Release(video);
     } else {
@@ -386,9 +385,9 @@ int probe_gpu_file(proven_arena_t *arena, proven_u8str_view_t path) {
                         (sample_flags & MF_SOURCE_READERF_ERROR)) break;
                 }
                 if (FAILED(hr) || !sample) {
-                    snprintf(line, sizeof(line),
-                             "but no picture came out of it (hr=0x%08lX, last flags=0x%lX)",
-                             (unsigned long)hr, (unsigned long)last_flags);
+                    rubraview_fmt(line, sizeof(line),
+                             "but no picture came out of it (hr=0x{:08X}, last flags=0x{:X})",
+                             PROVEN_ARG((unsigned long)hr), PROVEN_ARG((unsigned long)last_flags));
                     console_line(line);
                     code = 2;
                 } else {
@@ -426,8 +425,8 @@ int probe_gpu_file(proven_arena_t *arena, proven_u8str_view_t path) {
         if (!opened.media) {
             /* Why, so "cannot open" and "the card broke it" read differently. */
             proven_u8str_view_t why = rubraview_media_failure_text(opened.failure);
-            snprintf(line, sizeof(line), "hardware_decode = %s: the film did not open - %.*s",
-                     MODE_NAMES[mode], (int)why.size, why.ptr);
+            rubraview_fmt(line, sizeof(line), "hardware_decode = {}: the film did not open - {}",
+                     PROVEN_ARG(MODE_NAMES[mode]), PROVEN_ARG(rubraview_bytes_view(why.ptr, (int)why.size)));
             console_line(line);
             code = 2;
             continue;
@@ -457,13 +456,12 @@ int probe_gpu_file(proven_arena_t *arena, proven_u8str_view_t path) {
         uint32_t cc = opened.info.video_fourcc;
         char codec[5] = { (char)(cc & 0xFF), (char)((cc >> 8) & 0xFF), (char)((cc >> 16) & 0xFF), (char)(cc >> 24), 0 };
         for (int k = 0; k < 4; ++k) if (codec[k] < 32 || codec[k] > 126) codec[k] = '?';
-        snprintf(line, sizeof(line),
-                 "hardware_decode = %s: %s %dx%d, decoded %s; %d pictures in %.1f s (%.0f a second), "
-                 "%d of them on the card; CPU %.2f s (%.0f%% of one core)",
-                 MODE_NAMES[mode], codec, opened.info.width, opened.info.height,
-                 opened.info.hardware_decode ? "on the card" : "in software",
-                 pictures, elapsed, elapsed > 0.0 ? pictures / elapsed : 0.0, on_card,
-                 cpu, elapsed > 0.0 ? 100.0 * cpu / elapsed : 0.0);
+        rubraview_fmt(line, sizeof(line),
+                 "hardware_decode = {}: {} {}x{}, decoded {}; {} pictures in {:.1} s ({:.0} a second), {} of them on the card; CPU {:.2} s ({:.0}% of one core)",
+                 PROVEN_ARG(MODE_NAMES[mode]), PROVEN_ARG(codec), PROVEN_ARG((int)opened.info.width), PROVEN_ARG((int)opened.info.height),
+                 PROVEN_ARG(opened.info.hardware_decode ? "on the card" : "in software"),
+                 PROVEN_ARG((int)pictures), PROVEN_ARG((double)elapsed), PROVEN_ARG((double)(elapsed > 0.0 ? pictures / elapsed : 0.0)), PROVEN_ARG((int)on_card),
+                 PROVEN_ARG((double)cpu), PROVEN_ARG((double)(elapsed > 0.0 ? 100.0 * cpu / elapsed : 0.0)));
         console_line(line);
         if (pictures == 0 && opened.info.has_video) code = 2;
         rubraview_pal_media_close(opened.media);
@@ -487,12 +485,12 @@ int probe_gpu_file(proven_arena_t *arena, proven_u8str_view_t path) {
     }
     uint32_t viewer_profiles = 0;
     void *decode_device = rubraview_pal_render_video_device(renderer, &viewer_profiles);
-    snprintf(line, sizeof(line), "viewer path: the decoder's own device %s, %u decoder profiles",
-             decode_device ? "made" : "NOT made", (unsigned)viewer_profiles);
+    rubraview_fmt(line, sizeof(line), "viewer path: the decoder's own device {}, {} decoder profiles",
+             PROVEN_ARG(decode_device ? "made" : "NOT made"), PROVEN_ARG((unsigned)viewer_profiles));
     if (!decode_device) {
         console_line(line);
-        snprintf(line, sizeof(line), "viewer path: the last Direct3D answer was 0x%08X",
-                 (unsigned)rubraview_pal_render_last_hresult());
+        rubraview_fmt(line, sizeof(line), "viewer path: the last Direct3D answer was 0x{:08X}",
+                 PROVEN_ARG((unsigned)rubraview_pal_render_last_hresult()));
     }
     console_line(line);
   for (int32_t vmode = 1; vmode <= 2; ++vmode) {
@@ -502,7 +500,7 @@ int probe_gpu_file(proven_arena_t *arena, proven_u8str_view_t path) {
     opened_in = rubraview_pal_time_now_seconds() - opened_in;
     if (!vopen.media) {
         proven_u8str_view_t why = rubraview_media_failure_text(vopen.failure);
-        snprintf(line, sizeof(line), "viewer path (%s): the film did not open (%.1f s) - %.*s", MODE_NAMES[vmode], opened_in, (int)why.size, why.ptr);
+        rubraview_fmt(line, sizeof(line), "viewer path ({}): the film did not open ({:.1} s) - {}", PROVEN_ARG(MODE_NAMES[vmode]), PROVEN_ARG((double)opened_in), PROVEN_ARG(rubraview_bytes_view(why.ptr, (int)why.size)));
         console_line(line);
         code = 2;
     } else {
@@ -527,11 +525,10 @@ int probe_gpu_file(proven_arena_t *arena, proven_u8str_view_t path) {
             }
             rubraview_pal_media_pop_frame(vopen.media);
         }
-        snprintf(line, sizeof(line),
-                 "viewer path (%s): opened in %.1f s, decoded %s; %d pictures, %d copied to the screen texture, "
-                 "%d drawn; brightness of the picture %.0f of 255",
-                 MODE_NAMES[vmode], opened_in, vopen.info.hardware_decode ? "on the card" : "in software", pictures, copied, drawn,
-                 brightness);
+        rubraview_fmt(line, sizeof(line),
+                 "viewer path ({}): opened in {:.1} s, decoded {}; {} pictures, {} copied to the screen texture, {} drawn; brightness of the picture {:.0} of 255",
+                 PROVEN_ARG(MODE_NAMES[vmode]), PROVEN_ARG((double)opened_in), PROVEN_ARG(vopen.info.hardware_decode ? "on the card" : "in software"), PROVEN_ARG((int)pictures), PROVEN_ARG((int)copied), PROVEN_ARG((int)drawn),
+                 PROVEN_ARG((double)brightness));
         console_line(line);
         if (vopen.info.hardware_decode && (copied == 0 || drawn == 0)) code = 2;
         if (page) rubraview_pal_texture_destroy(page);
@@ -584,7 +581,7 @@ int run_diagnostics(proven_arena_t *arena, proven_u8str_view_t image_path) {
                                   &IID_IWICImagingFactory, (void**)&probe_factory);
     if (FAILED(hr) || !probe_factory) {
         char line[160];
-        snprintf(line, sizeof(line), "rubraview: step 1 FAILED (0x%08lX) - no imaging codecs at all", (unsigned long)hr);
+        rubraview_fmt(line, sizeof(line), "rubraview: step 1 FAILED (0x{:08X}) - no imaging codecs at all", PROVEN_ARG((unsigned long)hr));
         console_line(line);
         return 1;
     }
@@ -595,7 +592,7 @@ int run_diagnostics(proven_arena_t *arena, proven_u8str_view_t image_path) {
 
         char narrow[1024];
         size_t n = image_path.size < sizeof(narrow) - 1 ? image_path.size : sizeof(narrow) - 1;
-        memcpy(narrow, image_path.ptr, n);
+        proven_sys_mem_copy(narrow, image_path.ptr, n);
         narrow[n] = '\0';
 
         WCHAR wide[1024];
@@ -609,7 +606,7 @@ int run_diagnostics(proven_arena_t *arena, proven_u8str_view_t image_path) {
 
         char line[256];
         if (FAILED(hr) || !decoder) {
-            snprintf(line, sizeof(line), "rubraview: step 2 FAILED (0x%08lX) - the path or the format", (unsigned long)hr);
+            rubraview_fmt(line, sizeof(line), "rubraview: step 2 FAILED (0x{:08X}) - the path or the format", PROVEN_ARG((unsigned long)hr));
             console_line(line);
             IWICImagingFactory_Release(probe_factory);
             return 1;
@@ -621,7 +618,7 @@ int run_diagnostics(proven_arena_t *arena, proven_u8str_view_t image_path) {
         hr = IWICBitmapDecoder_GetFrame(decoder, 0, &frame);
         UINT w = 0, h = 0;
         if (SUCCEEDED(hr) && frame) IWICBitmapFrameDecode_GetSize(frame, &w, &h);
-        snprintf(line, sizeof(line), "rubraview: step 2 ok - %u frame(s), %ux%u", frames, w, h);
+        rubraview_fmt(line, sizeof(line), "rubraview: step 2 ok - {} frame(s), {}x{}", PROVEN_ARG((unsigned)frames), PROVEN_ARG((unsigned)w), PROVEN_ARG((unsigned)h));
         console_line(line);
         if (frame) IWICBitmapFrameDecode_Release(frame);
         IWICBitmapDecoder_Release(decoder);
@@ -647,17 +644,17 @@ int run_diagnostics(proven_arena_t *arena, proven_u8str_view_t image_path) {
     if (!renderer) {
         char line[512];
         proven_u8str_view_t where = rubraview_pal_render_last_error();
-        snprintf(line, sizeof(line), "rubraview: step 4 FAILED while %.*s (0x%08lX)",
-                 (int)where.size, where.ptr, (unsigned long)rubraview_pal_render_last_hresult());
+        rubraview_fmt(line, sizeof(line), "rubraview: step 4 FAILED while {} (0x{:08X})",
+                 PROVEN_ARG(rubraview_bytes_view(where.ptr, (int)where.size)), PROVEN_ARG((unsigned long)rubraview_pal_render_last_hresult()));
         console_line(line);
         rubraview_pal_window_destroy(window);
         return 1;
     }
 
     char described[256];
-    proven_u8str_view_t info = rubraview_pal_render_describe(renderer, described, sizeof(described));
+    proven_u8str_view_t info = rubraview_pal_render_describe(renderer, rubraview_mem_mut(described, sizeof(described)));
     char line[320];
-    snprintf(line, sizeof(line), "rubraview: step 4 ok - %.*s", (int)info.size, info.ptr);
+    rubraview_fmt(line, sizeof(line), "rubraview: step 4 ok - {}", PROVEN_ARG(rubraview_bytes_view(info.ptr, (int)info.size)));
     console_line(line);
 
     console_line("rubraview: step 5 - drawing a plain rectangle");
@@ -673,7 +670,7 @@ int run_diagnostics(proven_arena_t *arena, proven_u8str_view_t image_path) {
         console_line("rubraview: step 6 - the viewer's own decode path, stage by stage");
 
         char report[2048];
-        proven_u8str_view_t text = rubraview_pal_image_diagnose(renderer, image_path, report, sizeof(report));
+        proven_u8str_view_t text = rubraview_pal_image_diagnose(renderer, image_path, rubraview_mem_mut(report, sizeof(report)));
 
         size_t start = 0;
         for (size_t i = 0; i <= text.size; ++i) {
@@ -684,7 +681,7 @@ int run_diagnostics(proven_arena_t *arena, proven_u8str_view_t image_path) {
             if (stop > start) {
                 char one[256];
                 size_t take = stop - start < sizeof(one) - 1 ? stop - start : sizeof(one) - 1;
-                memcpy(one, text.ptr + start, take);
+                proven_sys_mem_copy(one, text.ptr + start, take);
                 one[take] = '\0';
                 console_line(one);
             }

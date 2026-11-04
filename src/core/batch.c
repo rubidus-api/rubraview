@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/batch.h"
 #include "rubraview/glob.h"
 #include <math.h>
@@ -34,22 +35,24 @@ proven_u8str_view_t rubraview_batch_format_name_ex(proven_arena_t *arena, proven
 }
 
 /* RV-194: {taken:FORMAT} — yyyy, yy, mm, dd, hh, mi, ss from yyyymmddhhmmss; the rest copied */
-static void append_taken(proven_arena_t *arena, proven_u8str_t *buf, int64_t taken, const char *format, size_t len) {
+static void append_taken(proven_arena_t *arena, proven_u8str_t *buf, int64_t taken, proven_u8str_view_t format_view) {
+    const char *format = (const char *)format_view.ptr;
+    size_t len = (size_t)format_view.size;
     if (taken <= 0) return;
     int part[6] = { (int)(taken / 10000000000LL), (int)(taken / 100000000LL % 100), (int)(taken / 1000000LL % 100),
                     (int)(taken / 10000LL % 100), (int)(taken / 100LL % 100), (int)(taken % 100) };
     for (size_t i = 0; i < len;) {
         char num[8];
         int n = -1, used = 0;
-        if (i + 4 <= len && memcmp(format + i, "yyyy", 4) == 0) { n = snprintf(num, sizeof(num), "%04d", part[0]); used = 4; }
-        else if (i + 2 <= len && memcmp(format + i, "yy", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[0] % 100); used = 2; }
-        else if (i + 2 <= len && memcmp(format + i, "mm", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[1]); used = 2; }
-        else if (i + 2 <= len && memcmp(format + i, "dd", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[2]); used = 2; }
-        else if (i + 2 <= len && memcmp(format + i, "hh", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[3]); used = 2; }
-        else if (i + 2 <= len && memcmp(format + i, "mi", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[4]); used = 2; }
-        else if (i + 2 <= len && memcmp(format + i, "ss", 2) == 0) { n = snprintf(num, sizeof(num), "%02d", part[5]); used = 2; }
-        if (n > 0) { rubraview_text_append(arena, buf, num, (size_t)n); i += (size_t)used; }
-        else { rubraview_text_append(arena, buf, format + i, 1); i++; }
+        if (i + 4 <= len && proven_sys_mem_cmp(format + i, "yyyy", 4) == 0) { n = rubraview_fmt(num, sizeof(num), "{:04}", PROVEN_ARG((int)part[0])); used = 4; }
+        else if (i + 2 <= len && proven_sys_mem_cmp(format + i, "yy", 2) == 0) { n = rubraview_fmt(num, sizeof(num), "{:02}", PROVEN_ARG((int)(part[0] % 100))); used = 2; }
+        else if (i + 2 <= len && proven_sys_mem_cmp(format + i, "mm", 2) == 0) { n = rubraview_fmt(num, sizeof(num), "{:02}", PROVEN_ARG((int)part[1])); used = 2; }
+        else if (i + 2 <= len && proven_sys_mem_cmp(format + i, "dd", 2) == 0) { n = rubraview_fmt(num, sizeof(num), "{:02}", PROVEN_ARG((int)part[2])); used = 2; }
+        else if (i + 2 <= len && proven_sys_mem_cmp(format + i, "hh", 2) == 0) { n = rubraview_fmt(num, sizeof(num), "{:02}", PROVEN_ARG((int)part[3])); used = 2; }
+        else if (i + 2 <= len && proven_sys_mem_cmp(format + i, "mi", 2) == 0) { n = rubraview_fmt(num, sizeof(num), "{:02}", PROVEN_ARG((int)part[4])); used = 2; }
+        else if (i + 2 <= len && proven_sys_mem_cmp(format + i, "ss", 2) == 0) { n = rubraview_fmt(num, sizeof(num), "{:02}", PROVEN_ARG((int)part[5])); used = 2; }
+        if (n > 0) { rubraview_text_append(arena, buf, rubraview_mem_view(num, (size_t)n)); i += (size_t)used; }
+        else { rubraview_text_append(arena, buf, rubraview_mem_view(format + i, 1)); i++; }
     }
 }
 
@@ -70,7 +73,7 @@ proven_u8str_view_t rubraview_batch_format_name_facts(proven_arena_t *arena, pro
     size_t i = 0;
     while (i < pattern.size) {
         if (pattern.ptr[i] != '{') {
-            rubraview_text_append(arena, &buf, (const char *)pattern.ptr + i, 1);
+            rubraview_text_append(arena, &buf, rubraview_mem_view((const char *)pattern.ptr + i, 1));
             i++;
             continue;
         }
@@ -79,7 +82,7 @@ proven_u8str_view_t rubraview_batch_format_name_facts(proven_arena_t *arena, pro
         while (close < pattern.size && pattern.ptr[close] != '}') close++;
         if (close >= pattern.size) {
             /* No matching '}': copy the rest through unchanged. */
-            rubraview_text_append(arena, &buf, (const char *)pattern.ptr + i, pattern.size - i);
+            rubraview_text_append(arena, &buf, rubraview_mem_view((const char *)pattern.ptr + i, pattern.size - i));
             break;
         }
 
@@ -87,35 +90,36 @@ proven_u8str_view_t rubraview_batch_format_name_facts(proven_arena_t *arena, pro
         size_t tok_len = close - i - 1;
 
         if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = (const proven_byte_t *)tok, .size = tok_len }, PROVEN_LIT("name"))) {
-            rubraview_text_append(arena, &buf, (name_stem).ptr, (name_stem).size);
+            rubraview_text_append(arena, &buf, rubraview_mem_view((name_stem).ptr, (name_stem).size));
         } else if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = (const proven_byte_t *)tok, .size = tok_len }, PROVEN_LIT("ext"))) {
-            rubraview_text_append(arena, &buf, (ext_no_dot).ptr, (ext_no_dot).size);
+            rubraview_text_append(arena, &buf, rubraview_mem_view((ext_no_dot).ptr, (ext_no_dot).size));
         } else if (tok_len == 1 && (tok[0] == 'w' || tok[0] == 'h') && (tok[0] == 'w' ? width : height) < 0) {
-            rubraview_text_append(arena, &buf, (const char *)pattern.ptr + i, close - i + 1);   /* RV-194: filled in once known */
-        } else if (tok_len >= 5 && memcmp(tok, "taken", 5) == 0 && (tok_len == 5 || tok[5] == ':')) {
-            if (tok_len == 5) append_taken(arena, &buf, facts->taken, "yyyy-mm-dd", 10);
-            else append_taken(arena, &buf, facts->taken, tok + 6, tok_len - 6);
+            rubraview_text_append(arena, &buf, rubraview_mem_view((const char *)pattern.ptr + i, close - i + 1));   /* RV-194: filled in once known */
+        } else if (tok_len >= 5 && proven_sys_mem_cmp(tok, "taken", 5) == 0 && (tok_len == 5 || tok[5] == ':')) {
+            if (tok_len == 5) append_taken(arena, &buf, facts->taken, rubraview_bytes_view("yyyy-mm-dd", 10));
+            else append_taken(arena, &buf, facts->taken, rubraview_bytes_view(tok + 6, tok_len - 6));
         } else if (tok_len == 1 && tok[0] == 'w') {
             char num[16];
-            int n = snprintf(num, sizeof(num), "%d", width);
-            if (n > 0) rubraview_text_append(arena, &buf, num, (size_t)n);
+            int n = rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG((int)width));
+            if (n > 0) rubraview_text_append(arena, &buf, rubraview_mem_view(num, (size_t)n));
         } else if (tok_len == 1 && tok[0] == 'h') {
             char num[16];
-            int n = snprintf(num, sizeof(num), "%d", height);
-            if (n > 0) rubraview_text_append(arena, &buf, num, (size_t)n);
+            int n = rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG((int)height));
+            if (n > 0) rubraview_text_append(arena, &buf, rubraview_mem_view(num, (size_t)n));
         } else if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = (const proven_byte_t *)tok, .size = tok_len }, PROVEN_LIT("date"))) {
-            rubraview_text_append(arena, &buf, (date_str).ptr, (date_str).size);
+            rubraview_text_append(arena, &buf, rubraview_mem_view((date_str).ptr, (date_str).size));
         } else if (proven_u8str_view_eq((proven_u8str_view_t){ .ptr = (const proven_byte_t *)tok, .size = tok_len }, PROVEN_LIT("parent"))) {
-            rubraview_text_append(arena, &buf, (parent).ptr, (parent).size);
+            rubraview_text_append(arena, &buf, rubraview_mem_view((parent).ptr, (parent).size));
         } else if (tok_len >= 1 && tok[0] == 'n' && (tok_len == 1 || (tok_len == 3 && tok[1] == ':' && tok[2] >= '1' && tok[2] <= '9'))) {
             /* RV-129: the counter, {n:3} padded with zeros to three digits */
             char num[32];
             int pad = tok_len == 3 ? tok[2] - '0' : 0;
-            int n = snprintf(num, sizeof(num), "%0*lld", pad, (long long)counter);
-            if (n > 0) rubraview_text_append(arena, &buf, num, (size_t)n);
+            static const char *const PADDED[10] = { "{}", "{:01}", "{:02}", "{:03}", "{:04}", "{:05}", "{:06}", "{:07}", "{:08}", "{:09}" };
+            int n = rubraview_fmt(num, sizeof(num), PADDED[pad >= 0 && pad <= 9 ? pad : 0], PROVEN_ARG((long long)counter));
+            if (n > 0) rubraview_text_append(arena, &buf, rubraview_mem_view(num, (size_t)n));
         } else {
             /* Unrecognized token: copy the whole "{...}" through unchanged. */
-            rubraview_text_append(arena, &buf, (const char *)pattern.ptr + i, close - i + 1);
+            rubraview_text_append(arena, &buf, rubraview_mem_view((const char *)pattern.ptr + i, close - i + 1));
         }
 
         i = close + 1;
@@ -143,21 +147,22 @@ proven_u8str_view_t rubraview_batch_compose_pattern(proven_arena_t *arena, const
     if (!arena || !parts) return PROVEN_LIT("");
     static const char *const TAKEN[4] = { "{taken:yyyy-mm-dd}", "{taken:yyyymmdd}", "{taken:yyyy-mm-dd_hhmiss}", "{taken:yymmdd}" };
     proven_u8str_t buf = {0};
-    rubraview_text_append(arena, &buf, (const char *)parts->before.ptr, parts->before.size);
+    rubraview_text_append(arena, &buf, rubraview_mem_view((const char *)parts->before.ptr, parts->before.size));
     bool any = false;
     char counter[8];
-    snprintf(counter, sizeof(counter), parts->digits > 1 && parts->digits <= 9 ? "{n:%d}" : "{n}", (int)parts->digits);
+    if (parts->digits > 1 && parts->digits <= 9) (void)rubraview_fmt(counter, sizeof(counter), "{{n:{}}}", PROVEN_ARG((int)parts->digits));
+    else (void)rubraview_fmt(counter, sizeof(counter), "{{n}}");
     const char *middle[5] = { parts->parent ? "{parent}" : NULL, parts->name ? "{name}" : NULL, parts->counter ? counter : NULL,
                               parts->size ? "{w}x{h}" : NULL, parts->taken ? TAKEN[(unsigned)parts->taken_form % 4u] : NULL };
     for (int i = 0; i < 5; ++i) {
         if (!middle[i]) continue;
-        if (any) rubraview_text_append(arena, &buf, (const char *)parts->sep.ptr, parts->sep.size);
-        rubraview_text_append(arena, &buf, middle[i], strlen(middle[i]));
+        if (any) rubraview_text_append(arena, &buf, rubraview_mem_view((const char *)parts->sep.ptr, parts->sep.size));
+        rubraview_text_append(arena, &buf, rubraview_mem_view(middle[i], proven_cstr_len(middle[i])));
         any = true;
     }
-    rubraview_text_append(arena, &buf, (const char *)parts->after.ptr, parts->after.size);
+    rubraview_text_append(arena, &buf, rubraview_mem_view((const char *)parts->after.ptr, parts->after.size));
     if (!any && parts->before.size == 0 && parts->after.size == 0) return PROVEN_LIT("{name}.{ext}");
-    rubraview_text_append(arena, &buf, ".{ext}", 6);
+    rubraview_text_append(arena, &buf, rubraview_mem_view(".{ext}", 6));
     return rubraview_text_view(&buf);
 }
 
@@ -168,12 +173,12 @@ proven_u8str_view_t rubraview_batch_replace_all(proven_arena_t *arena, proven_u8
     proven_u8str_t buf = {0};
     bool any = false;
     for (size_t i = 0; i < text.size;) {
-        if (i + from.size <= text.size && memcmp(text.ptr + i, from.ptr, from.size) == 0) {
-            rubraview_text_append(arena, &buf, (to).ptr, (to).size);
+        if (i + from.size <= text.size && proven_sys_mem_cmp(text.ptr + i, from.ptr, from.size) == 0) {
+            rubraview_text_append(arena, &buf, rubraview_mem_view((to).ptr, (to).size));
             i += from.size;
             any = true;
         } else {
-            rubraview_text_append(arena, &buf, (const char *)text.ptr + i, 1);
+            rubraview_text_append(arena, &buf, rubraview_mem_view((const char *)text.ptr + i, 1));
             ++i;
         }
     }
@@ -234,7 +239,7 @@ static rubraview_pixbuf_t place_on(proven_arena_t *arena, const rubraview_pixbuf
     fill_rgb(&out, rgb);
     int32_t ox = (w - src->width) / 2, oy = (h - src->height) / 2;
     for (int32_t y = 0; y < src->height; ++y)
-        memcpy(out.pixels + (size_t)(y + oy) * (size_t)out.stride + (size_t)ox * 4u,
+        proven_sys_mem_copy(out.pixels + (size_t)(y + oy) * (size_t)out.stride + (size_t)ox * 4u,
                src->pixels + (size_t)y * (size_t)src->stride, (size_t)src->width * 4u);
     return out;
 }
@@ -301,7 +306,7 @@ rubraview_pixbuf_t rubraview_batch_text_layer(proven_arena_t *arena, const rubra
     int32_t w = mask->width + 2 * pad, h = mask->height + 2 * pad;
     rubraview_pixbuf_t out = rubraview_pixbuf_create(arena, w, h, format);
     if (!out.pixels) return none;
-    memset(out.pixels, 0, (size_t)out.stride * (size_t)h);
+    proven_sys_mem_set(out.pixels, 0, (size_t)out.stride * (size_t)h);
     uint8_t r = (uint8_t)(rgb >> 16), g = (uint8_t)(rgb >> 8), b = (uint8_t)rgb;
     bool bgra = format == RUBRAVIEW_PIXFMT_BGRA8;
     int32_t off = pad / 2 > 0 ? pad / 2 : 1;

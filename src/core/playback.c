@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/playback.h"
 #include "rubraview/lang.h"
 #include <string.h>
@@ -116,7 +117,9 @@ double rubraview_seekbar_fraction(double position_seconds, double duration_secon
     return clampd(position_seconds / duration_seconds, 0.0, 1.0);
 }
 
-proven_u8str_view_t rubraview_format_timecode(char *buffer, size_t buffer_size, double seconds, bool with_milliseconds) {
+proven_u8str_view_t rubraview_format_timecode(proven_mem_mut_t buffer_view, double seconds, bool with_milliseconds) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     proven_u8str_view_t empty = PROVEN_LIT("");
     if (!buffer || buffer_size < 16) return empty;
 
@@ -132,14 +135,14 @@ proven_u8str_view_t rubraview_format_timecode(char *buffer, size_t buffer_size, 
     int written;
     if (h > 0) {
         written = with_milliseconds
-            ? snprintf(buffer, buffer_size, "%lld:%02lld:%02lld.%03lld", h, m, s, ms)
-            : snprintf(buffer, buffer_size, "%lld:%02lld:%02lld", h, m, s);
+            ? rubraview_fmt(buffer, buffer_size, "{}:{:02}:{:02}.{:03}", PROVEN_ARG((long long)h), PROVEN_ARG((long long)m), PROVEN_ARG((long long)s), PROVEN_ARG((long long)ms))
+            : rubraview_fmt(buffer, buffer_size, "{}:{:02}:{:02}", PROVEN_ARG((long long)h), PROVEN_ARG((long long)m), PROVEN_ARG((long long)s));
     } else {
         /* Under an hour the hours field is noise: `01:14.200` reads
            faster than `0:01:14.200`. */
         written = with_milliseconds
-            ? snprintf(buffer, buffer_size, "%02lld:%02lld.%03lld", m, s, ms)
-            : snprintf(buffer, buffer_size, "%02lld:%02lld", m, s);
+            ? rubraview_fmt(buffer, buffer_size, "{:02}:{:02}.{:03}", PROVEN_ARG((long long)m), PROVEN_ARG((long long)s), PROVEN_ARG((long long)ms))
+            : rubraview_fmt(buffer, buffer_size, "{:02}:{:02}", PROVEN_ARG((long long)m), PROVEN_ARG((long long)s));
     }
 
     if (written <= 0) return empty;
@@ -281,13 +284,15 @@ int32_t rubraview_tracks_next(const rubraview_track_set_t *set, rubraview_track_
     return current;
 }
 
-proven_u8str_view_t rubraview_track_label(char *buffer, size_t buffer_size,
+proven_u8str_view_t rubraview_track_label(proven_mem_mut_t buffer_view,
                               const rubraview_track_set_t *set, int32_t index) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     proven_u8str_view_t empty = PROVEN_LIT("");
     if (!buffer || buffer_size < 8) return empty;
 
     if (!set || index < 0 || (size_t)index >= set->count) {
-        int written = snprintf(buffer, buffer_size, T("Off"));
+        int written = rubraview_fmt(buffer, buffer_size, T("Off"));
         return written > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = (size_t)written } : empty;
     }
 
@@ -303,23 +308,23 @@ proven_u8str_view_t rubraview_track_label(char *buffer, size_t buffer_size,
 
     char language[32];
     size_t n = track->language.size < sizeof(language) - 1 ? track->language.size : sizeof(language) - 1;
-    if (n > 0) memcpy(language, track->language.ptr, n);
+    if (n > 0) proven_sys_mem_copy(language, track->language.ptr, n);
     language[n] = '\0';
 
     char codec[32];
     size_t c = track->codec.size < sizeof(codec) - 1 ? track->codec.size : sizeof(codec) - 1;
-    if (c > 0) memcpy(codec, track->codec.ptr, c);
+    if (c > 0) proven_sys_mem_copy(codec, track->codec.ptr, c);
     codec[c] = '\0';
 
     int written;
     if (track->kind == RUBRAVIEW_TRACK_AUDIO && track->channels > 0) {
-        written = snprintf(buffer, buffer_size, "#%d %s (%s %d.%d)", ordinal,
-                           n > 0 ? language : "unlabelled", c > 0 ? codec : "?",
-                           track->channels > 2 ? track->channels - 1 : track->channels,
-                           track->channels > 2 ? 1 : 0);
+        written = rubraview_fmt(buffer, buffer_size, "#{} {} ({} {}.{})", PROVEN_ARG((int)ordinal),
+                           PROVEN_ARG(n > 0 ? language : "unlabelled"), PROVEN_ARG(c > 0 ? codec : "?"),
+                           PROVEN_ARG((int)(track->channels > 2 ? track->channels - 1 : track->channels)),
+                           PROVEN_ARG((int)(track->channels > 2 ? 1 : 0)));
     } else {
-        written = snprintf(buffer, buffer_size, "#%d %s (%s)", ordinal,
-                           n > 0 ? language : "unlabelled", c > 0 ? codec : "?");
+        written = rubraview_fmt(buffer, buffer_size, "#{} {} ({})", PROVEN_ARG((int)ordinal),
+                           PROVEN_ARG(n > 0 ? language : "unlabelled"), PROVEN_ARG(c > 0 ? codec : "?"));
     }
 
     if (written <= 0) return empty;
@@ -341,23 +346,25 @@ size_t rubraview_pagebar_page(double bar_x, double bar_width, double click_x, si
     return page < count ? page : count - 1;
 }
 
-proven_u8str_view_t rubraview_media_status(char *buffer, size_t buffer_size, double position, double duration,
+proven_u8str_view_t rubraview_media_status(proven_mem_mut_t buffer_view, double position, double duration,
                                int volume, bool muted, double speed, double ab_a, double ab_b) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     if (!buffer || buffer_size == 0) return PROVEN_LIT("");
     char at[32], total[32], sp[16] = "";
-    proven_u8str_view_t a = rubraview_format_timecode(at, sizeof(at), position, false);
-    proven_u8str_view_t t = rubraview_format_timecode(total, sizeof(total), duration, false);
+    proven_u8str_view_t a = rubraview_format_timecode(rubraview_mem_mut(at, sizeof(at)), position, false);
+    proven_u8str_view_t t = rubraview_format_timecode(rubraview_mem_mut(total, sizeof(total)), duration, false);
     if (speed > 0.0 && fabs(speed - 1.0) > 1e-6) {
-        int n = snprintf(sp, sizeof(sp), "%.2f", speed);
+        int n = rubraview_fmt(sp, sizeof(sp), "{:.2}", PROVEN_ARG((double)speed));
         while (n > 0 && sp[n - 1] == '0') sp[--n] = '\0';
         if (n > 0 && sp[n - 1] == '.') sp[--n] = '\0';
     }
     char vol[24];
-    if (muted) snprintf(vol, sizeof(vol), "muted");
-    else snprintf(vol, sizeof(vol), "vol %d%%", volume);
-    int n = snprintf(buffer, buffer_size, "%.*s / %.*s   %s%s%s%s%s", (int)a.size, a.ptr, (int)t.size, t.ptr, vol,
-                     sp[0] ? "   " : "", sp, sp[0] ? "x" : "",
-                     ab_a >= 0.0 ? (ab_b > ab_a ? "   A-B" : "   A-") : "");
+    if (muted) rubraview_fmt(vol, sizeof(vol), "muted");
+    else rubraview_fmt(vol, sizeof(vol), "vol {}%", PROVEN_ARG((int)volume));
+    int n = rubraview_fmt(buffer, buffer_size, "{} / {}   {}{}{}{}{}", PROVEN_ARG(rubraview_bytes_view(a.ptr, (int)a.size)), PROVEN_ARG(rubraview_bytes_view(t.ptr, (int)t.size)), PROVEN_ARG(vol),
+                     PROVEN_ARG(sp[0] ? "   " : ""), PROVEN_ARG(sp), PROVEN_ARG(sp[0] ? "x" : ""),
+                     PROVEN_ARG(ab_a >= 0.0 ? (ab_b > ab_a ? "   A-B" : "   A-") : ""));
     if (n < 0) { buffer[0] = '\0'; return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 0 }; }
     size_t len = (size_t)n < buffer_size ? (size_t)n : buffer_size - 1;
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = len };

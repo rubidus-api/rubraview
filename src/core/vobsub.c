@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/vobsub.h"
 #include "rubraview/number.h"
 #include <string.h>
@@ -5,7 +6,7 @@
 /* ---- the index file ---- */
 
 static bool line_starts(proven_u8str_view_t line, const char *word, proven_u8str_view_t *rest) {
-    size_t n = strlen(word);
+    size_t n = proven_cstr_len(word);
     if (!proven_u8str_view_starts_with_ascii_ci(line, proven_u8str_view_from_bytes(word, n))) return false;
     *rest = (proven_u8str_view_t){ .ptr = line.ptr + n, .size = line.size - n };
     while (rest->size > 0 && (rest->ptr[0] == ' ' || rest->ptr[0] == '\t')) { rest->ptr++; rest->size--; }
@@ -106,7 +107,9 @@ static uint32_t be16(const uint8_t *p) { return (uint32_t)p[0] << 8 | p[1]; }
 /* Collects one subpicture's bytes, starting at `filepos`: the packets of
    the program stream from there until the subpicture says it is whole.
    Returns how many bytes were written, and the first PTS seen. */
-static size_t read_spu(reader_t *r, size_t filepos, uint8_t *out, size_t out_size, double *out_pts) {
+static size_t read_spu(reader_t *r, size_t filepos, proven_mem_mut_t out_view, double *out_pts) {
+    uint8_t *out = (uint8_t *)out_view.ptr;
+    size_t out_size = (size_t)out_view.size;
     size_t written = 0, want = 0;
     *out_pts = -1.0;
     size_t at = filepos;
@@ -142,7 +145,7 @@ static size_t read_spu(reader_t *r, size_t filepos, uint8_t *out, size_t out_siz
                     length--;
                     if (written == 0 && length >= 2) want = be16(payload);
                     if (written + length > out_size) length = out_size - written;
-                    memcpy(out + written, payload, length);
+                    proven_sys_mem_copy(out + written, payload, length);
                     written += length;
                     if (want > 0 && written >= want) return want < out_size ? want : out_size;
                 }
@@ -177,8 +180,10 @@ static void align_byte(nibbles_t *n) {
 /* One field of the picture: every other line, run-length coded. A run is
    one to four nibbles — count and colour — and a count of zero means "to
    the end of this line". */
-static void decode_field(const uint8_t *data, size_t size, size_t offset,
+static void decode_field(proven_mem_view_t data_view, size_t offset,
                          int32_t width, int32_t height, int32_t first_line, uint8_t *out) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     nibbles_t n = { .data = data, .size = size, .byte = offset, .high = true };
     for (int32_t line = first_line; line < height; line += 2) {
         int32_t x = 0;
@@ -194,7 +199,7 @@ static void decode_field(const uint8_t *data, size_t size, size_t offset,
             uint32_t count = v >> 2;
             uint8_t colour = (uint8_t)(v & 3);
             if (count == 0 || (int32_t)count > width - x) count = (uint32_t)(width - x);
-            memset(out + (size_t)line * (size_t)width + (size_t)x, colour, count);
+            proven_sys_mem_set(out + (size_t)line * (size_t)width + (size_t)x, colour, count);
             x += (int32_t)count;
         }
         align_byte(&n);
@@ -203,10 +208,12 @@ static void decode_field(const uint8_t *data, size_t size, size_t offset,
 }
 
 /* The control sequences: when to show it, where, in which colours. */
-static bool read_controls(const uint8_t *spu, size_t size, size_t control,
+static bool read_controls(proven_mem_view_t spu_view, size_t control,
                           double *out_show, double *out_hide, bool *out_forced,
                           int32_t *x1, int32_t *x2, int32_t *y1, int32_t *y2,
                           uint8_t *palette_index, uint8_t *alpha, size_t *field_offset) {
+    const uint8_t *spu = (const uint8_t *)spu_view.ptr;
+    size_t size = (size_t)spu_view.size;
     bool have_area = false, have_offsets = false;
     *out_show = 0.0;
     *out_hide = -1.0;
@@ -340,8 +347,10 @@ rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, proven_u8
 }
 
 bool rubraview_vobsub_decode(const rubraview_vobsub_track_t *track, size_t index,
-                             const uint8_t *sub_bytes, size_t sub_size,
+                             proven_mem_view_t sub_bytes_view,
                              uint8_t *pixels, rubraview_vobsub_cue_t *out_cue) {
+    const uint8_t *sub_bytes = (const uint8_t *)sub_bytes_view.ptr;
+    size_t sub_size = (size_t)sub_bytes_view.size;
     if (!track || !sub_bytes || !pixels || !out_cue || index >= track->count) return false;
     size_t filepos = track->entries[index].filepos;
     if (filepos >= sub_size) return false;
@@ -349,7 +358,7 @@ bool rubraview_vobsub_decode(const rubraview_vobsub_track_t *track, size_t index
     reader_t reader = { .data = sub_bytes, .size = sub_size, .at = 0 };
     static uint8_t spu[64 * 1024];   /* one subpicture; the format caps it at 64 KB */
     double pts = -1.0;
-    size_t spu_size = read_spu(&reader, filepos, spu, sizeof(spu), &pts);
+    size_t spu_size = read_spu(&reader, filepos, rubraview_mem_mut(spu, sizeof(spu)), &pts);
     if (spu_size < 4) return false;
     size_t control = be16(spu + 2);
     if (control + 4 > spu_size) return false;
@@ -359,7 +368,7 @@ bool rubraview_vobsub_decode(const rubraview_vobsub_track_t *track, size_t index
     int32_t x1 = 0, x2 = 0, y1 = 0, y2 = 0;
     uint8_t palette_index[4] = { 0, 1, 2, 3 }, alpha[4] = { 0, 15, 15, 15 };
     size_t field_offset[2] = { 4, 4 };
-    if (!read_controls(spu, spu_size, control, &show, &hide, &forced,
+    if (!read_controls(rubraview_mem_view(spu, spu_size), control, &show, &hide, &forced,
                        &x1, &x2, &y1, &y2, palette_index, alpha, field_offset)) {
         return false;
     }
@@ -367,9 +376,9 @@ bool rubraview_vobsub_decode(const rubraview_vobsub_track_t *track, size_t index
     if (width <= 0 || height <= 0) return false;
     if ((size_t)width * (size_t)height > RUBRAVIEW_VOBSUB_MAX_PIXELS) return false;
 
-    memset(pixels, 0, (size_t)width * (size_t)height);
-    decode_field(spu, spu_size, field_offset[0], width, height, 0, pixels);
-    decode_field(spu, spu_size, field_offset[1], width, height, 1, pixels);
+    proven_sys_mem_set(pixels, 0, (size_t)width * (size_t)height);
+    decode_field(rubraview_mem_view(spu, spu_size), field_offset[0], width, height, 0, pixels);
+    decode_field(rubraview_mem_view(spu, spu_size), field_offset[1], width, height, 1, pixels);
 
     double start = track->entries[index].start_seconds;
     rubraview_vobsub_cue_t cue = {

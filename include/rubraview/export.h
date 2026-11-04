@@ -146,7 +146,7 @@ proven_u8str_view_t rubraview_export_extension(rubraview_export_format_t format)
  * inch, in place: the picture itself is not touched. False when the file
  * has no JFIF block there (the caller then writes it another way).
  */
-bool rubraview_jpeg_set_dpi(uint8_t *jpeg, size_t len, double dpi);
+bool rubraview_jpeg_set_dpi(proven_mem_mut_t jpeg_view, double dpi);
 
 /** The format a filename implies, or SAME_AS_SOURCE when it names none. */
 rubraview_export_format_t rubraview_export_format_for_name(proven_u8str_view_t filename);

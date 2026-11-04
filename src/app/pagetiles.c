@@ -71,7 +71,7 @@ static void tile_set_take_all(app_state_t *app, struct tile_set *ts) {
                                         .live = true, .failed = texture == NULL };
             app->tiles_arrived = true;
         }
-        free(done.bgra);
+        rubraview_free(done.bgra);
     }
 }
 
@@ -92,22 +92,22 @@ static void tiles_give_archive_page(app_state_t *app, struct tile_set *ts, int32
     size_t budget = rubraview_page_source_read_budget(&app->source, (size_t)index);
     /* Not a page that must be decoded again from far back (a streamed 7z block). */
     bool close_by = page_read_cost(app, (size_t)index) <= PAGE_JOB_MIN_COST;
-    void *mem = close_by && size > 0 && size <= MAX_PAGE_BYTES && budget > 0 ? malloc(budget) : NULL;
+    void *mem = close_by && size > 0 && size <= MAX_PAGE_BYTES && budget > 0 ? rubraview_alloc(budget) : NULL;
     if (mem) {
         proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
         AcquireSRWLockExclusive(&app->source_lock);
         rubraview_page_bytes_t bytes = rubraview_page_source_read(&scratch, &app->source, (size_t)index, MAX_PAGE_BYTES);
         ReleaseSRWLockExclusive(&app->source_lock);
         if (bytes.ok && bytes.data.size > 0) {
-            copy = (uint8_t*)malloc(bytes.data.size);
+            copy = (uint8_t*)rubraview_alloc(bytes.data.size);
             if (copy) {
-                memcpy(copy, bytes.data.ptr, bytes.data.size);
+                proven_sys_mem_copy(copy, bytes.data.ptr, bytes.data.size);
                 copy_size = bytes.data.size;
             }
         }
-        free(mem);
+        rubraview_free(mem);
     }
-    rubraview_pal_tiles_source_bytes(ts->tiles, ts->generation, copy, copy_size, true, pw, ph);
+    rubraview_pal_tiles_source_bytes(ts->tiles, ts->generation, rubraview_mem_mut(copy, copy_size), true, pw, ph);
 }
 
 /* D-81: is this page, shown larger than its own pixels, to be enlarged
@@ -189,9 +189,9 @@ void draw_page_tiles(app_state_t *app, int which, int32_t index, const app_page_
             place);
         rubraview_pal_render_draw_texture_opacity(app->renderer, slot->texture, tile, interp, opacity);
     }
-    if (m != ts->asked_count || memcmp(missing, ts->asked, m * sizeof(missing[0])) != 0) {
+    if (m != ts->asked_count || proven_sys_mem_cmp(missing, ts->asked, m * sizeof(missing[0])) != 0) {
         rubraview_pal_tiles_want(ts->tiles, ts->generation, missing, m);
-        if (m) memcpy(ts->asked, missing, m * sizeof(missing[0]));
+        if (m) proven_sys_mem_copy(ts->asked, missing, m * sizeof(missing[0]));
         ts->asked_count = m;
     }
 }
@@ -239,7 +239,7 @@ void picker_thumbs_step(app_state_t *app) {
             t->media = (rubraview_picker_media_t){ done.source_width, done.source_height, done.seconds };
             app->picker_thumbs_arrived = true;
         }
-        free(done.bgra);
+        rubraview_free(done.bgra);
     }
 
     double tw = 0.0, th = 0.0;
@@ -286,10 +286,10 @@ void picker_thumbs_step(app_state_t *app) {
             book_reads++;
             void *mem = NULL;
             rubraview_page_bytes_t pb = page_read_owned(&app->source, &app->source_lock, page, &mem);
-            uint8_t *copy = pb.ok && pb.data.size > 0 ? (uint8_t*)malloc(pb.data.size) : NULL;
-            if (copy) memcpy(copy, pb.data.ptr, pb.data.size);
-            free(mem);
-            if (copy && rubraview_pal_thumbs_request_bytes(app->thumbs, app->picker_generation, index, tw / th, copy, pb.data.size)) {
+            uint8_t *copy = pb.ok && pb.data.size > 0 ? (uint8_t*)rubraview_alloc(pb.data.size) : NULL;
+            if (copy) proven_sys_mem_copy(copy, pb.data.ptr, pb.data.size);
+            rubraview_free(mem);
+            if (copy && rubraview_pal_thumbs_request_bytes(app->thumbs, app->picker_generation, index, tw / th, rubraview_mem_mut(copy, pb.data.size))) {
                 t->state = 3;
             } else {
                 t->state = 2;

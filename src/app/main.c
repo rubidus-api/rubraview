@@ -14,6 +14,7 @@
  * PAL.
  */
 
+#include "rubraview/pal/pal_wide.h"
 #include "app.h"
 
 /* The file-scope variables app.h declares (RV-163). */
@@ -76,7 +77,7 @@ void filing_put(app_state_t *app, bool moving);
 void rename_begin(app_state_t *app);
 void rename_commit(app_state_t *app);
 void password_ask(app_state_t *app, proven_u8str_view_t archive_path, bool wrong);
-void secure_wipe(void *p, size_t n);
+void secure_wipe(proven_mem_mut_t p_view);
 void password_commit(app_state_t *app);
 void password_remember(app_state_t *app, proven_u8str_view_t password);
 void picker_path_begin(app_state_t *app);
@@ -244,7 +245,7 @@ void panel_run_batch(app_state_t *app);
 void print_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count);
 proven_u8str_view_t current_file_path(app_state_t *app);
 bool on_archive_page(const app_state_t *app);
-void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry, const char *name, uint8_t *data, size_t size);
+void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry, const char *name, proven_mem_mut_t data_view);
 void arc_edit_on_page(app_state_t *app, rubraview_arcedit_op_t op, const char *name);
 bool arc_ask_key(app_state_t *app, rubraview_key_combo_t combo);
 void arc_job_poll(app_state_t *app, bool quitting);
@@ -268,12 +269,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
     {   /* RFC-0007: a plug-in runs in a child of this program, and nothing else starts in that child */
         int argc = 0;
         LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
-        if (wargv && argc == 4 && wcscmp(wargv[1], L"--filter-host") == 0) {
+        if (wargv && argc == 4 && rubraview_wcmp(wargv[1], L"--filter-host") == 0) {
             int code = rubraview_pal_plugin_host_main(wargv[2], wargv[3]);
             LocalFree(wargv);
             return code;
         }
-        if (wargv && argc == 5 && wcscmp(wargv[1], L"--media-host") == 0) {   /* RV-176: FFmpeg's child (D-208) */
+        if (wargv && argc == 5 && rubraview_wcmp(wargv[1], L"--media-host") == 0) {   /* RV-176: FFmpeg's child (D-208) */
             int code = rubraview_pal_media_host_main(wargv[2], wargv[3], wargv[4]);
             LocalFree(wargv);
             return code;

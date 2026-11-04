@@ -1,5 +1,6 @@
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/core.h"
 #include <windows.h>
 #include <d3d11.h>
 #include <d3d11_4.h>   /* ID3D11Multithread */
@@ -173,7 +174,7 @@ void rubraview_pal_hdr_pass_free(rubraview_hdr_pass_t *p) {
     if (p->lock) ID3D11Multithread_Release(p->lock);
     if (p->context) ID3D11DeviceContext_Release(p->context);
     if (p->device) ID3D11Device_Release(p->device);
-    free(p);
+    rubraview_free(p);
 }
 
 /* Windows' shader compiler, looked for once. */
@@ -196,7 +197,7 @@ rubraview_hdr_pass_t *rubraview_pal_hdr_pass_create(void *d3d11_device, const ch
     d3dcompile_fn compile_fn = compiler();
     if (!compile_fn) { *why = N_("no shader compiler (d3dcompiler_47.dll)"); return NULL; }
 
-    rubraview_hdr_pass_t *p = (rubraview_hdr_pass_t*)calloc(1, sizeof(*p));
+    rubraview_hdr_pass_t *p = (rubraview_hdr_pass_t*)rubraview_alloc_zero(1, sizeof(*p));
     if (!p) { *why = N_("out of memory"); return NULL; }
     p->device = (ID3D11Device*)d3d11_device;
     ID3D11Device_AddRef(p->device);
@@ -388,7 +389,7 @@ bool rubraview_pal_hdr_pass_run_as_p010(rubraview_hdr_pass_t *p, const rubraview
     if (w <= 0 || h <= 0 || (w & 1) || (h & 1) || planes->chroma_width != w / 2 || planes->chroma_height != h / 2) return false;
     if (in_memory) {
         size_t pitch = (size_t)w * 2u;
-        uint16_t *packed = (uint16_t*)malloc(pitch * (size_t)h + pitch * (size_t)(h / 2));
+        uint16_t *packed = (uint16_t*)rubraview_alloc(pitch * (size_t)h + pitch * (size_t)(h / 2));
         if (!packed) return false;
         uint16_t *uv = packed + (size_t)w * (size_t)h;
         for (int32_t y = 0; y < h; ++y) {
@@ -406,7 +407,7 @@ bool rubraview_pal_hdr_pass_run_as_p010(rubraview_hdr_pass_t *p, const rubraview
             .width = w, .height = h,
         };
         bool ok = rubraview_pal_hdr_pass_run_p010(p, &source, tone, target);
-        free(packed);
+        rubraview_free(packed);
         return ok;
     }
     if (!p->test_array || p->test_size[0] != w || p->test_size[1] != h) {
@@ -491,7 +492,7 @@ void rubraview_pal_hdr_present_free(rubraview_hdr_present_t *p) {
     if (p->vs) ID3D11VertexShader_Release(p->vs);
     if (p->context) ID3D11DeviceContext_Release(p->context);
     if (p->device) ID3D11Device_Release(p->device);
-    free(p);
+    rubraview_free(p);
 }
 
 static ID3DBlob *compile_present(d3dcompile_fn fn, const char *entry, const char *profile) {
@@ -508,7 +509,7 @@ rubraview_hdr_present_t *rubraview_pal_hdr_present_create(void *d3d11_device, co
     d3dcompile_fn fn = compiler();
     if (!d3d11_device) { *why = N_("no Direct3D 11 device"); return NULL; }
     if (!fn) { *why = N_("no shader compiler (d3dcompiler_47.dll)"); return NULL; }
-    rubraview_hdr_present_t *p = (rubraview_hdr_present_t*)calloc(1, sizeof(*p));
+    rubraview_hdr_present_t *p = (rubraview_hdr_present_t*)rubraview_alloc_zero(1, sizeof(*p));
     if (!p) { *why = N_("out of memory"); return NULL; }
     p->device = (ID3D11Device*)d3d11_device;
     ID3D11Device_AddRef(p->device);

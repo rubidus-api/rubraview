@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/textenc.h"
 #include "rubraview/utf8.h"
 #include "proven/utf.h"
@@ -67,8 +68,8 @@ const char *rubraview_textenc_word(rubraview_textenc_t enc) {
 
 rubraview_textenc_t rubraview_textenc_from_word(proven_u8str_view_t word) {
     for (int i = 0; i < RUBRAVIEW_TEXTENC_COUNT; ++i) {
-        size_t n = strlen(ENCODINGS[i].word);
-        if (word.size == n && memcmp(word.ptr, ENCODINGS[i].word, n) == 0) return (rubraview_textenc_t)i;
+        size_t n = proven_cstr_len(ENCODINGS[i].word);
+        if (word.size == n && proven_sys_mem_cmp(word.ptr, ENCODINGS[i].word, n) == 0) return (rubraview_textenc_t)i;
     }
     return RUBRAVIEW_TEXTENC_AUTO;
 }
@@ -84,7 +85,9 @@ static int utf8_seq(const uint8_t *b, size_t left) {
     return c.err == PROVEN_ERR_NEED_MORE ? -1 : 0;
 }
 
-bool rubraview_textenc_is_utf8(const uint8_t *b, size_t size, bool cut_ok) {
+bool rubraview_textenc_is_utf8(proven_mem_view_t b_view, bool cut_ok) {
+    const uint8_t *b = (const uint8_t *)b_view.ptr;
+    size_t size = (size_t)b_view.size;
     for (size_t i = 0; i < size;) {
         int n = utf8_seq(b + i, size - i);
         if (n < 0) return cut_ok;
@@ -99,9 +102,11 @@ static size_t put_cp(char *out, uint32_t cp) {
     return proven_utf8_encode_one(cp, (proven_byte_t *)out);
 }
 
-char *rubraview_textenc_utf16_to_utf8(const uint8_t *b, size_t size, bool big_endian, size_t *out_len) {
+char *rubraview_textenc_utf16_to_utf8(proven_mem_view_t b_view, bool big_endian, size_t *out_len) {
+    const uint8_t *b = (const uint8_t *)b_view.ptr;
+    size_t size = (size_t)b_view.size;
     size_t units = size / 2;
-    char *out = (char *)malloc(units * 3 + 1);
+    char *out = (char *)rubraview_alloc(units * 3 + 1);
     if (!out) return NULL;
     size_t at = 0;
     for (size_t i = 0; i < units; ++i) {
@@ -120,9 +125,11 @@ char *rubraview_textenc_utf16_to_utf8(const uint8_t *b, size_t size, bool big_en
     return out;
 }
 
-char *rubraview_text_clean(const char *utf8, size_t len, size_t *out_len) {
+char *rubraview_text_clean(proven_u8str_view_t utf8_view, size_t *out_len) {
+    const char *utf8 = (const char *)utf8_view.ptr;
+    size_t len = (size_t)utf8_view.size;
     /* At worst a bad byte (1) becomes U+FFFD (3) and a control (1) U+00B7 (2). */
-    char *out = (char *)malloc(len * 3 + 1);
+    char *out = (char *)rubraview_alloc(len * 3 + 1);
     if (!out) return NULL;
     const uint8_t *b = (const uint8_t *)utf8;
     size_t at = 0;
@@ -137,7 +144,7 @@ char *rubraview_text_clean(const char *utf8, size_t len, size_t *out_len) {
         if (c == 0x7F) { at += put_cp(out + at, 0xB7); ++i; continue; }
         int n = utf8_seq(b + i, len - i);
         if (n <= 0) { at += put_cp(out + at, 0xFFFD); ++i; continue; }
-        memcpy(out + at, b + i, (size_t)n);
+        proven_sys_mem_copy(out + at, b + i, (size_t)n);
         at += (size_t)n;
         i += (size_t)n;
     }
@@ -149,8 +156,8 @@ char *rubraview_text_clean(const char *utf8, size_t len, size_t *out_len) {
 /* ---- the guess ---- */
 
 static bool has(const uint8_t *b, size_t size, const char *needle) {
-    size_t n = strlen(needle);
-    for (size_t i = 0; i + n <= size; ++i) if (memcmp(b + i, needle, n) == 0) return true;
+    size_t n = proven_cstr_len(needle);
+    for (size_t i = 0; i + n <= size; ++i) if (proven_sys_mem_cmp(b + i, needle, n) == 0) return true;
     return false;
 }
 
@@ -243,14 +250,16 @@ static double score(rubraview_textenc_t enc, const uint8_t *b, size_t size) {
 
 static rubraview_textenc_t language_choice(const char *ui_lang) {
     if (!ui_lang) return RUBRAVIEW_TEXTENC_AUTO;
-    if (strncmp(ui_lang, "ko", 2) == 0) return RUBRAVIEW_TEXTENC_CP949;
-    if (strncmp(ui_lang, "ja", 2) == 0) return RUBRAVIEW_TEXTENC_SJIS;
-    if (strcmp(ui_lang, "zh-Hant") == 0) return RUBRAVIEW_TEXTENC_BIG5;
-    if (strncmp(ui_lang, "zh", 2) == 0) return RUBRAVIEW_TEXTENC_GBK;
+    if (rubraview_cstr_cmp_n(ui_lang, rubraview_bytes_view("ko", 2)) == 0) return RUBRAVIEW_TEXTENC_CP949;
+    if (rubraview_cstr_cmp_n(ui_lang, rubraview_bytes_view("ja", 2)) == 0) return RUBRAVIEW_TEXTENC_SJIS;
+    if (rubraview_cstr_cmp(ui_lang, "zh-Hant") == 0) return RUBRAVIEW_TEXTENC_BIG5;
+    if (rubraview_cstr_cmp_n(ui_lang, rubraview_bytes_view("zh", 2)) == 0) return RUBRAVIEW_TEXTENC_GBK;
     return RUBRAVIEW_TEXTENC_AUTO;
 }
 
-rubraview_textenc_t rubraview_textenc_guess(const uint8_t *b, size_t size, const char *ui_lang, size_t *bom) {
+rubraview_textenc_t rubraview_textenc_guess(proven_mem_view_t b_view, const char *ui_lang, size_t *bom) {
+    const uint8_t *b = (const uint8_t *)b_view.ptr;
+    size_t size = (size_t)b_view.size;
     if (bom) *bom = 0;
     if (size >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) { if (bom) *bom = 3; return RUBRAVIEW_TEXTENC_UTF8; }
     if (size >= 2 && b[0] == 0xFF && b[1] == 0xFE) { if (bom) *bom = 2; return RUBRAVIEW_TEXTENC_UTF16LE; }
@@ -273,7 +282,7 @@ rubraview_textenc_t rubraview_textenc_guess(const uint8_t *b, size_t size, const
         if (zero_even * 10 > pairs * 3 && zero_odd * 20 < pairs) return RUBRAVIEW_TEXTENC_UTF16BE;
     }
 
-    if (!high || rubraview_textenc_is_utf8(b, size, true)) return RUBRAVIEW_TEXTENC_UTF8;
+    if (!high || rubraview_textenc_is_utf8(rubraview_mem_view(b, size), true)) return RUBRAVIEW_TEXTENC_UTF8;
 
     static const rubraview_textenc_t CANDIDATES[] = {
         RUBRAVIEW_TEXTENC_CP949, RUBRAVIEW_TEXTENC_SJIS, RUBRAVIEW_TEXTENC_EUCJP,

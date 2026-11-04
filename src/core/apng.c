@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/apng.h"
 #include "proven/hash.h"
 #include <stdlib.h>
@@ -19,7 +20,7 @@ static void put32(uint8_t *p, uint32_t v) {
 }
 
 static bool type_is(const uint8_t *chunk, const char *type) {
-    return memcmp(chunk + 4, type, 4) == 0;
+    return proven_sys_mem_cmp(chunk + 4, type, 4) == 0;
 }
 
 /* The chunk at `at`: its data length, or false when it does not fit in the file. */
@@ -31,14 +32,16 @@ static bool chunk_at(const uint8_t *data, size_t size, size_t at, uint32_t *out_
     return true;
 }
 
-bool rubraview_apng_is_png(const uint8_t *data, size_t size) {
-    return data && size >= sizeof(PNG_SIGNATURE) && memcmp(data, PNG_SIGNATURE, sizeof(PNG_SIGNATURE)) == 0;
+bool rubraview_apng_is_png(proven_mem_view_t data_view) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    return data && size >= sizeof(PNG_SIGNATURE) && proven_sys_mem_cmp(data, PNG_SIGNATURE, sizeof(PNG_SIGNATURE)) == 0;
 }
 
 static bool frames_push(rubraview_apng_t *apng, size_t *cap, const rubraview_apng_frame_t *frame) {
     if (apng->frame_count == *cap) {
         size_t grown = *cap ? *cap * 2 : 64;
-        rubraview_apng_frame_t *more = (rubraview_apng_frame_t*)realloc(apng->frames, grown * sizeof(*more));
+        rubraview_apng_frame_t *more = (rubraview_apng_frame_t*)rubraview_realloc(rubraview_mem_mut(apng->frames, grown * sizeof(*more)));
         if (!more) return false;
         apng->frames = more;
         *cap = grown;
@@ -47,10 +50,12 @@ static bool frames_push(rubraview_apng_t *apng, size_t *cap, const rubraview_apn
     return true;
 }
 
-bool rubraview_apng_parse(const uint8_t *data, size_t size, rubraview_apng_t *out) {
+bool rubraview_apng_parse(proven_mem_view_t data_view, rubraview_apng_t *out) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!out) return false;
     *out = (rubraview_apng_t){ 0 };
-    if (!rubraview_apng_is_png(data, size)) return false;
+    if (!rubraview_apng_is_png(rubraview_mem_view(data, size))) return false;
 
     size_t at = sizeof(PNG_SIGNATURE);
     uint32_t len = 0;
@@ -82,7 +87,7 @@ bool rubraview_apng_parse(const uint8_t *data, size_t size, rubraview_apng_t *ou
         if ((control || end) && open) {
             /* The frame before ends where this begins. */
             frame.data_end = at;
-            if (has_data && !frames_push(&apng, &cap, &frame)) { free(apng.frames); return false; }
+            if (has_data && !frames_push(&apng, &cap, &frame)) { rubraview_free(apng.frames); return false; }
             open = false;
         }
         if (end) break;
@@ -119,14 +124,14 @@ bool rubraview_apng_parse(const uint8_t *data, size_t size, rubraview_apng_t *ou
         at += CHUNK_EXTRA + len;
     }
 
-    if (!seen_idat || apng.frame_count == 0) { free(apng.frames); return false; }
+    if (!seen_idat || apng.frame_count == 0) { rubraview_free(apng.frames); return false; }
     *out = apng;
     return true;
 }
 
 void rubraview_apng_free(rubraview_apng_t *apng) {
     if (!apng) return;
-    free(apng->frames);
+    rubraview_free(apng->frames);
     *apng = (rubraview_apng_t){ 0 };
 }
 
@@ -136,7 +141,9 @@ static bool head_carried(const uint8_t *chunk) {
     return !type_is(chunk, "acTL") && !type_is(chunk, "fcTL") && !type_is(chunk, "fdAT");
 }
 
-static void put_chunk_check(uint8_t *chunk, uint32_t len) {
+static void put_chunk_check(proven_mem_mut_t chunk_view) {
+    uint8_t *chunk = (uint8_t *)chunk_view.ptr;
+    uint32_t len = (uint32_t)chunk_view.size;
     put32(chunk + 8 + len, (uint32_t)proven_crc32((proven_mem_view_t){ .ptr = chunk + 4, .size = (size_t)len + 4 }));
 }
 
@@ -148,7 +155,7 @@ static size_t frame_png(const rubraview_apng_t *apng, size_t index, uint8_t *dst
     size_t used = 0;
 #define EMIT(bytes, count) do { \
         size_t n_ = (count); \
-        if (dst) { if (cap - used < n_) return 0; memcpy(dst + used, (bytes), n_); } \
+        if (dst) { if (cap - used < n_) return 0; proven_sys_mem_copy(dst + used, (bytes), n_); } \
         used += n_; \
     } while (0)
 
@@ -159,7 +166,7 @@ static size_t frame_png(const rubraview_apng_t *apng, size_t index, uint8_t *dst
     if (dst) {
         put32(dst + ihdr + 8, frame->width);
         put32(dst + ihdr + 12, frame->height);
-        put_chunk_check(dst + ihdr, IHDR_DATA);
+        put_chunk_check(rubraview_mem_mut(dst + ihdr, IHDR_DATA));
     }
 
     uint32_t len = 0;
@@ -178,11 +185,11 @@ static size_t frame_png(const rubraview_apng_t *apng, size_t index, uint8_t *dst
             size_t start = used;
             uint8_t head[8];
             put32(head, body);
-            memcpy(head + 4, "IDAT", 4);
+            proven_sys_mem_copy(head + 4, "IDAT", 4);
             EMIT(head, sizeof(head));
             EMIT(chunk + 12, body);
             EMIT(head, 4);   /* room for the check */
-            if (dst) put_chunk_check(dst + start, body);
+            if (dst) put_chunk_check(rubraview_mem_mut(dst + start, body));
         }
     }
 

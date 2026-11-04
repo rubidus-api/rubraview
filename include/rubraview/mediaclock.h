@@ -55,6 +55,16 @@ rubraview_frame_decision_t rubraview_media_schedule_at(double frame_pts, double 
 double rubraview_media_display_resample(double frame_rate, double refresh_hz, double max_change);
 
 /**
+ * RV-215 (D-272), mpv's interpolation (oversample): the frame for the refresh seen from `display_at` to
+ * `display_at + period`, shown as soon as it starts within that refresh, and `*prev_weight` how much of the refresh
+ * still belongs to the frame before it (0 when it began by `display_at`): the two are drawn blended by that, so a
+ * film whose frames do not land on refreshes moves evenly instead of three refreshes, then two. DROP and WAIT as
+ * rubraview_media_schedule.
+ */
+rubraview_frame_decision_t rubraview_media_schedule_blend(double frame_pts, double frame_duration, double display_at,
+                                                           double period, double *prev_weight);
+
+/**
  * Redraw pacing while a film or a sound plays and nothing else on screen
  * moves. A new picture is drawn at once; otherwise only the seek bar and
  * the time (minutes and seconds) change, and four times a second is plenty

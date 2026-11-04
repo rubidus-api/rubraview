@@ -66,10 +66,10 @@ void rubraview_lang_free(rubraview_lang_t *lang);
 
 /** The pack's text for `english` in `context` ("" or NULL for none), or NULL. */
 const rubraview_lang_entry_t *rubraview_lang_find(const rubraview_lang_t *lang, const char *context,
-                                                  const char *english, size_t english_len);
+                                                  proven_u8str_view_t english_view);
 
-/** Whether `translation` has the same printf conversions as `english`, in
-    the same order (%% is not one). */
+/* RV-220 (D-275): whether a translation takes the same arguments the same way as the English: the same proven
+   placeholders (`{}` numbered in turn, `{N}`, each with its `:spec`), in any order; braces that do not pair refuse it. */
 bool rubraview_lang_same_conversions(proven_u8str_view_t english, proven_u8str_view_t translation);
 
 /* ---- the pack in use, for the whole program ---- */

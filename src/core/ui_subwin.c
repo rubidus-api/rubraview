@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/ui_subwin.h"
 
 #include <math.h>
@@ -8,7 +9,7 @@ static bool cue_listed(const rubraview_subtitle_track_t *track, const rubraview_
     if (cue->text.size == 0 || cue->removed) return false;   /* RV-115: a removed cue waits, unseen, for the save */
     if (track->shown_language.size == 0) return true;
     return cue->language.size == track->shown_language.size &&
-           memcmp(cue->language.ptr, track->shown_language.ptr, cue->language.size) == 0;
+           proven_sys_mem_cmp(cue->language.ptr, track->shown_language.ptr, cue->language.size) == 0;
 }
 
 size_t rubraview_subwin_rows(const rubraview_subtitle_track_t *track, uint32_t *rows, size_t max) {
@@ -40,7 +41,7 @@ bool rubraview_subwin_click(bool *chosen, size_t count, size_t *anchor, size_t i
     if (shift) {
         size_t from = *anchor < count ? *anchor : index;
         size_t low = from < index ? from : index, high = from < index ? index : from;
-        if (!ctrl) memset(chosen, 0, count * sizeof(chosen[0]));
+        if (!ctrl) proven_sys_mem_set(chosen, 0, count * sizeof(chosen[0]));
         for (size_t i = low; i <= high; ++i) chosen[i] = true;
         return false;
     }
@@ -55,7 +56,7 @@ bool rubraview_subwin_click(bool *chosen, size_t count, size_t *anchor, size_t i
 size_t rubraview_subwin_shift(rubraview_subtitle_track_t *track, uint32_t *rows, bool *chosen, size_t count,
                               double seconds, bool *marks) {
     if (!track || !rows || !chosen || !marks || count == 0 || seconds == 0.0 || !(seconds == seconds)) return 0;
-    memset(marks, 0, track->count * sizeof(marks[0]));
+    proven_sys_mem_set(marks, 0, track->count * sizeof(marks[0]));
     size_t moved = 0;
     for (size_t i = 0; i < count; ++i) {
         if (!chosen[i] || rows[i] >= track->count) continue;
@@ -122,19 +123,23 @@ size_t rubraview_subwin_chosen_count(const bool *chosen, size_t count) {
     return n;
 }
 
-proven_u8str_view_t rubraview_subwin_time(char *buffer, size_t size, double seconds) {
+proven_u8str_view_t rubraview_subwin_time(proven_mem_mut_t buffer_view, double seconds) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t size = (size_t)buffer_view.size;
     proven_u8str_view_t none = PROVEN_LIT("");
     if (!buffer || size == 0) return none;
     if (!(seconds > 0.0)) seconds = 0.0;
     if (seconds > 359999.0) seconds = 359999.0;       /* 99:59:59 */
     long long hundredths = llround(seconds * 100.0);
     long long whole = hundredths / 100;
-    int n = snprintf(buffer, size, "%lld:%02lld:%02lld.%02lld", whole / 3600, whole / 60 % 60, whole % 60, hundredths % 100);
+    int n = rubraview_fmt(buffer, size, "{}:{:02}:{:02}.{:02}", PROVEN_ARG((long long)(whole / 3600)), PROVEN_ARG((long long)(whole / 60 % 60)), PROVEN_ARG((long long)(whole % 60)), PROVEN_ARG((long long)(hundredths % 100)));
     if (n <= 0) return none;
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = (size_t)n < size ? (size_t)n : size - 1 };
 }
 
-proven_u8str_view_t rubraview_subwin_line(char *buffer, size_t size, proven_u8str_view_t text) {
+proven_u8str_view_t rubraview_subwin_line(proven_mem_mut_t buffer_view, proven_u8str_view_t text) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t size = (size_t)buffer_view.size;
     size_t n = 0;
     if (!buffer || size == 0) return PROVEN_LIT("");
     for (size_t i = 0; i < text.size; ++i) {
@@ -143,14 +148,14 @@ proven_u8str_view_t rubraview_subwin_line(char *buffer, size_t size, proven_u8st
         if (c == '\n') {
             if (i + 1 >= text.size) break;             /* a break at the end says nothing */
             if (n + 3 > size) break;
-            memcpy(buffer + n, " / ", 3);
+            proven_sys_mem_copy(buffer + n, " / ", 3);
             n += 3;
             continue;
         }
         /* a whole character or none */
         size_t len = c < 0x80 ? 1 : c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
         if (i + len > text.size || n + len > size) break;
-        memcpy(buffer + n, text.ptr + i, len);
+        proven_sys_mem_copy(buffer + n, text.ptr + i, len);
         n += len;
         i += len - 1;
     }

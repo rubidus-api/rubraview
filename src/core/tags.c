@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/tags.h"
 #include "rubraview/path.h"
 #include "rubraview/number.h"
@@ -43,12 +44,14 @@ static uint32_t syncsafe(const uint8_t *p) {
 
 static proven_u8str_view_t none(void) { return PROVEN_LIT(""); }
 
-static proven_u8str_view_t arena_bytes(proven_arena_t *arena, const char *text, size_t len) {
+static proven_u8str_view_t arena_bytes(proven_arena_t *arena, proven_u8str_view_t text_view) {
+    const char *text = (const char *)text_view.ptr;
+    size_t len = (size_t)text_view.size;
     if (len == 0) return none();
     proven_result_mem_mut_t res = proven_arena_alloc(arena, len + 1);
     if (!proven_is_ok(res.err)) return none();
     char *out = (char*)res.value.ptr;
-    memcpy(out, text, len);
+    proven_sys_mem_copy(out, text, len);
     out[len] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = len };
 }
@@ -59,7 +62,7 @@ static proven_u8str_view_t trim(proven_arena_t *arena, const uint8_t *p, size_t 
                        p[len - 1] == '\n' || p[len - 1] == '\t')) len--;
     size_t at = 0;
     while (at < len && (p[at] == ' ' || p[at] == '\t')) at++;
-    return arena_bytes(arena, (const char*)p + at, len - at);
+    return arena_bytes(arena, rubraview_bytes_view((const char*)p + at, len - at));
 }
 
 static size_t utf8_put(char *out, uint32_t cp) {
@@ -82,7 +85,9 @@ static size_t utf8_put(char *out, uint32_t cp) {
     return 4;
 }
 
-static proven_u8str_view_t latin1_to_utf8(proven_arena_t *arena, const uint8_t *p, size_t len) {
+static proven_u8str_view_t latin1_to_utf8(proven_arena_t *arena, proven_mem_view_t p_view) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     proven_result_mem_mut_t res = proven_arena_alloc(arena, len * 2 + 1);
     if (!proven_is_ok(res.err)) return none();
     char *out = (char*)res.value.ptr;
@@ -96,7 +101,9 @@ static proven_u8str_view_t latin1_to_utf8(proven_arena_t *arena, const uint8_t *
 }
 
 /* `big` unless the text opens with a byte-order mark saying otherwise. */
-static proven_u8str_view_t utf16_to_utf8(proven_arena_t *arena, const uint8_t *p, size_t len, bool big) {
+static proven_u8str_view_t utf16_to_utf8(proven_arena_t *arena, proven_mem_view_t p_view, bool big) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     if (len >= 2 && p[0] == 0xFF && p[1] == 0xFE) { big = false; p += 2; len -= 2; }
     else if (len >= 2 && p[0] == 0xFE && p[1] == 0xFF) { big = true; p += 2; len -= 2; }
 
@@ -121,16 +128,18 @@ static proven_u8str_view_t utf16_to_utf8(proven_arena_t *arena, const uint8_t *p
 }
 
 /* An ID3 text frame opens with the byte that says which of the four. */
-static proven_u8str_view_t id3_text(proven_arena_t *arena, const uint8_t *p, size_t len) {
+static proven_u8str_view_t id3_text(proven_arena_t *arena, proven_mem_view_t p_view) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     if (len == 0) return none();
     uint8_t encoding = p[0];
     p++;
     len--;
     switch (encoding) {
-        case 1:  return utf16_to_utf8(arena, p, len, false);   /* with a mark */
-        case 2:  return utf16_to_utf8(arena, p, len, true);    /* big, no mark */
+        case 1:  return utf16_to_utf8(arena, rubraview_mem_view(p, len), false);   /* with a mark */
+        case 2:  return utf16_to_utf8(arena, rubraview_mem_view(p, len), true);    /* big, no mark */
         case 3:  return trim(arena, p, len);                   /* UTF-8 already */
-        default: return latin1_to_utf8(arena, p, len);
+        default: return latin1_to_utf8(arena, rubraview_mem_view(p, len));
     }
 }
 
@@ -145,7 +154,9 @@ static bool three(const uint8_t *p, const char *id) {
 /* ---- ID3v2 ---- */
 
 /* Every 0xFF 0x00 put in to hide the 0xFF is taken out again. */
-static span_t de_unsynchronise(proven_arena_t *arena, const uint8_t *p, size_t len) {
+static span_t de_unsynchronise(proven_arena_t *arena, proven_mem_view_t p_view) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     proven_result_mem_mut_t res = proven_arena_alloc(arena, len > 0 ? len : 1);
     if (!proven_is_ok(res.err)) return (span_t){ .p = p, .size = len };
     uint8_t *out = (uint8_t*)res.value.ptr;
@@ -158,8 +169,10 @@ static span_t de_unsynchronise(proven_arena_t *arena, const uint8_t *p, size_t l
 }
 
 /* `image/jpeg\0` then the kind, the description, then the picture. */
-static void id3_picture(proven_arena_t *arena, const uint8_t *p, size_t len,
+static void id3_picture(proven_arena_t *arena, proven_mem_view_t p_view,
                         bool short_id, rubraview_tags_t *out) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     if (len < 4) return;
     uint8_t encoding = p[0];
     size_t at = 1;
@@ -171,7 +184,7 @@ static void id3_picture(proven_arena_t *arena, const uint8_t *p, size_t len,
     } else {
         size_t start = at;
         while (at < len && p[at] != '\0') at++;
-        mime = arena_bytes(arena, (const char*)p + start, at - start);
+        mime = arena_bytes(arena, rubraview_bytes_view((const char*)p + start, at - start));
         at++;                             /* the NUL */
     }
     if (at >= len) return;
@@ -194,12 +207,14 @@ static void id3_picture(proven_arena_t *arena, const uint8_t *p, size_t len,
     out->art_mime = mime;
 }
 
-static void id3_txxx(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out);
-static void id3_uslt(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out);
-static void id3_sylt(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out);
+static void id3_txxx(proven_arena_t *arena, proven_mem_view_t p_view, rubraview_tags_t *out);
+static void id3_uslt(proven_arena_t *arena, proven_mem_view_t p_view, rubraview_tags_t *out);
+static void id3_sylt(proven_arena_t *arena, proven_mem_view_t p_view, rubraview_tags_t *out);
 
-static void read_id3v2(proven_arena_t *arena, const uint8_t *bytes, size_t size,
+static void read_id3v2(proven_arena_t *arena, proven_mem_view_t bytes_view,
                        rubraview_tags_t *out, size_t *out_end) {
+    const uint8_t *bytes = (const uint8_t *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
     if (size < 10 || !three(bytes, "ID3")) return;
     uint8_t major = bytes[3];
     uint8_t flags = bytes[5];
@@ -209,7 +224,7 @@ static void read_id3v2(proven_arena_t *arena, const uint8_t *bytes, size_t size,
     *out_end = 10 + tag_size;
 
     span_t body = { .p = bytes + 10, .size = have };
-    if (flags & 0x80) body = de_unsynchronise(arena, body.p, body.size);
+    if (flags & 0x80) body = de_unsynchronise(arena, rubraview_mem_view(body.p, body.size));
     size_t at = 0;
     if ((flags & 0x40) && body.size >= 4) {          /* an extended header, skipped */
         size_t ext = major >= 4 ? syncsafe(body.p) : be32(body.p) + 4;
@@ -229,28 +244,28 @@ static void read_id3v2(proven_arena_t *arena, const uint8_t *bytes, size_t size,
         const uint8_t *data = body.p + data_at;
 
         if (short_id) {
-            if (three(frame, "TT2")) out->title = id3_text(arena, data, frame_size);
-            else if (three(frame, "TP1")) out->artist = id3_text(arena, data, frame_size);
-            else if (three(frame, "TAL")) out->album = id3_text(arena, data, frame_size);
-            else if (three(frame, "TYE")) out->year = id3_text(arena, data, frame_size);
-            else if (three(frame, "TRK")) out->track_number = id3_text(arena, data, frame_size);
-            else if (three(frame, "TCO")) out->genre = id3_text(arena, data, frame_size);
-            else if (three(frame, "PIC")) id3_picture(arena, data, frame_size, true, out);
-            else if (three(frame, "ULT")) id3_uslt(arena, data, frame_size, out);
-            else if (three(frame, "SLT")) id3_sylt(arena, data, frame_size, out);
+            if (three(frame, "TT2")) out->title = id3_text(arena, rubraview_mem_view(data, frame_size));
+            else if (three(frame, "TP1")) out->artist = id3_text(arena, rubraview_mem_view(data, frame_size));
+            else if (three(frame, "TAL")) out->album = id3_text(arena, rubraview_mem_view(data, frame_size));
+            else if (three(frame, "TYE")) out->year = id3_text(arena, rubraview_mem_view(data, frame_size));
+            else if (three(frame, "TRK")) out->track_number = id3_text(arena, rubraview_mem_view(data, frame_size));
+            else if (three(frame, "TCO")) out->genre = id3_text(arena, rubraview_mem_view(data, frame_size));
+            else if (three(frame, "PIC")) id3_picture(arena, rubraview_mem_view(data, frame_size), true, out);
+            else if (three(frame, "ULT")) id3_uslt(arena, rubraview_mem_view(data, frame_size), out);
+            else if (three(frame, "SLT")) id3_sylt(arena, rubraview_mem_view(data, frame_size), out);
         } else {
-            if (four(frame, "TIT2")) out->title = id3_text(arena, data, frame_size);
-            else if (four(frame, "TPE1")) out->artist = id3_text(arena, data, frame_size);
-            else if (four(frame, "TALB")) out->album = id3_text(arena, data, frame_size);
+            if (four(frame, "TIT2")) out->title = id3_text(arena, rubraview_mem_view(data, frame_size));
+            else if (four(frame, "TPE1")) out->artist = id3_text(arena, rubraview_mem_view(data, frame_size));
+            else if (four(frame, "TALB")) out->album = id3_text(arena, rubraview_mem_view(data, frame_size));
             else if (four(frame, "TYER") || four(frame, "TDRC")) {
-                if (out->year.size == 0) out->year = id3_text(arena, data, frame_size);
+                if (out->year.size == 0) out->year = id3_text(arena, rubraview_mem_view(data, frame_size));
             }
-            else if (four(frame, "TRCK")) out->track_number = id3_text(arena, data, frame_size);
-            else if (four(frame, "TCON")) out->genre = id3_text(arena, data, frame_size);
-            else if (four(frame, "APIC")) id3_picture(arena, data, frame_size, false, out);
-            else if (four(frame, "TXXX")) id3_txxx(arena, data, frame_size, out);
-            else if (four(frame, "USLT")) id3_uslt(arena, data, frame_size, out);
-            else if (four(frame, "SYLT")) id3_sylt(arena, data, frame_size, out);
+            else if (four(frame, "TRCK")) out->track_number = id3_text(arena, rubraview_mem_view(data, frame_size));
+            else if (four(frame, "TCON")) out->genre = id3_text(arena, rubraview_mem_view(data, frame_size));
+            else if (four(frame, "APIC")) id3_picture(arena, rubraview_mem_view(data, frame_size), false, out);
+            else if (four(frame, "TXXX")) id3_txxx(arena, rubraview_mem_view(data, frame_size), out);
+            else if (four(frame, "USLT")) id3_uslt(arena, rubraview_mem_view(data, frame_size), out);
+            else if (four(frame, "SYLT")) id3_sylt(arena, rubraview_mem_view(data, frame_size), out);
         }
         at = data_at + frame_size;
         (void)id_len;
@@ -259,7 +274,9 @@ static void read_id3v2(proven_arena_t *arena, const uint8_t *bytes, size_t size,
 
 /* ---- ID3v1: the last 128 bytes, and nothing says how long anything is ---- */
 
-static void read_id3v1(proven_arena_t *arena, const uint8_t *tail, size_t size, rubraview_tags_t *out) {
+static void read_id3v1(proven_arena_t *arena, proven_mem_view_t tail_view, rubraview_tags_t *out) {
+    const uint8_t *tail = (const uint8_t *)tail_view.ptr;
+    size_t size = (size_t)tail_view.size;
     if (!tail || size < 128) return;
     const uint8_t *p = tail + size - 128;
     if (!three(p, "TAG")) return;
@@ -274,14 +291,14 @@ static void read_id3v1(proven_arena_t *arena, const uint8_t *tail, size_t size, 
         if (v >= 100) n[at++] = (char)('0' + v / 100);
         if (v >= 10) n[at++] = (char)('0' + (v / 10) % 10);
         n[at++] = (char)('0' + v % 10);
-        out->track_number = arena_bytes(arena, n, (size_t)at);
+        out->track_number = arena_bytes(arena, rubraview_bytes_view(n, (size_t)at));
     }
 }
 
 /* ---- ReplayGain, by name, from whichever tag carries it ---- */
 
 static bool same_ci(proven_u8str_view_t a, const char *b) {
-    size_t n = strlen(b);
+    size_t n = proven_cstr_len(b);
     if (a.size != n) return false;
     for (size_t i = 0; i < n; ++i) {
         char c = a.ptr[i];
@@ -309,7 +326,9 @@ static void replaygain_value(rubraview_tags_t *out, proven_u8str_view_t name, pr
 
 /* ID3v2's TXXX: an encoding byte, a description ending in a NUL (two for
    UTF-16), then the value. */
-static void id3_txxx(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
+static void id3_txxx(proven_arena_t *arena, proven_mem_view_t p_view, rubraview_tags_t *out) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     if (len < 3) return;
     uint8_t enc = p[0];
     bool wide = enc == 1 || enc == 2;
@@ -318,13 +337,13 @@ static void id3_txxx(proven_arena_t *arena, const uint8_t *p, size_t len, rubrav
     else      { while (end < len && p[end] != 0) end++; }
     if (end >= len) return;
     size_t value_at = end + (wide ? 2u : 1u);
-    proven_u8str_view_t name = id3_text(arena, p, end);   /* the encoding byte and the description */
+    proven_u8str_view_t name = id3_text(arena, rubraview_mem_view(p, end));   /* the encoding byte and the description */
     proven_result_mem_mut_t res = proven_arena_alloc(arena, len - value_at + 1);
     if (!proven_is_ok(res.err)) return;
     uint8_t *buf = (uint8_t*)res.value.ptr;
     buf[0] = enc;
-    memcpy(buf + 1, p + value_at, len - value_at);
-    proven_u8str_view_t value = id3_text(arena, buf, len - value_at + 1);
+    proven_sys_mem_copy(buf + 1, p + value_at, len - value_at);
+    proven_u8str_view_t value = id3_text(arena, rubraview_mem_view(buf, len - value_at + 1));
     replaygain_value(out, name, value);
 }
 
@@ -332,7 +351,9 @@ static void id3_txxx(proven_arena_t *arena, const uint8_t *p, size_t len, rubrav
 
 /* Where a string in `enc` ends: the offset of its terminator (one NUL, or
    two on a two-byte boundary for UTF-16), or `len` when it runs to the end. */
-static size_t id3_string_end(const uint8_t *p, size_t len, uint8_t enc) {
+static size_t id3_string_end(proven_mem_view_t p_view, uint8_t enc) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     if (enc == 1 || enc == 2) {
         size_t at = 0;
         while (at + 1 < len && !(p[at] == 0 && p[at + 1] == 0)) at += 2;
@@ -343,43 +364,49 @@ static size_t id3_string_end(const uint8_t *p, size_t len, uint8_t enc) {
     return at;
 }
 
-static proven_u8str_view_t id3_string(proven_arena_t *arena, uint8_t enc, const uint8_t *p, size_t len) {
+static proven_u8str_view_t id3_string(proven_arena_t *arena, uint8_t enc, proven_mem_view_t p_view) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     switch (enc) {
-        case 1:  return utf16_to_utf8(arena, p, len, false);
-        case 2:  return utf16_to_utf8(arena, p, len, true);
+        case 1:  return utf16_to_utf8(arena, rubraview_mem_view(p, len), false);
+        case 2:  return utf16_to_utf8(arena, rubraview_mem_view(p, len), true);
         case 3:  return trim(arena, p, len);
-        default: return latin1_to_utf8(arena, p, len);
+        default: return latin1_to_utf8(arena, rubraview_mem_view(p, len));
     }
 }
 
 /* USLT: encoding, a language of three letters, a description, the text.
    The first one found is kept. */
-static void id3_uslt(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
+static void id3_uslt(proven_arena_t *arena, proven_mem_view_t p_view, rubraview_tags_t *out) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     if (len < 5 || out->lyrics_text.size > 0) return;
     uint8_t enc = p[0];
     size_t at = 4;
-    size_t end = id3_string_end(p + at, len - at, enc);
+    size_t end = id3_string_end(rubraview_mem_view(p + at, len - at), enc);
     at += end + ((enc == 1 || enc == 2) ? 2u : 1u);
     if (at >= len) return;
-    out->lyrics_text = id3_string(arena, enc, p + at, len - at);
+    out->lyrics_text = id3_string(arena, enc, rubraview_mem_view(p + at, len - at));
 }
 
 /* SYLT: encoding, language, the stamps' unit, the content's kind, a
    description, then text and a four-byte big-endian stamp, again and again.
    Only milliseconds (unit 2) are kept: MPEG frames need the frame rate. */
-static void id3_sylt(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
+static void id3_sylt(proven_arena_t *arena, proven_mem_view_t p_view, rubraview_tags_t *out) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     if (len < 7 || out->synced_lyrics_count > 0) return;
     uint8_t enc = p[0], unit = p[4];
     if (unit != 2) return;
     size_t term = (enc == 1 || enc == 2) ? 2u : 1u;
     size_t at = 6;
-    at += id3_string_end(p + at, len - at, enc) + term;          /* the description */
+    at += id3_string_end(rubraview_mem_view(p + at, len - at), enc) + term;          /* the description */
     size_t cap = 0, count = 0;
     rubraview_lyric_line_t *lines = NULL;
     while (at < len) {
-        size_t end = id3_string_end(p + at, len - at, enc);
+        size_t end = id3_string_end(rubraview_mem_view(p + at, len - at), enc);
         if (at + end + term + 4 > len) break;
-        proven_u8str_view_t text = id3_string(arena, enc, p + at, end);
+        proven_u8str_view_t text = id3_string(arena, enc, rubraview_mem_view(p + at, end));
         /* a new line is often written as a leading line break */
         while (text.size > 0 && (text.ptr[0] == '\n' || text.ptr[0] == '\r')) { text.ptr++; text.size--; }
         uint32_t ms = be32(p + at + end + term);
@@ -388,7 +415,7 @@ static void id3_sylt(proven_arena_t *arena, const uint8_t *p, size_t len, rubrav
             size_t grown = cap ? cap * 2 : 64;
             proven_result_mem_mut_t res = proven_arena_alloc(arena, grown * sizeof(rubraview_lyric_line_t));
             if (!proven_is_ok(res.err)) break;
-            if (count) memcpy(res.value.ptr, lines, count * sizeof(rubraview_lyric_line_t));
+            if (count) proven_sys_mem_copy(res.value.ptr, lines, count * sizeof(rubraview_lyric_line_t));
             lines = (rubraview_lyric_line_t*)(void*)res.value.ptr;
             cap = grown;
         }
@@ -401,12 +428,12 @@ static void id3_sylt(proven_arena_t *arena, const uint8_t *p, size_t len, rubrav
 /* ---- Vorbis comments: FLAC's, Ogg's and Opus's, all the same ---- */
 
 static bool key_is(const uint8_t *p, size_t len, const char *key) {
-    size_t n = strlen(key);
+    size_t n = proven_cstr_len(key);
     if (len < n + 1 || p[n] != '=') return false;
     return proven_u8str_view_eq_ascii_ci(proven_u8str_view_from_bytes(p, n), proven_u8str_view_from_bytes(key, n));
 }
 
-static void picture_block(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out);
+static void picture_block(proven_arena_t *arena, proven_mem_view_t p_view, rubraview_tags_t *out);
 
 static int base64_value(uint8_t c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -417,7 +444,9 @@ static int base64_value(uint8_t c) {
     return -1;
 }
 
-static span_t base64_decode(proven_arena_t *arena, const uint8_t *p, size_t len) {
+static span_t base64_decode(proven_arena_t *arena, proven_mem_view_t p_view) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     proven_result_mem_mut_t res = proven_arena_alloc(arena, len / 4 * 3 + 3);
     if (!proven_is_ok(res.err)) return (span_t){ .p = NULL, .size = 0 };
     uint8_t *out = (uint8_t*)res.value.ptr;
@@ -437,8 +466,10 @@ static span_t base64_decode(proven_arena_t *arena, const uint8_t *p, size_t len)
     return (span_t){ .p = out, .size = at };
 }
 
-static void read_vorbis_comment(proven_arena_t *arena, const uint8_t *p, size_t len,
+static void read_vorbis_comment(proven_arena_t *arena, proven_mem_view_t p_view,
                                 rubraview_tags_t *out) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     if (len < 8) return;
     size_t at = 0;
     uint32_t vendor = le32(p);
@@ -475,8 +506,8 @@ static void read_vorbis_comment(proven_arena_t *arena, const uint8_t *p, size_t 
             out->lyrics_text = trim(arena, entry + 15, size - 15);
         else if (key_is(entry, size, "METADATA_BLOCK_PICTURE") && out->art_size == 0) {
             /* A FLAC picture block, base64'd, because a comment is text. */
-            span_t raw = base64_decode(arena, entry + 23, size - 23);
-            if (raw.p) picture_block(arena, raw.p, raw.size, out);
+            span_t raw = base64_decode(arena, rubraview_mem_view(entry + 23, size - 23));
+            if (raw.p) picture_block(arena, rubraview_mem_view(raw.p, raw.size), out);
         }
         at += size;
     }
@@ -484,13 +515,15 @@ static void read_vorbis_comment(proven_arena_t *arena, const uint8_t *p, size_t 
 
 /* ---- FLAC ---- */
 
-static void picture_block(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
+static void picture_block(proven_arena_t *arena, proven_mem_view_t p_view, rubraview_tags_t *out) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     if (len < 32) return;
     size_t at = 4;                        /* the kind: front cover, back, ... */
     uint32_t mime_len = be32(p + at);
     at += 4;
     if (mime_len > len - at) return;
-    proven_u8str_view_t mime = arena_bytes(arena, (const char*)p + at, mime_len);
+    proven_u8str_view_t mime = arena_bytes(arena, rubraview_bytes_view((const char*)p + at, mime_len));
     at += mime_len;
     if (at + 4 > len) return;
     uint32_t desc_len = be32(p + at);
@@ -527,9 +560,9 @@ static void read_flac(proven_arena_t *arena, const uint8_t *p, size_t len, rubra
                 out->duration_seconds = (double)samples / (double)out->sample_rate;
             }
         } else if (type == 4) {
-            read_vorbis_comment(arena, p + at, size, out);
+            read_vorbis_comment(arena, rubraview_mem_view(p + at, size), out);
         } else if (type == 6) {
-            picture_block(arena, p + at, size, out);
+            picture_block(arena, rubraview_mem_view(p + at, size), out);
         }
         at += size;
         if (last) break;
@@ -542,25 +575,27 @@ static void read_ogg(proven_arena_t *arena, const uint8_t *p, size_t len, rubrav
     out->codec = PROVEN_LIT("Vorbis");
     size_t limit = len > 512u * 1024u ? 512u * 1024u : len;
     for (size_t i = 0; i + 8 < limit; ++i) {
-        if (p[i] == 'O' && memcmp(p + i, "OpusHead", 8) == 0 && i + 19 <= len) {
+        if (p[i] == 'O' && proven_sys_mem_cmp(p + i, "OpusHead", 8) == 0 && i + 19 <= len) {
             out->codec = PROVEN_LIT("Opus");
             out->channels = p[i + 9];
             out->sample_rate = le32(p + i + 12);       /* the original rate; Opus runs at 48 kHz */
             if (out->sample_rate == 0) out->sample_rate = 48000;
-        } else if (p[i] == 'O' && memcmp(p + i, "OpusTags", 8) == 0) {
-            read_vorbis_comment(arena, p + i + 8, len - i - 8, out);
-        } else if (p[i] == 0x01 && i + 30 < len && memcmp(p + i + 1, "vorbis", 6) == 0) {
+        } else if (p[i] == 'O' && proven_sys_mem_cmp(p + i, "OpusTags", 8) == 0) {
+            read_vorbis_comment(arena, rubraview_mem_view(p + i + 8, len - i - 8), out);
+        } else if (p[i] == 0x01 && i + 30 < len && proven_sys_mem_cmp(p + i + 1, "vorbis", 6) == 0) {
             out->channels = p[i + 11];
             out->sample_rate = le32(p + i + 12);
-        } else if (p[i] == 0x03 && i + 7 < len && memcmp(p + i + 1, "vorbis", 6) == 0) {
-            read_vorbis_comment(arena, p + i + 7, len - i - 7, out);
+        } else if (p[i] == 0x03 && i + 7 < len && proven_sys_mem_cmp(p + i + 1, "vorbis", 6) == 0) {
+            read_vorbis_comment(arena, rubraview_mem_view(p + i + 7, len - i - 7), out);
         }
     }
 }
 
 /* ---- MP4 / M4A: atoms inside atoms ---- */
 
-static void mp4_ilst(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
+static void mp4_ilst(proven_arena_t *arena, proven_mem_view_t p_view, rubraview_tags_t *out) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     size_t at = 0;
     while (at + 8 <= len) {
         uint32_t size = be32(p + at);
@@ -596,7 +631,7 @@ static void mp4_ilst(proven_arena_t *arena, const uint8_t *p, size_t len, rubrav
             if (number >= 100) n[wrote++] = (char)('0' + number / 100 % 10);
             if (number >= 10) n[wrote++] = (char)('0' + number / 10 % 10);
             n[wrote++] = (char)('0' + number % 10);
-            out->track_number = arena_bytes(arena, n, (size_t)wrote);
+            out->track_number = arena_bytes(arena, rubraview_bytes_view(n, (size_t)wrote));
         } else if (four(name, "covr") && raw && raw_len > 0 && out->art_size == 0 &&
                    raw_len <= RUBRAVIEW_TAGS_MAX_ART) {
             out->art = raw;
@@ -609,8 +644,10 @@ static void mp4_ilst(proven_arena_t *arena, const uint8_t *p, size_t len, rubrav
     }
 }
 
-static void mp4_walk(proven_arena_t *arena, const uint8_t *p, size_t len, int depth,
+static void mp4_walk(proven_arena_t *arena, proven_mem_view_t p_view, int depth,
                      rubraview_tags_t *out) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     if (depth > 8) return;
     size_t at = 0;
     while (at + 8 <= len) {
@@ -628,11 +665,11 @@ static void mp4_walk(proven_arena_t *arena, const uint8_t *p, size_t len, int de
 
         if (four(name, "moov") || four(name, "udta") || four(name, "trak") ||
             four(name, "mdia") || four(name, "minf") || four(name, "stbl")) {
-            mp4_walk(arena, body, body_len, depth + 1, out);
+            mp4_walk(arena, rubraview_mem_view(body, body_len), depth + 1, out);
         } else if (four(name, "meta") && body_len > 4) {
-            mp4_walk(arena, body + 4, body_len - 4, depth + 1, out);   /* the version nothing else has */
+            mp4_walk(arena, rubraview_mem_view(body + 4, body_len - 4), depth + 1, out);   /* the version nothing else has */
         } else if (four(name, "ilst")) {
-            mp4_ilst(arena, body, body_len, out);
+            mp4_ilst(arena, rubraview_mem_view(body, body_len), out);
         } else if (four(name, "mvhd") && body_len >= 20) {
             uint32_t timescale = be32(body + 12);
             uint32_t duration = be32(body + 16);
@@ -696,7 +733,9 @@ static void read_wav(proven_arena_t *arena, const uint8_t *p, size_t len, rubrav
 
 /* ---- MP3: the first frame header says the rest ---- */
 
-static void read_mp3_frame(const uint8_t *p, size_t len, size_t from, rubraview_tags_t *out) {
+static void read_mp3_frame(proven_mem_view_t p_view, size_t from, rubraview_tags_t *out) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     static const uint32_t BITRATE_V1_L3[16] = { 0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0 };
     static const uint32_t BITRATE_V2_L3[16] = { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0 };
     static const uint32_t RATE_V1[4] = { 44100, 48000, 32000, 0 };
@@ -732,22 +771,22 @@ rubraview_tags_t rubraview_tags_read(proven_arena_t *arena, rubraview_tags_sourc
     size_t len = source.head_size;
 
     size_t after_id3 = 0;
-    read_id3v2(arena, p, len, &out, &after_id3);       /* MP3 and often FLAC too */
+    read_id3v2(arena, rubraview_mem_view(p, len), &out, &after_id3);       /* MP3 and often FLAC too */
 
     if (four(p, "fLaC")) {
         read_flac(arena, p, len, &out);
     } else if (four(p, "OggS")) {
         read_ogg(arena, p, len, &out);
     } else if (len > 12 && four(p + 4, "ftyp")) {
-        mp4_walk(arena, p, len, 0, &out);
+        mp4_walk(arena, rubraview_mem_view(p, len), 0, &out);
         if (out.codec.size == 0) out.codec = PROVEN_LIT("AAC");
     } else if (four(p, "RIFF") && len > 12 && four(p + 8, "WAVE")) {
         read_wav(arena, p, len, &out);
     } else {
-        read_mp3_frame(p, len, after_id3 < len ? after_id3 : 0, &out);
+        read_mp3_frame(rubraview_mem_view(p, len), after_id3 < len ? after_id3 : 0, &out);
     }
 
-    read_id3v1(arena, source.tail, source.tail_size, &out);
+    read_id3v1(arena, rubraview_mem_view(source.tail, source.tail_size), &out);
 
     /* When nothing measured it, the file's own size and length do. */
     if (out.bitrate_kbps == 0 && out.duration_seconds > 0.0 && source.file_size > 0) {

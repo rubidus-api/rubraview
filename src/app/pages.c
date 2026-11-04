@@ -49,8 +49,8 @@ void page_job_stop(app_state_t *app) {
     WaitForSingleObject(job->thread, INFINITE);
     CloseHandle(job->thread);
     rubraview_page_source_cancel(&app->source, false);
-    free(job->mem);
-    free(job);
+    rubraview_free(job->mem);
+    rubraview_free(job);
     app->page_job = NULL;
 }
 
@@ -77,11 +77,11 @@ rubraview_page_bytes_t page_read_owned(rubraview_page_source_t *source, SRWLOCK 
         bytes = rubraview_page_source_read(&unused, source, index, MAX_PAGE_BYTES);
     } else {
         size_t budget = rubraview_page_source_read_budget(source, index);
-        void *mem = budget > 0 && budget <= (size_t)MAX_PAGE_BYTES + 4096u ? malloc(budget) : NULL;
+        void *mem = budget > 0 && budget <= (size_t)MAX_PAGE_BYTES + 4096u ? rubraview_alloc(budget) : NULL;
         if (mem) {
             proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
             bytes = rubraview_page_source_read(&scratch, source, index, MAX_PAGE_BYTES);
-            if (bytes.ok) *out_mem = mem; else free(mem);
+            if (bytes.ok) *out_mem = mem; else rubraview_free(mem);
         }
     }
     ReleaseSRWLockExclusive(lock);
@@ -116,20 +116,20 @@ void page_job_poll(app_state_t *app) {
             update_window_title(app);
         }
     }
-    free(job->mem);
-    free(job);
+    rubraview_free(job->mem);
+    rubraview_free(job);
 }
 
 static void page_job_start(app_state_t *app, size_t index) {
     page_job_stop(app);
-    page_job_t *job = (page_job_t*)calloc(1, sizeof(*job));
+    page_job_t *job = (page_job_t*)rubraview_alloc_zero(1, sizeof(*job));
     if (!job) return;
     job->source = &app->source;
     job->lock = &app->source_lock;
     job->index = index;
     job->wake = app->window;
     job->thread = CreateThread(NULL, 0, page_job_run, job, 0, NULL);
-    if (!job->thread) { free(job); return; }
+    if (!job->thread) { rubraview_free(job); return; }
     app->page_job = job;
 }
 
@@ -167,7 +167,7 @@ app_page_t *ensure_page_loaded_how(app_state_t *app, int32_t index, bool on_scre
         return page;
     }
     page_take_bytes(app, page, (size_t)index, bytes);
-    free(mem);
+    rubraview_free(mem);
     if (rubraview_pal_fs_mapping_lost(&app->archive_map)) {
         page->failed = !page->loaded;
         osd_say(app, TU8("the archive is no longer there (its drive went away)"));
@@ -187,11 +187,11 @@ bool page_moves(app_state_t *app, size_t index, const rubraview_page_bytes_t *by
     if (path.size > 0) {
         rubraview_fs_mapping_t map = {0};
         bool moves = rubraview_pal_fs_map(path, &map) && map.size <= (uint64_t)SIZE_MAX &&
-                     rubraview_image_is_animated(map.data, (size_t)map.size);
+                     rubraview_image_is_animated(rubraview_mem_view(map.data, (size_t)map.size));
         rubraview_pal_fs_unmap(&map);
         return moves;
     }
-    return bytes && bytes->ok && rubraview_image_is_animated((const uint8_t*)bytes->data.ptr, bytes->data.size);
+    return bytes && bytes->ok && rubraview_image_is_animated(rubraview_mem_view((const uint8_t*)bytes->data.ptr, bytes->data.size));
 }
 
 static void page_take_bytes(app_state_t *app, app_page_t *page, size_t index, rubraview_page_bytes_t bytes) {
@@ -201,7 +201,7 @@ static void page_take_bytes(app_state_t *app, app_page_t *page, size_t index, ru
     rubraview_image_load_result_t loaded = bytes.from_disk
         ? rubraview_pal_image_load_texture(app->renderer, app->source.pages[index].path, true)
         : rubraview_pal_image_load_texture_from_memory(app->renderer,
-                                                       (const uint8_t*)bytes.data.ptr, bytes.data.size, true);
+                                                       rubraview_mem_view((const uint8_t*)bytes.data.ptr, bytes.data.size), true);
     if (!loaded.ok) {
         page->failed = true;
         return;

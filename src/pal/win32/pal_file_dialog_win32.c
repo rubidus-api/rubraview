@@ -1,5 +1,7 @@
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include <windows.h>
 #include <stdio.h>
 #include <shobjidl.h>
@@ -46,7 +48,7 @@ static void apply_title_and_filters(IFileDialog *pfd, const rubraview_file_dialo
     if (save) {
         /* "*.ini;*.txt" gives "ini" */
         WCHAR ext[16] = {0};
-        const WCHAR *dot = wcschr(specs[0], L'.');
+        const WCHAR *dot = rubraview_wchr(specs[0], L'.');
         if (dot) {
             size_t k = 0;
             for (++dot; *dot && *dot != L';' && *dot != L'*' && k + 1 < 16; ++dot) ext[k++] = *dot;
@@ -205,7 +207,7 @@ bool rubraview_pal_choose_font(void *parent_window_handle, proven_u8str_view_t c
                                 (current.size > 0 ? CF_INITTOLOGFONTSTRUCT : 0) };
     if (!ChooseFontW(&cf) || lf.lfFaceName[0] == L'\0') {
         DWORD err = CommDlgExtendedError();   /* 0: cancelled; else why it could not open */
-        if (err != 0) snprintf(out, cap, "#%lu", (unsigned long)err);
+        if (err != 0) rubraview_fmt(out, cap, "#{}", PROVEN_ARG((unsigned long)err));
         return false;
     }
     int n = WideCharToMultiByte(CP_UTF8, 0, lf.lfFaceName, -1, out, (int)cap, NULL, NULL);

@@ -74,14 +74,14 @@ static void facts_load(app_state_t *app) {
     size_t dir = app->history_path.size - base.size;
     static const char name[] = "media-facts.txt";
     if (app->history_path.size == 0 || dir + sizeof(name) > sizeof(app->facts_path)) return;
-    memcpy(app->facts_path, app->history_path.ptr, dir);
-    memcpy(app->facts_path + dir, name, sizeof(name));
-    void *memory = malloc(FACTS_FILE_MAX + 4096u);
+    proven_sys_mem_copy(app->facts_path, app->history_path.ptr, dir);
+    proven_sys_mem_copy(app->facts_path + dir, name, sizeof(name));
+    void *memory = rubraview_alloc(FACTS_FILE_MAX + 4096u);
     if (!memory) return;
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t *)memory, .size = FACTS_FILE_MAX + 4096u });
     proven_u8str_view_t text = rubraview_pal_fs_read_file(&arena, cstr(app->facts_path), FACTS_FILE_MAX);
-    (void)rubraview_shape_cache_parse(&app->shape_cache, (const char *)text.ptr, text.size);
-    free(memory);
+    (void)rubraview_shape_cache_parse(&app->shape_cache, rubraview_bytes_view((const char *)text.ptr, text.size));
+    rubraview_free(memory);
 }
 
 static bool facts_kept_out(void *context, proven_u8str_view_t path) {
@@ -96,17 +96,17 @@ static void facts_save(app_state_t *app) {
     app->facts_saved_at = rubraview_pal_time_now_seconds();
     if (rubraview_settings_get(&app->settings, PROVEN_LIT("recent"), PROVEN_LIT("keep")) < 0.5) return;
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
-    void *memory = malloc(FACTS_FILE_MAX + 4096u);
+    void *memory = rubraview_alloc(FACTS_FILE_MAX + 4096u);
     if (memory) {
         proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t *)memory, .size = FACTS_FILE_MAX + 4096u });
         proven_u8str_view_t text = rubraview_pal_fs_read_file(&arena, cstr(app->facts_path), FACTS_FILE_MAX);
-        (void)rubraview_shape_cache_parse(&app->shape_cache, (const char *)text.ptr, text.size);   /* another viewer's */
-        free(memory);
+        (void)rubraview_shape_cache_parse(&app->shape_cache, rubraview_bytes_view((const char *)text.ptr, text.size));   /* another viewer's */
+        rubraview_free(memory);
     }
     size_t size = 0;
     char *out = rubraview_shape_cache_serialize(&app->shape_cache, FACTS_KEEP, facts_kept_out, app, &size);
     if (out) (void)rubraview_pal_fs_write_file_atomic(cstr(app->facts_path), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = size });
-    free(out);
+    rubraview_free(out);
     if (locked) rubraview_pal_config_unlock();
 }
 
@@ -121,9 +121,9 @@ static void shape_reader_end(app_state_t *app) {
     rubraview_pal_sizes_stop(app->shape_reader);
     app->shape_reader = NULL;
     app->shape_ahead = false;
-    free(app->shape_reader_mtime);
+    rubraview_free(app->shape_reader_mtime);
     app->shape_reader_mtime = NULL;
-    free(app->shape_taken);
+    rubraview_free(app->shape_taken);
     app->shape_taken = NULL;
 }
 
@@ -169,9 +169,9 @@ static void facts_take(app_state_t *app) {
 static bool facts_start(app_state_t *app, int32_t target, int32_t then, int key, bool ahead) {
     facts_load(app);
     size_t count = shape_items(app, target);
-    proven_u8str_view_t *paths = (proven_u8str_view_t*)calloc(count ? count : 1, sizeof(*paths));
-    int64_t *mtimes = (int64_t*)calloc(count ? count : 1, sizeof(int64_t));
-    int64_t *expect = (int64_t*)calloc(count ? count : 1, sizeof(int64_t));
+    proven_u8str_view_t *paths = (proven_u8str_view_t*)rubraview_alloc_zero(count ? count : 1, sizeof(*paths));
+    int64_t *mtimes = (int64_t*)rubraview_alloc_zero(count ? count : 1, sizeof(int64_t));
+    int64_t *expect = (int64_t*)rubraview_alloc_zero(count ? count : 1, sizeof(int64_t));
     size_t missing = 0;
     for (size_t i = 0; paths && mtimes && expect && i < count; ++i) {
         int64_t mtime = 0;
@@ -183,11 +183,11 @@ static bool facts_start(app_state_t *app, int32_t target, int32_t then, int key,
         missing++;
     }
     if (missing > 0) app->shape_reader = rubraview_pal_sizes_start(paths, expect, missing, ahead, thumbs_wake, app->window);
-    free(paths);
-    free(expect);
-    if (!app->shape_reader) { free(mtimes); return false; }
-    app->shape_taken = (uint8_t *)calloc(missing, 1);
-    if (!app->shape_taken) { rubraview_pal_sizes_stop(app->shape_reader); app->shape_reader = NULL; free(mtimes); return false; }
+    rubraview_free(paths);
+    rubraview_free(expect);
+    if (!app->shape_reader) { rubraview_free(mtimes); return false; }
+    app->shape_taken = (uint8_t *)rubraview_alloc_zero(missing, 1);
+    if (!app->shape_taken) { rubraview_pal_sizes_stop(app->shape_reader); app->shape_reader = NULL; rubraview_free(mtimes); return false; }
     app->shape_reader_mtime = mtimes;
     app->shape_for = target;
     app->shape_generation = app->picker_generation;
@@ -205,10 +205,10 @@ bool shape_table(app_state_t *app, int32_t target, uint8_t **out_shapes, size_t 
     bool *selected = target == SHAPE_FOR_PICKER ? app->picker_selected
                    : (app->list_checked_count == count ? app->list_checked : NULL);
     if (count == 0 || !selected) return false;
-    uint8_t *shapes = (uint8_t*)calloc(count, 1);
+    uint8_t *shapes = (uint8_t*)rubraview_alloc_zero(count, 1);
     size_t shown = target == SHAPE_FOR_LIST ? list_rows(app) : count;
-    size_t *order = (size_t*)calloc(shown ? shown : 1, sizeof(size_t));
-    if (!shapes || !order) { free(shapes); free(order); return false; }
+    size_t *order = (size_t*)rubraview_alloc_zero(shown ? shown : 1, sizeof(size_t));
+    if (!shapes || !order) { rubraview_free(shapes); rubraview_free(order); return false; }
     /* The pictures and films only: a list's rows it shows (as its box for all does), the open-file
        screen's all it lists. A folder, a song or a text is no row here; one whose size could not
        be read stays unknown. */
@@ -368,11 +368,11 @@ void shape_pick(app_state_t *app, int32_t which) {
         rubraview_picker_set_mode(&app->picker, RUBRAVIEW_PICK_INDIVIDUAL);   /* as Same type does */
     bool picked = false;
     size_t k = rubraview_shape_toggle(selected, shapes, rows, n, (rubraview_shape_t)which, &picked);
-    free(shapes);
-    free(rows);
+    rubraview_free(shapes);
+    rubraview_free(rows);
     char line[96];
-    int w = k == 0 ? snprintf(line, sizeof(line), T("no %s files here"), shape_word((rubraview_shape_t)which))
-                   : snprintf(line, sizeof(line), picked ? T("%zu %s picked") : T("%zu %s let go"), k, shape_word((rubraview_shape_t)which));
+    int w = k == 0 ? rubraview_fmt(line, sizeof(line), T("no {} files here"), PROVEN_ARG(shape_word((rubraview_shape_t)which)))
+                   : rubraview_fmt(line, sizeof(line), picked ? T("{} {} picked") : T("{} {} let go"), PROVEN_ARG((size_t)k), PROVEN_ARG(shape_word((rubraview_shape_t)which)));
     if (w > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)w });
     if (app->shape_for == SHAPE_FOR_LIST) app->files_dirty = true;
 }

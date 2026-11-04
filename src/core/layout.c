@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/layout.h"
 #include <string.h>
 
@@ -71,7 +72,7 @@ static bool spread_buf_reserve(proven_arena_t *arena, spread_buf_t *b, size_t mi
     if (!proven_is_ok(res.err)) return false;
 
     rubraview_spread_t *new_data = (rubraview_spread_t*)(void*)res.value.ptr;
-    if (b->data && b->count > 0) memcpy(new_data, b->data, b->count * sizeof(rubraview_spread_t));
+    if (b->data && b->count > 0) proven_sys_mem_copy(new_data, b->data, b->count * sizeof(rubraview_spread_t));
     b->data = new_data;
     b->capacity = new_cap;
     return true;

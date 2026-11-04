@@ -30,7 +30,8 @@ typedef struct rubraview_info {
 void rubraview_info_heading(proven_arena_t *arena, rubraview_info_t *info, const char *title);
 /* An empty value adds nothing: a line saying nothing is noise. */
 void rubraview_info_add(proven_arena_t *arena, rubraview_info_t *info, const char *label, proven_u8str_view_t value);
-void rubraview_info_addf(proven_arena_t *arena, rubraview_info_t *info, const char *label, const char *format, ...);
+void rubraview_info_addf_args(proven_arena_t *arena, rubraview_info_t *info, const char *label, const char *format, const proven_arg_t *fmt_args, size_t fmt_count);
+#define rubraview_info_addf(arena, info, label, format, ...) rubraview_info_addf_args(arena, info, label, format, RUBRAVIEW_FMT_ARGS(__VA_ARGS__))
 
 /* Everything an EXIF block says, a line each, in words. */
 void rubraview_info_add_exif(proven_arena_t *arena, rubraview_info_t *info, const rubraview_exif_info_t *exif);

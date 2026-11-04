@@ -70,7 +70,7 @@ rubraview_action_state_t rubraview_action_state(proven_u8str_view_t action, cons
  * the plain label is returned instead.
  */
 proven_u8str_view_t rubraview_tile_caption(proven_u8str_view_t label, bool submenu, rubraview_tile_mark_t mark, const char *value,
-                               char *buffer, size_t buffer_size);
+                               proven_mem_mut_t buffer_view);
 
 /**
  * The zoom tile's caption (D-97): the zoom against the size the fit
@@ -78,7 +78,7 @@ proven_u8str_view_t rubraview_tile_caption(proven_u8str_view_t label, bool subme
  * and never less than "1%". Empty when `scale` is not above zero or the
  * buffer is too small.
  */
-proven_u8str_view_t rubraview_scale_caption(char *buffer, size_t buffer_size, double scale);
+proven_u8str_view_t rubraview_scale_caption(proven_mem_mut_t buffer_view, double scale);
 
 /**
  * The icon a toolbox button draws (owner, 2026-09-22): a code point in the

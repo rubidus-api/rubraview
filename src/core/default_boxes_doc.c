@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/boxes_doc.h"
 #include <string.h>
 
@@ -465,9 +466,9 @@ static size_t g_document_len;
 proven_u8str_view_t rubraview_default_boxes_document(void) {
     if (g_document_len == 0) {
         for (size_t i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); ++i) {
-            size_t n = strlen(PARTS[i]);
+            size_t n = proven_cstr_len(PARTS[i]);
             if (g_document_len + n >= sizeof(g_document)) break;
-            memcpy(g_document + g_document_len, PARTS[i], n);
+            proven_sys_mem_copy(g_document + g_document_len, PARTS[i], n);
             g_document_len += n;
         }
         g_document[g_document_len] = '\0';

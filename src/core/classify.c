@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/classify.h"
 #include <string.h>
 
@@ -37,8 +38,8 @@ size_t rubraview_classify_count(const rubraview_classify_t *c, int32_t folder) {
 
 void rubraview_classify_remove_at(rubraview_classify_t *c, size_t index) {
     if (!c || index >= c->count) return;
-    memmove(c->paths + index, c->paths + index + 1, (c->count - index - 1) * sizeof(c->paths[0]));
-    memmove(c->folders + index, c->folders + index + 1, (c->count - index - 1) * sizeof(c->folders[0]));
+    proven_sys_mem_move(c->paths + index, c->paths + index + 1, (c->count - index - 1) * sizeof(c->paths[0]));
+    proven_sys_mem_move(c->folders + index, c->folders + index + 1, (c->count - index - 1) * sizeof(c->folders[0]));
     c->count--;
 }
 

@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/arcedit.h"
 #include "rubraview/lang.h"
 #include "rubraview/path.h"
@@ -31,11 +32,13 @@ static char lower(char c) {
 }
 
 static bool ends_with(proven_u8str_view_t s, const char *tail) {
-    size_t n = strlen(tail);
+    size_t n = proven_cstr_len(tail);
     return s.size >= n && proven_u8str_view_eq_ascii_ci(proven_u8str_view_slice(s, s.size - n, n), proven_u8str_view_from_bytes(tail, n));
 }
 
-static bool all_digits(const char *p, size_t n) {
+static bool all_digits(proven_u8str_view_t p_view) {
+    const char *p = (const char *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     if (n == 0) return false;
     for (size_t i = 0; i < n; ++i) if (p[i] < '0' || p[i] > '9') return false;
     return true;
@@ -48,7 +51,7 @@ static proven_u8str_view_t book_stem(proven_u8str_view_t name, bool *out_comic) 
     /* x.7z.001, x.zip.001: the number, then the extension below. */
     size_t dot = s.size;
     while (dot > 0 && s.ptr[dot - 1] != '.') dot--;
-    if (dot > 0 && all_digits((const char *)s.ptr + dot, s.size - dot) && s.size - dot >= 2) {
+    if (dot > 0 && all_digits(rubraview_bytes_view((const char *)s.ptr + dot, s.size - dot)) && s.size - dot >= 2) {
         proven_u8str_view_t inner = { .ptr = s.ptr, .size = dot - 1 };
         if (ends_with(inner, ".7z") || ends_with(inner, ".zip")) s = inner;
     }
@@ -62,8 +65,8 @@ static proven_u8str_view_t book_stem(proven_u8str_view_t name, bool *out_comic) 
     if (dot > 1) {
         const char *mark = (const char *)s.ptr + dot;
         size_t n = s.size - dot;
-        bool part = n > 4 && proven_u8str_view_starts_with_ascii_ci(proven_u8str_view_from_bytes(mark, n), PROVEN_LIT("part")) && all_digits(mark + 4, n - 4);
-        bool vol = n > 3 && proven_u8str_view_starts_with_ascii_ci(proven_u8str_view_from_bytes(mark, n), PROVEN_LIT("vol")) && all_digits(mark + 3, n - 3);
+        bool part = n > 4 && proven_u8str_view_starts_with_ascii_ci(proven_u8str_view_from_bytes(mark, n), PROVEN_LIT("part")) && all_digits(rubraview_bytes_view(mark + 4, n - 4));
+        bool vol = n > 3 && proven_u8str_view_starts_with_ascii_ci(proven_u8str_view_from_bytes(mark, n), PROVEN_LIT("vol")) && all_digits(rubraview_bytes_view(mark + 3, n - 3));
         if (part || vol) s.size = dot - 1;
     }
     return s;
@@ -77,10 +80,10 @@ size_t rubraview_arcedit_converted_name(proven_u8str_view_t archive_name, rubrav
     bool zip = target == RUBRAVIEW_ARCEDIT_ZIP;
     if (target == RUBRAVIEW_ARCEDIT_SAME) zip = !(ends_with(archive_name, ".7z") || ends_with(archive_name, ".cb7"));
     const char *ext = comic ? (zip ? ".cbz" : ".cb7") : (zip ? ".zip" : ".7z");
-    size_t need = stem.size + strlen(ext);
+    size_t need = stem.size + proven_cstr_len(ext);
     if (need + 1 > cap) return 0;
-    memcpy(dst, stem.ptr, stem.size);
-    memcpy(dst + stem.size, ext, strlen(ext) + 1);
+    proven_sys_mem_copy(dst, stem.ptr, stem.size);
+    proven_sys_mem_copy(dst + stem.size, ext, proven_cstr_len(ext) + 1);
     return need;
 }
 
@@ -91,7 +94,7 @@ size_t rubraview_arcedit_sibling_name(proven_u8str_view_t entry_name, proven_u8s
     size_t need = dir + new_base.size;
     if (need + 1 > cap) return 0;
     for (size_t i = 0; i < dir; ++i) dst[i] = entry_name.ptr[i] == '\\' ? '/' : entry_name.ptr[i];
-    memcpy(dst + dir, new_base.ptr, new_base.size);
+    proven_sys_mem_copy(dst + dir, new_base.ptr, new_base.size);
     dst[need] = '\0';
     return need;
 }
@@ -119,13 +122,13 @@ typedef struct run {
 } run_t;
 
 static bool job_note_volume(rubraview_arcedit_job_t *job, const char *path) {
-    char **more = (char**)realloc(job->volumes, (job->volume_count + 1) * sizeof(char*));
+    char **more = (char**)rubraview_realloc(rubraview_mem_mut(job->volumes, (job->volume_count + 1) * sizeof(char*)));
     if (!more) return false;
     job->volumes = more;
-    size_t n = strlen(path);
-    char *copy = (char*)malloc(n + 1);
+    size_t n = proven_cstr_len(path);
+    char *copy = (char*)rubraview_alloc(n + 1);
     if (!copy) return false;
-    memcpy(copy, path, n + 1);
+    proven_sys_mem_copy(copy, path, n + 1);
     job->volumes[job->volume_count++] = copy;
     return true;
 }
@@ -158,7 +161,7 @@ static fulta_arc_err_t run_read(void *ctx, void *buf, size_t cap, size_t *got) {
     run_t *run = (run_t*)ctx;
     size_t left = run->job->size - run->at;
     size_t n = left < cap ? left : cap;
-    if (n) memcpy(buf, run->job->data + run->at, n);
+    if (n) proven_sys_mem_copy(buf, run->job->data + run->at, n);
     run->at += n;
     *got = n;
     return FULTA_ARC_OK;
@@ -198,7 +201,7 @@ typedef struct expect {
 } expect_t;
 
 static int expect_cmp(const void *a, const void *b) {
-    return strcmp(((const expect_t*)a)->name, ((const expect_t*)b)->name);
+    return rubraview_cstr_cmp(((const expect_t*)a)->name, ((const expect_t*)b)->name);
 }
 
 typedef struct mem_sink {
@@ -209,7 +212,7 @@ typedef struct mem_sink {
 
 static fulta_arc_err_t mem_sink_write(void *ctx, const void *data, size_t n) {
     mem_sink_t *m = (mem_sink_t*)ctx;
-    if (m->at + n > m->size || memcmp(m->want + m->at, data, n) != 0) m->same = false;
+    if (m->at + n > m->size || proven_sys_mem_cmp(m->want + m->at, data, n) != 0) m->same = false;
     m->at += n;
     return m->same ? FULTA_ARC_OK : FULTA_ARC_ERR_CHECKSUM;
 }
@@ -221,7 +224,7 @@ static bool verify(rubraview_arcedit_job_t *job, expect_t *want, size_t want_cou
     if (open_at(job->out_path, job->codepage, NULL, job, &arc) != FULTA_ARC_OK) return false;
     bool ok = true;
     size_t count = fulta_arc_count(arc), files = 0, changed = SIZE_MAX;
-    expect_t *got = (expect_t*)calloc(count ? count : 1, sizeof(expect_t));
+    expect_t *got = (expect_t*)rubraview_alloc_zero(count ? count : 1, sizeof(expect_t));
     if (!got) ok = false;
     for (size_t i = 0; ok && i < count; ++i) {
         const fulta_arc_entry_t *en = fulta_arc_entry(arc, i);
@@ -240,7 +243,7 @@ static bool verify(rubraview_arcedit_job_t *job, expect_t *want, size_t want_cou
         proven_array_sort(&got_view, expect_cmp);
         proven_array_sort(&want_view, expect_cmp);
         for (size_t i = 0; ok && i < files; ++i) {
-            if (strcmp(got[i].name, want[i].name) != 0 || got[i].size != want[i].size) ok = false;
+            if (rubraview_cstr_cmp(got[i].name, want[i].name) != 0 || got[i].size != want[i].size) ok = false;
             else if (got[i].has_crc && want[i].has_crc && got[i].crc != want[i].crc) ok = false;
         }
     }
@@ -249,7 +252,7 @@ static bool verify(rubraview_arcedit_job_t *job, expect_t *want, size_t want_cou
         fulta_arc_sink_t sink = { .ctx = &m, .write = mem_sink_write };
         if (changed == SIZE_MAX || fulta_arc_extract(arc, changed, &sink) != FULTA_ARC_OK || !m.same || m.at != job->size) ok = false;
     }
-    free(got);
+    rubraview_free(got);
     fulta_arc_close(arc);
     return ok;
 }
@@ -282,7 +285,7 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
     bool with_data = job->op == RUBRAVIEW_ARCEDIT_REPLACE || job->op == RUBRAVIEW_ARCEDIT_ADD;
     bool with_name = job->op == RUBRAVIEW_ARCEDIT_RENAME || job->op == RUBRAVIEW_ARCEDIT_ADD;
     if ((with_data && !job->data && job->size > 0) || (with_name && (!job->name || !job->name[0]))) return RUBRAVIEW_ARCEDIT_BAD_NAME;
-    if (job->name && (strchr(job->name, '/') || strchr(job->name, '\\'))) return RUBRAVIEW_ARCEDIT_BAD_NAME;
+    if (job->name && (rubraview_cstr_chr(job->name, '/') || rubraview_cstr_chr(job->name, '\\'))) return RUBRAVIEW_ARCEDIT_BAD_NAME;
 
     if (!job_note_volume(job, job->archive_path)) return RUBRAVIEW_ARCEDIT_NO_MEMORY;
     fulta_arc_t *arc = NULL;
@@ -309,8 +312,8 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
         if (!en || (en->flags & FULTA_ARC_ENTRY_DIR)) { result = RUBRAVIEW_ARCEDIT_UNREADABLE; goto done; }
     }
 
-    want = (expect_t*)calloc(count + 1, sizeof(expect_t));
-    names = (char**)calloc(count + 1, sizeof(char*));
+    want = (expect_t*)rubraview_alloc_zero(count + 1, sizeof(expect_t));
+    names = (char**)rubraview_alloc_zero(count + 1, sizeof(char*));
     if (!want || !names) { result = RUBRAVIEW_ARCEDIT_NO_MEMORY; goto done; }
     err = fulta_arc_edit_begin(arc, &edit);
     if (err != FULTA_ARC_OK) { result = result_of(err, false); goto done; }
@@ -320,26 +323,26 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
        page are read by the viewer, not by FultaArc (§3.8.3). */
     if (!in_place) {
         enum { SCRATCH = 8192 };
-        uint8_t *scratch = (uint8_t*)malloc(SCRATCH);
+        uint8_t *scratch = (uint8_t*)rubraview_alloc(SCRATCH);
         if (!scratch) { result = RUBRAVIEW_ARCEDIT_NO_MEMORY; goto done; }
         for (size_t i = 0; i < count && result == RUBRAVIEW_ARCEDIT_OK; ++i) {
             const fulta_arc_entry_t *en = fulta_arc_entry(arc, i);
             if (!en || !en->name) continue;
             proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = scratch, .size = SCRATCH });
             proven_u8str_view_t shown = rubraview_page_source_entry_name(&arena, en, format, job->codepage);
-            if (shown.size == 0 || (shown.size == strlen(en->name) && memcmp(shown.ptr, en->name, shown.size) == 0)) continue;
+            if (shown.size == 0 || (shown.size == proven_cstr_len(en->name) && proven_sys_mem_cmp(shown.ptr, en->name, shown.size) == 0)) continue;
             bool dir = (en->flags & FULTA_ARC_ENTRY_DIR) != 0;
             bool slash = shown.ptr[shown.size - 1] == '/';
-            names[i] = (char*)malloc(shown.size + 2);
+            names[i] = (char*)rubraview_alloc(shown.size + 2);
             if (!names[i]) { result = RUBRAVIEW_ARCEDIT_NO_MEMORY; break; }
-            memcpy(names[i], shown.ptr, shown.size);
+            proven_sys_mem_copy(names[i], shown.ptr, shown.size);
             names[i][shown.size] = '\0';
             if (dir && !slash) { names[i][shown.size] = '/'; names[i][shown.size + 1] = '\0'; }
             if (i == job->entry_index && job->op != RUBRAVIEW_ARCEDIT_ADD && job->op != RUBRAVIEW_ARCEDIT_DELETE) continue;
             err = fulta_arc_edit_replace(edit, i, names[i], NULL);
             if (err != FULTA_ARC_OK) result = result_of(err, false);
         }
-        free(scratch);
+        rubraview_free(scratch);
         if (result != RUBRAVIEW_ARCEDIT_OK) goto done;
     }
 
@@ -348,11 +351,11 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
     if (job->name) {
         const fulta_arc_entry_t *beside = fulta_arc_entry(arc, job->entry_index);
         const char *beside_name = !beside ? "" : names[job->entry_index] ? names[job->entry_index] : beside->name;
-        size_t room = strlen(beside_name) + strlen(job->name) + 2;
-        full = (char*)malloc(room);
+        size_t room = proven_cstr_len(beside_name) + proven_cstr_len(job->name) + 2;
+        full = (char*)rubraview_alloc(room);
         if (!full) { result = RUBRAVIEW_ARCEDIT_NO_MEMORY; goto done; }
-        if (rubraview_arcedit_sibling_name((proven_u8str_view_t){ .ptr = (const proven_byte_t *)beside_name, .size = strlen(beside_name) },
-                                           (proven_u8str_view_t){ .ptr = (const proven_byte_t *)job->name, .size = strlen(job->name) }, full, room) == 0) {
+        if (rubraview_arcedit_sibling_name((proven_u8str_view_t){ .ptr = (const proven_byte_t *)beside_name, .size = proven_cstr_len(beside_name) },
+                                           (proven_u8str_view_t){ .ptr = (const proven_byte_t *)job->name, .size = proven_cstr_len(job->name) }, full, room) == 0) {
             result = RUBRAVIEW_ARCEDIT_BAD_NAME;
             goto done;
         }
@@ -418,18 +421,18 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
 done:
     if (edit) fulta_arc_edit_free(edit);
     fulta_arc_close(arc);
-    if (names) for (size_t i = 0; i < count; ++i) free(names[i]);
-    free(names);
-    free(want);
-    free(full);
+    if (names) for (size_t i = 0; i < count; ++i) rubraview_free(names[i]);
+    rubraview_free(names);
+    rubraview_free(want);
+    rubraview_free(full);
     if (result != RUBRAVIEW_ARCEDIT_OK) discard(job->out_path);
     return result;
 }
 
 void rubraview_arcedit_job_free(rubraview_arcedit_job_t *job) {
     if (!job) return;
-    for (size_t i = 0; i < job->volume_count; ++i) free(job->volumes[i]);
-    free(job->volumes);
+    for (size_t i = 0; i < job->volume_count; ++i) rubraview_free(job->volumes[i]);
+    rubraview_free(job->volumes);
     job->volumes = NULL;
     job->volume_count = 0;
 }

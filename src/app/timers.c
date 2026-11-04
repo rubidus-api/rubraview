@@ -115,8 +115,8 @@ void tick_timers(app_state_t *app, double dt) {
         }
         /* Kept in the app's own buffer, so it is the same text however it was made. */
         if (hint.size >= sizeof(app->hint_text)) hint.size = sizeof(app->hint_text) - 1;
-        if (hint.size != app->hint.size || memcmp(hint.ptr, app->hint_text, hint.size) != 0) {
-            memmove(app->hint_text, hint.ptr, hint.size);
+        if (hint.size != app->hint.size || proven_sys_mem_cmp(hint.ptr, app->hint_text, hint.size) != 0) {
+            proven_sys_mem_move(app->hint_text, hint.ptr, hint.size);
             app->hint_text[hint.size] = '\0';
             app->hint = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->hint_text, .size = hint.size };
             app->hint_since = rubraview_pal_time_now_seconds();

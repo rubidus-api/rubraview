@@ -15,6 +15,8 @@
  *    this is done for every user or not at all.
  */
 #ifdef _WIN32
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include "rubraview/pal/pal_window.h"
 #include "rubraview/pal/pal_image.h"
 #include "rubraview/filemanage.h"
@@ -53,7 +55,7 @@
 static bool set_string(HKEY root, const WCHAR *subkey, const WCHAR *name, const WCHAR *value) {
     HKEY key = NULL;
     if (RegCreateKeyExW(root, subkey, 0, NULL, 0, KEY_WRITE, NULL, &key, NULL) != ERROR_SUCCESS) return false;
-    LONG result = RegSetValueExW(key, name, 0, REG_SZ, (const BYTE*)value, (DWORD)((wcslen(value) + 1) * sizeof(WCHAR)));
+    LONG result = RegSetValueExW(key, name, 0, REG_SZ, (const BYTE*)value, (DWORD)((rubraview_wlen(value) + 1) * sizeof(WCHAR)));
     RegCloseKey(key);
     return result == ERROR_SUCCESS;
 }
@@ -96,8 +98,8 @@ static bool program_path(WCHAR *exe, DWORD cap, WCHAR *dir) {
     DWORD n = GetModuleFileNameW(NULL, exe, cap);
     if (n == 0 || n >= cap) return false;
     if (dir) {
-        wcscpy(dir, exe);
-        WCHAR *slash = wcsrchr(dir, L'\\');
+        rubraview_wcopy(dir, cap, exe);   /* the callers' folder buffer is as long as the path's */
+        WCHAR *slash = rubraview_wrchr(dir, L'\\');
         if (!slash) return false;
         *slash = 0;
     }
@@ -123,10 +125,10 @@ static bool next_extension(proven_u8str_view_t list, size_t *at, WCHAR ext[40], 
     return false;
 }
 
-static void verb_key_for(const WCHAR *ext, WCHAR *out) {
-    wcscpy(out, L"Software\\Classes\\SystemFileAssociations\\");
-    wcscat(out, ext);
-    wcscat(out, L"\\shell\\" MENU_VERB_KEY);
+static void verb_key_for(const WCHAR *ext, WCHAR *out, size_t cap) {
+    rubraview_wcopy(out, cap, L"Software\\Classes\\SystemFileAssociations\\");
+    rubraview_wcat(out, cap, ext);
+    rubraview_wcat(out, cap, L"\\shell\\" MENU_VERB_KEY);
 }
 
 /* ---- the classic menu ---- */
@@ -141,7 +143,7 @@ static bool classic_add_at(HKEY root, const WCHAR *key, uint32_t kind, const WCH
 
 static bool classic_add(HKEY root, const WCHAR *ext, uint32_t kind, const WCHAR *exe) {
     WCHAR key[300];
-    verb_key_for(ext, key);
+    verb_key_for(ext, key, RUBRAVIEW_COUNT_OF(key));
     return classic_add_at(root, key, kind | RUBRAVIEW_SHELL_ANY_FILE, exe);
 }
 
@@ -149,8 +151,8 @@ static bool classic_add_at(HKEY root, const WCHAR *key, uint32_t kind, const WCH
     WCHAR sub[400], text[128], command[MAX_PATH * 2 + 64], icon[MAX_PATH * 2 + 8];
     RegDeleteTreeW(root, key);   /* what an earlier choice left here */
 
-    wcscpy(icon, exe);
-    wcscat(icon, L",0");
+    rubraview_wcopy_a(icon, exe);
+    rubraview_wcat_a(icon, L",0");
     bool ok = set_string(root, key, L"MUIVerb", L"Rubraview") && set_string(root, key, L"Icon", icon) &&
               /* Empty: the items are the keys under this one's `shell`. */
               set_string(root, key, L"SubCommands", L"");
@@ -161,25 +163,25 @@ static bool classic_add_at(HKEY root, const WCHAR *key, uint32_t kind, const WCH
     for (size_t i = 0; ok && i < count; ++i) {
         if (!(items[i].kinds & kind)) continue;
         WCHAR id[32], flag[32];
-        widen(items[i].id, strlen(items[i].id), id, 32);
-        widen(rubraview_shell_verb_flag(items[i].verb), strlen(rubraview_shell_verb_flag(items[i].verb)), flag, 32);
+        widen(items[i].id, proven_cstr_len(items[i].id), id, 32);
+        widen(rubraview_shell_verb_flag(items[i].verb), proven_cstr_len(rubraview_shell_verb_flag(items[i].verb)), flag, 32);
         const char *label = korean ? items[i].text_ko : items[i].text;
-        widen(label, strlen(label), text, 128);
+        widen(label, proven_cstr_len(label), text, 128);
 
-        wcscpy(sub, key);
-        wcscat(sub, L"\\shell\\");
-        wcscat(sub, id);
+        rubraview_wcopy_a(sub, key);
+        rubraview_wcat_a(sub, L"\\shell\\");
+        rubraview_wcat_a(sub, id);
         /* Explorer starts the command once for every selected file; the
            viewer gathers them (rubraview_shellreq_collect). "Player" lifts
            the limit of fifteen a plain verb has. */
         ok = set_string(root, sub, L"MUIVerb", text) &&
              set_string(root, sub, L"MultiSelectModel", items[i].single ? L"Single" : L"Player");
-        wcscat(sub, L"\\command");
-        wcscpy(command, L"\"");
-        wcscat(command, exe);
-        wcscat(command, L"\" ");
-        wcscat(command, flag);
-        wcscat(command, L" \"%1\"");
+        rubraview_wcat_a(sub, L"\\command");
+        rubraview_wcopy_a(command, L"\"");
+        rubraview_wcat_a(command, exe);
+        rubraview_wcat_a(command, L"\" ");
+        rubraview_wcat_a(command, flag);
+        rubraview_wcat_a(command, L" \"%1\"");
         ok = ok && set_string(root, sub, NULL, command);
     }
     return ok;
@@ -196,15 +198,15 @@ static void classic_remove_anything(HKEY root) {
 
 static void classic_remove(HKEY root, const WCHAR *ext) {
     WCHAR key[300];
-    verb_key_for(ext, key);
+    verb_key_for(ext, key, RUBRAVIEW_COUNT_OF(key));
     RegDeleteTreeW(root, key);
     /* The keys above it go only when nothing else is in them. */
-    wcscpy(key, L"Software\\Classes\\SystemFileAssociations\\");
-    wcscat(key, ext);
-    wcscat(key, L"\\shell");
+    rubraview_wcopy_a(key, L"Software\\Classes\\SystemFileAssociations\\");
+    rubraview_wcat_a(key, ext);
+    rubraview_wcat_a(key, L"\\shell");
     delete_if_empty(root, key);
-    wcscpy(key, L"Software\\Classes\\SystemFileAssociations\\");
-    wcscat(key, ext);
+    rubraview_wcopy_a(key, L"Software\\Classes\\SystemFileAssociations\\");
+    rubraview_wcat_a(key, ext);
     delete_if_empty(root, key);
 }
 
@@ -214,12 +216,12 @@ static void classic_remove(HKEY root, const WCHAR *ext) {
 static void on_list(proven_u8str_view_t selection, uint32_t kinds, WCHAR *out, size_t cap) {
     WCHAR ext[40];
     proven_u8str_view_t narrow;
-    wcscpy(out, L";");
+    rubraview_wcopy(out, cap, L";");
     for (size_t at = 0; next_extension(selection, &at, ext, &narrow);) {
         if (!(rubraview_shell_kind_of(narrow) & kinds)) continue;
-        if (wcslen(out) + wcslen(ext) + 2 >= cap) break;
-        wcscat(out, ext + 1);
-        wcscat(out, L";");
+        if (rubraview_wlen(out) + rubraview_wlen(ext) + 2 >= cap) break;
+        rubraview_wcat(out, cap, ext + 1);
+        rubraview_wcat(out, cap, L";");
     }
 }
 
@@ -227,8 +229,8 @@ static bool config_write(HKEY root, proven_u8str_view_t selection, const WCHAR *
     WCHAR on[1024], icon[MAX_PATH * 2 + 8], sub[400], text[128], args[96];
     RegDeleteTreeW(root, MENU_CLASS_KEY);
 
-    wcscpy(icon, exe);
-    wcscat(icon, L",0");
+    rubraview_wcopy_a(icon, exe);
+    rubraview_wcat_a(icon, L",0");
     /* No On of its own (RV-207): compressing shows on anything; each item says where it shows. */
     bool ok = set_string(root, MENU_CLASS_KEY, L"Text", L"Rubraview") && set_string(root, MENU_CLASS_KEY, L"Icon", icon);
 
@@ -238,22 +240,22 @@ static bool config_write(HKEY root, proven_u8str_view_t selection, const WCHAR *
     size_t names_len = 0;
     for (size_t i = 0; ok && i < count; ++i) {
         WCHAR id[32], flag[32];
-        widen(items[i].id, strlen(items[i].id), id, 32);
-        widen(rubraview_shell_verb_flag(items[i].verb), strlen(rubraview_shell_verb_flag(items[i].verb)), flag, 32);
-        if (names_len + wcslen(id) + 2 >= 512) break;
-        wcscpy(names + names_len, id);
-        names_len += wcslen(id) + 1;
+        widen(items[i].id, proven_cstr_len(items[i].id), id, 32);
+        widen(rubraview_shell_verb_flag(items[i].verb), proven_cstr_len(rubraview_shell_verb_flag(items[i].verb)), flag, 32);
+        if (names_len + rubraview_wlen(id) + 2 >= 512) break;
+        rubraview_wcopy(names + names_len, RUBRAVIEW_COUNT_OF(names) - names_len, id);
+        names_len += rubraview_wlen(id) + 1;
 
-        wcscpy(sub, MENU_CLASS_KEY L"\\");
-        wcscat(sub, id);
-        widen(items[i].text, strlen(items[i].text), text, 128);
+        rubraview_wcopy_a(sub, MENU_CLASS_KEY L"\\");
+        rubraview_wcat_a(sub, id);
+        widen(items[i].text, proven_cstr_len(items[i].text), text, 128);
         ok = set_string(root, sub, L"Text", text);
-        widen(items[i].text_ko, strlen(items[i].text_ko), text, 128);
+        widen(items[i].text_ko, proven_cstr_len(items[i].text_ko), text, 128);
         ok = ok && set_string(root, sub, L"Text.ko", text);
         /* Every selected file on one command line, and the word that
            says so: nothing more is coming, the viewer need not wait. */
-        wcscpy(args, flag);
-        wcscat(args, L" --whole %*");
+        rubraview_wcopy_a(args, flag);
+        rubraview_wcat_a(args, L" --whole %*");
         bool anything = (items[i].kinds & (RUBRAVIEW_SHELL_ANY_FILE | RUBRAVIEW_SHELL_FOLDERS)) != 0;
         on_list(selection, items[i].kinds, on, 1024);
         ok = ok && set_string(root, sub, L"Command", exe) && set_string(root, sub, L"Args", args) &&
@@ -288,11 +290,11 @@ static bool file_exists(const WCHAR *path) {
 bool rubraview_pal_shell_menu_parts_present(void) {
     WCHAR exe[MAX_PATH * 2], dir[MAX_PATH * 2], path[MAX_PATH * 2 + 40];
     if (!program_path(exe, MAX_PATH * 2, dir)) return false;
-    wcscpy(path, dir);
-    wcscat(path, L"\\" WIDE(RUBRAVIEW_MENU_DLL_FILE));
+    rubraview_wcopy_a(path, dir);
+    rubraview_wcat_a(path, L"\\" WIDE(RUBRAVIEW_MENU_DLL_FILE));
     if (!file_exists(path)) return false;
-    wcscpy(path, dir);
-    wcscat(path, L"\\" WIDE(RUBRAVIEW_MENU_PACKAGE_FILE));
+    rubraview_wcopy_a(path, dir);
+    rubraview_wcat_a(path, L"\\" WIDE(RUBRAVIEW_MENU_PACKAGE_FILE));
     return file_exists(path);
 }
 
@@ -313,8 +315,8 @@ static void package_remove(void) {
 static bool package_add(void) {
     WCHAR exe[MAX_PATH * 2], dir[MAX_PATH * 2], package[MAX_PATH * 2 + 40], full[256];
     if (!program_path(exe, MAX_PATH * 2, dir)) return false;
-    wcscpy(package, dir);
-    wcscat(package, L"\\" WIDE(RUBRAVIEW_MENU_PACKAGE_FILE));
+    rubraview_wcopy_a(package, dir);
+    rubraview_wcat_a(package, L"\\" WIDE(RUBRAVIEW_MENU_PACKAGE_FILE));
 
     /* An earlier one may name another folder, or be an older version. */
     package_remove();
@@ -438,11 +440,11 @@ static bool wide_starts(const WCHAR *text, const WCHAR *lower_word) {
 static bool verb_is_ours(HKEY root, const WCHAR *shell_key, const WCHAR *verb) {
     WCHAR sub[520], command[1024];
     char name8[400], command8[3100];
-    if (wcslen(shell_key) + wcslen(verb) + 12 >= 520) return false;
-    wcscpy(sub, shell_key);
-    wcscat(sub, L"\\");
-    wcscat(sub, verb);
-    wcscat(sub, L"\\command");
+    if (rubraview_wlen(shell_key) + rubraview_wlen(verb) + 12 >= 520) return false;
+    rubraview_wcopy_a(sub, shell_key);
+    rubraview_wcat_a(sub, L"\\");
+    rubraview_wcat_a(sub, verb);
+    rubraview_wcat_a(sub, L"\\command");
     command[0] = 0;
     HKEY key = NULL;
     if (RegOpenKeyExW(root, sub, 0, KEY_READ, &key) == ERROR_SUCCESS) {
@@ -468,9 +470,9 @@ static bool verb_is_ours(HKEY root, const WCHAR *shell_key, const WCHAR *verb) {
    with" list. 1 when something was ours. */
 static int32_t wipe_extension(HKEY root, const WCHAR *ext) {
     WCHAR sub[300], value[128], was[128];
-    if (wcslen(ext) > 60) return 0;
-    wcscpy(sub, L"Software\\Classes\\");
-    wcscat(sub, ext);
+    if (rubraview_wlen(ext) > 60) return 0;
+    rubraview_wcopy_a(sub, L"Software\\Classes\\");
+    rubraview_wcat_a(sub, ext);
     HKEY key = NULL;
     if (RegOpenKeyExW(root, sub, 0, KEY_READ | KEY_SET_VALUE, &key) != ERROR_SUCCESS) return 0;
     int32_t found = 0;
@@ -484,7 +486,7 @@ static int32_t wipe_extension(HKEY root, const WCHAR *ext) {
     bool had = RegQueryValueExW(key, L"Rubraview.Was", NULL, &type, (BYTE*)was, &size) == ERROR_SUCCESS && type == REG_SZ;
     if (had) was[size / sizeof(WCHAR)] = 0;
     if (ours) {
-        if (had && was[0]) RegSetValueExW(key, NULL, 0, REG_SZ, (const BYTE*)was, (DWORD)((wcslen(was) + 1) * sizeof(WCHAR)));
+        if (had && was[0]) RegSetValueExW(key, NULL, 0, REG_SZ, (const BYTE*)was, (DWORD)((rubraview_wlen(was) + 1) * sizeof(WCHAR)));
         else RegDeleteValueW(key, NULL);
         found = 1;
     }
@@ -492,8 +494,8 @@ static int32_t wipe_extension(HKEY root, const WCHAR *ext) {
     RegCloseKey(key);
 
     WCHAR with[340];
-    wcscpy(with, sub);
-    wcscat(with, L"\\OpenWithProgids");
+    rubraview_wcopy_a(with, sub);
+    rubraview_wcat_a(with, L"\\OpenWithProgids");
     HKEY open_with = NULL;
     if (RegOpenKeyExW(root, with, 0, KEY_READ | KEY_SET_VALUE, &open_with) == ERROR_SUCCESS) {
         for (DWORD i = 0;;) {
@@ -519,15 +521,15 @@ static int32_t wipe_verbs(HKEY root, const WCHAR *owner, bool tidy) {
     static WCHAR verbs[64][128];
     WCHAR shell[400], sub[540];
     int32_t removed = 0;
-    if (wcslen(owner) + 8 >= 400) return 0;
-    wcscpy(shell, owner);
-    wcscat(shell, L"\\shell");
+    if (rubraview_wlen(owner) + 8 >= 400) return 0;
+    rubraview_wcopy_a(shell, owner);
+    rubraview_wcat_a(shell, L"\\shell");
     DWORD count = child_names(root, shell, verbs, 64);
     for (DWORD i = 0; i < count; ++i) {
         if (!verb_is_ours(root, shell, verbs[i])) continue;
-        wcscpy(sub, shell);
-        wcscat(sub, L"\\");
-        wcscat(sub, verbs[i]);
+        rubraview_wcopy_a(sub, shell);
+        rubraview_wcat_a(sub, L"\\");
+        rubraview_wcat_a(sub, verbs[i]);
         if (RegDeleteTreeW(root, sub) == ERROR_SUCCESS) removed++;
     }
     if (count > 0) delete_if_empty(root, shell);
@@ -544,8 +546,8 @@ static int32_t wipe_packages(void) {
     if (!list) return 0;
     UINT32 count = 0, chars = 0;
     if (list(PACKAGE_FAMILY, &count, NULL, &chars, NULL) != ERROR_INSUFFICIENT_BUFFER || count == 0 || count > 32) return 0;
-    PWSTR *names = (PWSTR*)calloc(count, sizeof(PWSTR));
-    WCHAR *text = (WCHAR*)calloc(chars + 1, sizeof(WCHAR));
+    PWSTR *names = (PWSTR*)rubraview_alloc_zero(count, sizeof(PWSTR));
+    WCHAR *text = (WCHAR*)rubraview_alloc_zero(chars + 1, sizeof(WCHAR));
     int32_t removed = 0;
     if (names && text && list(PACKAGE_FAMILY, &count, names, &chars, text) == ERROR_SUCCESS) {
         for (UINT32 i = 0; i < count; ++i) {
@@ -553,8 +555,8 @@ static int32_t wipe_packages(void) {
             if (SUCCEEDED(appx_run(&job))) removed++;
         }
     }
-    free(names);
-    free(text);
+    rubraview_free(names);
+    rubraview_free(text);
     return removed;
 }
 
@@ -572,15 +574,15 @@ int32_t rubraview_pal_shell_menu_wipe(bool all_users) {
     /* The menu on a file type, whoever opens it: any type, not only the ones this version knows. */
     DWORD count = child_names(root, L"Software\\Classes\\SystemFileAssociations", names, WIPE_NAMES);
     for (DWORD i = 0; i < count; ++i) {
-        wcscpy(sub, L"Software\\Classes\\SystemFileAssociations\\");
-        wcscat(sub, names[i]);
+        rubraview_wcopy_a(sub, L"Software\\Classes\\SystemFileAssociations\\");
+        rubraview_wcat_a(sub, names[i]);
         removed += wipe_verbs(root, sub, true);
     }
     for (size_t i = 0; i < sizeof(EVERYWHERE) / sizeof(EVERYWHERE[0]); ++i) removed += wipe_verbs(root, EVERYWHERE[i], false);
     proven_u8str_view_t every = rubraview_shell_extensions_all();
     for (size_t at = 0; next_extension(every, &at, ext, NULL);) {
-        wcscpy(sub, L"Software\\Classes\\");
-        wcscat(sub, ext);
+        rubraview_wcopy_a(sub, L"Software\\Classes\\");
+        rubraview_wcat_a(sub, ext);
         removed += wipe_verbs(root, sub, false);
     }
 
@@ -601,17 +603,17 @@ int32_t rubraview_pal_shell_menu_wipe(bool all_users) {
         }
         RegCloseKey(classes);
         for (DWORD i = 0; i < count; ++i) {
-            wcscpy(sub, L"Software\\Classes\\");
-            wcscat(sub, names[i]);
+            rubraview_wcopy_a(sub, L"Software\\Classes\\");
+            rubraview_wcat_a(sub, names[i]);
             if (RegDeleteTreeW(root, sub) == ERROR_SUCCESS) removed++;
         }
     }
     count = child_names(root, L"Software\\Classes\\Applications", names, WIPE_NAMES);
     for (DWORD i = 0; i < count; ++i) {
-        size_t len = wcslen(names[i]);
+        size_t len = rubraview_wlen(names[i]);
         if (len < 13 || !wide_starts(names[i], L"rubraview") || !wide_starts(names[i] + len - 4, L".exe")) continue;
-        wcscpy(sub, L"Software\\Classes\\Applications\\");
-        wcscat(sub, names[i]);
+        rubraview_wcopy_a(sub, L"Software\\Classes\\Applications\\");
+        rubraview_wcat_a(sub, names[i]);
         if (RegDeleteTreeW(root, sub) == ERROR_SUCCESS) removed++;
     }
 
@@ -663,13 +665,13 @@ static bool print_one(HDC dc, proven_u8str_view_t path, const rubraview_print_op
     size_t pixels = (size_t)w * (size_t)h;
     if (pixels > ((size_t)1 << 28)) return false;
     size_t room = pixels * 4u * 3u + (16u << 20);
-    void *memory = malloc(room);
+    void *memory = rubraview_alloc(room);
     if (!memory) return false;
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = room });
-    rubraview_pixbuf_t picture = rubraview_pal_image_read_pixels(&arena, path, NULL, 0, true);
+    rubraview_pixbuf_t picture = rubraview_pal_image_read_pixels(&arena, path, rubraview_mem_view(NULL, 0), true);
     if (!picture.pixels || picture.width <= 0 || picture.height <= 0 || picture.stride != picture.width * 4 ||
         picture.format != RUBRAVIEW_PIXFMT_RGBA8) {
-        free(memory);
+        rubraview_free(memory);
         return false;
     }
     w = picture.width;
@@ -697,7 +699,7 @@ static bool print_one(HDC dc, proven_u8str_view_t path, const rubraview_print_op
     rubraview_print_placement_t place;
     rubraview_print_options_t chosen = *options;
     if (!rubraview_print_place(cx, cy, cw, ch, dpi_x, dpi_y, w, h, &chosen, &place)) {
-        free(memory);
+        rubraview_free(memory);
         return false;
     }
 
@@ -732,7 +734,7 @@ static bool print_one(HDC dc, proven_u8str_view_t path, const rubraview_print_op
                            place.src_x, 0, place.src_w, place.src_h, from, &info, DIB_RGB_COLORS, SRCCOPY) > 0;
         (*on_sheet)++;
     }
-    free(memory);
+    rubraview_free(memory);
     return ok;
 }
 
@@ -817,7 +819,7 @@ size_t rubraview_pal_printers(proven_arena_t *arena, proven_u8str_view_t *out, s
     DWORD flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
     EnumPrintersW(flags, NULL, 4, NULL, 0, &need, &got);
     if (need == 0) return 0;
-    BYTE *buf = (BYTE*)malloc(need);
+    BYTE *buf = (BYTE*)rubraview_alloc(need);
     if (!buf) return 0;
     size_t count = 0;
     if (EnumPrintersW(flags, NULL, 4, buf, need, &need, &got)) {
@@ -833,7 +835,7 @@ size_t rubraview_pal_printers(proven_arena_t *arena, proven_u8str_view_t *out, s
             out[count++] = name;
         }
     }
-    free(buf);
+    rubraview_free(buf);
     return count;
 }
 
@@ -843,9 +845,9 @@ size_t rubraview_pal_printer_papers(proven_u8str_view_t printer, rubraview_print
     if (!out || capacity == 0 || !wide_of(printer, name, 512)) return 0;
     int n = DeviceCapabilitiesW(name, NULL, DC_PAPERS, NULL, NULL);
     if (n <= 0 || n > 4096) return 0;
-    WORD *ids = (WORD*)calloc((size_t)n, sizeof(WORD));
-    WCHAR *names = (WCHAR*)calloc((size_t)n, 64 * sizeof(WCHAR));
-    POINT *sizes = (POINT*)calloc((size_t)n, sizeof(POINT));
+    WORD *ids = (WORD*)rubraview_alloc_zero((size_t)n, sizeof(WORD));
+    WCHAR *names = (WCHAR*)rubraview_alloc_zero((size_t)n, 64 * sizeof(WCHAR));
+    POINT *sizes = (POINT*)rubraview_alloc_zero((size_t)n, sizeof(POINT));
     size_t count = 0;
     if (ids && names && sizes &&
         DeviceCapabilitiesW(name, NULL, DC_PAPERS, (LPWSTR)ids, NULL) == n &&
@@ -856,20 +858,20 @@ size_t rubraview_pal_printer_papers(proven_u8str_view_t printer, rubraview_print
             rubraview_printer_paper_t *p = &out[count++];
             *p = (rubraview_printer_paper_t){ .id = ids[i], .w_tenth_mm = sizes[i].x, .h_tenth_mm = sizes[i].y };
             WCHAR one[65];
-            memcpy(one, names + (size_t)i * 64u, 64 * sizeof(WCHAR));
+            proven_sys_mem_copy(one, names + (size_t)i * 64u, 64 * sizeof(WCHAR));
             one[64] = 0;
             int m = WideCharToMultiByte(CP_UTF8, 0, one, -1, p->name, (int)sizeof(p->name), NULL, NULL);
-            if (m <= 1) snprintf(p->name, sizeof(p->name), "%d x %d mm", (int)(sizes[i].x / 10), (int)(sizes[i].y / 10));
+            if (m <= 1) rubraview_fmt(p->name, sizeof(p->name), "{} x {} mm", PROVEN_ARG((int)(sizes[i].x / 10)), PROVEN_ARG((int)(sizes[i].y / 10)));
         }
     }
-    free(ids); free(names); free(sizes);
+    rubraview_free(ids); rubraview_free(names); rubraview_free(sizes);
     /* the printer's own paper, as its driver has it now */
     HANDLE h = NULL;
     if (out_default_id && OpenPrinterW(name, &h, NULL) && h) {
         LONG size = DocumentPropertiesW(NULL, h, name, NULL, NULL, 0);
-        DEVMODEW *dm = size > 0 ? (DEVMODEW*)malloc((size_t)size) : NULL;
+        DEVMODEW *dm = size > 0 ? (DEVMODEW*)rubraview_alloc((size_t)size) : NULL;
         if (dm && DocumentPropertiesW(NULL, h, name, dm, NULL, DM_OUT_BUFFER) == IDOK && (dm->dmFields & DM_PAPERSIZE)) *out_default_id = dm->dmPaperSize;
-        free(dm);
+        rubraview_free(dm);
         ClosePrinter(h);
     }
     return count;
@@ -883,14 +885,14 @@ static HDC printer_dc(proven_u8str_view_t printer, int32_t paper_id, int32_t ori
     if (!OpenPrinterW(name, &h, NULL) || !h) return NULL;
     HDC dc = NULL;
     LONG size = DocumentPropertiesW(NULL, h, name, NULL, NULL, 0);
-    DEVMODEW *dm = size > 0 ? (DEVMODEW*)malloc((size_t)size) : NULL;
+    DEVMODEW *dm = size > 0 ? (DEVMODEW*)rubraview_alloc((size_t)size) : NULL;
     if (dm && DocumentPropertiesW(NULL, h, name, dm, NULL, DM_OUT_BUFFER) == IDOK) {
         if (paper_id > 0) { dm->dmPaperSize = (short)paper_id; dm->dmFields |= DM_PAPERSIZE; dm->dmFields &= ~(DWORD)(DM_PAPERLENGTH | DM_PAPERWIDTH); }
         if (orientation == 1 || orientation == 2) { dm->dmOrientation = orientation == 2 ? DMORIENT_LANDSCAPE : DMORIENT_PORTRAIT; dm->dmFields |= DM_ORIENTATION; }
         if (copies > 1) { dm->dmCopies = (short)copies; dm->dmFields |= DM_COPIES; }
         if (DocumentPropertiesW(NULL, h, name, dm, dm, DM_IN_BUFFER | DM_OUT_BUFFER) == IDOK) dc = CreateDCW(L"WINSPOOL", name, NULL, dm);
     }
-    free(dm);
+    rubraview_free(dm);
     ClosePrinter(h);
     return dc;
 }
@@ -941,7 +943,7 @@ static bool msi_menu_program(WCHAR *out, DWORD cap) {
     DWORD size = sizeof(items);
     if (RegGetValueW(HKEY_LOCAL_MACHINE, MENU_CLASS_KEY, L"Items", RRF_RT_REG_MULTI_SZ, NULL, items, &size) != ERROR_SUCCESS || !items[0]) return false;
     WCHAR sub[600];
-    wcscpy(sub, MENU_CLASS_KEY L"\\");
+    rubraview_wcopy_a(sub, MENU_CLASS_KEY L"\\");
     wcsncat(sub, items, 64);
     size = cap * sizeof(WCHAR);
     return RegGetValueW(HKEY_LOCAL_MACHINE, sub, L"Command", RRF_RT_REG_SZ, NULL, out, &size) == ERROR_SUCCESS;
@@ -969,7 +971,7 @@ rubraview_other_copies_t rubraview_pal_shell_other_copies(void) {
                 /* Nothing registered to tell by: the MSI's copy is in Program Files. */
                 WCHAR pf[MAX_PATH];
                 DWORD n = GetEnvironmentVariableW(L"ProgramFiles", pf, MAX_PATH);
-                other.msi = !(n > 0 && n < MAX_PATH && _wcsnicmp(exe, pf, n) == 0);
+                other.msi = !(n > 0 && n < MAX_PATH && rubraview_wcmp_n(exe, pf, n, true) == 0);
             }
         }
         FreeLibrary(msi);
@@ -984,13 +986,13 @@ rubraview_other_copies_t rubraview_pal_shell_other_copies(void) {
         for (DWORD i = 0; !other.store; ++i) {
             DWORD len = 256;
             if (RegEnumKeyExW(packages, i, name, &len, NULL, NULL, NULL, NULL) != ERROR_SUCCESS) break;
-            if (_wcsnicmp(name, menu_package, wcslen(menu_package)) == 0) continue;
+            if (rubraview_wcmp_n(name, menu_package, rubraview_wlen(menu_package), true) == 0) continue;
             WCHAR root[MAX_PATH + 32];
             DWORD size = MAX_PATH * sizeof(WCHAR);
             if (RegGetValueW(packages, name, L"PackageRootFolder", RRF_RT_REG_SZ, NULL, root, &size) != ERROR_SUCCESS) continue;
-            size_t n = wcslen(root);
+            size_t n = rubraview_wlen(root);
             if (n == 0 || n > MAX_PATH) continue;
-            wcscpy(root + n, root[n - 1] == L'\\' ? L"rubraview.exe" : L"\\rubraview.exe");
+            rubraview_wcopy(root + n, RUBRAVIEW_COUNT_OF(root) - n, root[n - 1] == L'\\' ? L"rubraview.exe" : L"\\rubraview.exe");
             if (GetFileAttributesW(root) == INVALID_FILE_ATTRIBUTES) continue;
             if (same_file(root, exe)) continue;   /* this copy is that package */
             other.store = true;

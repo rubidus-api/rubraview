@@ -7,6 +7,7 @@
  */
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/core.h"
 #include <windows.h>
 #include <wincodec.h>
 #include <objbase.h>
@@ -81,7 +82,7 @@ uint8_t *rubraview_pal_shell_thumbnail_bgra(proven_u8str_view_t path, int32_t si
     WCHAR wide[MAX_PATH * 2];
     if (path.size == 0 || path.size >= sizeof(narrow)) return NULL;
     if (rubraview_stream_is_address(path)) return NULL;   /* RV-157: a station is not the shell's to look at */
-    memcpy(narrow, path.ptr, path.size);
+    proven_sys_mem_copy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
     /* The shell's parser, unlike CreateFile, does not take '/' for a
        separator — and a listing joins the folder and the name with '/'. */
@@ -117,7 +118,7 @@ uint8_t *rubraview_pal_shell_thumbnail_bgra(proven_u8str_view_t path, int32_t si
                     *out_h = h;
                 }
                 if (dc) ReleaseDC(NULL, dc);
-                free(pixels);
+                rubraview_free(pixels);
             }
             DeleteObject(bitmap);
         }
@@ -152,7 +153,7 @@ static bool handle_read(void *context, uint64_t at, uint8_t *dst, size_t len, si
 static bool wide_path(proven_u8str_view_t path, WCHAR *wide, int cap) {
     char narrow[MAX_PATH * 4];
     if (path.size == 0 || path.size >= sizeof(narrow)) return false;
-    memcpy(narrow, path.ptr, path.size);
+    proven_sys_mem_copy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
     for (size_t i = 0; i < path.size; ++i) if (narrow[i] == '/') narrow[i] = '\\';
     return MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, cap) > 0;
@@ -170,7 +171,7 @@ static bool head_facts(rubraview_head_src_t *src, proven_u8str_view_t path, rubr
     bool ok = GetFileInformationByHandle(file, &info) != 0;
     if (ok) {
         if (out_mtime) *out_mtime = unix_seconds(info.ftLastWriteTime);
-        rubraview_head_src_reset(src, handle_read, file, ((uint64_t)info.nFileSizeHigh << 32) | info.nFileSizeLow);
+        rubraview_head_src_reset(src, handle_read, rubraview_mem_mut(file, ((uint64_t)info.nFileSizeHigh << 32) | info.nFileSizeLow));
         (void)rubraview_media_head_read(src, rubraview_path_basename(path), out);
     }
     CloseHandle(file);
@@ -185,8 +186,10 @@ static _Thread_local rubraview_head_src_t g_thumb_head;   /* the thumbnail threa
    it, scaled down on the way (a comic page at full size is tens of MB). */
 static _Thread_local int32_t g_decoded_w, g_decoded_h;   /* the last decoded picture's own size, each thumbnail thread its own */
 
-static uint8_t *decode_small_bgra(IWICImagingFactory *factory, const uint8_t *data, size_t size, int32_t side,
+static uint8_t *decode_small_bgra(IWICImagingFactory *factory, proven_mem_view_t data_view, int32_t side,
                                   int32_t *out_w, int32_t *out_h) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     g_decoded_w = g_decoded_h = 0;
     if (!factory || !data || size == 0 || size > 0xFFFFFFFFu) return NULL;
     uint8_t *result = NULL;
@@ -198,7 +201,7 @@ static uint8_t *decode_small_bgra(IWICImagingFactory *factory, const uint8_t *da
     UINT w = 0, h = 0;
     /* RV-110: by the road a page takes, so an AVIF or a JPEG XL Windows has
        no codec for gets its small picture too. Ours decode at full size. */
-    if ((decoder = rubraview_wic_decoder_for_bytes(factory, data, size, &stream)) != NULL &&
+    if ((decoder = rubraview_wic_decoder_for_bytes(factory, rubraview_mem_view(data, size), &stream)) != NULL &&
         SUCCEEDED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) && frame &&
         SUCCEEDED(IWICBitmapFrameDecode_GetSize(frame, &w, &h)) && w > 0 && h > 0) {
         if (w < 0x7FFFFFFF && h < 0x7FFFFFFF) { g_decoded_w = (int32_t)w; g_decoded_h = (int32_t)h; }
@@ -219,7 +222,7 @@ static uint8_t *decode_small_bgra(IWICImagingFactory *factory, const uint8_t *da
                 *out_w = (int32_t)sw;
                 *out_h = (int32_t)sh;
             }
-            free(pixels);
+            rubraview_free(pixels);
         }
     }
     if (converter) IWICFormatConverter_Release(converter);
@@ -238,9 +241,9 @@ static uint8_t *own_file_small(IWICImagingFactory *factory, proven_u8str_view_t 
     rubraview_fs_mapping_t map = {0};
     if (!rubraview_pal_fs_map(path, &map)) return NULL;
     if (map.size <= OWN_FILE_MAX &&
-        (rubraview_avif_is(map.data, (size_t)map.size) || rubraview_image_is_jxl(map.data, (size_t)map.size) ||
-         rubraview_bigtiff_is(map.data, (size_t)map.size))) {
-        result = decode_small_bgra(factory, map.data, (size_t)map.size, THUMB_DECODE_SIDE, out_w, out_h);
+        (rubraview_avif_is(rubraview_mem_view(map.data, (size_t)map.size)) || rubraview_image_is_jxl(rubraview_mem_view(map.data, (size_t)map.size)) ||
+         rubraview_bigtiff_is(rubraview_mem_view(map.data, (size_t)map.size)))) {
+        result = decode_small_bgra(factory, rubraview_mem_view(map.data, (size_t)map.size), THUMB_DECODE_SIDE, out_w, out_h);
     }
     rubraview_pal_fs_unmap(&map);
     return result;
@@ -261,12 +264,12 @@ static uint8_t *archive_first_page(proven_arena_t *scratch, IWICImagingFactory *
     if (!rubraview_pal_fs_map(path, &map)) return NULL;
     if (map.size <= (uint64_t)SIZE_MAX) {
         rubraview_page_source_t source = rubraview_page_source_from_archive(
-            scratch, map.data, (size_t)map.size, path, picture_filter, RUBRAVIEW_CODEPAGE_AUTO,
+            scratch, rubraview_mem_view(map.data, (size_t)map.size), path, picture_filter, RUBRAVIEW_CODEPAGE_AUTO,
             ARCHIVE_MAX_ENTRY, ARCHIVE_7Z_MAX_FILE);
         if (source.page_count > 0 && rubraview_page_source_read_cost(&source, 0) <= ARCHIVE_MAX_COST) {
             rubraview_page_bytes_t page = rubraview_page_source_read(scratch, &source, 0, ARCHIVE_MAX_ENTRY);
             if (page.ok && page.data.size > 0) {
-                result = decode_small_bgra(factory, (const uint8_t*)page.data.ptr, page.data.size,
+                result = decode_small_bgra(factory, rubraview_mem_view((const uint8_t*)page.data.ptr, page.data.size),
                                            THUMB_DECODE_SIDE, out_w, out_h);
             }
         }
@@ -285,14 +288,14 @@ static uint8_t *archive_entry_page(proven_arena_t *scratch, IWICImagingFactory *
     if (!rubraview_pal_fs_map(path, &map)) return NULL;
     if (map.size <= (uint64_t)SIZE_MAX) {
         rubraview_page_source_t source = rubraview_page_source_from_archive(
-            scratch, map.data, (size_t)map.size, path, picture_filter, RUBRAVIEW_CODEPAGE_AUTO,
+            scratch, rubraview_mem_view(map.data, (size_t)map.size), path, picture_filter, RUBRAVIEW_CODEPAGE_AUTO,
             ARCHIVE_MAX_ENTRY, ARCHIVE_7Z_MAX_FILE);
         for (size_t i = 0; i < source.page_count; ++i) {
             if (!rubraview_path_same(source.pages[i].name, inner)) continue;
             if (rubraview_page_source_read_cost(&source, i) <= ARCHIVE_MAX_COST) {
                 rubraview_page_bytes_t page = rubraview_page_source_read(scratch, &source, i, ARCHIVE_MAX_ENTRY);
                 if (page.ok && page.data.size > 0) {
-                    result = decode_small_bgra(factory, (const uint8_t*)page.data.ptr, page.data.size,
+                    result = decode_small_bgra(factory, rubraview_mem_view((const uint8_t*)page.data.ptr, page.data.size),
                                                THUMB_DECODE_SIDE, out_w, out_h);
                 }
             }
@@ -318,7 +321,7 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
 
     if (job->bytes) {
         /* a page inside a book: decoded small from its bytes */
-        raw = decode_small_bgra(factory, job->bytes, job->bytes_len, THUMB_DECODE_SIDE, &w, &h);
+        raw = decode_small_bgra(factory, rubraview_mem_view(job->bytes, job->bytes_len), THUMB_DECODE_SIDE, &w, &h);
         meta->source_width = g_decoded_w;
         meta->source_height = g_decoded_h;
     } else if (job->inner_at > 0 && job->inner_at < job->path_len) {
@@ -371,17 +374,17 @@ static uint8_t *make_one(rubraview_thumbs_t *t, proven_arena_t *scratch, IWICIma
     uint8_t *out = NULL;
     if (rubraview_pixbuf_is_valid(&thumb)) {
         size_t bytes = (size_t)thumb.width * (size_t)thumb.height * 4u;
-        out = (uint8_t*)malloc(bytes);
+        out = (uint8_t*)rubraview_alloc(bytes);
         if (out) {
             for (int32_t y = 0; y < thumb.height; ++y) {
-                memcpy(out + (size_t)y * (size_t)thumb.width * 4u, thumb.pixels + (ptrdiff_t)y * thumb.stride,
+                proven_sys_mem_copy(out + (size_t)y * (size_t)thumb.width * 4u, thumb.pixels + (ptrdiff_t)y * thumb.stride,
                        (size_t)thumb.width * 4u);
             }
             *out_w = thumb.width;
             *out_h = thumb.height;
         }
     }
-    free(raw);
+    rubraview_free(raw);
     return out;
 }
 
@@ -394,25 +397,25 @@ static uint8_t *text_page_small(proven_arena_t *scratch, proven_u8str_view_t pat
     if (!rubraview_pal_fs_map(path, &map)) return NULL;
     size_t n = map.size < 4096u ? (size_t)map.size : 4096u;
     size_t bom = 0;
-    rubraview_textenc_t enc = rubraview_textenc_guess(map.data, n, NULL, &bom);
+    rubraview_textenc_t enc = rubraview_textenc_guess(rubraview_mem_view(map.data, n), NULL, &bom);
     const uint8_t *b = map.data + bom;
     size_t len = n - bom, raw_len = 0;
     char *raw = NULL;
     if (enc == RUBRAVIEW_TEXTENC_UTF8) {
         while (len > 0 && (b[len - 1] & 0xC0u) == 0x80u) --len;   /* a character cut by the 4 KB: left out */
         if (len > 0 && b[len - 1] >= 0xC0u) --len;
-        raw = (char *)malloc(len + 1);
-        if (raw) { memcpy(raw, b, len); raw[len] = '\0'; raw_len = len; }
+        raw = (char *)rubraview_alloc(len + 1);
+        if (raw) { proven_sys_mem_copy(raw, b, len); raw[len] = '\0'; raw_len = len; }
     } else if (enc == RUBRAVIEW_TEXTENC_UTF16LE || enc == RUBRAVIEW_TEXTENC_UTF16BE) {
-        raw = rubraview_textenc_utf16_to_utf8(b, len & ~(size_t)1, enc == RUBRAVIEW_TEXTENC_UTF16BE, &raw_len);
+        raw = rubraview_textenc_utf16_to_utf8(rubraview_mem_view(b, len & ~(size_t)1), enc == RUBRAVIEW_TEXTENC_UTF16BE, &raw_len);
     } else {
-        raw = rubraview_pal_text_decode(b, len, rubraview_textenc_codepage(enc), &raw_len);
+        raw = rubraview_pal_text_decode(rubraview_mem_view(b, len), rubraview_textenc_codepage(enc), &raw_len);
     }
     rubraview_pal_fs_unmap(&map);
     if (!raw) return NULL;
     size_t clean_len = 0;
-    char *clean = rubraview_text_clean(raw, raw_len, &clean_len);
-    free(raw);
+    char *clean = rubraview_text_clean(rubraview_bytes_view(raw, raw_len), &clean_len);
+    rubraview_free(raw);
     if (!clean) return NULL;
     for (size_t i = 0; i < clean_len; ++i) if (clean[i] == '\t') clean[i] = ' ';
     /* The page is made in the tile's own shape, so nothing is cut from it: the first lines stay at its top. */
@@ -423,8 +426,8 @@ static uint8_t *text_page_small(proven_arena_t *scratch, proven_u8str_view_t pat
     const int32_t pad = 10;
     rubraview_pixbuf_t mask = rubraview_pal_text_mask_box(scratch, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)clean, .size = clean_len }, PROVEN_LIT(""),
                                                           14, tw - 2 * pad, th - 2 * pad);
-    free(clean);
-    uint8_t *out = (uint8_t *)malloc((size_t)tw * (size_t)th * 4u);
+    rubraview_free(clean);
+    uint8_t *out = (uint8_t *)rubraview_alloc((size_t)tw * (size_t)th * 4u);
     if (!out) return NULL;
     const uint8_t paper[3] = { 0xE6, 0xEB, 0xEE }, ink[3] = { 0x2A, 0x2A, 0x2A };   /* BGR */
     for (int32_t y = 0; y < th; ++y) {
@@ -450,7 +453,7 @@ static DWORD WINAPI thumbs_thread(LPVOID param) {
         (void)CoCreateInstance(&CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER,
                                &IID_IWICImagingFactory, (void**)&factory);
     }
-    void *memory = malloc(THUMB_SCRATCH_BYTES);
+    void *memory = rubraview_alloc(THUMB_SCRATCH_BYTES);
 
     for (;;) {
         rubraview_thumb_job_t job;
@@ -467,25 +470,25 @@ static DWORD WINAPI thumbs_thread(LPVOID param) {
                                                                              .size = THUMB_SCRATCH_BYTES });
             result.bgra = make_one(t, &scratch, factory, &job, &result.width, &result.height, &result);
         }
-        free(job.bytes);   /* taken: the thread's */
+        rubraview_free(job.bytes);   /* taken: the thread's */
 
         AcquireSRWLockExclusive(&t->lock);
         t->working = false;
         if (job.generation == t->queue.generation) {
             if (t->result_count == THUMB_RESULTS) {   /* nobody is reading: the oldest goes */
-                free(t->results[0].bgra);
-                memmove(&t->results[0], &t->results[1], (THUMB_RESULTS - 1) * sizeof(t->results[0]));
+                rubraview_free(t->results[0].bgra);
+                proven_sys_mem_move(&t->results[0], &t->results[1], (THUMB_RESULTS - 1) * sizeof(t->results[0]));
                 t->result_count--;
             }
             t->results[t->result_count++] = result;
         } else {
-            free(result.bgra);   /* made for a listing that is gone */
+            rubraview_free(result.bgra);   /* made for a listing that is gone */
         }
         ReleaseSRWLockExclusive(&t->lock);
         if (t->wake) t->wake(t->context);
     }
 
-    free(memory);
+    rubraview_free(memory);
     rubraview_head_src_free(&g_thumb_head);
     if (factory) IWICImagingFactory_Release(factory);
     if (com) CoUninitialize();
@@ -496,13 +499,13 @@ static DWORD WINAPI thumbs_thread(LPVOID param) {
 
 static size_t copy_filter(char *to, size_t cap, proven_u8str_view_t from) {
     size_t n = from.size < cap ? from.size : cap;
-    if (n) memcpy(to, from.ptr, n);
+    if (n) proven_sys_mem_copy(to, from.ptr, n);
     return n;
 }
 
 rubraview_thumbs_t *rubraview_pal_thumbs_start(proven_u8str_view_t picture_filter, proven_u8str_view_t film_filter, proven_u8str_view_t archive_filter,
                                                rubraview_thumbs_wake_fn wake, void *context) {
-    rubraview_thumbs_t *t = (rubraview_thumbs_t*)calloc(1, sizeof(*t));
+    rubraview_thumbs_t *t = (rubraview_thumbs_t*)rubraview_alloc_zero(1, sizeof(*t));
     if (!t) return NULL;
     InitializeSRWLock(&t->lock);
     InitializeConditionVariable(&t->wake_worker);
@@ -513,7 +516,7 @@ rubraview_thumbs_t *rubraview_pal_thumbs_start(proven_u8str_view_t picture_filte
     t->wake = wake;
     t->context = context;
     t->thread = CreateThread(NULL, 0, thumbs_thread, t, 0, NULL);
-    if (!t->thread) { free(t); return NULL; }
+    if (!t->thread) { rubraview_free(t); return NULL; }
     /* Below the viewer: a thumbnail must never slow a page turn or a film. */
     SetThreadPriority(t->thread, THREAD_PRIORITY_BELOW_NORMAL);
     return t;
@@ -528,9 +531,9 @@ void rubraview_pal_thumbs_stop(rubraview_thumbs_t *t) {
     /* A shell or disk call may be in flight; it is waited for, briefly. */
     if (WaitForSingleObject(t->thread, 3000) == WAIT_OBJECT_0) {
         CloseHandle(t->thread);
-        for (size_t i = 0; i < t->result_count; ++i) free(t->results[i].bgra);
+        for (size_t i = 0; i < t->result_count; ++i) rubraview_free(t->results[i].bgra);
         rubraview_thumbq_set_generation(&t->queue, t->queue.generation + 1);   /* frees what is still queued */
-        free(t);
+        rubraview_free(t);
     }
     /* Otherwise the thread still holds `t`; it is left, not freed under it. */
 }
@@ -539,7 +542,7 @@ void rubraview_pal_thumbs_generation(rubraview_thumbs_t *t, uint32_t generation)
     if (!t) return;
     AcquireSRWLockExclusive(&t->lock);
     rubraview_thumbq_set_generation(&t->queue, generation);
-    for (size_t i = 0; i < t->result_count; ++i) free(t->results[i].bgra);
+    for (size_t i = 0; i < t->result_count; ++i) rubraview_free(t->results[i].bgra);
     t->result_count = 0;
     ReleaseSRWLockExclusive(&t->lock);
 }
@@ -565,10 +568,12 @@ bool rubraview_pal_thumbs_request_entry(rubraview_thumbs_t *t, uint32_t generati
 }
 
 bool rubraview_pal_thumbs_request_bytes(rubraview_thumbs_t *t, uint32_t generation, size_t index,
-                                        double aspect, uint8_t *bytes, size_t len) {
-    if (!t) { free(bytes); return false; }
+                                        double aspect, proven_mem_mut_t bytes_view) {
+    uint8_t *bytes = (uint8_t *)bytes_view.ptr;
+    size_t len = (size_t)bytes_view.size;
+    if (!t) { rubraview_free(bytes); return false; }
     AcquireSRWLockExclusive(&t->lock);
-    bool ok = rubraview_thumbq_push_bytes(&t->queue, generation, index, aspect, bytes, len);
+    bool ok = rubraview_thumbq_push_bytes(&t->queue, generation, index, aspect, rubraview_mem_mut(bytes, len));
     ReleaseSRWLockExclusive(&t->lock);
     if (ok) WakeConditionVariable(&t->wake_worker);
     return ok;
@@ -580,7 +585,7 @@ bool rubraview_pal_thumbs_take(rubraview_thumbs_t *t, rubraview_thumb_result_t *
     AcquireSRWLockExclusive(&t->lock);
     if (t->result_count > 0) {
         *out = t->results[0];
-        memmove(&t->results[0], &t->results[1], (t->result_count - 1) * sizeof(t->results[0]));
+        proven_sys_mem_move(&t->results[0], &t->results[1], (t->result_count - 1) * sizeof(t->results[0]));
         t->result_count--;
         got = true;
     }
@@ -670,35 +675,35 @@ static DWORD WINAPI sizes_thread(LPVOID param) {
 }
 
 static void sizes_free(rubraview_sizes_t *s) {
-    for (size_t i = 0; s->paths && i < s->count; ++i) free(s->paths[i]);
-    free(s->paths); free(s->lens); free(s->expect); free(s->w); free(s->h); free(s->seconds); free(s->mtime);
-    free(s->confirmed); free((void *)s->ready);
-    free(s);
+    for (size_t i = 0; s->paths && i < s->count; ++i) rubraview_free(s->paths[i]);
+    rubraview_free(s->paths); rubraview_free(s->lens); rubraview_free(s->expect); rubraview_free(s->w); rubraview_free(s->h); rubraview_free(s->seconds); rubraview_free(s->mtime);
+    rubraview_free(s->confirmed); rubraview_free((void *)s->ready);
+    rubraview_free(s);
 }
 
 rubraview_sizes_t *rubraview_pal_sizes_start(const proven_u8str_view_t *paths, const int64_t *expect, size_t count,
                                              bool background, rubraview_thumbs_wake_fn wake, void *context) {
     if (count > 0 && !paths) return NULL;
-    rubraview_sizes_t *s = (rubraview_sizes_t*)calloc(1, sizeof(*s));
+    rubraview_sizes_t *s = (rubraview_sizes_t*)rubraview_alloc_zero(1, sizeof(*s));
     if (!s) return NULL;
     size_t n = count ? count : 1;
-    s->paths = (char**)calloc(n, sizeof(char*));
-    s->lens = (size_t*)calloc(n, sizeof(size_t));
-    s->expect = expect ? (int64_t*)calloc(n, sizeof(int64_t)) : NULL;
-    s->w = (int32_t*)calloc(n, sizeof(int32_t));
-    s->h = (int32_t*)calloc(n, sizeof(int32_t));
-    s->seconds = (double*)calloc(n, sizeof(double));
-    s->mtime = (int64_t*)calloc(n, sizeof(int64_t));
-    s->confirmed = (uint8_t*)calloc(n, 1);
-    s->ready = (volatile LONG*)calloc(n, sizeof(LONG));
+    s->paths = (char**)rubraview_alloc_zero(n, sizeof(char*));
+    s->lens = (size_t*)rubraview_alloc_zero(n, sizeof(size_t));
+    s->expect = expect ? (int64_t*)rubraview_alloc_zero(n, sizeof(int64_t)) : NULL;
+    s->w = (int32_t*)rubraview_alloc_zero(n, sizeof(int32_t));
+    s->h = (int32_t*)rubraview_alloc_zero(n, sizeof(int32_t));
+    s->seconds = (double*)rubraview_alloc_zero(n, sizeof(double));
+    s->mtime = (int64_t*)rubraview_alloc_zero(n, sizeof(int64_t));
+    s->confirmed = (uint8_t*)rubraview_alloc_zero(n, 1);
+    s->ready = (volatile LONG*)rubraview_alloc_zero(n, sizeof(LONG));
     s->count = count;
     bool ok = s->paths && s->lens && (!expect || s->expect) && s->w && s->h && s->seconds && s->mtime && s->confirmed && s->ready;
     for (size_t i = 0; ok && i < count; ++i) {
         if (expect) s->expect[i] = expect[i];
         if (paths[i].size == 0) continue;
-        s->paths[i] = (char*)malloc(paths[i].size);
+        s->paths[i] = (char*)rubraview_alloc(paths[i].size);
         if (!s->paths[i]) { ok = false; break; }
-        memcpy(s->paths[i], paths[i].ptr, paths[i].size);
+        proven_sys_mem_copy(s->paths[i], paths[i].ptr, paths[i].size);
         s->lens[i] = paths[i].size;
     }
     if (!ok) { sizes_free(s); return NULL; }

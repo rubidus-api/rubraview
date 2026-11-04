@@ -28,7 +28,7 @@ typedef struct rubraview_thumbs rubraview_thumbs_t;
 typedef struct rubraview_thumb_result {
     uint32_t generation;
     size_t   index;
-    uint8_t *bgra;          /* NULL: nothing to show; else free() it */
+    uint8_t *bgra;          /* NULL: nothing to show; else rubraview_free() it */
     int32_t  width, height;
     /* What the file itself is, for the details view (owner, 2026-10-16): its own
        size in pixels and, for a film or a song, its length. 0 when not known. */
@@ -49,7 +49,7 @@ void rubraview_pal_thumbs_generation(rubraview_thumbs_t *thumbs, uint32_t genera
 /* A page inside a book (owner, 2026-09-29): its bytes, owned by the thread
    from here — freed if the request is refused or dropped. */
 bool rubraview_pal_thumbs_request_bytes(rubraview_thumbs_t *thumbs, uint32_t generation, size_t index,
-                                        double aspect, uint8_t *bytes, size_t len);
+                                        double aspect, proven_mem_mut_t bytes_view);
 bool rubraview_pal_thumbs_request(rubraview_thumbs_t *thumbs, uint32_t generation, size_t index,
                                   bool folder, double aspect, proven_u8str_view_t path);
 /* RV-207: a picture inside an archive (the open-file screen's tree of it): the archive's path and the entry's name. */
@@ -61,7 +61,7 @@ bool rubraview_pal_thumbs_take(rubraview_thumbs_t *thumbs, rubraview_thumb_resul
 bool rubraview_pal_thumbs_busy(rubraview_thumbs_t *thumbs);
 
 /* The picture Windows' shell has for a file — a photo's or a film's
-   thumbnail, a record's cover — as top-row-first BGRA to free(), or NULL.
+   thumbnail, a record's cover — as top-row-first BGRA to rubraview_free(), or NULL.
    Any thread with COM started. */
 uint8_t *rubraview_pal_shell_thumbnail_bgra(proven_u8str_view_t path, int32_t side, int32_t *out_w, int32_t *out_h);
 

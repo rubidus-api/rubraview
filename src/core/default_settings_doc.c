@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/settings_doc.h"
 #include <string.h>
 
@@ -304,6 +305,8 @@ static const char *const PARTS[] = {
 "  choice video.hdr_output         \"HDR output\"              off | auto | always = auto wired\n"
 "  toggle video.display_resample   \"Match a film to the screen\" = true wired\n"
 "  note   \"A film whose frames nearly fit the screen's refresh (29.97 on 60 Hz) is played up to a hundredth faster or slower, the sound too, so every frame stays on screen as long as the next.\"\n"
+"  toggle video.blend_frames       \"Blend frames\"            = false wired\n"
+"  note   \"A film whose frames do not fit the refresh (24 on 60 Hz) moves evenly: a frame that starts within a refresh is mixed with the one before it for that refresh. Not with HDR output.\"\n"
 "  info   \"FFmpeg\"                  {media.ffmpeg}\n"
 "  section \"Subtitles\"\n"
 "  int    video.subtitle_size      \"Subtitle size\"           10..72 step 1 unit \"pt\" = 24 wired\n"
@@ -543,9 +546,9 @@ static size_t g_document_len;
 proven_u8str_view_t rubraview_default_settings_document(void) {
     if (g_document_len == 0) {
         for (size_t i = 0; i < sizeof(PARTS) / sizeof(PARTS[0]); ++i) {
-            size_t n = strlen(PARTS[i]);
+            size_t n = proven_cstr_len(PARTS[i]);
             if (g_document_len + n >= sizeof(g_document)) break;   /* the parse will say a page is missing */
-            memcpy(g_document + g_document_len, PARTS[i], n);
+            proven_sys_mem_copy(g_document + g_document_len, PARTS[i], n);
             g_document_len += n;
         }
         g_document[g_document_len] = '\0';

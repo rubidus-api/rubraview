@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/aspect.h"
 #include "rubraview/lang.h"
 #include <math.h>
@@ -33,8 +34,8 @@ const char *rubraview_aspect_label(rubraview_aspect_t aspect) {
 
 rubraview_aspect_t rubraview_aspect_from_action(proven_u8str_view_t action) {
     for (int i = 0; i < RUBRAVIEW_ASPECT_COUNT; ++i) {
-        size_t len = strlen(ASPECTS[i].action);
-        if (action.size == len && action.ptr && memcmp(action.ptr, ASPECTS[i].action, len) == 0) return (rubraview_aspect_t)i;
+        size_t len = proven_cstr_len(ASPECTS[i].action);
+        if (action.size == len && action.ptr && proven_sys_mem_cmp(action.ptr, ASPECTS[i].action, len) == 0) return (rubraview_aspect_t)i;
     }
     return RUBRAVIEW_ASPECT_COUNT;
 }

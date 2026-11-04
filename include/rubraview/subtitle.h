@@ -204,7 +204,7 @@ void rubraview_subtitle_sync_reset(rubraview_subtitle_track_t *track);
  * What the playback line says of the sync: "sub +0.6 s" (a minus when
  * earlier), empty when it is 0. Written into `buffer`.
  */
-proven_u8str_view_t rubraview_subtitle_offset_text(char *buffer, size_t buffer_size, double offset_seconds);
+proven_u8str_view_t rubraview_subtitle_offset_text(proven_mem_mut_t buffer_view, double offset_seconds);
 
 /**
  * §3.16.1: the subtitle files that go with a video, found by sharing its

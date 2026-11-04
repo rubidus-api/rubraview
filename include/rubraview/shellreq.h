@@ -69,7 +69,7 @@ size_t rubraview_shellreq_pack(rubraview_shell_verb_t verb, bool whole, const pr
  * Read it back. The paths point into `blob`. False for bytes that are
  * not a request; paths past `cap` are counted out, not stored.
  */
-bool rubraview_shellreq_unpack(const char *blob, size_t len, rubraview_shell_verb_t *out_verb, bool *out_whole,
+bool rubraview_shellreq_unpack(proven_u8str_view_t blob_view, rubraview_shell_verb_t *out_verb, bool *out_whole,
                                proven_u8str_view_t *paths, size_t cap, size_t *out_count);
 
 /**

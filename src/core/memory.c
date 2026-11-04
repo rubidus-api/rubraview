@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/memory.h"
 #include "proven/arena.h"
 #include "proven/heap.h"
@@ -18,7 +19,7 @@ struct rubraview_chunk {
 static rubraview_chunk_t *chunk_new(size_t size) {
     size_t total = 0;
     if (PROVEN_CKD_ADD(&total, sizeof(rubraview_chunk_t), size)) return NULL;
-    rubraview_chunk_t *c = (rubraview_chunk_t*)malloc(total);
+    rubraview_chunk_t *c = (rubraview_chunk_t*)rubraview_alloc(total);
     if (!c) return NULL;
     c->prev = NULL;
     c->size = size;
@@ -34,7 +35,9 @@ static void note_high_water(rubraview_region_t *r) {
     if (used > r->high_water) r->high_water = used;
 }
 
-bool rubraview_region_init(rubraview_region_t *region, const char *name, size_t chunk_bytes, size_t limit) {
+bool rubraview_region_init(rubraview_region_t *region, proven_u8str_view_t name_view, size_t limit) {
+    const char *name = (const char *)name_view.ptr;
+    size_t chunk_bytes = (size_t)name_view.size;
     if (!region || chunk_bytes == 0) return false;
     *region = (rubraview_region_t){ .name = name, .chunk_bytes = chunk_bytes, .limit = limit < chunk_bytes ? chunk_bytes : limit };
     rubraview_chunk_t *c = chunk_new(chunk_bytes);
@@ -75,7 +78,7 @@ void rubraview_region_reset(rubraview_region_t *region) {
     rubraview_chunk_t *c = region->newest;
     while (c->prev) {
         rubraview_chunk_t *older = c->prev;
-        free(c);
+        rubraview_free(c);
         c = older;
     }
     region->newest = c;
@@ -89,7 +92,7 @@ void rubraview_region_release(rubraview_region_t *region) {
     rubraview_chunk_t *c = region->newest;
     while (c) {
         rubraview_chunk_t *older = c->prev;
-        free(c);
+        rubraview_free(c);
         c = older;
     }
     region->newest = NULL;
@@ -109,7 +112,7 @@ static proven_result_mem_mut_t region_alloc(void *ctx, proven_size_t size, prove
 
 static proven_result_mem_mut_t region_realloc(void *ctx, void *old_ptr, proven_size_t old_size, proven_size_t new_size, proven_size_t align) {
     proven_result_mem_mut_t res = region_alloc(ctx, new_size, align);
-    if (proven_is_ok(res.err) && old_ptr && old_size) memcpy(res.value.ptr, old_ptr, old_size < new_size ? old_size : new_size);
+    if (proven_is_ok(res.err) && old_ptr && old_size) proven_sys_mem_copy(res.value.ptr, old_ptr, old_size < new_size ? old_size : new_size);
     return res;
 }
 
@@ -181,11 +184,13 @@ void rubraview_block_pool_release(rubraview_block_pool_t *pool) {
 
 /* ---- two regions in turn ---- */
 
-bool rubraview_halves_init(rubraview_halves_t *h, const char *name, size_t chunk_bytes, size_t limit) {
+bool rubraview_halves_init(rubraview_halves_t *h, proven_u8str_view_t name_view, size_t limit) {
+    const char *name = (const char *)name_view.ptr;
+    size_t chunk_bytes = (size_t)name_view.size;
     if (!h) return false;
     *h = (rubraview_halves_t){0};
-    if (!rubraview_region_init(&h->half[0], name, chunk_bytes, limit)) return false;
-    if (rubraview_region_init(&h->half[1], name, chunk_bytes, limit)) return true;
+    if (!rubraview_region_init(&h->half[0], rubraview_bytes_view(name, chunk_bytes), limit)) return false;
+    if (rubraview_region_init(&h->half[1], rubraview_bytes_view(name, chunk_bytes), limit)) return true;
     rubraview_region_release(&h->half[0]);
     return false;
 }
@@ -235,13 +240,13 @@ static const size_t SCRATCH_BYTES[RUBRAVIEW_SCRATCH_CLASSES] = { 1u * MB, 4u * M
 bool rubraview_mem_init(rubraview_mem_t *mem) {
     if (!mem) return false;
     *mem = (rubraview_mem_t){0};
-    bool ok = rubraview_region_init(&mem->persist, "persist", 64u * MB, (size_t)1024u * MB) &&
-              rubraview_region_init(&mem->media, "media", 4u * MB, 256u * MB) &&
-              rubraview_region_init(&mem->bgm, "bgm", 4u * MB, 64u * MB) &&
-              rubraview_region_init(&mem->recent[0], "recent", 256u * 1024u, 16u * MB) &&
-              rubraview_region_init(&mem->recent[1], "recent", 256u * 1024u, 16u * MB) &&
-              rubraview_halves_init(&mem->settings, "settings", 256u * 1024u, 16u * MB) &&
-              rubraview_halves_init(&mem->subs, "subs", 4u * MB, 128u * MB) &&
+    bool ok = rubraview_region_init(&mem->persist, rubraview_bytes_view("persist", 64u * MB), (size_t)1024u * MB) &&
+              rubraview_region_init(&mem->media, rubraview_bytes_view("media", 4u * MB), 256u * MB) &&
+              rubraview_region_init(&mem->bgm, rubraview_bytes_view("bgm", 4u * MB), 64u * MB) &&
+              rubraview_region_init(&mem->recent[0], rubraview_bytes_view("recent", 256u * 1024u), 16u * MB) &&
+              rubraview_region_init(&mem->recent[1], rubraview_bytes_view("recent", 256u * 1024u), 16u * MB) &&
+              rubraview_halves_init(&mem->settings, rubraview_bytes_view("settings", 256u * 1024u), 16u * MB) &&
+              rubraview_halves_init(&mem->subs, rubraview_bytes_view("subs", 4u * MB), 128u * MB) &&
               rubraview_block_pool_init(&mem->windows, 1u * MB, 8);
     for (int c = 0; ok && c < RUBRAVIEW_SCRATCH_CLASSES; ++c)
         ok = rubraview_block_pool_init(&mem->scratch[c], SCRATCH_BYTES[c], c < 2 ? 2 : 1);   /* the big ones are not kept many */
@@ -274,7 +279,7 @@ bool rubraview_scratch_take(rubraview_mem_t *mem, size_t bytes, rubraview_scratc
         out->bytes = SCRATCH_BYTES[c];
         return true;
     }
-    void *block = malloc(bytes);   /* larger than every class: its own, freed when given */
+    void *block = rubraview_alloc(bytes);   /* larger than every class: its own, freed when given */
     if (!block) return false;
     out->block = block;
     out->bytes = bytes;
@@ -288,7 +293,7 @@ void rubraview_scratch_give(rubraview_mem_t *mem, rubraview_scratch_t *scratch) 
     if (scratch->cls >= 0) {
         rubraview_block_give(&mem->scratch[scratch->cls], scratch->block);
     } else {
-        free(scratch->block);
+        rubraview_free(scratch->block);
         mem->scratch_big -= scratch->bytes <= mem->scratch_big ? scratch->bytes : mem->scratch_big;
     }
     *scratch = (rubraview_scratch_t){ .cls = -1 };
@@ -335,4 +340,145 @@ rubraview_mem_pressure_t rubraview_mem_pressure(const rubraview_mem_t *mem) {
     rubraview_mem_stats_t s = rubraview_mem_stats(mem);
     if (s.persist_used >= mem->restart_at || s.total_held >= mem->heap_restart_at) return RUBRAVIEW_MEM_HIGH;
     return RUBRAVIEW_MEM_OK;
+}
+
+/* ---- RV-220 (D-275): the program's heap, as proven's allocator trait over the C runtime's malloc family ---- */
+
+static proven_result_mem_mut_t heap_alloc(void *ctx, proven_size_t size, proven_size_t align) {
+    (void)ctx;
+    if (size == 0 || align > (proven_size_t)alignof(max_align_t)) return (proven_result_mem_mut_t){ .err = PROVEN_ERR_INVALID_ARG };
+    void *p = malloc((size_t)size);
+    return p ? (proven_result_mem_mut_t){ .err = PROVEN_OK, .value = { .ptr = p, .size = size } }
+             : (proven_result_mem_mut_t){ .err = PROVEN_ERR_NOMEM };
+}
+
+static proven_result_mem_mut_t heap_realloc(void *ctx, void *old_ptr, proven_size_t old_size, proven_size_t new_size, proven_size_t align) {
+    (void)ctx; (void)old_size;
+    if (align > (proven_size_t)alignof(max_align_t)) return (proven_result_mem_mut_t){ .err = PROVEN_ERR_INVALID_ARG };
+    if (new_size == 0) { free(old_ptr); return (proven_result_mem_mut_t){ .err = PROVEN_OK }; }
+    void *p = realloc(old_ptr, (size_t)new_size);
+    return p ? (proven_result_mem_mut_t){ .err = PROVEN_OK, .value = { .ptr = p, .size = new_size } }
+             : (proven_result_mem_mut_t){ .err = PROVEN_ERR_NOMEM };
+}
+
+static void heap_free(void *ctx, void *ptr) {
+    (void)ctx;
+    free(ptr);
+}
+
+proven_allocator_t rubraview_heap(void) {
+    return (proven_allocator_t){ .ctx = NULL, .alloc_fn = heap_alloc, .realloc_fn = heap_realloc, .free_fn = heap_free };
+}
+
+void *rubraview_alloc(proven_size_t bytes) {
+    proven_allocator_t h = rubraview_heap();
+    proven_result_mem_mut_t r = h.alloc_fn(h.ctx, bytes ? bytes : 1, (proven_size_t)alignof(max_align_t));
+    return r.err == PROVEN_OK ? r.value.ptr : NULL;
+}
+
+void *rubraview_alloc_zero(proven_size_t count, proven_size_t size) {
+    proven_size_t bytes = 0;
+    if (PROVEN_CKD_MUL(&bytes, count, size)) return NULL;
+    void *p = rubraview_alloc(bytes);
+    if (p) proven_sys_mem_set(p, 0, bytes ? bytes : 1);
+    return p;
+}
+
+void *rubraview_realloc(proven_mem_mut_t block_view) {
+    void *block = (void *)block_view.ptr;
+    proven_size_t bytes = (proven_size_t)block_view.size;
+    proven_allocator_t h = rubraview_heap();
+    proven_result_mem_mut_t r = h.realloc_fn(h.ctx, block, 0, bytes ? bytes : 1, (proven_size_t)alignof(max_align_t));
+    return r.err == PROVEN_OK ? r.value.ptr : NULL;
+}
+
+void rubraview_free(void *block) {
+    if (!block) return;
+    proven_allocator_t h = rubraview_heap();
+    h.free_fn(h.ctx, block);
+}
+
+char *rubraview_strndup_view(proven_u8str_view_t text) {
+    char *copy = (char *)rubraview_alloc(text.size + 1);
+    if (!copy) return NULL;
+    if (text.size) proven_sys_mem_copy(copy, text.ptr, text.size);
+    copy[text.size] = '\0';
+    return copy;
+}
+
+char *rubraview_strdup(const char *text) {
+    return text ? rubraview_strndup_view(proven_u8str_view_from_cstr(text)) : NULL;
+}
+
+int rubraview_cstr_cmp_n(const char *a, proven_u8str_view_t b_view) {
+    const char *b = (const char *)b_view.ptr;
+    proven_size_t n = (proven_size_t)b_view.size;
+    proven_u8str_view_t x = proven_u8str_view_from_cstr(a ? a : ""), y = proven_u8str_view_from_cstr(b ? b : "");
+    if (x.size > n) x.size = n;
+    if (y.size > n) y.size = n;
+    return proven_u8str_view_cmp(x, y);
+}
+
+int rubraview_cstr_cmp_ci(const char *a, const char *b) {
+    const unsigned char *x = (const unsigned char *)(a ? a : ""), *y = (const unsigned char *)(b ? b : "");
+    for (;; ++x, ++y) {
+        int cx = *x >= 'A' && *x <= 'Z' ? *x + 32 : *x, cy = *y >= 'A' && *y <= 'Z' ? *y + 32 : *y;
+        if (cx != cy || !cx) return cx - cy;
+    }
+}
+
+/* RV-220: printf's %.Ng through proven's formatter. */
+static void strip_fraction_zeros(char *s) {
+    char *e = s;
+    while (*e && *e != 'e') e++;   /* the mantissa ends at an exponent, if any */
+    char *dot = NULL;
+    for (char *p = s; p < e; ++p) if (*p == '.') dot = p;
+    if (!dot) return;
+    char *last = e - 1;
+    while (last > dot && *last == '0') last--;
+    if (last == dot) last--;
+    size_t tail = proven_cstr_len(e);
+    proven_sys_mem_move(last + 1, e, tail + 1);
+}
+
+const char *rubraview_g_text(char *buf, double value, int sig) {
+    static const char *const FIXED[18] = { "{:.0}", "{:.1}", "{:.2}", "{:.3}", "{:.4}", "{:.5}", "{:.6}", "{:.7}", "{:.8}",
+                                           "{:.9}", "{:.10}", "{:.11}", "{:.12}", "{:.13}", "{:.14}", "{:.15}", "{:.16}", "{:.17}" };
+    static const char *const SCI[18] = { "{:.0e}", "{:.1e}", "{:.2e}", "{:.3e}", "{:.4e}", "{:.5e}", "{:.6e}", "{:.7e}", "{:.8e}",
+                                         "{:.9e}", "{:.10e}", "{:.11e}", "{:.12e}", "{:.13e}", "{:.14e}", "{:.15e}", "{:.16e}", "{:.17e}" };
+    const size_t cap = 32;
+    if (sig < 1) sig = 1;
+    if (sig > 17) sig = 17;
+    if (value != value) { proven_sys_mem_copy(buf, "nan", 4); return buf; }
+    if (value == 0.0) {
+        bool negative = 1.0 / value < 0.0;
+        proven_sys_mem_copy(buf, negative ? "-0" : "0", negative ? 3 : 2);
+        return buf;
+    }
+    if (value > 1.7976931348623157e308 || value < -1.7976931348623157e308) {
+        proven_sys_mem_copy(buf, value > 0 ? "inf" : "-inf", value > 0 ? 4 : 5);
+        return buf;
+    }
+    /* the exponent as printf's %e would show it after rounding to `sig` digits */
+    char sci[40];
+    (void)proven_fmt_to(sci, sizeof sci, SCI[sig - 1], PROVEN_ARG(value));
+    int exponent = 0;
+    for (char *p = sci; *p; ++p) {
+        if (*p == 'e') {
+            int sign = 1, at = 1;
+            if (p[1] == '-') { sign = -1; at = 2; } else if (p[1] == '+') at = 2;
+            for (char *q = p + at; *q >= '0' && *q <= '9'; ++q) exponent = exponent * 10 + (*q - '0');
+            exponent *= sign;
+            break;
+        }
+    }
+    if (exponent < -4 || exponent >= sig) {
+        (void)proven_fmt_to(buf, cap, SCI[sig - 1], PROVEN_ARG(value));
+    } else {
+        int decimals = sig - 1 - exponent;
+        if (decimals > 17) decimals = 17;
+        (void)proven_fmt_to(buf, cap, FIXED[decimals], PROVEN_ARG(value));
+    }
+    strip_fraction_zeros(buf);
+    return buf;
 }

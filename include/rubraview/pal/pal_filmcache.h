@@ -33,7 +33,7 @@ void rubraview_pal_filmcache_folder(char *out, size_t cap);
 rubraview_filmcache_stream_t *rubraview_pal_filmcache_open(const wchar_t *path);
 uint64_t rubraview_pal_filmcache_size(const rubraview_filmcache_stream_t *stream);
 /* Up to `len` bytes at `at`; `*got` fewer only at the end. False on a read that failed. */
-bool rubraview_pal_filmcache_read(rubraview_filmcache_stream_t *stream, uint64_t at, void *dst, uint32_t len, uint32_t *got);
+bool rubraview_pal_filmcache_read(rubraview_filmcache_stream_t *stream, uint64_t at, proven_mem_mut_t dst_view, uint32_t *got);
 void rubraview_pal_filmcache_close(rubraview_filmcache_stream_t *stream);
 /* An IStream (as void *) over a new reference to `stream`, its own position; the stream is closed
    with the last reference. NULL on failure. */

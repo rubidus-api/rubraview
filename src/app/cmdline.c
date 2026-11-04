@@ -157,14 +157,14 @@ bool run_command_line(proven_arena_t *arena, int *exit_code) {
             bool alone = rubraview_pal_instance_claim();
             if (rubraview_instance_decide(single_instance, !alone) == RUBRAVIEW_INSTANCE_HAND_OVER) {
                 size_t need = rubraview_shellreq_pack(cli.shell_verb, cli.shell_whole, g_launch_paths, g_launch_count, NULL, 0);
-                char *blob = (char*)malloc(need);
+                char *blob = (char*)rubraview_alloc(need);
                 bool sent = false;
                 if (blob) {
                     (void)rubraview_shellreq_pack(cli.shell_verb, cli.shell_whole, g_launch_paths, g_launch_count, blob, need);
                     /* The other launch may still be making its window
                        (several files opened at once): it is waited for. */
-                    sent = rubraview_pal_instance_send_request(blob, need, 8000);
-                    free(blob);
+                    sent = rubraview_pal_instance_send_request(rubraview_bytes_view(blob, need), 8000);
+                    rubraview_free(blob);
                 }
                 if (sent) {
                     *exit_code = 0;

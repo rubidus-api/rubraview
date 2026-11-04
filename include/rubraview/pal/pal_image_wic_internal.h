@@ -12,7 +12,7 @@
  * premultiplied BGRA into `dst`, top row first. For the tile thread (D-40),
  * which passes its own factory: the viewer's is not shared across threads.
  */
-bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, const uint8_t *data, size_t size,
+bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, proven_mem_view_t data_view,
                                 bool apply_exif_orientation,
                                 int32_t x, int32_t y, int32_t w, int32_t h,
                                 int32_t out_w, int32_t out_h, uint8_t *dst, uint32_t stride);
@@ -23,7 +23,7 @@ bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, const uint8_t *data
  * has none) — the one road every reader of a picture's bytes takes. The
  * stream, when one comes back, must outlive the decoder.
  */
-IWICBitmapDecoder *rubraview_wic_decoder_for_bytes(IWICImagingFactory *factory, const uint8_t *data, size_t size,
+IWICBitmapDecoder *rubraview_wic_decoder_for_bytes(IWICImagingFactory *factory, proven_mem_view_t data_view,
                                                    IWICStream **out_stream);
 
 /*
@@ -31,7 +31,7 @@ IWICBitmapDecoder *rubraview_wic_decoder_for_bytes(IWICImagingFactory *factory, 
  * reader that will come back for many rectangles. NULL when Windows reads
  * the bytes itself or nothing does. Let go with rubraview_wic_own_tiff_free.
  */
-uint8_t *rubraview_wic_own_tiff(IWICImagingFactory *factory, const uint8_t *data, size_t size,
+uint8_t *rubraview_wic_own_tiff(IWICImagingFactory *factory, proven_mem_view_t data_view,
                                 size_t *out_size, void **out_owner);
 void rubraview_wic_own_tiff_free(void *owner);
 

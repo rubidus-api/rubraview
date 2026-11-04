@@ -55,23 +55,23 @@ rubraview_textenc_t rubraview_textenc_from_word(proven_u8str_view_t word);
  * double-byte ones. `*bom` is set to the length of a byte order mark to
  * skip (0 when there is none).
  */
-rubraview_textenc_t rubraview_textenc_guess(const uint8_t *bytes, size_t size, const char *ui_lang, size_t *bom);
+rubraview_textenc_t rubraview_textenc_guess(proven_mem_view_t bytes_view, const char *ui_lang, size_t *bom);
 
 /** Whether `bytes` are UTF-8 throughout; a sequence cut by the end is allowed when `cut_ok`. */
-bool rubraview_textenc_is_utf8(const uint8_t *bytes, size_t size, bool cut_ok);
+bool rubraview_textenc_is_utf8(proven_mem_view_t bytes_view, bool cut_ok);
 
 /**
  * UTF-16 (`big_endian` or not) as UTF-8, malloc'd, NUL-terminated; a lone
  * surrogate becomes U+FFFD. NULL when out of memory.
  */
-char *rubraview_textenc_utf16_to_utf8(const uint8_t *bytes, size_t size, bool big_endian, size_t *out_len);
+char *rubraview_textenc_utf16_to_utf8(proven_mem_view_t bytes_view, bool big_endian, size_t *out_len);
 
 /**
  * §2.3: decoded text made ready to show, in place where it can be, the
  * result malloc'd: bad UTF-8 becomes U+FFFD, "\r\n" and "\r" become "\n",
  * and a control character other than tab and line feed shows as U+00B7.
  */
-char *rubraview_text_clean(const char *utf8, size_t len, size_t *out_len);
+char *rubraview_text_clean(proven_u8str_view_t utf8_view, size_t *out_len);
 
 #ifdef __cplusplus
 }

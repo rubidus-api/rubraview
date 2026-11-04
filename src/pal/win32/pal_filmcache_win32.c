@@ -6,6 +6,8 @@
  */
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include <windows.h>
 #include <objidl.h>
 #include <shlobj.h>
@@ -40,18 +42,15 @@ struct rubraview_filmcache_stream {
 };
 
 /* RUBRAVIEW_FILMCACHE_LOG set: what each process does with the cache, a line at a time, in that file. */
-static void say(const char *format, ...) {
+static void say_args(const char *format, const proven_arg_t *fmt_args, size_t fmt_count) {
     WCHAR file[MAX_PATH];
     DWORD n = GetEnvironmentVariableW(L"RUBRAVIEW_FILMCACHE_LOG", file, MAX_PATH);
     if (n == 0 || n >= MAX_PATH) return;
     char line[512];
-    int head = snprintf(line, sizeof line, "%lu ", (unsigned long)GetCurrentProcessId());
-    va_list args;
-    va_start(args, format);
-    int body = vsnprintf(line + head, sizeof line - (size_t)head - 1, format, args);
-    va_end(args);
+    int head = rubraview_fmt(line, sizeof line, "{} ", PROVEN_ARG((unsigned long)GetCurrentProcessId()));
+    int body = rubraview_fmt_length(proven_fmt_to_internal(line + head, sizeof line - (size_t)head - 1, format, fmt_args, fmt_count));
     if (head < 0 || body < 0) return;
-    size_t len = strlen(line);
+    size_t len = proven_cstr_len(line);
     line[len++] = '\n';
     HANDLE h = CreateFileW(file, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (h == INVALID_HANDLE_VALUE) return;
@@ -59,6 +58,7 @@ static void say(const char *format, ...) {
     WriteFile(h, line, (DWORD)len, &put, NULL);
     CloseHandle(h);
 }
+#define say(format, ...) say_args(format, RUBRAVIEW_FMT_ARGS(__VA_ARGS__))
 
 static SRWLOCK g_cfg_lock = SRWLOCK_INIT;
 static char g_folder_set[WPATH];
@@ -72,18 +72,18 @@ static _Atomic uint64_t g_from_copy, g_from_source;
 void rubraview_pal_filmcache_configure(proven_u8str_view_t folder, uint64_t limit_bytes, bool ahead) {
     AcquireSRWLockExclusive(&g_cfg_lock);
     size_t n = folder.size < sizeof g_folder_set - 1 ? folder.size : 0;   /* a folder too long: the default */
-    if (n) memcpy(g_folder_set, folder.ptr, n);
+    if (n) proven_sys_mem_copy(g_folder_set, folder.ptr, n);
     g_folder_set[n] = '\0';
     bool changed = g_limit != limit_bytes || g_ahead != ahead;
     g_limit = limit_bytes;
     g_ahead = ahead;
     ReleaseSRWLockExclusive(&g_cfg_lock);
-    if (changed) say("settings: %llu MB, ahead %s, folder \"%s\"", (unsigned long long)(limit_bytes >> 20), ahead ? "on" : "off", g_folder_set);
+    if (changed) say("settings: {} MB, ahead {}, folder \"{}\"", PROVEN_ARG((unsigned long long)(limit_bytes >> 20)), PROVEN_ARG(ahead ? "on" : "off"), PROVEN_ARG(g_folder_set));
 }
 
 void rubraview_pal_filmcache_settings(char *folder, size_t cap, uint64_t *limit_bytes, bool *ahead) {
     AcquireSRWLockShared(&g_cfg_lock);
-    if (folder && cap) snprintf(folder, cap, "%s", g_folder_set);
+    if (folder && cap) rubraview_fmt(folder, cap, "{}", PROVEN_ARG(g_folder_set));
     if (limit_bytes) *limit_bytes = g_limit;
     if (ahead) *ahead = g_ahead;
     ReleaseSRWLockShared(&g_cfg_lock);
@@ -100,7 +100,7 @@ static bool folder_at(WCHAR *out, size_t cap, bool make) {
         WCHAR base[WPATH];
         DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", base, WPATH);
         if (n == 0 || n >= WPATH) return false;
-        if (_snwprintf(out, cap, L"%ls\\rubraview\\film-cache", base) < 0) return false;
+        if (rubraview_wfmt(out, cap, "{}\\rubraview\\film-cache", PROVEN_ARG(rubraview_wide_view(base))) < 0) return false;
         out[cap - 1] = L'\0';
     }
     for (WCHAR *p = out; *p; ++p) if (*p == L'/') *p = L'\\';
@@ -122,7 +122,7 @@ void rubraview_pal_filmcache_folder(char *out, size_t cap) {
 static bool on_network(const wchar_t *path) {
     if (path[0] == L'\\' && path[1] == L'\\') {
         if (path[2] != L'?' && path[2] != L'.') return true;   /* \\server\share */
-        if (wcsncmp(path, L"\\\\?\\UNC\\", 8) == 0) return true;
+        if (rubraview_wcmp_n(path, L"\\\\?\\UNC\\", 8, false) == 0) return true;
         if (path[2] == L'?' && path[3] == L'\\') path += 4;    /* \\?\C:\... */
         else return false;
     }
@@ -149,10 +149,10 @@ static void save_map(rubraview_filmcache_stream_t *s) {
     if (!s->copy) return;
     proven_u8str_view_t path = { .ptr = (const proven_byte_t *)s->path, .size = s->path_len };
     size_t cap = rubraview_filmcache_map_text_size(&s->map, path);
-    char *text = (char *)malloc(cap);
+    char *text = (char *)rubraview_alloc(cap);
     size_t n = text ? rubraview_filmcache_map_text(&s->map, path, text, cap) : 0;
     WCHAR tmp[WPATH + 8];
-    _snwprintf(tmp, WPATH + 8, L"%ls.new", s->map_file);
+    rubraview_wfmt(tmp, WPATH + 8, "{}.new", PROVEN_ARG(rubraview_wide_view(s->map_file)));
     tmp[WPATH + 7] = L'\0';
     HANDLE h = n ? CreateFileW(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL) : INVALID_HANDLE_VALUE;
     if (h != INVALID_HANDLE_VALUE) {
@@ -162,7 +162,7 @@ static void save_map(rubraview_filmcache_stream_t *s) {
         if (ok && MoveFileExW(tmp, s->map_file, MOVEFILE_REPLACE_EXISTING)) s->saved = s->map.filled;
         else DeleteFileW(tmp);
     }
-    free(text);
+    rubraview_free(text);
 }
 
 /* Block `b` from the network into `buf`, then into the copy and the map; its length, 0 when it failed. */
@@ -191,7 +191,7 @@ static bool has_block(rubraview_filmcache_stream_t *s, uint64_t b) {
 
 static DWORD WINAPI ahead_main(void *arg) {
     rubraview_filmcache_stream_t *s = (rubraview_filmcache_stream_t *)arg;
-    uint8_t *buf = (uint8_t *)malloc(BLOCK);
+    uint8_t *buf = (uint8_t *)rubraview_alloc(BLOCK);
     if (!buf) return 0;
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
     while (!atomic_load(&s->closing)) {
@@ -200,10 +200,10 @@ static DWORD WINAPI ahead_main(void *arg) {
         if (gap >= s->map.blocks) gap = rubraview_filmcache_map_next_gap(&s->map, 0);
         uint64_t blocks = s->map.blocks;
         ReleaseSRWLockShared(&s->lock);
-        if (gap >= blocks) { say("ahead: all %llu blocks here", (unsigned long long)blocks); break; }   /* all of it is here */
+        if (gap >= blocks) { say("ahead: all {} blocks here", PROVEN_ARG((unsigned long long)blocks)); break; }   /* all of it is here */
         if (!fetch_block(s, s->ahead_source, gap, buf)) Sleep(500);   /* the link dropped: again soon */
     }
-    free(buf);
+    rubraview_free(buf);
     return 0;
 }
 
@@ -211,7 +211,9 @@ uint64_t rubraview_pal_filmcache_size(const rubraview_filmcache_stream_t *s) {
     return s ? s->map.size : 0;
 }
 
-bool rubraview_pal_filmcache_read(rubraview_filmcache_stream_t *s, uint64_t at, void *dst, uint32_t len, uint32_t *got) {
+bool rubraview_pal_filmcache_read(rubraview_filmcache_stream_t *s, uint64_t at, proven_mem_mut_t dst_view, uint32_t *got) {
+    void *dst = (void *)dst_view.ptr;
+    uint32_t len = (uint32_t)dst_view.size;
     *got = 0;
     if (!s || !dst) return false;
     if (at >= s->map.size || len == 0) return true;
@@ -230,16 +232,16 @@ bool rubraview_pal_filmcache_read(rubraview_filmcache_stream_t *s, uint64_t at, 
             if (!pread_at(s->source, pos, out, n, &took) || took != n) { ok = false; break; }
             atomic_fetch_add(&g_from_source, n);
         } else {
-            if (!buf && !(buf = (uint8_t *)malloc(BLOCK))) { ok = false; break; }
+            if (!buf && !(buf = (uint8_t *)rubraview_alloc(BLOCK))) { ok = false; break; }
             DWORD whole = fetch_block(s, s->source, b, buf);
             if (whole < off + n) { ok = false; break; }
-            memcpy(out, buf + off, n);
+            proven_sys_mem_copy(out, buf + off, n);
         }
         atomic_store(&s->ahead_from, b + 1);
         out += n; pos += n; left -= n;
         *got += n;
     }
-    free(buf);
+    rubraview_free(buf);
     return ok || *got > 0;
 }
 
@@ -250,15 +252,15 @@ static bool stem_open(const WCHAR *stem) {
     for (rubraview_filmcache_stream_t *e = g_list; e; e = e->next) {
         WCHAR w[17];
         MultiByteToWideChar(CP_UTF8, 0, e->name, -1, w, 17);
-        if (_wcsicmp(w, stem) == 0) return true;
+        if (rubraview_wcmp_ci(w, stem) == 0) return true;
     }
     return false;
 }
 
 static uint64_t delete_copy(const WCHAR *folder, const WCHAR *stem) {
     WCHAR bin[WPATH], map[WPATH];
-    _snwprintf(bin, WPATH, L"%ls\\%ls.bin", folder, stem); bin[WPATH - 1] = 0;
-    _snwprintf(map, WPATH, L"%ls\\%ls.map", folder, stem); map[WPATH - 1] = 0;
+    rubraview_wfmt(bin, WPATH, "{}\\{}.bin", PROVEN_ARG(rubraview_wide_view(folder)), PROVEN_ARG(rubraview_wide_view(stem))); bin[WPATH - 1] = 0;
+    rubraview_wfmt(map, WPATH, "{}\\{}.map", PROVEN_ARG(rubraview_wide_view(folder)), PROVEN_ARG(rubraview_wide_view(stem))); map[WPATH - 1] = 0;
     DWORD high = 0, low = GetCompressedFileSizeW(bin, &high);
     uint64_t bytes = low == INVALID_FILE_SIZE && GetLastError() != NO_ERROR ? 0 : ((uint64_t)high << 32) | low;
     if (!DeleteFileW(bin) && GetLastError() != ERROR_FILE_NOT_FOUND) return 0;   /* open elsewhere: kept */
@@ -271,10 +273,10 @@ typedef struct copy_seen { WCHAR stem[17]; } copy_seen_t;
 /* Copies go, least recently played first, till `incoming` more bytes fit; `all`: every one not open. */
 static uint64_t make_room(const WCHAR *folder, uint64_t limit, uint64_t incoming, bool all) {
     WCHAR pattern[WPATH];
-    _snwprintf(pattern, WPATH, L"%ls\\*.bin", folder); pattern[WPATH - 1] = 0;
-    rubraview_filmcache_entry_t *entries = (rubraview_filmcache_entry_t *)calloc(MAX_COPIES, sizeof *entries);
-    copy_seen_t *seen = (copy_seen_t *)calloc(MAX_COPIES, sizeof *seen);
-    size_t *victims = (size_t *)calloc(MAX_COPIES, sizeof *victims);
+    rubraview_wfmt(pattern, WPATH, "{}\\*.bin", PROVEN_ARG(rubraview_wide_view(folder))); pattern[WPATH - 1] = 0;
+    rubraview_filmcache_entry_t *entries = (rubraview_filmcache_entry_t *)rubraview_alloc_zero(MAX_COPIES, sizeof *entries);
+    copy_seen_t *seen = (copy_seen_t *)rubraview_alloc_zero(MAX_COPIES, sizeof *seen);
+    size_t *victims = (size_t *)rubraview_alloc_zero(MAX_COPIES, sizeof *victims);
     uint64_t freed = 0;
     if (!entries || !seen || !victims) goto done;
     size_t count = 0;
@@ -283,13 +285,13 @@ static uint64_t make_room(const WCHAR *folder, uint64_t limit, uint64_t incoming
     if (find == INVALID_HANDLE_VALUE) goto done;
     AcquireSRWLockShared(&g_list_lock);
     do {
-        size_t len = wcslen(fd.cFileName);
+        size_t len = rubraview_wlen(fd.cFileName);
         if (len != 20 || count >= MAX_COPIES) continue;   /* 16 hex digits and ".bin" */
-        wcsncpy(seen[count].stem, fd.cFileName, 16);
+        proven_sys_mem_copy(seen[count].stem, fd.cFileName, 16 * sizeof(WCHAR));   /* the 16 hex digits */
         seen[count].stem[16] = 0;
         WCHAR bin[WPATH], map[WPATH];
-        _snwprintf(bin, WPATH, L"%ls\\%ls", folder, fd.cFileName); bin[WPATH - 1] = 0;
-        _snwprintf(map, WPATH, L"%ls\\%ls.map", folder, seen[count].stem); map[WPATH - 1] = 0;
+        rubraview_wfmt(bin, WPATH, "{}\\{}", PROVEN_ARG(rubraview_wide_view(folder)), PROVEN_ARG(rubraview_wide_view(fd.cFileName))); bin[WPATH - 1] = 0;
+        rubraview_wfmt(map, WPATH, "{}\\{}.map", PROVEN_ARG(rubraview_wide_view(folder)), PROVEN_ARG(rubraview_wide_view(seen[count].stem))); map[WPATH - 1] = 0;
         DWORD high = 0, low = GetCompressedFileSizeW(bin, &high);
         WIN32_FILE_ATTRIBUTE_DATA md;
         FILETIME used = fd.ftLastWriteTime;
@@ -306,7 +308,7 @@ static uint64_t make_room(const WCHAR *folder, uint64_t limit, uint64_t incoming
     size_t k = rubraview_filmcache_evict(entries, count, all ? 0 : limit, all ? 1 : incoming, victims, MAX_COPIES);
     for (size_t i = 0; i < k; ++i) freed += delete_copy(folder, seen[victims[i]].stem);
 done:
-    free(entries); free(seen); free(victims);
+    rubraview_free(entries); rubraview_free(seen); rubraview_free(victims);
     return freed;
 }
 
@@ -315,14 +317,14 @@ size_t rubraview_pal_filmcache_usage(uint64_t *bytes) {
     size_t count = 0;
     if (bytes) *bytes = 0;
     if (!folder_at(folder, WPATH, false)) return 0;
-    _snwprintf(pattern, WPATH, L"%ls\\*.bin", folder); pattern[WPATH - 1] = 0;
+    rubraview_wfmt(pattern, WPATH, "{}\\*.bin", PROVEN_ARG(rubraview_wide_view(folder))); pattern[WPATH - 1] = 0;
     WIN32_FIND_DATAW fd;
     HANDLE find = FindFirstFileW(pattern, &fd);
     if (find == INVALID_HANDLE_VALUE) return 0;
     do {
-        if (wcslen(fd.cFileName) != 20) continue;
+        if (rubraview_wlen(fd.cFileName) != 20) continue;
         WCHAR bin[WPATH];
-        _snwprintf(bin, WPATH, L"%ls\\%ls", folder, fd.cFileName); bin[WPATH - 1] = 0;
+        rubraview_wfmt(bin, WPATH, "{}\\{}", PROVEN_ARG(rubraview_wide_view(folder)), PROVEN_ARG(rubraview_wide_view(fd.cFileName))); bin[WPATH - 1] = 0;
         DWORD high = 0, low = GetCompressedFileSizeW(bin, &high);
         if (bytes && low != INVALID_FILE_SIZE) *bytes += ((uint64_t)high << 32) | low;
         count++;
@@ -351,7 +353,7 @@ void rubraview_pal_filmcache_forget(proven_u8str_view_t path) {
 /* ---- open and close ---- */
 
 static void stream_free(rubraview_filmcache_stream_t *s) {
-    say("close %s: %llu of %llu blocks here", s->path, (unsigned long long)s->map.filled, (unsigned long long)s->map.blocks);
+    say("close {}: {} of {} blocks here", PROVEN_ARG(s->path), PROVEN_ARG((unsigned long long)s->map.filled), PROVEN_ARG((unsigned long long)s->map.blocks));
     atomic_store(&s->closing, true);
     if (s->ahead_thread) { WaitForSingleObject(s->ahead_thread, INFINITE); CloseHandle(s->ahead_thread); }
     if (s->copy) {
@@ -364,7 +366,7 @@ static void stream_free(rubraview_filmcache_stream_t *s) {
     if (s->ahead_source) CloseHandle(s->ahead_source);
     if (s->source) CloseHandle(s->source);
     rubraview_filmcache_map_free(&s->map);
-    free(s);
+    rubraview_free(s);
 }
 
 void rubraview_pal_filmcache_close(rubraview_filmcache_stream_t *s) {
@@ -396,11 +398,11 @@ static void open_copy(rubraview_filmcache_stream_t *s, uint64_t size, int64_t ti
     if (m != INVALID_HANDLE_VALUE) {
         LARGE_INTEGER n;
         if (GetFileSizeEx(m, &n) && n.QuadPart > 0 && n.QuadPart < (64 << 20)) {
-            char *text = (char *)malloc((size_t)n.QuadPart);
+            char *text = (char *)rubraview_alloc((size_t)n.QuadPart);
             DWORD got = 0;
             if (text && ReadFile(m, text, (DWORD)n.QuadPart, &got, NULL) && got == (DWORD)n.QuadPart)
-                kept = rubraview_filmcache_map_parse(&s->map, text, got, path, size, time);
-            free(text);
+                kept = rubraview_filmcache_map_parse(&s->map, rubraview_bytes_view(text, got), path, size, time);
+            rubraview_free(text);
         }
         CloseHandle(m);
     }
@@ -426,36 +428,36 @@ rubraview_filmcache_stream_t *rubraview_pal_filmcache_open(const wchar_t *path) 
     uint64_t limit = 0;
     bool ahead = false;
     rubraview_pal_filmcache_settings(NULL, 0, &limit, &ahead);
-    if (!path || limit == 0 || !on_network(path)) { say("not cached: %s", !path ? "no path" : limit == 0 ? "off" : "not a network drive"); return NULL; }
+    if (!path || limit == 0 || !on_network(path)) { say("not cached: {}", PROVEN_ARG(!path ? "no path" : limit == 0 ? "off" : "not a network drive")); return NULL; }
 
-    rubraview_filmcache_stream_t *s = (rubraview_filmcache_stream_t *)calloc(1, sizeof *s);
+    rubraview_filmcache_stream_t *s = (rubraview_filmcache_stream_t *)rubraview_alloc_zero(1, sizeof *s);
     if (!s) return NULL;
     InitializeSRWLock(&s->lock);
     s->refs = 1;
     int n = WideCharToMultiByte(CP_UTF8, 0, path, -1, s->path, (int)sizeof s->path, NULL, NULL);
-    if (n <= 1) { free(s); return NULL; }
+    if (n <= 1) { rubraview_free(s); return NULL; }
     s->path_len = (size_t)n - 1;
     proven_u8str_view_t p8 = { .ptr = (const proven_byte_t *)s->path, .size = s->path_len };
     rubraview_filmcache_name(s->name, p8);
 
     s->source = open_source(path);
-    if (s->source == INVALID_HANDLE_VALUE) { free(s); return NULL; }
+    if (s->source == INVALID_HANDLE_VALUE) { rubraview_free(s); return NULL; }
     BY_HANDLE_FILE_INFORMATION info;
-    if (!GetFileInformationByHandle(s->source, &info)) { CloseHandle(s->source); free(s); return NULL; }
+    if (!GetFileInformationByHandle(s->source, &info)) { CloseHandle(s->source); rubraview_free(s); return NULL; }
     uint64_t size = ((uint64_t)info.nFileSizeHigh << 32) | info.nFileSizeLow;
     int64_t time = (int64_t)(((uint64_t)info.ftLastWriteTime.dwHighDateTime << 32) | info.ftLastWriteTime.dwLowDateTime);
-    if (size < RUBRAVIEW_FILMCACHE_FLOOR) { CloseHandle(s->source); free(s); return NULL; }
+    if (size < RUBRAVIEW_FILMCACHE_FLOOR) { CloseHandle(s->source); rubraview_free(s); return NULL; }
 
     /* The same film open already in this process: one copy, read by both. */
     AcquireSRWLockExclusive(&g_list_lock);
     for (rubraview_filmcache_stream_t *e = g_list; e; e = e->next) {
-        if (strcmp(e->name, s->name) != 0 || e->map.size != size || e->map.time != time) continue;
+        if (rubraview_cstr_cmp(e->name, s->name) != 0 || e->map.size != size || e->map.time != time) continue;
         e->refs++;
         g_last = e;
-        say("open %s again: %ld readers", e->path, e->refs);
+        say("open {} again: {} readers", PROVEN_ARG(e->path), PROVEN_ARG((long)e->refs));
         ReleaseSRWLockExclusive(&g_list_lock);
         CloseHandle(s->source);
-        free(s);
+        rubraview_free(s);
         return e;
     }
     ReleaseSRWLockExclusive(&g_list_lock);
@@ -463,12 +465,12 @@ rubraview_filmcache_stream_t *rubraview_pal_filmcache_open(const wchar_t *path) 
     WCHAR folder[WPATH], stem[17];
     MultiByteToWideChar(CP_UTF8, 0, s->name, -1, stem, 17);
     if (folder_at(folder, WPATH, true)) {
-        _snwprintf(s->bin, WPATH, L"%ls\\%ls.bin", folder, stem); s->bin[WPATH - 1] = 0;
-        _snwprintf(s->map_file, WPATH, L"%ls\\%ls.map", folder, stem); s->map_file[WPATH - 1] = 0;
+        rubraview_wfmt(s->bin, WPATH, "{}\\{}.bin", PROVEN_ARG(rubraview_wide_view(folder)), PROVEN_ARG(rubraview_wide_view(stem))); s->bin[WPATH - 1] = 0;
+        rubraview_wfmt(s->map_file, WPATH, "{}\\{}.map", PROVEN_ARG(rubraview_wide_view(folder)), PROVEN_ARG(rubraview_wide_view(stem))); s->map_file[WPATH - 1] = 0;
         make_room(folder, limit, size, false);
         if (size <= limit) open_copy(s, size, time);   /* a film larger than the whole cache is read through */
     }
-    if (!s->copy && !rubraview_filmcache_map_make(&s->map, size, time)) { CloseHandle(s->source); free(s); return NULL; }
+    if (!s->copy && !rubraview_filmcache_map_make(&s->map, size, time)) { CloseHandle(s->source); rubraview_free(s); return NULL; }
     if (s->copy && ahead && s->map.filled < s->map.blocks) {
         s->ahead_source = open_source(path);
         if (s->ahead_source == INVALID_HANDLE_VALUE) s->ahead_source = NULL;
@@ -479,8 +481,8 @@ rubraview_filmcache_stream_t *rubraview_pal_filmcache_open(const wchar_t *path) 
     g_list = s;
     g_last = s;
     ReleaseSRWLockExclusive(&g_list_lock);
-    say("open %s: %s, %llu of %llu blocks here, ahead %s", s->path, s->copy ? "writing the copy" : "read through",
-        (unsigned long long)s->map.filled, (unsigned long long)s->map.blocks, s->ahead_thread ? "on" : ahead ? "asked, not started" : "off");
+    say("open {}: {}, {} of {} blocks here, ahead {}", PROVEN_ARG(s->path), PROVEN_ARG(s->copy ? "writing the copy" : "read through"),
+        PROVEN_ARG((unsigned long long)s->map.filled), PROVEN_ARG((unsigned long long)s->map.blocks), PROVEN_ARG(s->ahead_thread ? "on" : ahead ? "asked, not started" : "off"));
     return s;
 }
 
@@ -531,13 +533,13 @@ static ULONG STDMETHODCALLTYPE is_addref(IStream *self) { return (ULONG)Interloc
 static ULONG STDMETHODCALLTYPE is_release(IStream *self) {
     cache_istream_t *c = (cache_istream_t *)self;
     LONG left = InterlockedDecrement(&c->refs);
-    if (left == 0) { rubraview_pal_filmcache_close(c->s); free(c); }
+    if (left == 0) { rubraview_pal_filmcache_close(c->s); rubraview_free(c); }
     return (ULONG)left;
 }
 static HRESULT STDMETHODCALLTYPE is_read(IStream *self, void *dst, ULONG len, ULONG *read) {
     cache_istream_t *c = (cache_istream_t *)self;
     uint32_t got = 0;
-    bool ok = rubraview_pal_filmcache_read(c->s, c->at, dst, len, &got);
+    bool ok = rubraview_pal_filmcache_read(c->s, c->at, rubraview_mem_mut(dst, len), &got);
     c->at += got;
     if (read) *read = got;
     if (!ok) return STG_E_READFAULT;
@@ -571,7 +573,7 @@ static HRESULT STDMETHODCALLTYPE is_lock(IStream *self, ULARGE_INTEGER at, ULARG
 static HRESULT STDMETHODCALLTYPE is_stat(IStream *self, STATSTG *st, DWORD flags) {
     cache_istream_t *c = (cache_istream_t *)self;
     if (!st) return STG_E_INVALIDPOINTER;
-    memset(st, 0, sizeof *st);
+    proven_sys_mem_set(st, 0, sizeof *st);
     st->type = STGTY_STREAM;
     st->cbSize.QuadPart = rubraview_pal_filmcache_size(c->s);
     st->grfMode = STGM_READ;
@@ -599,7 +601,7 @@ static IStreamVtbl g_istream_vtbl = {
 
 void *rubraview_pal_filmcache_istream(rubraview_filmcache_stream_t *s) {
     if (!s) return NULL;
-    cache_istream_t *c = (cache_istream_t *)calloc(1, sizeof *c);
+    cache_istream_t *c = (cache_istream_t *)rubraview_alloc_zero(1, sizeof *c);
     if (!c) return NULL;
     c->face.lpVtbl = &g_istream_vtbl;
     c->refs = 1;

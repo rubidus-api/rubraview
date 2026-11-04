@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/ui_actions.h"
 #include "rubraview/lang.h"
 #include "rubraview/repeat.h"
@@ -113,17 +114,19 @@ rubraview_action_state_t rubraview_action_state(proven_u8str_view_t action, cons
 }
 
 proven_u8str_view_t rubraview_tile_caption(proven_u8str_view_t label, bool submenu, rubraview_tile_mark_t mark, const char *value,
-                               char *buffer, size_t buffer_size) {
+                               proven_mem_mut_t buffer_view) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     const char *sep = submenu ? " >" : (value || mark == RUBRAVIEW_MARK_ON || mark == RUBRAVIEW_MARK_OFF) ? ": " : "";
     const char *word = submenu ? ""
                      : value ? value
                      : mark == RUBRAVIEW_MARK_ON ? T("on")
                      : mark == RUBRAVIEW_MARK_OFF ? T("off") : "";
-    size_t a = strlen(sep), b = strlen(word);
+    size_t a = proven_cstr_len(sep), b = proven_cstr_len(word);
     if (a + b == 0 || !buffer || label.size + a + b + 1 > buffer_size) return label;
-    memcpy(buffer, label.ptr, label.size);
-    memcpy(buffer + label.size, sep, a);
-    memcpy(buffer + label.size + a, word, b + 1);
+    proven_sys_mem_copy(buffer, label.ptr, label.size);
+    proven_sys_mem_copy(buffer + label.size, sep, a);
+    proven_sys_mem_copy(buffer + label.size + a, word, b + 1);
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = label.size + a + b };
 }
 
@@ -146,13 +149,15 @@ void rubraview_confirm_clear(rubraview_confirm_t *c) {
     if (c) *c = (rubraview_confirm_t){0};
 }
 
-proven_u8str_view_t rubraview_scale_caption(char *buffer, size_t buffer_size, double scale) {
+proven_u8str_view_t rubraview_scale_caption(proven_mem_mut_t buffer_view, double scale) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     proven_u8str_view_t none = { .ptr = (const proven_byte_t *)buffer, .size = 0 };
     if (!buffer || !(scale > 0.0)) return none;
     double percent = floor(scale * 100.0 + 0.5);
     if (percent < 1.0) percent = 1.0;
     if (percent > 999999.0) percent = 999999.0;
-    int n = snprintf(buffer, buffer_size, "%.0f%%", percent);
+    int n = rubraview_fmt(buffer, buffer_size, "{:.0}%", PROVEN_ARG((double)percent));
     if (n <= 0 || (size_t)n >= buffer_size) return none;
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = (size_t)n };
 }

@@ -8,7 +8,7 @@
 /* ---- The Adjust panel's size in pixels (owner, 2026-10-15) ---- */
 
 static void px_edit_fill(app_state_t *app, int32_t field, int32_t value) {
-    int n = snprintf(app->px_edit_text[field], sizeof(app->px_edit_text[0]), "%d", (int)value);
+    int n = rubraview_fmt(app->px_edit_text[field], sizeof(app->px_edit_text[0]), "{}", PROVEN_ARG((int)value));
     app->px_edit_length[field] = n > 0 ? (size_t)n : 0;
 }
 
@@ -30,10 +30,10 @@ static int32_t px_edit_base(const app_state_t *app, int32_t field) {
 static double px_edit_ratio_of(const app_state_t *app, int32_t field) {
     if (!(app->px_edit_ratio & (1u << field)) || app->px_edit_length[field] == 0) return -1.0;
     char text[20];
-    snprintf(text, sizeof(text), "%.*s", (int)app->px_edit_length[field], app->px_edit_text[field]);
+    rubraview_fmt(text, sizeof(text), "{}", PROVEN_ARG(rubraview_bytes_view(app->px_edit_text[field], (int)app->px_edit_length[field])));
     for (char *c = text; *c; ++c) if (*c == ',') *c = '.';
     char *end = NULL;
-    double v = strtod(text, &end);
+    double v = proven_strtod(text, &end);
     return end != text && isfinite(v) && v >= 0.0 ? v : -1.0;
 }
 
@@ -56,7 +56,7 @@ static int32_t px_edit_value(const app_state_t *app, int32_t field) {
 static void px_edit_show(app_state_t *app, int32_t field, int32_t px) {
     if (app->px_edit_ratio & (1u << field)) {
         int32_t base = px_edit_base(app, field);
-        int n = snprintf(app->px_edit_text[field], sizeof(app->px_edit_text[0]), "%.4f", base > 0 ? (double)px / base : 0.0);
+        int n = rubraview_fmt(app->px_edit_text[field], sizeof(app->px_edit_text[0]), "{:.4}", PROVEN_ARG((double)(base > 0 ? (double)px / base : 0.0)));
         app->px_edit_length[field] = n > 0 ? (size_t)n : 0;
     } else {
         px_edit_fill(app, field, px);
@@ -81,7 +81,7 @@ void px_edit_fill_crop(app_state_t *app) {
     const int32_t v[4] = { c.x, c.y, c.width, c.height };
     for (int32_t k = 0; k < 4; ++k) {   /* RV-187: a ratio typed shows as it was typed while its pixels stand */
         if ((app->px_edit_ratio & (1u << k)) && (app->unit_frac_set & (1u << k)) && app->unit_frac_px[k] == v[k]) {
-            int n = snprintf(app->px_edit_text[k], sizeof(app->px_edit_text[0]), "%.6g", app->unit_frac[k]);
+            int n = rubraview_fmt(app->px_edit_text[k], sizeof(app->px_edit_text[0]), "{}", PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(app->unit_frac[k]), 6)));
             app->px_edit_length[k] = n > 0 ? (size_t)n : 0;
         } else {
             px_edit_show(app, k, v[k]);
@@ -172,7 +172,7 @@ static bool px_edit_commit(app_state_t *app) {
         app->edit_shown_valid = false;
         char line[80];
         const rubraview_crop_rect_t *c = &app->edit.crop;
-        int n = snprintf(line, sizeof(line), T("cut at %d, %d: %d x %d pixels"), (int)c->x, (int)c->y, (int)c->width, (int)c->height);
+        int n = rubraview_fmt(line, sizeof(line), T("cut at {}, {}: {} x {} pixels"), PROVEN_ARG((int)c->x), PROVEN_ARG((int)c->y), PROVEN_ARG((int)c->width), PROVEN_ARG((int)c->height));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         return true;
     }
@@ -195,7 +195,7 @@ static bool px_edit_commit(app_state_t *app) {
     if (app->panel.open) panel_build_edit(app);   /* Resize % and its pixels from the session */
     app->edit_shown_valid = false;
     char line[64];
-    int n = snprintf(line, sizeof(line), T("saved at %d x %d pixels"), (int)w, (int)h);
+    int n = rubraview_fmt(line, sizeof(line), T("saved at {} x {} pixels"), PROVEN_ARG((int)w), PROVEN_ARG((int)h));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     return true;
 }
@@ -232,7 +232,7 @@ void px_edit_text_typed(app_state_t *app, proven_u8str_view_t text) {
         if (c == '/') { px_edit_toggle_unit(app, f); continue; }   /* RV-187: pixels or a ratio */
         bool ratio = (app->px_edit_ratio & (1u << f)) != 0;
         /* RV-128: a size may be typed with its unit: 21cm, 210 mm, 8.5in, 50%; RV-187: a ratio its point */
-        bool unit = ratio ? (c == '.' || c == ',') : !app->px_edit_crop && c != '\0' && strchr(".,% cmMiInNpPxX\"", c) != NULL;
+        bool unit = ratio ? (c == '.' || c == ',') : !app->px_edit_crop && c != '\0' && rubraview_cstr_chr(".,% cmMiInNpPxX\"", c) != NULL;
         if (!digit && !unit) continue;
         size_t most = ratio ? 12u : app->px_edit_crop ? 5u : sizeof(app->px_edit_text[0]) - 1u;
         if (app->px_edit_length[f] + 1 >= sizeof(app->px_edit_text[0]) || app->px_edit_length[f] >= most) break;
@@ -284,14 +284,14 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
             }
             size_t half = bytes_scaled(biggest, 6u, 16u << 20), all = bytes_scaled(half, 2u, 0);
             size_t first = picture_bytes((size_t)w, (size_t)h, 4u * 3u, 16u << 20);
-            void *mem = all == SIZE_MAX || first == SIZE_MAX || PROVEN_CKD_ADD(&all, all, first) ? NULL : malloc(all);
+            void *mem = all == SIZE_MAX || first == SIZE_MAX || PROVEN_CKD_ADD(&all, all, first) ? NULL : rubraview_alloc(all);
             if (mem) {
                 proven_arena_t read = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = first });
                 proven_arena_t lanes[2] = {
                     proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem + first, .size = half }),
                     proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem + first + half, .size = half }),
                 };
-                rubraview_pixbuf_t px = rubraview_pal_image_read_pixels(&read, path, NULL, 0, true);
+                rubraview_pixbuf_t px = rubraview_pal_image_read_pixels(&read, path, rubraview_mem_view(NULL, 0), true);
                 ok = rubraview_pixbuf_is_valid(&px);
                 for (size_t k = 0; ok && k < steps.cursor; ++k) {
                     proven_arena_t *lane = &lanes[k % 2u];
@@ -308,7 +308,7 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
                     proven_u8str_view_t stem = rubraview_path_stem(rubraview_path_basename(path));
                     proven_u8str_view_t dir = rubraview_path_dirname(path);
                     char tmp[2048];
-                    int n = snprintf(tmp, sizeof(tmp), "%.*s\\%.*s.rvsaving.%.*s", (int)dir.size, dir.ptr, (int)stem.size, stem.ptr, (int)ext.size, ext.ptr);
+                    int n = rubraview_fmt(tmp, sizeof(tmp), "{}\\{}.rvsaving.{}", PROVEN_ARG(rubraview_bytes_view(dir.ptr, (int)dir.size)), PROVEN_ARG(rubraview_bytes_view(stem.ptr, (int)stem.size)), PROVEN_ARG(rubraview_bytes_view(ext.ptr, (int)ext.size)));
                     proven_u8str_view_t out = { .ptr = (const proven_byte_t *)tmp, .size = n > 0 && (size_t)n < sizeof(tmp) ? (size_t)n : 0 };
                     ok = f != RUBRAVIEW_EXPORT_SAME_AS_SOURCE && out.size > 0 && rubraview_pal_image_save(out, &px, &options);
                     if (ok) (void)details_keep(path, out, path, f, &options);   /* 1.17.0: read from the original before it goes */
@@ -318,7 +318,7 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
                     /* in its own format when it can be written, else PNG (RV-139: AVIF and JPEG XL when FFmpeg can) */
                     rubraview_export_options_t options = job->options;
                     rubraview_export_format_t f = rubraview_export_format_for_name(path);
-                    uint32_t ff = f == RUBRAVIEW_EXPORT_AVIF || f == RUBRAVIEW_EXPORT_JXL ? rubraview_pal_ffmpeg_image_encoders(NULL, 0) : 0u;
+                    uint32_t ff = f == RUBRAVIEW_EXPORT_AVIF || f == RUBRAVIEW_EXPORT_JXL ? rubraview_pal_ffmpeg_image_encoders(rubraview_mem_mut(NULL, 0)) : 0u;
                     if ((f == RUBRAVIEW_EXPORT_AVIF && !(ff & RUBRAVIEW_FFMPEG_WRITES_AVIF)) ||
                         (f == RUBRAVIEW_EXPORT_JXL && !(ff & RUBRAVIEW_FFMPEG_WRITES_JXL))) f = RUBRAVIEW_EXPORT_SAME_AS_SOURCE;
                     if (f == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) f = RUBRAVIEW_EXPORT_PNG;
@@ -326,7 +326,7 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
                     proven_u8str_view_t ext = rubraview_export_extension(f);
                     proven_u8str_view_t stem = rubraview_path_stem(rubraview_path_basename(path));
                     char name[1024];
-                    int n = snprintf(name, sizeof(name), "%s%.*s%s.%.*s", job->prefix, (int)stem.size, stem.ptr, job->suffix, (int)ext.size, ext.ptr);
+                    int n = rubraview_fmt(name, sizeof(name), "{}{}{}.{}", PROVEN_ARG(job->prefix), PROVEN_ARG(rubraview_bytes_view(stem.ptr, (int)stem.size)), PROVEN_ARG(job->suffix), PROVEN_ARG(rubraview_bytes_view(ext.ptr, (int)ext.size)));
                     proven_arena_t *names = &lanes[steps.cursor % 2u];
                     proven_u8str_view_t target = n > 0 && (size_t)n < sizeof(name)
                         ? rubraview_filing_target(names, rubraview_path_dirname(path), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = (size_t)n }, filing_exists, NULL)
@@ -334,7 +334,7 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
                     ok = target.size > 0 && rubraview_pal_image_save(target, &px, &options);
                     if (ok) (void)details_keep(path, target, target, f, &options);   /* 1.17.0 */
                 }
-                free(mem);
+                rubraview_free(mem);
             }
         }
         if (ok) InterlockedIncrement(&job->done); else InterlockedIncrement(&job->failed);
@@ -359,32 +359,32 @@ void apply_all_typed(app_state_t *app) {
     proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
     char pattern[160];
     size_t n = text.size < sizeof(pattern) - 1 ? text.size : sizeof(pattern) - 1;
-    memcpy(pattern, text.ptr, n);
+    proven_sys_mem_copy(pattern, text.ptr, n);
     pattern[n] = '\0';
     rename_end(app);
-    char *star = strchr(pattern, '*');
-    bool bad = !star || strchr(star + 1, '*') || n == 1 || strpbrk(pattern, "\\/:\"<>|?");
+    char *star = rubraview_cstr_chr(pattern, '*');
+    bool bad = !star || rubraview_cstr_chr(star + 1, '*') || n == 1 || strpbrk(pattern, "\\/:\"<>|?");
     if (bad) { osd_say(app, TU8("the name needs one * for the picture's own name and something beside it: *_edit")); return; }
     if (app->apply_job || app->edit_steps.cursor == 0 || app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) return;
     rubraview_settings_set_text(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("copy_name"), app_keep(app, cstr(pattern)));
-    apply_all_job_t *job = (apply_all_job_t*)calloc(1, sizeof(*job));
+    apply_all_job_t *job = (apply_all_job_t*)rubraview_alloc_zero(1, sizeof(*job));
     if (!job) return;
     size_t count = page_count(app);
-    job->paths = (char**)calloc(count ? count : 1, sizeof(char*));
+    job->paths = (char**)rubraview_alloc_zero(count ? count : 1, sizeof(char*));
     for (size_t i = 0; job->paths && i < count; ++i) {
         proven_u8str_view_t p = app->source.pages[i].path;
         if (p.size == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), PROVEN_LIT(IMAGE_FILTER))) continue;   /* pictures only */
         if (edit_is_copy_name(p, cstr(pattern))) continue;                                                    /* not a copy made before */
-        char *copy = (char*)malloc(p.size + 1);
+        char *copy = (char*)rubraview_alloc(p.size + 1);
         if (!copy) continue;
-        memcpy(copy, p.ptr, p.size);
+        proven_sys_mem_copy(copy, p.ptr, p.size);
         copy[p.size] = '\0';
         job->paths[job->count++] = copy;
     }
-    if (job->count == 0) { free(job->paths); free(job); osd_say(app, TU8("no pictures in the list")); return; }
+    if (job->count == 0) { rubraview_free(job->paths); rubraview_free(job); osd_say(app, TU8("no pictures in the list")); return; }
     *star = '\0';
-    snprintf(job->prefix, sizeof(job->prefix), "%s", pattern);
-    snprintf(job->suffix, sizeof(job->suffix), "%s", star + 1);
+    rubraview_fmt(job->prefix, sizeof(job->prefix), "{}", PROVEN_ARG(pattern));
+    rubraview_fmt(job->suffix, sizeof(job->suffix), "{}", PROVEN_ARG(star + 1));
     apply_all_start(app, job);
 }
 
@@ -396,15 +396,15 @@ void apply_all_start(app_state_t *app, apply_all_job_t *job) {
     job->wake = app->window;
     job->thread = CreateThread(NULL, 0, apply_all_run, job, 0, NULL);
     if (!job->thread) {
-        for (size_t i = 0; i < job->count; ++i) free(job->paths[i]);
-        free(job->paths); free(job);
+        for (size_t i = 0; i < job->count; ++i) rubraview_free(job->paths[i]);
+        rubraview_free(job->paths); rubraview_free(job);
         osd_say(app, TU8("could not start applying"));
         return;
     }
     app->apply_job = job;
     app->apply_said = -1;
     char said[96];
-    int m = snprintf(said, sizeof(said), T("applying the edit to %zu pictures..."), job->count);
+    int m = rubraview_fmt(said, sizeof(said), T("applying the edit to {} pictures..."), PROVEN_ARG((size_t)job->count));
     if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)m });
 }
 
@@ -428,24 +428,24 @@ void apply_all_originals(app_state_t *app) {
     if (now - asked_at > 5.0) {
         asked_at = now;
         char said[160];
-        int m = snprintf(said, sizeof(said), T("press again to write the changes over %zu originals (the old files go to the Recycle Bin)"), pictures);
+        int m = rubraview_fmt(said, sizeof(said), T("press again to write the changes over {} originals (the old files go to the Recycle Bin)"), PROVEN_ARG((size_t)pictures));
         if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)m });
         return;
     }
     asked_at = -100.0;
-    apply_all_job_t *job = (apply_all_job_t*)calloc(1, sizeof(*job));
+    apply_all_job_t *job = (apply_all_job_t*)rubraview_alloc_zero(1, sizeof(*job));
     if (!job) return;
-    job->paths = (char**)calloc(count ? count : 1, sizeof(char*));
+    job->paths = (char**)rubraview_alloc_zero(count ? count : 1, sizeof(char*));
     for (size_t i = 0; job->paths && i < count; ++i) {
         proven_u8str_view_t p = app->source.pages[i].path;
         if (p.size == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), PROVEN_LIT(IMAGE_FILTER)) || edit_is_copy_name(p, copies)) continue;
-        char *copy = (char*)malloc(p.size + 1);
+        char *copy = (char*)rubraview_alloc(p.size + 1);
         if (!copy) continue;
-        memcpy(copy, p.ptr, p.size);
+        proven_sys_mem_copy(copy, p.ptr, p.size);
         copy[p.size] = '\0';
         job->paths[job->count++] = copy;
     }
-    if (job->count == 0) { free(job->paths); free(job); return; }
+    if (job->count == 0) { rubraview_free(job->paths); rubraview_free(job); return; }
     job->over = true;
     apply_all_start(app, job);
 }
@@ -460,7 +460,7 @@ void apply_all_poll(app_state_t *app, bool quitting) {
         if (done + failed != app->apply_said) {
             app->apply_said = done + failed;
             char said[96];
-            int m = snprintf(said, sizeof(said), T("applying the edit: %ld / %zu"), (long)(done + failed), job->count);
+            int m = rubraview_fmt(said, sizeof(said), T("applying the edit: {} / {}"), PROVEN_ARG((long)(done + failed)), PROVEN_ARG((size_t)job->count));
             if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)m });
         }
         return;
@@ -469,16 +469,16 @@ void apply_all_poll(app_state_t *app, bool quitting) {
     CloseHandle(job->thread);
     done = job->done; failed = job->failed;
     bool over = job->over;
-    for (size_t i = 0; i < job->count; ++i) free(job->paths[i]);
-    free(job->paths);
-    free(job);
+    for (size_t i = 0; i < job->count; ++i) rubraview_free(job->paths[i]);
+    rubraview_free(job->paths);
+    rubraview_free(job);
     app->apply_job = NULL;
     if (quitting) return;
     char said[128];
-    int m = over ? (failed ? snprintf(said, sizeof(said), T("%ld originals written over; %ld could not be"), (long)done, (long)failed)
-                           : snprintf(said, sizeof(said), T("%ld originals written over"), (long)done))
-          : failed ? snprintf(said, sizeof(said), T("%ld copies made beside the pictures; %ld could not be"), (long)done, (long)failed)
-                   : snprintf(said, sizeof(said), T("%ld copies made beside the pictures"), (long)done);
+    int m = over ? (failed ? rubraview_fmt(said, sizeof(said), T("{} originals written over; {} could not be"), PROVEN_ARG((long)done), PROVEN_ARG((long)failed))
+                           : rubraview_fmt(said, sizeof(said), T("{} originals written over"), PROVEN_ARG((long)done)))
+          : failed ? rubraview_fmt(said, sizeof(said), T("{} copies made beside the pictures; {} could not be"), PROVEN_ARG((long)done), PROVEN_ARG((long)failed))
+                   : rubraview_fmt(said, sizeof(said), T("{} copies made beside the pictures"), PROVEN_ARG((long)done));
     if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)m });
     if (over && done > 0) {
         /* the pictures hold the changes now: shown again they would be made twice, and read again from their files */
@@ -587,7 +587,7 @@ void edit_steps_changed(app_state_t *app) {
 
 static bool edit_area_same(const rubraview_edit_area_t *a, const rubraview_edit_area_t *b) {
     if (a->shape != b->shape || a->feather != b->feather) return false;
-    return a->shape == RUBRAVIEW_AREA_ALL || memcmp(&a->rect, &b->rect, sizeof(a->rect)) == 0;
+    return a->shape == RUBRAVIEW_AREA_ALL || proven_sys_mem_cmp(&a->rect, &b->rect, sizeof(a->rect)) == 0;
 }
 
 /* The change in hand ends: it stays a step, and the next change starts from nothing. */
@@ -679,7 +679,7 @@ void edit_auto_colour(app_state_t *app) {
     if (!rubraview_pixbuf_is_valid(&app->edit_small)) { osd_say(app, TU8("the picture is not read yet")); return; }
     edit_live_close(app);   /* measured on the steps as they are, then a step of its own */
     size_t bytes = picture_bytes((size_t)app->edit_small.width, (size_t)app->edit_small.height, 4u * (6u + 4u * app->edit_steps.cursor), 8u << 20);
-    void *mem = malloc(bytes);
+    void *mem = rubraview_alloc(bytes);
     if (!mem) return;
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = bytes });
     double ratio = app->edit_steps.width > 0 ? (double)app->edit_small.width / (double)app->edit_steps.width : 1.0;
@@ -690,7 +690,7 @@ void edit_auto_colour(app_state_t *app) {
         panel_build_edit(app);
         osd_say(app, TU8("colours corrected (Ctrl+Z undoes it)"));
     }
-    free(mem);
+    rubraview_free(mem);
 }
 
 void edit_undo(app_state_t *app, bool redo) {
@@ -718,9 +718,9 @@ static const char *edit_adjust_words(const rubraview_edit_step_t *s, char *buf, 
     buf[0] = '\0';
     for (size_t i = 0; i < sizeof(all) / sizeof(all[0]); ++i) {
         if (fabs(all[i].v) < 1e-4) continue;
-        if (said == 2) { snprintf(buf + used, cap - used, ", ..."); break; }
-        int n = all[i].fine ? snprintf(buf + used, cap - used, "%s%s %+.2f", said ? ", " : "", all[i].name, all[i].v)
-                            : snprintf(buf + used, cap - used, "%s%s %+.0f", said ? ", " : "", all[i].name, all[i].v);
+        if (said == 2) { rubraview_fmt(buf + used, cap - used, ", ..."); break; }
+        int n = all[i].fine ? rubraview_fmt(buf + used, cap - used, "{}{} {:+.2}", PROVEN_ARG(said ? ", " : ""), PROVEN_ARG(all[i].name), PROVEN_ARG((double)all[i].v))
+                            : rubraview_fmt(buf + used, cap - used, "{}{} {:+.0}", PROVEN_ARG(said ? ", " : ""), PROVEN_ARG(all[i].name), PROVEN_ARG((double)all[i].v));
         if (n <= 0 || (size_t)n >= cap - used) break;
         used += (size_t)n;
         said++;
@@ -728,7 +728,9 @@ static const char *edit_adjust_words(const rubraview_edit_step_t *s, char *buf, 
     return said ? buf : T("Adjust");   /* the curve alone, or nothing named */
 }
 
-static proven_u8str_view_t edit_step_words(const rubraview_edit_step_t *s, size_t number, char *buffer, size_t size) {
+static proven_u8str_view_t edit_step_words(const rubraview_edit_step_t *s, size_t number, proven_mem_mut_t buffer_view) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t size = (size_t)buffer_view.size;
     char moved[80];
     const char *what = s->kind == RUBRAVIEW_STEP_CROP ? T("Crop") : s->kind == RUBRAVIEW_STEP_RESIZE ? T("Resize")
                      : s->kind == RUBRAVIEW_STEP_EFFECT ? effect_word(s->effect)
@@ -740,12 +742,12 @@ static proven_u8str_view_t edit_step_words(const rubraview_edit_step_t *s, size_
     const char *where = s->area.shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : s->area.shape == RUBRAVIEW_AREA_RECT ? T("rectangle") : T("whole");
     int n;
     if (s->kind == RUBRAVIEW_STEP_RESIZE) {
-        n = snprintf(buffer, size, "%zu. %s %d x %d", number, what, (int)s->values.resize_width, (int)s->values.resize_height);
+        n = rubraview_fmt(buffer, size, "{}. {} {} x {}", PROVEN_ARG((size_t)number), PROVEN_ARG(what), PROVEN_ARG((int)s->values.resize_width), PROVEN_ARG((int)s->values.resize_height));
     } else if (s->kind == RUBRAVIEW_STEP_CROP || s->area.shape != RUBRAVIEW_AREA_ALL) {
-        n = snprintf(buffer, size, "%zu. %s: %s %d,%d %dx%d", number, what, s->kind == RUBRAVIEW_STEP_CROP ? T("rectangle") : where,
-                     (int)s->area.rect.x, (int)s->area.rect.y, (int)s->area.rect.width, (int)s->area.rect.height);
+        n = rubraview_fmt(buffer, size, "{}. {}: {} {},{} {}x{}", PROVEN_ARG((size_t)number), PROVEN_ARG(what), PROVEN_ARG(s->kind == RUBRAVIEW_STEP_CROP ? T("rectangle") : where),
+                     PROVEN_ARG((int)s->area.rect.x), PROVEN_ARG((int)s->area.rect.y), PROVEN_ARG((int)s->area.rect.width), PROVEN_ARG((int)s->area.rect.height));
     } else {
-        n = snprintf(buffer, size, "%zu. %s: %s", number, what, where);
+        n = rubraview_fmt(buffer, size, "{}. {}: {}", PROVEN_ARG((size_t)number), PROVEN_ARG(what), PROVEN_ARG(where));
     }
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = n > 0 ? ((size_t)n < size ? (size_t)n : size - 1) : 0 };
 }
@@ -763,13 +765,13 @@ static void edit_steps_build(app_state_t *app) {
     app->steps_panel.place_y = placed ? py : 120.0 * dpi;
     app->steps_panel.placed = true;
     static char words[RUBRAVIEW_EDIT_MAX_STEPS + 1][96];
-    int n0 = snprintf(words[0], sizeof(words[0]), "%s%s", app->edit_steps.cursor == 0 ? "> " : "  ", T("0. The picture as it was"));
+    int n0 = rubraview_fmt(words[0], sizeof(words[0]), "{}{}", PROVEN_ARG(app->edit_steps.cursor == 0 ? "> " : "  "), PROVEN_ARG(T("0. The picture as it was")));
     rubraview_panel_add_button(&app->steps_panel, PANEL_STEP_FIRST, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)words[0], .size = n0 > 0 ? (size_t)n0 : 0 });
     for (size_t i = 0; i < app->edit_steps.count; ++i) {
         char line[96];
-        proven_u8str_view_t w = edit_step_words(&app->edit_steps.steps[i], i + 1, line, sizeof(line));
-        int n = snprintf(words[i + 1], sizeof(words[0]), "%s%.*s", i + 1 == app->edit_steps.cursor ? "> " : i + 1 > app->edit_steps.cursor ? "- " : "  ",
-                         (int)w.size, w.ptr);
+        proven_u8str_view_t w = edit_step_words(&app->edit_steps.steps[i], i + 1, rubraview_mem_mut(line, sizeof(line)));
+        int n = rubraview_fmt(words[i + 1], sizeof(words[0]), "{}{}", PROVEN_ARG(i + 1 == app->edit_steps.cursor ? "> " : i + 1 > app->edit_steps.cursor ? "- " : "  "),
+                         PROVEN_ARG(rubraview_bytes_view(w.ptr, (int)w.size)));
         rubraview_panel_add_button(&app->steps_panel, PANEL_STEP_FIRST + (int32_t)i + 1, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)words[i + 1], .size = n > 0 ? (size_t)n : 0 });
     }
     app->steps_panel.open = true;
@@ -858,8 +860,8 @@ static proven_u8str_view_t edit_sel_label(const app_state_t *app) {
     static char line[96];
     if (!app->edit.crop_active) return TU8("Selection: none (the whole picture)...");
     const rubraview_crop_rect_t *c = &app->edit.crop;
-    int n = snprintf(line, sizeof(line), T("Selection: %s %d,%d %dx%d..."), app->sel_shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : T("rectangle"),
-                     (int)c->x, (int)c->y, (int)c->width, (int)c->height);
+    int n = rubraview_fmt(line, sizeof(line), T("Selection: {} {},{} {}x{}..."), PROVEN_ARG(app->sel_shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : T("rectangle")),
+                     PROVEN_ARG((int)c->x), PROVEN_ARG((int)c->y), PROVEN_ARG((int)c->width), PROVEN_ARG((int)c->height));
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 };
 }
 
@@ -928,7 +930,7 @@ static SRWLOCK g_plugin_results_lock = SRWLOCK_INIT;
 void plugins_look(proven_u8str_view_t folder) {
     AcquireSRWLockExclusive(&g_plugin_lock);
     size_t n = folder.size < sizeof(g_plugin_folder) ? folder.size : 0;
-    memcpy(g_plugin_folder, folder.ptr, n);
+    proven_sys_mem_copy(g_plugin_folder, folder.ptr, n);
     g_plugin_folder[n] = '\0';
     g_plugin_count = n ? rubraview_pal_plugins_find(cstr(g_plugin_folder), g_plugins, RUBRAVIEW_PLUGIN_MAX) : 0;
     ReleaseSRWLockExclusive(&g_plugin_lock);
@@ -941,11 +943,11 @@ void plugins_from_settings(app_state_t *app) {
     bool on = rubraview_settings_get(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("plugins")) > 0.5;
     proven_u8str_view_t folder = rubraview_settings_get_text(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("plugin_folder"));
     char chosen[520] = "";
-    if (folder.size > 0 && folder.size < sizeof(chosen)) { memcpy(chosen, folder.ptr, folder.size); chosen[folder.size] = '\0'; }
+    if (folder.size > 0 && folder.size < sizeof(chosen)) { proven_sys_mem_copy(chosen, folder.ptr, folder.size); chosen[folder.size] = '\0'; }
     else if (on) (void)rubraview_pal_plugins_default_folder(chosen, sizeof(chosen), true);
-    if (was_on == (int)on && strcmp(was_folder, chosen) == 0) return;
+    if (was_on == (int)on && rubraview_cstr_cmp(was_folder, chosen) == 0) return;
     was_on = on;
-    snprintf(was_folder, sizeof(was_folder), "%s", chosen);
+    rubraview_fmt(was_folder, sizeof(was_folder), "{}", PROVEN_ARG(chosen));
     plugins_look(on ? cstr(chosen) : PROVEN_LIT(""));
     app->plugin_choice = 0;
 }
@@ -956,7 +958,9 @@ size_t plugins_usable(const rubraview_plugin_t **out, size_t capacity) {
     return n;
 }
 
-static uint64_t bytes_sum(const uint8_t *p, size_t n) {   /* FNV-1a: the same picture or not */
+static uint64_t bytes_sum(proven_mem_view_t p_view) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;   /* FNV-1a: the same picture or not */
     uint64_t h = 1469598103934665603ULL;
     for (size_t i = 0; i < n; ++i) { h ^= p[i]; h *= 1099511628211ULL; }
     return h;
@@ -985,64 +989,64 @@ rubraview_pixbuf_t plugin_runner(void *user, proven_arena_t *arena, const rubrav
     if (!found) { g_plugin_why = N_("the plug-in is not in the plug-in folder, or plug-ins are off"); return empty; }
     if (!plugin.usable) { g_plugin_why = plugin.why; return empty; }
     static const uint8_t NONE[32] = { 0 };
-    if (memcmp(step->plugin_sha256, NONE, 32) != 0 && memcmp(step->plugin_sha256, plugin.sha256, 32) != 0) {
+    if (proven_sys_mem_cmp(step->plugin_sha256, NONE, 32) != 0 && proven_sys_mem_cmp(step->plugin_sha256, plugin.sha256, 32) != 0) {
         g_plugin_why = N_("the plug-in has changed since this step was made");
         return empty;
     }
     double values[RUBRAVIEW_PLUGIN_PARAMS];
-    memcpy(values, step->plugin_params, sizeof(values));
+    proven_sys_mem_copy(values, step->plugin_params, sizeof(values));
     rubraview_plugin_params_clamp(&plugin, values, step->plugin_param_count);
     size_t row = (size_t)src->width * 4u, bytes = row * (size_t)src->height;
-    uint8_t *in = (uint8_t*)malloc(bytes), *out = NULL;
+    uint8_t *in = (uint8_t*)rubraview_alloc(bytes), *out = NULL;
     if (!in) { g_plugin_why = N_("out of memory"); return empty; }
     bool rgba = src->format == RUBRAVIEW_PIXFMT_RGBA8;
     for (int32_t y = 0; y < src->height; ++y) {
         const uint8_t *s = src->pixels + (size_t)y * (size_t)src->stride;
         uint8_t *d = in + (size_t)y * row;
-        if (!rgba) { memcpy(d, s, row); continue; }
+        if (!rgba) { proven_sys_mem_copy(d, s, row); continue; }
         for (int32_t x = 0; x < src->width; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
     }
-    uint64_t sum = bytes_sum(in, bytes);
+    uint64_t sum = bytes_sum(rubraview_mem_view(in, bytes));
     AcquireSRWLockShared(&g_plugin_results_lock);
     for (size_t i = 0; i < 4 && !out; ++i) {
         const plugin_result_t *r = &g_plugin_results[i];
-        if (r->bgra && r->sum == sum && r->width == src->width && r->height == src->height && strcmp(r->file, plugin.file) == 0 &&
-            memcmp(r->sha256, plugin.sha256, 32) == 0 && memcmp(r->params, values, sizeof(values)) == 0 && (out = (uint8_t*)malloc(bytes)) != NULL)
-            memcpy(out, r->bgra, bytes);
+        if (r->bgra && r->sum == sum && r->width == src->width && r->height == src->height && rubraview_cstr_cmp(r->file, plugin.file) == 0 &&
+            proven_sys_mem_cmp(r->sha256, plugin.sha256, 32) == 0 && proven_sys_mem_cmp(r->params, values, sizeof(values)) == 0 && (out = (uint8_t*)rubraview_alloc(bytes)) != NULL)
+            proven_sys_mem_copy(out, r->bgra, bytes);
     }
     ReleaseSRWLockShared(&g_plugin_results_lock);
     if (!out) {
-        out = (uint8_t*)malloc(bytes);
+        out = (uint8_t*)rubraview_alloc(bytes);
         if (!out || !rubraview_pal_plugin_run(&plugin, values, in, src->width, src->height, out, plugin_tick, NULL, &g_plugin_why)) {
             if (!g_plugin_why) g_plugin_why = N_("out of memory");
-            free(in);
-            free(out);
+            rubraview_free(in);
+            rubraview_free(out);
             return empty;
         }
-        uint8_t *kept = (uint8_t*)malloc(bytes);
+        uint8_t *kept = (uint8_t*)rubraview_alloc(bytes);
         if (kept) {
-            memcpy(kept, out, bytes);
+            proven_sys_mem_copy(kept, out, bytes);
             AcquireSRWLockExclusive(&g_plugin_results_lock);
             plugin_result_t *r = &g_plugin_results[g_plugin_result_next++ % 4];
-            free(r->bgra);
+            rubraview_free(r->bgra);
             *r = (plugin_result_t){ .width = src->width, .height = src->height, .sum = sum, .bgra = kept };
-            snprintf(r->file, sizeof(r->file), "%s", plugin.file);
-            memcpy(r->sha256, plugin.sha256, 32);
-            memcpy(r->params, values, sizeof(values));
+            rubraview_fmt(r->file, sizeof(r->file), "{}", PROVEN_ARG(plugin.file));
+            proven_sys_mem_copy(r->sha256, plugin.sha256, 32);
+            proven_sys_mem_copy(r->params, values, sizeof(values));
             ReleaseSRWLockExclusive(&g_plugin_results_lock);
         }
     }
-    free(in);
+    rubraview_free(in);
     rubraview_pixbuf_t made = rubraview_pixbuf_create(arena, src->width, src->height, src->format);
     if (rubraview_pixbuf_is_valid(&made)) {
         for (int32_t y = 0; y < made.height; ++y) {
             const uint8_t *s = out + (size_t)y * row;
             uint8_t *d = made.pixels + (size_t)y * (size_t)made.stride;
-            if (!rgba) { memcpy(d, s, row); continue; }
+            if (!rgba) { proven_sys_mem_copy(d, s, row); continue; }
             for (int32_t x = 0; x < made.width; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
         }
     }
-    free(out);
+    rubraview_free(out);
     return made;
 }
 
@@ -1086,7 +1090,7 @@ static void edit_rows_plugins(app_state_t *app) {
         const rubraview_plugin_param_t *q = &p->params[i];
         int32_t id = PANEL_PLUGIN_P0 + i;
         static char labels[RUBRAVIEW_PLUGIN_PARAMS][80];   /* the rows' words live as long as the panel */
-        snprintf(labels[i], sizeof(labels[i]), "  %s", q->name);
+        rubraview_fmt(labels[i], sizeof(labels[i]), "  {}", PROVEN_ARG(q->name));
         proven_u8str_view_t name = cstr(labels[i]);
         if (q->kind == RVF_BOOL) rubraview_panel_add_toggle(&app->panel, id, name, app->plugin_values[i] > 0.5);
         else if (q->kind == RVF_CHOICE) rubraview_panel_add_choice(&app->panel, id, name, (int32_t)app->plugin_values[i], (int32_t)q->max + 1);
@@ -1103,9 +1107,9 @@ void edit_plugin_apply(app_state_t *app) {
     const rubraview_plugin_t *p = list[app->plugin_choice - 1];
     (void)edit_apply_pending(app, false);
     rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_PLUGIN, .area = edit_area_now(app), .plugin_param_count = p->param_count };
-    snprintf(s.plugin, sizeof(s.plugin), "%s", p->file);
-    memcpy(s.plugin_sha256, p->sha256, 32);
-    memcpy(s.plugin_params, app->plugin_values, sizeof(s.plugin_params));
+    rubraview_fmt(s.plugin, sizeof(s.plugin), "{}", PROVEN_ARG(p->file));
+    proven_sys_mem_copy(s.plugin_sha256, p->sha256, 32);
+    proven_sys_mem_copy(s.plugin_params, app->plugin_values, sizeof(s.plugin_params));
     rubraview_plugin_params_clamp(p, s.plugin_params, p->param_count);
     if (!edit_push(app, &s)) return;
     edit_steps_changed(app);
@@ -1131,7 +1135,7 @@ static proven_u8str_view_t gmic_list_path(app_state_t *app) {
 /* The list read from where it is kept; false (and why) when it is not there or not G'MIC's. */
 static bool gmic_list_load(app_state_t *app) {
     proven_u8str_view_t path = gmic_list_path(app);
-    free(g_gmic_mem);
+    rubraview_free(g_gmic_mem);
     g_gmic_mem = NULL;
     g_gmic = (rubraview_gmic_catalog_t){0};
     g_gmic_list_why = N_("no filter list yet: press Make the filter list");
@@ -1139,14 +1143,14 @@ static bool gmic_list_load(app_state_t *app) {
     if (!rubraview_pal_fs_stat(app->arena, path, &entry) || entry.size_bytes == 0) return false;
     if (entry.size_bytes > 64u << 20) { g_gmic_list_why = N_("the filter list is too large"); return false; }
     size_t room = (size_t)entry.size_bytes * 3u + (8u << 20);   /* the text, and what is read out of it */
-    g_gmic_mem = malloc(room);
+    g_gmic_mem = rubraview_alloc(room);
     if (!g_gmic_mem) { g_gmic_list_why = N_("out of memory"); return false; }
     g_gmic_arena = proven_arena_create((proven_mem_mut_t){ .ptr = g_gmic_mem, .size = room });
     proven_u8str_view_t text = rubraview_pal_fs_read_file(&g_gmic_arena, path, (size_t)entry.size_bytes);
     const char *why = NULL;
     g_gmic = rubraview_gmic_catalog_parse(&g_gmic_arena, text, &why);
     if (g_gmic.filter_count == 0) {
-        free(g_gmic_mem);
+        rubraview_free(g_gmic_mem);
         g_gmic_mem = NULL;
         g_gmic = (rubraview_gmic_catalog_t){0};
         g_gmic_list_why = why ? why : N_("the filter list names no filter");
@@ -1160,13 +1164,13 @@ static bool gmic_list_load(app_state_t *app) {
 void gmic_from_settings(app_state_t *app) {
     proven_u8str_view_t where = rubraview_settings_get_text(&app->settings, PROVEN_LIT("gmic"), PROVEN_LIT("path"));
     char named[520] = "";
-    if (where.size < sizeof(named)) { memcpy(named, where.ptr, where.size); named[where.size] = '\0'; }
+    if (where.size < sizeof(named)) { proven_sys_mem_copy(named, where.ptr, where.size); named[where.size] = '\0'; }
     static bool looked;
-    if (looked && strcmp(named, g_gmic_where) == 0) return;
+    if (looked && rubraview_cstr_cmp(named, g_gmic_where) == 0) return;
     looked = true;
-    snprintf(g_gmic_where, sizeof(g_gmic_where), "%s", named);
+    rubraview_fmt(g_gmic_where, sizeof(g_gmic_where), "{}", PROVEN_ARG(named));
     proven_u8str_view_t exe = rubraview_pal_gmic_find(app->arena, cstr(named));
-    snprintf(g_gmic_exe, sizeof(g_gmic_exe), "%.*s", (int)exe.size, (const char *)exe.ptr);
+    rubraview_fmt(g_gmic_exe, sizeof(g_gmic_exe), "{}", PROVEN_ARG(rubraview_bytes_view((const char *)exe.ptr, (int)exe.size)));
     if (g_gmic_exe[0] && g_gmic.filter_count == 0) (void)gmic_list_load(app);
     app->gmic_category = 0;
 }
@@ -1200,7 +1204,7 @@ static DWORD WINAPI gmic_list_run(LPVOID arg) {
         job->took[1] = rubraview_pal_time_now_seconds() - job->step_started;
     }
     job->ok = r.ok;
-    snprintf(job->said, sizeof(job->said), "%s", r.said);
+    rubraview_fmt(job->said, sizeof(job->said), "{}", PROVEN_ARG(r.said));
     InterlockedExchange(&job->done, 1);
     rubraview_pal_window_wake(job->wake);
     return 0;
@@ -1209,15 +1213,15 @@ static DWORD WINAPI gmic_list_run(LPVOID arg) {
 void gmic_list_make(app_state_t *app) {
     if (g_gmic_job) { settings_say(app, T("the filter list is being made")); return; }
     if (!g_gmic_exe[0]) { settings_say(app, T("name gmic.exe or its folder first")); return; }
-    gmic_list_job_t *job = (gmic_list_job_t *)calloc(1, sizeof(*job));
+    gmic_list_job_t *job = (gmic_list_job_t *)rubraview_alloc_zero(1, sizeof(*job));
     proven_u8str_view_t out = rubraview_pal_gmic_temp(app->arena, 0, true);
-    if (!job || out.size < 4 || out.size >= sizeof(job->out)) { free(job); settings_say(app, T("the filter list could not be made")); return; }
-    snprintf(job->exe, sizeof(job->exe), "%s", g_gmic_exe);
-    snprintf(job->out, sizeof(job->out), "%.*s.json", (int)(out.size - 4), (const char *)out.ptr);   /* ...-out.png -> ...-out.json */
+    if (!job || out.size < 4 || out.size >= sizeof(job->out)) { rubraview_free(job); settings_say(app, T("the filter list could not be made")); return; }
+    rubraview_fmt(job->exe, sizeof(job->exe), "{}", PROVEN_ARG(g_gmic_exe));
+    rubraview_fmt(job->out, sizeof(job->out), "{}.json", PROVEN_ARG(rubraview_bytes_view((const char *)out.ptr, (int)(out.size - 4))));   /* ...-out.png -> ...-out.json */
     job->wake = app->window;
     job->started = job->step_started = rubraview_pal_time_now_seconds();
     job->thread = CreateThread(NULL, 0, gmic_list_run, job, 0, NULL);
-    if (!job->thread) { free(job); settings_say(app, T("the filter list could not be made")); return; }
+    if (!job->thread) { rubraview_free(job); settings_say(app, T("the filter list could not be made")); return; }
     g_gmic_job = job;
     settings_say(app, T("G'MIC is fetching its filters and listing them: a few minutes"));
 }
@@ -1232,10 +1236,10 @@ size_t gmic_list_progress(char *buffer, size_t capacity, const app_state_t *app)
     if (in < 0) in = 0;
     double fetch = rubraview_settings_get(&app->settings, PROVEN_LIT("gmic"), PROVEN_LIT("took_fetch"));
     double list = rubraview_settings_get(&app->settings, PROVEN_LIT("gmic"), PROVEN_LIT("took_list"));
-    int n = snprintf(buffer, capacity, step == 1 ? T("step 1 of 2: G'MIC is fetching its filters from gmic.eu, %d:%02d")
-                                                 : T("step 2 of 2: G'MIC is listing its filters, %d:%02d"), all / 60, all % 60);
+    int n = rubraview_fmt(buffer, capacity, step == 1 ? T("step 1 of 2: G'MIC is fetching its filters from gmic.eu, {}:{:02}")
+                                                 : T("step 2 of 2: G'MIC is listing its filters, {}:{:02}"), PROVEN_ARG((int)(all / 60)), PROVEN_ARG((int)(all % 60)));
     int pct = rubraview_gmic_list_percent((int)step, (double)in, fetch, list);
-    if (n > 0 && (size_t)n < capacity && pct >= 0) n += snprintf(buffer + n, capacity - (size_t)n, T(" (about %d %%, by the last run)"), pct);
+    if (n > 0 && (size_t)n < capacity && pct >= 0) n += rubraview_fmt(buffer + n, capacity - (size_t)n, T(" (about {} %, by the last run)"), PROVEN_ARG((int)pct));
     return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
 }
 
@@ -1244,31 +1248,30 @@ void gmic_list_show(app_state_t *app) {
     size_t cap = 256;
     for (int32_t c = 0; c < g_gmic.category_count; ++c) cap += g_gmic.categories[c].size + 32;
     for (int32_t i = 0; i < g_gmic.filter_count; ++i) cap += g_gmic.filters[i].name.size + g_gmic.filters[i].command.size + 16;
-    char *text = (char *)malloc(cap);
+    char *text = (char *)rubraview_alloc(cap);
     if (!text) { settings_say(app, T("the filter list could not be shown")); return; }
     size_t at = 0;
-    int w = snprintf(text, cap, T("G'MIC %.*s: %d filters in %d categories (Edit > G'MIC)"), (int)g_gmic.version.size,
-                     (const char *)g_gmic.version.ptr, g_gmic.filter_count, g_gmic.category_count);
+    int w = rubraview_fmt(text, cap, T("G'MIC {}: {} filters in {} categories (Edit > G'MIC)"), PROVEN_ARG(rubraview_bytes_view((const char *)g_gmic.version.ptr, (int)g_gmic.version.size)), PROVEN_ARG((int)g_gmic.filter_count), PROVEN_ARG((int)g_gmic.category_count));
     if (w > 0 && (size_t)w + 1 < cap) { at = (size_t)w; text[at++] = '\n'; }
     for (int32_t c = 0; c < g_gmic.category_count; ++c) {
         int32_t count = 0;
         for (int32_t i = 0; i < g_gmic.filter_count; ++i) count += g_gmic.filters[i].category == c;
-        w = snprintf(text + at, cap - at, "\n%.*s (%d)\n", (int)g_gmic.categories[c].size, (const char *)g_gmic.categories[c].ptr, (int)count);
+        w = rubraview_fmt(text + at, cap - at, "\n{} ({})\n", PROVEN_ARG(rubraview_bytes_view((const char *)g_gmic.categories[c].ptr, (int)g_gmic.categories[c].size)), PROVEN_ARG((int)count));
         if (w > 0 && (size_t)w < cap - at) at += (size_t)w;
         for (int32_t i = 0; i < g_gmic.filter_count; ++i) {
             const rubraview_gmic_filter_t *f = &g_gmic.filters[i];
             if (f->category != c) continue;
             /* G'MIC's own pages (About, Release Notes) have no command: "_none_" */
             if (proven_u8str_view_eq(f->command, PROVEN_LIT("_none_")))
-                w = snprintf(text + at, cap - at, "  %.*s\n", (int)f->name.size, (const char *)f->name.ptr);
-            else w = snprintf(text + at, cap - at, "  %.*s  -  %.*s\n", (int)f->name.size, (const char *)f->name.ptr,
-                              (int)f->command.size, (const char *)f->command.ptr);
+                w = rubraview_fmt(text + at, cap - at, "  {}\n", PROVEN_ARG(rubraview_bytes_view((const char *)f->name.ptr, (int)f->name.size)));
+            else w = rubraview_fmt(text + at, cap - at, "  {}  -  {}\n", PROVEN_ARG(rubraview_bytes_view((const char *)f->name.ptr, (int)f->name.size)),
+                              PROVEN_ARG(rubraview_bytes_view((const char *)f->command.ptr, (int)f->command.size)));
             if (w > 0 && (size_t)w < cap - at) at += (size_t)w;
         }
     }
     proven_u8str_view_t path = rubraview_path_join(app->arena, rubraview_path_dirname(app->settings_path), PROVEN_LIT("gmic-filters.txt"));
     bool ok = rubraview_pal_fs_write_file(path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = at });
-    free(text);
+    rubraview_free(text);
     if (!ok) { settings_say(app, T("the filter list could not be shown")); return; }
     new_window_open(app, path);
     settings_say(app, T("the filter list opens in a window of its own"));
@@ -1293,11 +1296,11 @@ void gmic_list_poll(app_state_t *app) {
     }
     char line[240];   /* the settings window's message line */
     char said[160];
-    snprintf(said, sizeof(said), "%s", job->said[0] ? job->said + (strlen(job->said) > 150 ? strlen(job->said) - 150 : 0) : T("G'MIC said nothing"));
-    if (ok) snprintf(line, sizeof(line), T("G'MIC's filter list: %d filters (Edit > G'MIC)"), g_gmic.filter_count);
-    else snprintf(line, sizeof(line), T("the filter list could not be made: %s"), said);
+    rubraview_fmt(said, sizeof(said), "{}", PROVEN_ARG(job->said[0] ? job->said + (proven_cstr_len(job->said) > 150 ? proven_cstr_len(job->said) - 150 : 0) : T("G'MIC said nothing")));
+    if (ok) rubraview_fmt(line, sizeof(line), T("G'MIC's filter list: {} filters (Edit > G'MIC)"), PROVEN_ARG((int)g_gmic.filter_count));
+    else rubraview_fmt(line, sizeof(line), T("the filter list could not be made: {}"), PROVEN_ARG(said));
     (void)rubraview_pal_fs_delete(made);
-    free(job);
+    rubraview_free(job);
     osd_say(app, cstr(line));
     if (app->settings_window) { skip_dirs_table_rows(app); settings_say(app, line); }   /* RV-186: the list's rows */
 }
@@ -1334,7 +1337,7 @@ static void gmic_defaults(app_state_t *app) {
     const rubraview_gmic_filter_t *f = gmic_chosen(app);
     for (int32_t i = 0; f && i < f->param_count && i < RUBRAVIEW_GMIC_MAX_SHOWN; ++i) {
         app->gmic_values[i] = f->params[i].value;
-        snprintf(app->gmic_texts[i], sizeof(app->gmic_texts[i]), "%.*s", (int)f->params[i].text.size, (const char *)f->params[i].text.ptr);
+        rubraview_fmt(app->gmic_texts[i], sizeof(app->gmic_texts[i]), "{}", PROVEN_ARG(rubraview_bytes_view((const char *)f->params[i].text.ptr, (int)f->params[i].text.size)));
     }
 }
 
@@ -1361,11 +1364,11 @@ static void edit_rows_gmic(app_state_t *app) {
                 const rubraview_gmic_param_t *q = &f->params[i];
                 int32_t id = PANEL_GMIC_P0 + row;
                 if (gmic_is_typed(q->kind)) {
-                    snprintf(labels[row], sizeof(labels[row]), "  %.*s: %s", (int)q->name.size, (const char *)q->name.ptr, app->gmic_texts[i]);
+                    rubraview_fmt(labels[row], sizeof(labels[row]), "  {}: {}", PROVEN_ARG(rubraview_bytes_view((const char *)q->name.ptr, (int)q->name.size)), PROVEN_ARG(app->gmic_texts[i]));
                     rubraview_panel_add_button(&app->panel, id, cstr(labels[row]));
                     continue;
                 }
-                snprintf(labels[row], sizeof(labels[row]), "  %.*s", (int)q->name.size, (const char *)q->name.ptr);
+                rubraview_fmt(labels[row], sizeof(labels[row]), "  {}", PROVEN_ARG(rubraview_bytes_view((const char *)q->name.ptr, (int)q->name.size)));
                 proven_u8str_view_t name = cstr(labels[row]);
                 if (q->kind == RUBRAVIEW_GMIC_BOOL) rubraview_panel_add_toggle(&app->panel, id, name, app->gmic_values[i] > 0.5);
                 else if (q->kind == RUBRAVIEW_GMIC_CHOICE) rubraview_panel_add_choice(&app->panel, id, name, (int32_t)app->gmic_values[i], q->choice_count);
@@ -1380,7 +1383,9 @@ static void edit_rows_gmic(app_state_t *app) {
 }
 
 /* A choice row's words: the categories, the filters of the one chosen, a parameter's choices. */
-static proven_u8str_view_t gmic_choice_word(const app_state_t *app, int32_t id, int32_t i, char *buffer, size_t size) {
+static proven_u8str_view_t gmic_choice_word(const app_state_t *app, int32_t id, int32_t i, proven_mem_mut_t buffer_view) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t size = (size_t)buffer_view.size;
     proven_u8str_view_t w = PROVEN_LIT("");
     if (id == PANEL_GMIC_CATEGORY) {
         if (i <= 0) return cstr(T("none"));
@@ -1393,7 +1398,7 @@ static proven_u8str_view_t gmic_choice_word(const app_state_t *app, int32_t id, 
         int32_t p = gmic_param_of_row(f, id - PANEL_GMIC_P0);
         if (p >= 0 && f->params[p].kind == RUBRAVIEW_GMIC_CHOICE && i >= 0 && i < f->params[p].choice_count) w = f->params[p].choices[i];
     }
-    snprintf(buffer, size, "%.*s", (int)w.size, (const char *)w.ptr);
+    rubraview_fmt(buffer, size, "{}", PROVEN_ARG(rubraview_bytes_view((const char *)w.ptr, (int)w.size)));
     return cstr(buffer);
 }
 
@@ -1444,7 +1449,7 @@ bool gmic_button(app_state_t *app, int32_t id) {
     char args[RUBRAVIEW_GMIC_ARGS_MAX];
     size_t n = rubraview_gmic_args(f, app->gmic_values, texts, args, sizeof(args));
     rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_GMIC, .area = edit_area_now(app) };
-    int w = snprintf(s.command, sizeof(s.command), "%.*s%s%s", (int)f->command.size, (const char *)f->command.ptr, n ? " " : "", args);
+    int w = rubraview_fmt(s.command, sizeof(s.command), "{}{}{}", PROVEN_ARG(rubraview_bytes_view((const char *)f->command.ptr, (int)f->command.size)), PROVEN_ARG(n ? " " : ""), PROVEN_ARG(args));
     if (w <= 0 || (size_t)w >= sizeof(s.command)) { osd_say(app, TU8("this filter's settings are too long for a step")); return true; }
     (void)edit_apply_pending(app, false);
     if (!edit_push(app, &s)) return true;
@@ -1459,7 +1464,7 @@ void gmic_typed(app_state_t *app) {
     int32_t param = app->gmic_typing;
     rename_end(app);
     if (param >= 0 && param < RUBRAVIEW_GMIC_MAX_SHOWN) {
-        snprintf(app->gmic_texts[param], sizeof(app->gmic_texts[param]), "%.*s", (int)text.size, (const char *)text.ptr);
+        rubraview_fmt(app->gmic_texts[param], sizeof(app->gmic_texts[param]), "{}", PROVEN_ARG(rubraview_bytes_view((const char *)text.ptr, (int)text.size)));
         panel_build_edit(app);
         return;
     }
@@ -1467,8 +1472,8 @@ void gmic_typed(app_state_t *app) {
     if (text.size == 0) return;
     rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_GMIC, .area = edit_area_now(app) };
     if (text.size >= sizeof(s.command)) { osd_say(app, TU8("the command is too long for a step")); return; }
-    memcpy(s.command, text.ptr, text.size);
-    snprintf(app->gmic_last_typed, sizeof(app->gmic_last_typed), "%s", s.command);
+    proven_sys_mem_copy(s.command, text.ptr, text.size);
+    rubraview_fmt(app->gmic_last_typed, sizeof(app->gmic_last_typed), "{}", PROVEN_ARG(s.command));
     (void)edit_apply_pending(app, false);
     if (!edit_push(app, &s)) return;
     edit_steps_changed(app);
@@ -1482,7 +1487,7 @@ const char *gmic_step_name(const rubraview_edit_step_t *step) {
     if (rubraview_gmic_split(proven_u8str_view_from_cstr(step->command), items, RUBRAVIEW_GMIC_MAX_ITEMS) >= 1) {
         for (int32_t i = 0; i < g_gmic.filter_count; ++i) {
             if (!proven_u8str_view_eq(g_gmic.filters[i].command, items[0])) continue;
-            snprintf(name, sizeof(name), "G'MIC %.*s", (int)g_gmic.filters[i].name.size, (const char *)g_gmic.filters[i].name.ptr);
+            rubraview_fmt(name, sizeof(name), "G'MIC {}", PROVEN_ARG(rubraview_bytes_view((const char *)g_gmic.filters[i].name.ptr, (int)g_gmic.filters[i].name.size)));
             return name;
         }
     }
@@ -1515,7 +1520,7 @@ static uint8_t *gmic_rgba_of(const rubraview_pixbuf_t *src) {
     for (int32_t y = 0; y < src->height; ++y) {
         const uint8_t *s = src->pixels + (size_t)y * (size_t)src->stride;
         uint8_t *d = out + (size_t)y * row;
-        if (!bgra) { memcpy(d, s, row); continue; }
+        if (!bgra) { proven_sys_mem_copy(d, s, row); continue; }
         for (int32_t x = 0; x < src->width; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
     }
     return out;
@@ -1528,7 +1533,7 @@ static rubraview_pixbuf_t gmic_pixbuf_of(proven_arena_t *arena, const uint8_t *r
     for (int32_t y = 0; y < h; ++y) {
         const uint8_t *s = rgba + (size_t)y * (size_t)w * 4u;
         uint8_t *d = out.pixels + (size_t)y * (size_t)out.stride;
-        if (format != RUBRAVIEW_PIXFMT_BGRA8) { memcpy(d, s, (size_t)w * 4u); continue; }
+        if (format != RUBRAVIEW_PIXFMT_BGRA8) { proven_sys_mem_copy(d, s, (size_t)w * 4u); continue; }
         for (int32_t x = 0; x < w; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
     }
     return out;
@@ -1541,16 +1546,16 @@ static rubraview_pixbuf_t gmic_runner(proven_arena_t *arena, const rubraview_edi
     uint8_t *in = gmic_rgba_of(src);
     if (!in) { g_plugin_why = N_("out of memory"); return empty; }
     size_t bytes = (size_t)src->width * 4u * (size_t)src->height;
-    uint64_t sum = bytes_sum(in, bytes);
+    uint64_t sum = bytes_sum(rubraview_mem_view(in, bytes));
     rubraview_pixbuf_t done = empty;
     AcquireSRWLockShared(&g_gmic_results_lock);
     for (size_t i = 0; i < 4 && !done.pixels; ++i) {
         const gmic_result_t *r = &g_gmic_results[i];
-        if (r->rgba && r->sum == sum && r->width == src->width && r->height == src->height && strcmp(r->command, step->command) == 0)
+        if (r->rgba && r->sum == sum && r->width == src->width && r->height == src->height && rubraview_cstr_cmp(r->command, step->command) == 0)
             done = gmic_pixbuf_of(arena, r->rgba, r->out_width, r->out_height, src->format);
     }
     ReleaseSRWLockShared(&g_gmic_results_lock);
-    if (done.pixels) { free(in); return done; }
+    if (done.pixels) { rubraview_free(in); return done; }
 
     static volatile LONG run_number;
     uint32_t tag = (uint32_t)InterlockedIncrement(&run_number);
@@ -1561,11 +1566,11 @@ static rubraview_pixbuf_t gmic_runner(proven_arena_t *arena, const rubraview_edi
     png.format = RUBRAVIEW_EXPORT_PNG;
     png.png_compression = 1;   /* speed: the file lives a moment */
     if (in_path.size == 0 || !rubraview_pal_image_save(in_path, &whole, &png)) {
-        free(in);
+        rubraview_free(in);
         g_plugin_why = N_("the picture could not be handed to G'MIC");
         return empty;
     }
-    free(in);
+    rubraview_free(in);
     proven_u8str_view_t items[RUBRAVIEW_GMIC_MAX_ITEMS];
     size_t n = rubraview_gmic_split(cstr(step->command), items + 1, RUBRAVIEW_GMIC_MAX_ITEMS - 3);
     rubraview_gmic_exec_t r = { .ok = false };
@@ -1576,7 +1581,7 @@ static rubraview_pixbuf_t gmic_runner(proven_arena_t *arena, const rubraview_edi
         r = rubraview_pal_gmic_exec(cstr(g_gmic_exe), items, n + 3, 10u * 60u * 1000u, gmic_tick, NULL);
     }
     (void)rubraview_pal_fs_delete(in_path);
-    rubraview_pixbuf_t back = r.ok ? rubraview_pal_image_read_pixels(arena, out_path, NULL, 0, false) : empty;
+    rubraview_pixbuf_t back = r.ok ? rubraview_pal_image_read_pixels(arena, out_path, rubraview_mem_view(NULL, 0), false) : empty;
     (void)rubraview_pal_fs_delete(out_path);
     if (!rubraview_pixbuf_is_valid(&back)) {
         if (r.cancelled) g_plugin_why = N_("cancelled");
@@ -1585,27 +1590,27 @@ static rubraview_pixbuf_t gmic_runner(proven_arena_t *arena, const rubraview_edi
         else {
             /* its last line says what went wrong */
             const char *say = r.said;
-            size_t len = strlen(say);
+            size_t len = proven_cstr_len(say);
             while (len > 0 && (say[len - 1] == '\n' || say[len - 1] == ' ')) len--;
             size_t start = len;
             while (start > 0 && say[start - 1] != '\n') start--;
-            snprintf(g_gmic_said, sizeof(g_gmic_said), "G'MIC: %.*s", (int)(len - start), say + start);
+            rubraview_fmt(g_gmic_said, sizeof(g_gmic_said), "G'MIC: {}", PROVEN_ARG(rubraview_bytes_view(say + start, (int)(len - start))));
             g_plugin_why = len > 0 ? g_gmic_said : N_("G'MIC gave no picture back");
         }
         return empty;
     }
     if (back.format != src->format && (back.format == RUBRAVIEW_PIXFMT_RGBA8 || back.format == RUBRAVIEW_PIXFMT_BGRA8)) {
         uint8_t *rgba = gmic_rgba_of(&back);
-        if (rgba) { back = gmic_pixbuf_of(arena, rgba, back.width, back.height, src->format); free(rgba); }
+        if (rgba) { back = gmic_pixbuf_of(arena, rgba, back.width, back.height, src->format); rubraview_free(rgba); }
     }
     uint8_t *kept = rubraview_pixbuf_is_valid(&back) ? gmic_rgba_of(&back) : NULL;
     if (kept) {
         AcquireSRWLockExclusive(&g_gmic_results_lock);
         gmic_result_t *slot = &g_gmic_results[g_gmic_result_next++ % 4];
-        free(slot->rgba);
+        rubraview_free(slot->rgba);
         *slot = (gmic_result_t){ .width = src->width, .height = src->height, .out_width = back.width, .out_height = back.height,
                                  .sum = sum, .rgba = kept };
-        snprintf(slot->command, sizeof(slot->command), "%s", step->command);
+        rubraview_fmt(slot->command, sizeof(slot->command), "{}", PROVEN_ARG(step->command));
         ReleaseSRWLockExclusive(&g_gmic_results_lock);
     }
     return back;
@@ -1630,11 +1635,11 @@ bool ffmpeg_list_ready(void) {
     if (rubraview_pal_ffilter_state() != RUBRAVIEW_FFILTER_READY || g_ffm_asked) return false;
     g_ffm_asked = true;
     size_t room = 8u << 20;
-    g_ffm_mem = malloc(room);
+    g_ffm_mem = rubraview_alloc(room);
     if (!g_ffm_mem) return false;
     g_ffm_arena = proven_arena_create((proven_mem_mut_t){ .ptr = g_ffm_mem, .size = room });
     if (!rubraview_pal_ffilter_list(&g_ffm_arena, &g_ffm)) {
-        free(g_ffm_mem);
+        rubraview_free(g_ffm_mem);
         g_ffm_mem = NULL;
         g_ffm = (rubraview_ffilter_catalog_t){0};
         return false;
@@ -1660,7 +1665,7 @@ static void ffmpeg_defaults(app_state_t *app) {
     const rubraview_ffilter_t *f = ffmpeg_chosen(app);
     for (int32_t i = 0; f && i < f->option_count && i < RUBRAVIEW_FFILTER_MAX_SHOWN; ++i) {
         app->ffmpeg_values[i] = f->options[i].value;
-        snprintf(app->ffmpeg_texts[i], sizeof(app->ffmpeg_texts[i]), "%.*s", (int)f->options[i].text.size, (const char *)f->options[i].text.ptr);
+        rubraview_fmt(app->ffmpeg_texts[i], sizeof(app->ffmpeg_texts[i]), "{}", PROVEN_ARG(rubraview_bytes_view((const char *)f->options[i].text.ptr, (int)f->options[i].text.size)));
     }
 }
 
@@ -1679,12 +1684,12 @@ static void edit_rows_ffmpeg(app_state_t *app) {
             const rubraview_ffilter_option_t *q = &f->options[i];
             int32_t id = PANEL_FFMPEG_P0 + i;
             if (q->kind == RUBRAVIEW_FFILTER_TEXT) {
-                snprintf(labels[i], sizeof(labels[i]), "  %.*s: %s", (int)q->name.size, (const char *)q->name.ptr,
-                         app->ffmpeg_texts[i][0] ? app->ffmpeg_texts[i] : T("(FFmpeg's default)"));
+                rubraview_fmt(labels[i], sizeof(labels[i]), "  {}: {}", PROVEN_ARG(rubraview_bytes_view((const char *)q->name.ptr, (int)q->name.size)),
+                         PROVEN_ARG(app->ffmpeg_texts[i][0] ? app->ffmpeg_texts[i] : T("(FFmpeg's default)")));
                 rubraview_panel_add_button(&app->panel, id, cstr(labels[i]));
                 continue;
             }
-            snprintf(labels[i], sizeof(labels[i]), "  %.*s", (int)q->name.size, (const char *)q->name.ptr);
+            rubraview_fmt(labels[i], sizeof(labels[i]), "  {}", PROVEN_ARG(rubraview_bytes_view((const char *)q->name.ptr, (int)q->name.size)));
             proven_u8str_view_t name = cstr(labels[i]);
             if (q->kind == RUBRAVIEW_FFILTER_BOOL) rubraview_panel_add_toggle(&app->panel, id, name, app->ffmpeg_values[i] > 0.5);
             else if (q->kind == RUBRAVIEW_FFILTER_CHOICE) rubraview_panel_add_choice(&app->panel, id, name, (int32_t)app->ffmpeg_values[i], q->choice_count);
@@ -1697,20 +1702,22 @@ static void edit_rows_ffmpeg(app_state_t *app) {
 }
 
 /* A choice row's words: the groups, the filters of the one chosen (with what they do), an option's choices. */
-static proven_u8str_view_t ffmpeg_choice_word(const app_state_t *app, int32_t id, int32_t i, char *buffer, size_t size) {
+static proven_u8str_view_t ffmpeg_choice_word(const app_state_t *app, int32_t id, int32_t i, proven_mem_mut_t buffer_view) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t size = (size_t)buffer_view.size;
     buffer[0] = '\0';
     if (id == PANEL_FFMPEG_GROUP) {
         if (i <= 0) return cstr(T("none"));
         rubraview_ffilter_group_name(&g_ffm, g_ffm_first, g_ffm_groups, i - 1, buffer, size);
     } else if (id == PANEL_FFMPEG_FILTER) {
         const rubraview_ffilter_t *f = ffmpeg_filter_in(app->ffmpeg_group, i, NULL);
-        if (f) snprintf(buffer, size, "%.*s \xE2\x80\x94 %.*s", (int)f->name.size, (const char *)f->name.ptr,
-                        (int)(f->description.size < 60 ? f->description.size : 60), (const char *)f->description.ptr);
+        if (f) rubraview_fmt(buffer, size, "{} \xE2\x80\x94 {}", PROVEN_ARG(rubraview_bytes_view((const char *)f->name.ptr, (int)f->name.size)),
+                        PROVEN_ARG(rubraview_bytes_view((const char *)f->description.ptr, (int)(f->description.size < 60 ? f->description.size : 60))));
     } else {
         const rubraview_ffilter_t *f = ffmpeg_chosen(app);
         int32_t p = id - PANEL_FFMPEG_P0;
         if (f && p >= 0 && p < f->option_count && f->options[p].kind == RUBRAVIEW_FFILTER_CHOICE && i >= 0 && i < f->options[p].choice_count)
-            snprintf(buffer, size, "%.*s", (int)f->options[p].choices[i].size, (const char *)f->options[p].choices[i].ptr);
+            rubraview_fmt(buffer, size, "{}", PROVEN_ARG(rubraview_bytes_view((const char *)f->options[p].choices[i].ptr, (int)f->options[p].choices[i].size)));
     }
     return cstr(buffer);
 }
@@ -1750,13 +1757,13 @@ static void ffmpeg_push(app_state_t *app, proven_u8str_view_t graph) {
     const char *refused = rubraview_ffilter_refused(graph);
     if (refused) {
         char line[160];
-        snprintf(line, sizeof(line), T("the filter %s is not allowed here"), refused);
+        rubraview_fmt(line, sizeof(line), T("the filter {} is not allowed here"), PROVEN_ARG(refused));
         osd_say(app, cstr(line));
         return;
     }
     rubraview_edit_step_t s = { .kind = RUBRAVIEW_STEP_FFMPEG, .area = edit_area_now(app) };
     if (graph.size == 0 || graph.size >= sizeof(s.command)) { osd_say(app, TU8("the filter graph is too long for a step")); return; }
-    memcpy(s.command, graph.ptr, graph.size);
+    proven_sys_mem_copy(s.command, graph.ptr, graph.size);
     (void)edit_apply_pending(app, false);
     if (!edit_push(app, &s)) return;
     edit_steps_changed(app);
@@ -1785,13 +1792,13 @@ void ffmpeg_typed(app_state_t *app) {
     int32_t option = app->ffmpeg_typing;
     rename_end(app);
     if (option >= 0 && option < RUBRAVIEW_FFILTER_MAX_SHOWN) {
-        snprintf(app->ffmpeg_texts[option], sizeof(app->ffmpeg_texts[option]), "%.*s", (int)text.size, (const char *)text.ptr);
+        rubraview_fmt(app->ffmpeg_texts[option], sizeof(app->ffmpeg_texts[option]), "{}", PROVEN_ARG(rubraview_bytes_view((const char *)text.ptr, (int)text.size)));
         panel_build_edit(app);
         return;
     }
     text = proven_u8str_view_trim(text);
     if (text.size == 0) return;
-    snprintf(app->ffmpeg_last_typed, sizeof(app->ffmpeg_last_typed), "%.*s", (int)text.size, (const char *)text.ptr);
+    rubraview_fmt(app->ffmpeg_last_typed, sizeof(app->ffmpeg_last_typed), "{}", PROVEN_ARG(rubraview_bytes_view((const char *)text.ptr, (int)text.size)));
     ffmpeg_push(app, text);
 }
 
@@ -1815,7 +1822,7 @@ static uint8_t *ffmpeg_bgra_of(const uint8_t *pixels, int32_t w, int32_t h, size
     for (int32_t y = 0; y < h; ++y) {
         const uint8_t *s = pixels + (size_t)y * stride;
         uint8_t *d = out + (size_t)y * row;
-        if (!swap) { memcpy(d, s, row); continue; }
+        if (!swap) { proven_sys_mem_copy(d, s, row); continue; }
         for (int32_t x = 0; x < w; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
     }
     return out;
@@ -1828,7 +1835,7 @@ static rubraview_pixbuf_t ffmpeg_pixbuf_of(proven_arena_t *arena, const uint8_t 
     for (int32_t y = 0; y < h; ++y) {
         const uint8_t *s = bgra + (size_t)y * (size_t)w * 4u;
         uint8_t *d = out.pixels + (size_t)y * (size_t)out.stride;
-        if (!swap) { memcpy(d, s, (size_t)w * 4u); continue; }
+        if (!swap) { proven_sys_mem_copy(d, s, (size_t)w * 4u); continue; }
         for (int32_t x = 0; x < w; ++x) { d[x * 4] = s[x * 4 + 2]; d[x * 4 + 1] = s[x * 4 + 1]; d[x * 4 + 2] = s[x * 4]; d[x * 4 + 3] = s[x * 4 + 3]; }
     }
     return out;
@@ -1844,24 +1851,24 @@ static rubraview_pixbuf_t ffmpeg_runner(proven_arena_t *arena, const rubraview_e
     }
     uint8_t *in = ffmpeg_bgra_of(src->pixels, src->width, src->height, (size_t)src->stride, src->format != RUBRAVIEW_PIXFMT_BGRA8);
     if (!in) { g_plugin_why = N_("out of memory"); return empty; }
-    uint64_t sum = bytes_sum(in, (size_t)src->width * 4u * (size_t)src->height);
+    uint64_t sum = bytes_sum(rubraview_mem_view(in, (size_t)src->width * 4u * (size_t)src->height));
     rubraview_pixbuf_t done = empty;
     AcquireSRWLockShared(&g_ffm_results_lock);
     for (size_t i = 0; i < 4 && !done.pixels; ++i) {
         const ffmpeg_result_t *r = &g_ffm_results[i];
-        if (r->bgra && r->sum == sum && r->width == src->width && r->height == src->height && strcmp(r->graph, step->command) == 0)
+        if (r->bgra && r->sum == sum && r->width == src->width && r->height == src->height && rubraview_cstr_cmp(r->graph, step->command) == 0)
             done = ffmpeg_pixbuf_of(arena, r->bgra, r->out_width, r->out_height, src->format);
     }
     ReleaseSRWLockShared(&g_ffm_results_lock);
-    if (done.pixels) { free(in); return done; }
+    if (done.pixels) { rubraview_free(in); return done; }
 
     uint8_t *out = NULL;
     int32_t ow = 0, oh = 0;
     char said[400];
-    bool ok = rubraview_pal_ffilter_run(step->command, in, src->width, src->height, &out, &ow, &oh, said, sizeof(said));
-    free(in);
+    bool ok = rubraview_pal_ffilter_run(step->command, in, src->width, src->height, &out, &ow, &oh, rubraview_mem_mut(said, sizeof(said)));
+    rubraview_free(in);
     if (!ok) {
-        snprintf(g_ffm_said, sizeof(g_ffm_said), "FFmpeg: %s", said[0] ? said : "no picture came back");
+        rubraview_fmt(g_ffm_said, sizeof(g_ffm_said), "FFmpeg: {}", PROVEN_ARG(said[0] ? said : "no picture came back"));
         g_plugin_why = g_ffm_said;
         return empty;
     }
@@ -1869,12 +1876,12 @@ static rubraview_pixbuf_t ffmpeg_runner(proven_arena_t *arena, const rubraview_e
     if (rubraview_pixbuf_is_valid(&done)) {
         AcquireSRWLockExclusive(&g_ffm_results_lock);
         ffmpeg_result_t *slot = &g_ffm_results[g_ffm_result_next++ % 4];
-        free(slot->bgra);
+        rubraview_free(slot->bgra);
         *slot = (ffmpeg_result_t){ .width = src->width, .height = src->height, .out_width = ow, .out_height = oh, .sum = sum, .bgra = out };
-        snprintf(slot->graph, sizeof(slot->graph), "%s", step->command);
+        rubraview_fmt(slot->graph, sizeof(slot->graph), "{}", PROVEN_ARG(step->command));
         ReleaseSRWLockExclusive(&g_ffm_results_lock);
     } else {
-        free(out);
+        rubraview_free(out);
         g_plugin_why = N_("out of memory");
     }
     return done;
@@ -2012,7 +2019,7 @@ static void edit_rows_windowed(app_state_t *app) {
 void panel_build_edit(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->edit_window ? app->edit_window : app->window);
     double column_scroll[RUBRAVIEW_PANEL_MAX_COLUMNS];
-    memcpy(column_scroll, app->panel.column_scroll, sizeof(column_scroll));   /* each column stays where it was scrolled */
+    proven_sys_mem_copy(column_scroll, app->panel.column_scroll, sizeof(column_scroll));   /* each column stays where it was scrolled */
     app->edit_preview_tries = 0;
     const rubraview_edit_session_t *e = &app->edit;
     bool placed = app->panel.open && edit_panel_open(app) && app->panel.placed;
@@ -2028,7 +2035,7 @@ void panel_build_edit(app_state_t *app) {
     app->panel_is_convert = false;
 
     if (app->edit_window) {
-        memcpy(app->panel.column_scroll, column_scroll, sizeof(column_scroll));
+        proven_sys_mem_copy(app->panel.column_scroll, column_scroll, sizeof(column_scroll));
         edit_rows_windowed(app);
         if (app->edit_renderer) {   /* RV-188: the label column as wide as its longest name and the number box beside it */
             double size = app->panel.row_height * 0.45, most = 0.0;
@@ -2168,7 +2175,9 @@ static const char *resize_preset_word(int32_t i) {
 }
 
 /* What a row's value is called: a choice's word, or a number worth reading. */
-proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_panel_row_t *row, char *buffer, size_t size) {
+proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_panel_row_t *row, proven_mem_mut_t buffer_view) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t size = (size_t)buffer_view.size;
     (void)app;
     const char *const CROP[] = { T("free"), "1:1", "4:3", "16:9", T("the picture's") };
     const char *const BLUR[] = { T("soft (Gaussian)"), T("flat (box)") };
@@ -2185,8 +2194,8 @@ proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_pane
     const char *const PRESET[] = { T("none"), T("picture"), T("photo"), T("drawing"), T("icon"), T("text") };
     int32_t i = (int32_t)row->value;
     const char *word = NULL;
-    if (row->id >= PANEL_GMIC_P0 && row->id < PANEL_GMIC_P0 + PANEL_GMIC_ROWS) return gmic_choice_word(app, row->id, i, buffer, size);
-    if (row->id >= PANEL_FFMPEG_P0 && row->id < PANEL_FFMPEG_P0 + PANEL_FFMPEG_ROWS) return ffmpeg_choice_word(app, row->id, i, buffer, size);
+    if (row->id >= PANEL_GMIC_P0 && row->id < PANEL_GMIC_P0 + PANEL_GMIC_ROWS) return gmic_choice_word(app, row->id, i, rubraview_mem_mut(buffer, size));
+    if (row->id >= PANEL_FFMPEG_P0 && row->id < PANEL_FFMPEG_P0 + PANEL_FFMPEG_ROWS) return ffmpeg_choice_word(app, row->id, i, rubraview_mem_mut(buffer, size));
     switch (row->id) {
         case PANEL_CROP_RATIO:   word = i >= 0 && i < 5 ? CROP[i] : NULL; break;
         case PANEL_EFFECT: {   /* within the kind chosen */
@@ -2213,8 +2222,8 @@ proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_pane
             break;
         }
         case PANEL_SEL_SHAPE:    word = i == 1 ? T("ellipse") : T("rectangle"); break;
-        case PANEL_GMIC_CATEGORY: case PANEL_GMIC_FILTER: return gmic_choice_word(app, row->id, i, buffer, size);   /* RFC-0009 C */
-        case PANEL_FFMPEG_GROUP: case PANEL_FFMPEG_FILTER: return ffmpeg_choice_word(app, row->id, i, buffer, size);   /* RFC-0009 D */
+        case PANEL_GMIC_CATEGORY: case PANEL_GMIC_FILTER: return gmic_choice_word(app, row->id, i, rubraview_mem_mut(buffer, size));   /* RFC-0009 C */
+        case PANEL_FFMPEG_GROUP: case PANEL_FFMPEG_FILTER: return ffmpeg_choice_word(app, row->id, i, rubraview_mem_mut(buffer, size));   /* RFC-0009 D */
         case PANEL_RESIZE_PRESET: word = resize_preset_word(i); break;
         /* RV-129: the batch window */
         case PANEL_BATCH_SIZE_BY: {
@@ -2244,16 +2253,16 @@ proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_pane
             break;
         }
         case PANEL_BATCH_TEXT_COLOUR: word = i == 0 ? T("white") : i == 1 ? T("black") : i == 2 ? T("yellow") : NULL; break;
-        case PANEL_BATCH_TEXT_SIZE: case PANEL_BATCH_DPI: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
+        case PANEL_BATCH_TEXT_SIZE: case PANEL_BATCH_DPI: rubraview_fmt(buffer, size, "{}", PROVEN_ARG((int)lround(row->value))); return cstr(buffer);
         case PANEL_BATCH_EXISTS:  word = i == 0 ? T("replace it") : i == 1 ? T("leave it, skip") : i == 2 ? T("a new name (-1, -2...)") : NULL; break;
         case PANEL_NAMES_SEP: case PANEL_NAMES_CASE: case PANEL_NAMES_TAKEN_FORM: word = names_choice_word(row->id, i); break;   /* RV-194 */
-        case PANEL_NAMES_STEP: case PANEL_NAMES_DIGITS: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
-        case PANEL_BATCH_RESIZE:  snprintf(buffer, size, "%g", row->value); return cstr(buffer);
+        case PANEL_NAMES_STEP: case PANEL_NAMES_DIGITS: rubraview_fmt(buffer, size, "{}", PROVEN_ARG((int)lround(row->value))); return cstr(buffer);
+        case PANEL_BATCH_RESIZE:  rubraview_fmt(buffer, size, "{}", PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(row->value), 6))); return cstr(buffer);
         case PANEL_BATCH_BOX_H: case PANEL_BATCH_SHARPEN: case PANEL_BATCH_BORDER: case PANEL_BATCH_MARK_OPACITY:
         case PANEL_BATCH_QUALITY: case PANEL_BATCH_START: case PANEL_BATCH_EFFECT_AMOUNT:
-            snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
+            rubraview_fmt(buffer, size, "{}", PROVEN_ARG((int)lround(row->value))); return cstr(buffer);
         case PANEL_RESIZE_FILTER: word = i == 0 ? T("nearest (pixel art)") : i == 1 ? T("bilinear") : i == 2 ? T("bicubic") : i == 3 ? T("Lanczos-3 (sharpest)") : NULL; break;
-        case PANEL_RESIZE_SHARPEN: case PANEL_RESIZE_DPI: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
+        case PANEL_RESIZE_SHARPEN: case PANEL_RESIZE_DPI: rubraview_fmt(buffer, size, "{}", PROVEN_ARG((int)lround(row->value))); return cstr(buffer);
         case PANEL_BLUR_KIND:    word = i >= 0 && i < 2 ? BLUR[i] : NULL; break;
         case PANEL_SHARPEN_KIND: word = i >= 0 && i < 2 ? SHARP[i] : NULL; break;
         case PANEL_FORMAT:       word = i >= 0 && i < RUBRAVIEW_EXPORT_FORMATS ? FORMAT[i] : NULL; break;
@@ -2268,21 +2277,21 @@ proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_pane
         case PANEL_AVIF_BITS:    word = i == 1 ? T("10 bits") : T("8 bits"); break;
         case PANEL_TARGET_KB:
             if (i <= 0) { word = T("off"); break; }
-            snprintf(buffer, size, T("at most %d KB"), (int)i); return cstr(buffer);
+            rubraview_fmt(buffer, size, T("at most {} KB"), PROVEN_ARG((int)i)); return cstr(buffer);
         case PANEL_JPEG_RESTART:
             if (i == 0) { word = T("none"); break; }
-            snprintf(buffer, size, T("every %d rows of blocks"), (int)i); return cstr(buffer);
-        case PANEL_COLOURS: case PANEL_WEBP_ALPHA: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
+            rubraview_fmt(buffer, size, T("every {} rows of blocks"), PROVEN_ARG((int)i)); return cstr(buffer);
+        case PANEL_COLOURS: case PANEL_WEBP_ALPHA: rubraview_fmt(buffer, size, "{}", PROVEN_ARG((int)lround(row->value))); return cstr(buffer);
         case PANEL_WEBP_NEAR:
             if (i >= 100) { word = T("off"); break; }
-            snprintf(buffer, size, "%d", (int)i); return cstr(buffer);
-        case PANEL_RESIZE:           snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
-        case PANEL_SHARPEN_THRESHOLD: snprintf(buffer, size, "%d", (int)lround(row->value)); return cstr(buffer);
-        case PANEL_SHARPEN_RADIUS:   snprintf(buffer, size, "%.1f", row->value); return cstr(buffer);
+            rubraview_fmt(buffer, size, "{}", PROVEN_ARG((int)i)); return cstr(buffer);
+        case PANEL_RESIZE:           rubraview_fmt(buffer, size, "{}", PROVEN_ARG((int)lround(row->value))); return cstr(buffer);
+        case PANEL_SHARPEN_THRESHOLD: rubraview_fmt(buffer, size, "{}", PROVEN_ARG((int)lround(row->value))); return cstr(buffer);
+        case PANEL_SHARPEN_RADIUS:   rubraview_fmt(buffer, size, "{:.1}", PROVEN_ARG((double)row->value)); return cstr(buffer);
         default: break;
     }
-    if (word) { snprintf(buffer, size, "%s", word); return cstr(buffer); }
-    snprintf(buffer, size, "[%d]", (int)i);
+    if (word) { rubraview_fmt(buffer, size, "{}", PROVEN_ARG(word)); return cstr(buffer); }
+    rubraview_fmt(buffer, size, "[{}]", PROVEN_ARG((int)i));
     return cstr(buffer);
 }
 
@@ -2425,8 +2434,8 @@ void panel_open_export(app_state_t *app) {
 void edit_preview_close(app_state_t *app) {
     if (app->edit_preview) rubraview_pal_texture_destroy(app->edit_preview);
     app->edit_preview = NULL;
-    free(app->edit_small_mem);
-    free(app->edit_work_mem);
+    rubraview_free(app->edit_small_mem);
+    rubraview_free(app->edit_work_mem);
     app->edit_small_mem = app->edit_work_mem = NULL;
     app->edit_small = (rubraview_pixbuf_t){0};
     app->edit_page = -1;
@@ -2479,12 +2488,12 @@ void edit_preview_open(app_state_t *app) {
     void *scratch_mem = NULL;
     if (!within) {
         big = picture_bytes((size_t)w, (size_t)h, 4u * 2u, 16u << 20);
-        scratch_mem = malloc(big);
+        scratch_mem = rubraview_alloc(big);
         within = scratch_mem == NULL;
     }
     if (within) {
         big = picture_bytes((size_t)pw, (size_t)ph, 4u * 3u, 16u << 20);
-        scratch_mem = malloc(big);
+        scratch_mem = rubraview_alloc(big);
         if (!scratch_mem) return;
     }
     proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)scratch_mem, .size = big });
@@ -2492,7 +2501,7 @@ void edit_preview_open(app_state_t *app) {
     proven_u8str_view_t path = app->source.pages[page].path;
     int32_t max_w = within ? pw : 0, max_h = within ? ph : 0;
     if (path.size > 0) {
-        full = rubraview_pal_image_read_pixels_within(&scratch, path, NULL, 0, true, max_w, max_h);
+        full = rubraview_pal_image_read_pixels_within(&scratch, path, rubraview_mem_view(NULL, 0), true, max_w, max_h);
     } else {
         rubraview_page_bytes_t bytes = { .ok = false };
         if (page_read_cost(app, (size_t)page) <= PAGE_JOB_MIN_COST) {
@@ -2502,7 +2511,7 @@ void edit_preview_open(app_state_t *app) {
         }
         if (bytes.ok && bytes.data.size > 0) {
             full = rubraview_pal_image_read_pixels_within(&scratch, PROVEN_LIT(""),
-                                                          (const uint8_t*)bytes.data.ptr, bytes.data.size, true,
+                                                          rubraview_mem_view((const uint8_t*)bytes.data.ptr, bytes.data.size), true,
                                                           max_w, max_h);
         }
     }
@@ -2510,8 +2519,8 @@ void edit_preview_open(app_state_t *app) {
         size_t small = picture_bytes((size_t)pw, (size_t)ph, 4u, 0);
         app->edit_small_bytes = small + (1u << 20);
         app->edit_work_bytes = small * 10u + (8u << 20);   /* commit's stages and the BGRA copy */
-        app->edit_small_mem = malloc(app->edit_small_bytes);
-        app->edit_work_mem = malloc(app->edit_work_bytes);
+        app->edit_small_mem = rubraview_alloc(app->edit_small_bytes);
+        app->edit_work_mem = rubraview_alloc(app->edit_work_bytes);
         if (app->edit_small_mem && app->edit_work_mem) {
             proven_arena_t keep = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)app->edit_small_mem,
                                                                           .size = app->edit_small_bytes });
@@ -2521,7 +2530,7 @@ void edit_preview_open(app_state_t *app) {
             if (rubraview_pixbuf_is_valid(&app->edit_small)) app->edit_page = page;
         }
     }
-    free(scratch_mem);
+    rubraview_free(scratch_mem);
     if (app->edit_page < 0) edit_preview_close(app);
 }
 
@@ -2549,15 +2558,15 @@ void edit_preview_update(app_state_t *app) {
     if (!app->edit_work_mem) return;
     if (current_page_index(app) != app->edit_page) { edit_preview_close(app); return; }
     if (app->edit_shown_valid && app->edit_shown_rev == app->edit_rev &&
-        memcmp(&app->edit_shown_params, &app->edit.params, sizeof(app->edit.params)) == 0 &&
-        memcmp(app->edit_shown_curves, app->edit.curves, sizeof(app->edit.curves)) == 0 &&
+        proven_sys_mem_cmp(&app->edit_shown_params, &app->edit.params, sizeof(app->edit.params)) == 0 &&
+        proven_sys_mem_cmp(app->edit_shown_curves, app->edit.curves, sizeof(app->edit.curves)) == 0 &&
         edit_extras_same(&app->edit_shown_session, &app->edit)) {
         return;
     }
     app->edit_shown_session = app->edit;
     app->edit_shown_rev = app->edit_rev;
     app->edit_shown_params = app->edit.params;
-    memcpy(app->edit_shown_curves, app->edit.curves, sizeof(app->edit.curves));
+    proven_sys_mem_copy(app->edit_shown_curves, app->edit.curves, sizeof(app->edit.curves));
     app->edit_shown_valid = true;
 
     /* The owner's edit: the steps in force, then the step being made on its area,
@@ -2565,7 +2574,7 @@ void edit_preview_update(app_state_t *app) {
     size_t small_bytes = picture_bytes((size_t)app->edit_small.width, (size_t)app->edit_small.height, 4u, 0);
     size_t need = small_bytes * (10u + 4u * app->edit_steps.cursor) + (8u << 20);
     if (need > app->edit_work_bytes) {
-        void *more = realloc(app->edit_work_mem, need);
+        void *more = rubraview_realloc(rubraview_mem_mut(app->edit_work_mem, need));
         if (!more) return;
         app->edit_work_mem = more;
         app->edit_work_bytes = need;
@@ -2577,7 +2586,7 @@ void edit_preview_update(app_state_t *app) {
     rubraview_pixbuf_t edited = rubraview_edit_steps_apply(&work, &app->edit_steps, &app->edit_small, ratio);
     if (g_plugin_why) {   /* RFC-0007, RFC-0009 C: a step that did not run is left out of the preview; said why */
         char said[320];
-        snprintf(said, sizeof(said), T("a step did not run: %s"), rubraview_tr(g_plugin_why));   /* a plug-in's, or G'MIC's */
+        rubraview_fmt(said, sizeof(said), T("a step did not run: {}"), PROVEN_ARG(rubraview_tr(g_plugin_why)));   /* a plug-in's, or G'MIC's */
         osd_say(app, cstr(said));
         g_plugin_why = NULL;
     }
@@ -2648,7 +2657,7 @@ static void draw_edit_histogram(app_state_t *app, rubraview_pal_rect_t box) {
 static void sel_handles(double x, double y, double w, double h, double out[8][2]) {
     const double pts[8][2] = { { x, y }, { x + w * 0.5, y }, { x + w, y }, { x + w, y + h * 0.5 },
                                { x + w, y + h }, { x + w * 0.5, y + h }, { x, y + h }, { x, y + h * 0.5 } };
-    memcpy(out, pts, sizeof(pts));
+    proven_sys_mem_copy(out, pts, sizeof(pts));
 }
 
 static bool sel_screen_rect(app_state_t *app, double *x, double *y, double *w, double *h) {
@@ -2698,7 +2707,7 @@ void draw_crop_overlay(app_state_t *app) {
         rubraview_pal_render_stroke_rect(app->renderer, g, 0xFF000000u, 1.0, 0.0);
     }
     char line[96];
-    int n = snprintf(line, sizeof(line), "%d, %d   %d x %d", (int)c.x, (int)c.y, (int)c.width, (int)c.height);
+    int n = rubraview_fmt(line, sizeof(line), "{}, {}   {} x {}", PROVEN_ARG((int)c.x), PROVEN_ARG((int)c.y), PROVEN_ARG((int)c.width), PROVEN_ARG((int)c.height));
     rubraview_pal_rect_t label = { x, y - 22.0 * dpi, 200.0 * dpi, 20.0 * dpi };
     if (label.y < rect.y) label.y = y + 2.0 * dpi;
     rubraview_pal_render_fill_rect(app->renderer, label, 0xC0000000u, 0.0);
@@ -2925,8 +2934,8 @@ static proven_u8str_view_t edit_bar_word(const app_state_t *app, int32_t part, c
     static const char *const WORDS[EDIT_BAR_PARTS] = { N_("Adjust"), N_("Effects"), N_("Size"), N_("Edits"),
                                                        N_("Undo"), N_("Redo"), N_("Save a copy"), N_("Save") };
     int n = part == EDIT_TAB_EDITS && app->edit_steps.count > 0
-          ? snprintf(buf, cap, "%s  %zu", rubraview_tr(WORDS[part]), app->edit_steps.count)
-          : snprintf(buf, cap, "%s", rubraview_tr(WORDS[part]));
+          ? rubraview_fmt(buf, cap, "{}  {}", PROVEN_ARG(rubraview_tr(WORDS[part])), PROVEN_ARG((size_t)app->edit_steps.count))
+          : rubraview_fmt(buf, cap, "{}", PROVEN_ARG(rubraview_tr(WORDS[part])));
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? ((size_t)n < cap ? (size_t)n : cap - 1) : 0 };
 }
 
@@ -3022,7 +3031,7 @@ static bool edit_bar_press(app_state_t *app, double x, double y) {
         if (part != app->edit_tab) {
             edit_live_close(app);
             app->edit_tab = part;
-            memset(app->panel.column_scroll, 0, sizeof(app->panel.column_scroll));
+            proven_sys_mem_set(app->panel.column_scroll, 0, sizeof(app->panel.column_scroll));
             panel_build_edit(app);
         }
     } else if (part == EDIT_BAR_UNDO) {
@@ -3119,7 +3128,7 @@ void edit_window_show(app_state_t *app) {
     app->changes.title_height = 0.0;
     app->changes.bar_height = 0.0;
     app->changes.placed = app->changes.open = true;
-    memset(app->change_checked, 0, sizeof(app->change_checked));
+    proven_sys_mem_set(app->change_checked, 0, sizeof(app->change_checked));
     app->change_press = -1;
     app->change_dragging = false;
     app->steps_panel.open = false;    /* the change list is in the window */
@@ -3131,7 +3140,7 @@ void edit_window_show(app_state_t *app) {
 
 /* The change list: a press on a row's box, x, arrows or name. */
 static void changes_changed(app_state_t *app) {
-    memset(app->change_checked, 0, sizeof(app->change_checked));
+    proven_sys_mem_set(app->change_checked, 0, sizeof(app->change_checked));
     edit_steps_changed(app);
 }
 
@@ -3143,7 +3152,7 @@ void changes_remove_checked(app_state_t *app) {
     size_t n = rubraview_edit_steps_remove(&app->edit_steps, app->change_checked);
     changes_changed(app);
     char said[96];
-    int m = snprintf(said, sizeof(said), T("%zu edits removed"), n);
+    int m = rubraview_fmt(said, sizeof(said), T("{} edits removed"), PROVEN_ARG((size_t)n));
     if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)m });
 }
 
@@ -3231,7 +3240,7 @@ static void draw_changes(app_state_t *app) {
         list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_row_part_rect(lw, i, count, RUBRAVIEW_LISTWIN_ROW_DOWN), "\xE2\x96\xBC", small * 0.8, false,
                     i + 1 < app->edit_steps.cursor ? COLOR_TEXT : COLOR_BOX_BORDER);
         char line[96], fit[200];
-        proven_u8str_view_t words = edit_step_words(&app->edit_steps.steps[i], i + 1, line, sizeof(line));
+        proven_u8str_view_t words = edit_step_words(&app->edit_steps.steps[i], i + 1, rubraview_mem_mut(line, sizeof(line)));
         rubraview_pal_rect_t t = { text_x, r0.y, r0.x + r0.width - clear - text_x - 4.0, r0.height };
         rubraview_pal_render_draw_text(rr, files_fit_text(fit, sizeof(fit), words, t.width, small), t, small,
                                        in_force ? COLOR_TEXT : COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);   /* undone: dimmed */
@@ -3254,7 +3263,7 @@ static void edit_heading(app_state_t *app, int32_t id, const char *words, size_t
     rubraview_rect_t r = edit_room(app, id);
     if (r.width <= 0.0) return;
     char text[96];
-    int n = number ? snprintf(text, sizeof(text), "%s   %zu", words, number) : snprintf(text, sizeof(text), "%s", words);
+    int n = number ? rubraview_fmt(text, sizeof(text), "{}   {}", PROVEN_ARG(words), PROVEN_ARG((size_t)number)) : rubraview_fmt(text, sizeof(text), "{}", PROVEN_ARG(words));
     if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)text, (size_t)n }, (rubraview_pal_rect_t){ r.x, r.y, r.width, app->panel.row_height },
                                               app->panel.row_height * 0.5, SETTINGS_ACCENT, RUBRAVIEW_TEXT_LEFT);
 }
@@ -3265,8 +3274,8 @@ static uint64_t edit_window_signature(const app_state_t *app) {
     double v[] = { (double)app->edit_rev, (double)app->edit_steps.count, (double)app->edit_steps.cursor, (double)app->edit.crop_active,
                    app->edit.crop.x, app->edit.crop.y, app->edit.crop.width, app->edit.crop.height, (double)app->panel.row_count,
                    (double)app->sel_panel.row_count, (double)app->edit.active_channel, (double)app->edit_tab, (double)app->edit_tab_hover };
-    for (size_t i = 0; i < sizeof(v) / sizeof(v[0]); ++i) { uint64_t b; memcpy(&b, &v[i], 8); h = (h ^ b) * 1099511628211ull; }
-    for (size_t i = 0; i < app->panel.row_count; ++i) { uint64_t b; memcpy(&b, &app->panel.rows[i].value, 8); h = (h ^ b) * 1099511628211ull; }
+    for (size_t i = 0; i < sizeof(v) / sizeof(v[0]); ++i) { uint64_t b; proven_sys_mem_copy(&b, &v[i], 8); h = (h ^ b) * 1099511628211ull; }
+    for (size_t i = 0; i < app->panel.row_count; ++i) { uint64_t b; proven_sys_mem_copy(&b, &app->panel.rows[i].value, 8); h = (h ^ b) * 1099511628211ull; }
     return h;
 }
 
@@ -3419,13 +3428,13 @@ void edit_steps_say_programs(app_state_t *app, const rubraview_edit_steps_t *ste
         else if (k == RUBRAVIEW_STEP_PLUGIN) counts[1]++;
         else if (k == RUBRAVIEW_STEP_FFMPEG) counts[2]++;
     }
-    int n = snprintf(line, sizeof(line), T("%zu steps"), steps->cursor);
+    int n = rubraview_fmt(line, sizeof(line), T("{} steps"), PROVEN_ARG((size_t)steps->cursor));
     if (n > 0) at = (size_t)n;
-    if (counts[0] && at < sizeof(line)) { n = snprintf(line + at, sizeof(line) - at, T(", %d by G'MIC"), counts[0]); if (n > 0) at += (size_t)n; }
-    if (counts[1] && at < sizeof(line)) { n = snprintf(line + at, sizeof(line) - at, T(", %d by a plug-in"), counts[1]); if (n > 0) at += (size_t)n; }
-    if (counts[2] && at < sizeof(line)) { n = snprintf(line + at, sizeof(line) - at, T(", %d by FFmpeg"), counts[2]); if (n > 0) at += (size_t)n; }
+    if (counts[0] && at < sizeof(line)) { n = rubraview_fmt(line + at, sizeof(line) - at, T(", {} by G'MIC"), PROVEN_ARG((int)counts[0])); if (n > 0) at += (size_t)n; }
+    if (counts[1] && at < sizeof(line)) { n = rubraview_fmt(line + at, sizeof(line) - at, T(", {} by a plug-in"), PROVEN_ARG((int)counts[1])); if (n > 0) at += (size_t)n; }
+    if (counts[2] && at < sizeof(line)) { n = rubraview_fmt(line + at, sizeof(line) - at, T(", {} by FFmpeg"), PROVEN_ARG((int)counts[2])); if (n > 0) at += (size_t)n; }
     if ((counts[0] || counts[1]) && at < sizeof(line)) {
-        n = snprintf(line + at, sizeof(line) - at, "%s", T(" (they run with your rights: use files you trust)"));
+        n = rubraview_fmt(line + at, sizeof(line) - at, "{}", PROVEN_ARG(T(" (they run with your rights: use files you trust)")));
         if (n > 0) at += (size_t)n;
     }
     osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = at < sizeof(line) ? at : sizeof(line) - 1 });
@@ -3456,7 +3465,7 @@ void edit_steps_save_or_load(app_state_t *app, bool saving) {
     const char *why = NULL;
     if (text.size == 0 || !rubraview_edit_steps_parse(app->arena, text, &loaded, &why)) {
         char line[300];
-        int n = snprintf(line, sizeof(line), T("not loaded: %s"), why ? rubraview_tr(why) : T("the file could not be read"));
+        int n = rubraview_fmt(line, sizeof(line), T("not loaded: {}"), PROVEN_ARG(why ? rubraview_tr(why) : T("the file could not be read")));
         osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 });
         return;
     }

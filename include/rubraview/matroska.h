@@ -67,7 +67,7 @@ typedef struct rubraview_mkv {
  * its clock and its tracks. False, with a reason, when it is not one or
  * its head cannot be read. A file cut short opens if its tracks are whole.
  */
-bool rubraview_mkv_open(rubraview_mkv_t *mkv, const uint8_t *data, uint64_t size, const char **out_why);
+bool rubraview_mkv_open(rubraview_mkv_t *mkv, proven_mem_view_t data_view, const char **out_why);
 
 /**
  * RV-202: the first video track's size as it is shown (its display size when that is in pixels,
@@ -237,7 +237,7 @@ typedef struct rubraview_mkv_check {
     const char          *why;
 } rubraview_mkv_check_t;
 
-bool rubraview_mkv_check_begin(rubraview_mkv_check_t *check, const rubraview_mkv_put_t *put, const uint8_t *made, uint64_t made_size);
+bool rubraview_mkv_check_begin(rubraview_mkv_check_t *check, const rubraview_mkv_put_t *put, proven_mem_view_t made_view);
 int rubraview_mkv_check_step(rubraview_mkv_check_t *check, const rubraview_mkv_put_t *put, size_t budget_blocks);
 
 #ifdef __cplusplus

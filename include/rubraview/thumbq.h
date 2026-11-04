@@ -48,7 +48,7 @@ bool rubraview_thumbq_push(rubraview_thumbq_t *q, uint32_t generation, size_t in
    The queue owns `bytes` from here: it frees them if it refuses the
    request or drops it later; a take hands them to the taker. */
 bool rubraview_thumbq_push_bytes(rubraview_thumbq_t *q, uint32_t generation, size_t index,
-                                 double aspect, uint8_t *bytes, size_t len);
+                                 double aspect, proven_mem_mut_t bytes_view);
 
 /* RV-207: a picture inside an archive listed in the open-file screen — the archive's path and the entry's name in
    it, kept one after the other in the job's path (`inner_at` where the name starts). */

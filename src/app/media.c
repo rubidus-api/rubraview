@@ -64,6 +64,7 @@ void media_close(app_state_t *app) {
         if (page->texture) rubraview_pal_texture_destroy(page->texture);
         *page = (app_page_t){0};
     }
+    media_blend_drop(app);
     app->media_page = -1;
     app->media_paused = false;
     app->media_has_frame = false;
@@ -98,7 +99,7 @@ static void music_clear(app_state_t *app) {
     app->music_tags_read = false;
     app->music_lyrics = (rubraview_lyrics_t){0};
     app->music_cue = (rubraview_cue_sheet_t){0};
-    memset(app->viz_peaks, 0, sizeof(app->viz_peaks));
+    proven_sys_mem_set(app->viz_peaks, 0, sizeof(app->viz_peaks));
     /* RFC-0006: what a track carried, given back for the next one. A track that went on
        as the background music took its region with it (bgm_adopt). */
     if (app->mem) rubraview_region_reset(&app->mem->media);
@@ -217,7 +218,7 @@ void audio_chain_update(app_state_t *app) {
 void music_make_backdrop(app_state_t *app, const rubraview_tags_t *tags) {
     if (!tags->art || tags->art_size == 0) return;
     rubraview_pixbuf_t art = rubraview_pal_image_read_pixels(app->arena, PROVEN_LIT(""),
-                                                             tags->art, tags->art_size, false);
+                                                             rubraview_mem_view(tags->art, tags->art_size), false);
     if (!rubraview_pixbuf_is_valid(&art)) return;
 
     rubraview_pixbuf_t small = rubraview_pixbuf_resample(app->arena, &art, 64, 64, RUBRAVIEW_FILTER_BILINEAR);
@@ -270,7 +271,7 @@ static void music_load(app_state_t *app, proven_u8str_view_t path) {
         proven_u8str_view_t dir = rubraview_path_dirname(path);
         if (dir.size == 0) dir = PROVEN_LIT(".");
         if (dir.size >= sizeof(app->cue_scan_dir) || dir.size != app->cue_scan_dir_len ||
-            memcmp(dir.ptr, app->cue_scan_dir, dir.size) != 0) {
+            proven_sys_mem_cmp(dir.ptr, app->cue_scan_dir, dir.size) != 0) {
             /* A folder not listed yet: its sheets, kept for the tracks after this one. */
             app->cue_scan_count = 0;
             app->cue_scan_paths = NULL;
@@ -292,7 +293,7 @@ static void music_load(app_state_t *app, proven_u8str_view_t path) {
                 }
             }
             if (dir.size < sizeof(app->cue_scan_dir)) {
-                memcpy(app->cue_scan_dir, dir.ptr, dir.size);
+                proven_sys_mem_copy(app->cue_scan_dir, dir.ptr, dir.size);
                 app->cue_scan_dir_len = dir.size;
             }
         }
@@ -343,13 +344,13 @@ static rubraview_texture_t *audio_page_picture(app_state_t *app, proven_u8str_vi
             texture = NULL;
         }
         if (texture) { *out_w = w; *out_h = h; }
-        free(pixels);
+        rubraview_free(pixels);
     }
     /* The shell knows the common formats; when it does not (FLAC and
        Opus often), the cover this file carries is read here instead. */
     if (!texture && app->music_tags_read && app->music_tags.art_size > 0) {
         rubraview_image_load_result_t art = rubraview_pal_image_load_texture_from_memory(
-            app->renderer, app->music_tags.art, app->music_tags.art_size, false);
+            app->renderer, rubraview_mem_view(app->music_tags.art, app->music_tags.art_size), false);
         if (art.texture) {
             texture = art.texture;
             *out_w = art.width;
@@ -367,7 +368,7 @@ static rubraview_texture_t *audio_page_picture(app_state_t *app, proven_u8str_vi
                 texture = NULL;
             }
             if (texture) { *out_w = SIDE; *out_h = SIDE; }
-            free(pixels);
+            rubraview_free(pixels);
         }
     }
     return texture;
@@ -379,6 +380,7 @@ static app_page_t *media_page_ready(app_state_t *app) {
     if (!app->media || app->media_page < 0 || (size_t)app->media_page >= page_count(app)) return NULL;
     app_page_t *page = &app->pages[app->media_page];
     if (!page->texture) {
+        media_blend_drop(app);   /* D-272: the earlier frame's texture is made again to the new one's size */
         int32_t w = app->media_info.width, h = app->media_info.height;
         /* RV-062: a film decoded on the card gets a texture on the card,
            and its frames are copied into it there; so does one tone mapped there (RV-150). */
@@ -623,7 +625,7 @@ static void pgs_load(app_state_t *app, proven_u8str_view_t sup_path) {
         if (!proven_is_ok(mem.err)) return;
         app->pgs_pixels = (uint8_t*)mem.value.ptr;
     }
-    app->pgs = rubraview_pgs_index(subs_arena(app, 16u << 20), (const uint8_t*)app->pgs_bytes.ptr, app->pgs_bytes.size);
+    app->pgs = rubraview_pgs_index(subs_arena(app, 16u << 20), rubraview_mem_view((const uint8_t*)app->pgs_bytes.ptr, app->pgs_bytes.size));
 }
 
 /* The sync the reader set by hand for this film comes back — for a text
@@ -654,7 +656,7 @@ void subtitle_select(app_state_t *app, int32_t index) {
             vobsub_load(app, app->subtitle_files[track->stream_index].path,
                         (size_t)app->subtitle_vobsub_stream[track->stream_index]);
             if (app->vobsub.count == 0) return;
-            proven_u8str_view_t picture_label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
+            proven_u8str_view_t picture_label = rubraview_track_label(rubraview_mem_mut(app->subtitle_label, sizeof(app->subtitle_label)),
                                                           &app->tracks, index);
             app->subtitle_name = track->title.size > 0 ? track->title : picture_label;
             app->tracks.current_subtitle = index;
@@ -664,7 +666,7 @@ void subtitle_select(app_state_t *app, int32_t index) {
         if (app->subtitle_files[track->stream_index].format == RUBRAVIEW_SUBTITLE_PGS) {
             pgs_load(app, app->subtitle_files[track->stream_index].path);
             if (app->pgs.count == 0) return;
-            proven_u8str_view_t picture_label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
+            proven_u8str_view_t picture_label = rubraview_track_label(rubraview_mem_mut(app->subtitle_label, sizeof(app->subtitle_label)),
                                                           &app->tracks, index);
             app->subtitle_name = track->title.size > 0 ? track->title : picture_label;
             app->tracks.current_subtitle = index;
@@ -692,7 +694,7 @@ void subtitle_select(app_state_t *app, int32_t index) {
     if (app->subtitle.count == 0) return;
     /* A stream inside a file often has no name of its own, so the OSD
        uses the same label the track menu shows. */
-    proven_u8str_view_t label = rubraview_track_label(app->subtitle_label, sizeof(app->subtitle_label),
+    proven_u8str_view_t label = rubraview_track_label(rubraview_mem_mut(app->subtitle_label, sizeof(app->subtitle_label)),
                                           &app->tracks, index);
     app->subtitle_name = track->title.size > 0 ? track->title : label;
     app->tracks.current_subtitle = index;
@@ -868,16 +870,16 @@ static station_alts_t g_station_alts[STATION_ALTS_MAX];
 static size_t g_station_alts_next;
 
 static char *dup_view(proven_u8str_view_t v) {
-    char *s = (char *)malloc(v.size + 1);
-    if (s) { memcpy(s, v.ptr, v.size); s[v.size] = '\0'; }
+    char *s = (char *)rubraview_alloc(v.size + 1);
+    if (s) { proven_sys_mem_copy(s, v.ptr, v.size); s[v.size] = '\0'; }
     return s;
 }
 
 void station_alts_note(const rubraview_playlist_entry_t *e) {
     if (e->alternate_count == 0) return;
     station_alts_t *slot = &g_station_alts[g_station_alts_next++ % STATION_ALTS_MAX];
-    free(slot->primary);
-    for (size_t i = 0; i < slot->count; ++i) free(slot->alts[i]);
+    rubraview_free(slot->primary);
+    for (size_t i = 0; i < slot->count; ++i) rubraview_free(slot->alts[i]);
     *slot = (station_alts_t){ .primary = dup_view(e->path) };
     for (size_t i = 0; i < e->alternate_count && i < RUBRAVIEW_PLAYLIST_MAX_ALTERNATES; ++i)
         if ((slot->alts[slot->count] = dup_view(e->alternates[i])) != NULL) slot->count++;
@@ -894,7 +896,7 @@ static const station_alts_t *station_alts_of(proven_u8str_view_t primary) {
 static bool station_try_add(station_job_t *job, proven_u8str_view_t address, bool fetched) {
     if (job->count >= RUBRAVIEW_STREAM_MAX_TRIES || address.size >= RUBRAVIEW_STREAM_URL_MAX || !rubraview_stream_is_address(address)) return false;
     for (size_t i = 0; i < job->count; ++i) if (proven_u8str_view_eq(proven_u8str_view_from_cstr(job->tries[i]), address)) return false;
-    memcpy(job->tries[job->count], address.ptr, address.size);
+    proven_sys_mem_copy(job->tries[job->count], address.ptr, address.size);
     job->tries[job->count][address.size] = '\0';
     job->fetched[job->count++] = fetched;
     return true;
@@ -905,10 +907,10 @@ char *list_text_decode(proven_u8str_view_t raw, size_t *len);
 /* RV-158: the list an address names (or, `sniffing`, what an address that would not play answers with), fetched
    and read as a list file is; its stations join the tries. A list it names in turn is not followed. */
 static void station_list_take(station_job_t *job, proven_u8str_view_t address, bool sniffing) {
-    uint8_t *raw = (uint8_t *)malloc(RUBRAVIEW_STREAM_LIST_MAX);
+    uint8_t *raw = (uint8_t *)rubraview_alloc(RUBRAVIEW_STREAM_LIST_MAX);
     int64_t got = raw ? rubraview_pal_ffmpeg_fetch(address, raw, RUBRAVIEW_STREAM_LIST_MAX) : -1;
     size_t room = 1u << 20;
-    void *mem = got > 0 ? malloc(room) : NULL;
+    void *mem = got > 0 ? rubraview_alloc(room) : NULL;
     if (mem) {
         size_t len = 0;
         proven_u8str_view_t bytes = proven_u8str_view_from_bytes(raw, (size_t)got);
@@ -925,10 +927,10 @@ static void station_list_take(station_job_t *job, proven_u8str_view_t address, b
                 (void)station_try_add(job, a, true);
             }
         }
-        free(text);
+        rubraview_free(text);
     }
-    free(mem);
-    free(raw);
+    rubraview_free(mem);
+    rubraview_free(raw);
 }
 
 static DWORD WINAPI station_job_run(LPVOID arg) {
@@ -950,7 +952,7 @@ static DWORD WINAPI station_job_run(LPVOID arg) {
     }
     if (InterlockedCompareExchange(&job->state, 1, 0) == 2) {
         if (job->result.media) rubraview_pal_media_close(job->result.media);
-        free(job);
+        rubraview_free(job);
         return 0;
     }
     rubraview_pal_window_wake(job->wake);
@@ -965,14 +967,14 @@ static void station_job_leave(app_state_t *app) {
     if (InterlockedCompareExchange(&job->state, 2, 0) == 1) {   /* it had finished: closed here */
         WaitForSingleObject(thread, INFINITE);
         if (job->result.media) rubraview_pal_media_close(job->result.media);
-        free(job);
+        rubraview_free(job);
     }
     CloseHandle(thread);   /* otherwise the thread closes what it opens, and frees the job */
 }
 
 static void station_job_start(app_state_t *app, int32_t index, proven_u8str_view_t path) {
     station_job_leave(app);
-    station_job_t *job = (station_job_t*)calloc(1, sizeof(*job));
+    station_job_t *job = (station_job_t*)rubraview_alloc_zero(1, sizeof(*job));
     if (job && station_try_add(job, path, false)) {
         const station_alts_t *alts = station_alts_of(path);   /* RV-158 */
         for (size_t i = 0; alts && i < alts->count; ++i) (void)station_try_add(job, proven_u8str_view_from_cstr(alts->alts[i]), false);
@@ -981,7 +983,7 @@ static void station_job_start(app_state_t *app, int32_t index, proven_u8str_view
         job->thread = CreateThread(NULL, 0, station_job_run, job, 0, NULL);
     }
     if (!job || !job->thread) {
-        free(job);
+        rubraview_free(job);
         media_adopt(app, index, path, (rubraview_media_open_result_t){ .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_STATION },
                     RUBRAVIEW_MEDIA_FAIL_STATION);
         return;
@@ -1004,7 +1006,7 @@ void station_job_poll(app_state_t *app) {
     rubraview_media_open_result_t opened = job->result;
     int32_t page = job->page;
     bool nested = job->nested && !opened.media;
-    free(job);
+    rubraview_free(job);
     if (nested) osd_say(app, TU8("the station's list names another list; that one is not followed"));   /* RV-158 */
     if (page != current_page_index(app) || app->media || (size_t)page >= page_count(app)) {
         if (opened.media) rubraview_pal_media_close(opened.media);
@@ -1018,8 +1020,8 @@ void station_job_poll(app_state_t *app) {
 void station_title_poll(app_state_t *app) {
     char now[sizeof(app->station_title)] = "";
     if (app->media && app->media_info.live) (void)rubraview_pal_media_stream_title(app->media, now, sizeof(now));
-    if (strcmp(now, app->station_title) == 0) return;
-    memcpy(app->station_title, now, sizeof(now));
+    if (rubraview_cstr_cmp(now, app->station_title) == 0) return;
+    proven_sys_mem_copy(app->station_title, now, sizeof(now));
     update_window_title(app);
 }
 
@@ -1153,8 +1155,8 @@ static void media_adopt(app_state_t *app, int32_t index, proven_u8str_view_t pat
     if (opened.info.has_audio && !opened.info.audio_output) {
         char why[128], line[192];
         int n = rubraview_pal_audio_last_failure(why, sizeof(why))
-            ? snprintf(line, sizeof(line), T("no sound: the device would not open (%s)"), why)
-            : snprintf(line, sizeof(line), T("no sound: the device would not open"));
+            ? rubraview_fmt(line, sizeof(line), T("no sound: the device would not open ({})"), PROVEN_ARG(why))
+            : rubraview_fmt(line, sizeof(line), T("no sound: the device would not open"));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     }
     /* §3.14.6: something with sound of its own is on screen now. */
@@ -1166,8 +1168,8 @@ static void media_adopt(app_state_t *app, int32_t index, proven_u8str_view_t pat
     if (opened.info.live) osd_say(app, TU8("live: an internet radio station"));
     if (app->subtitle.count > 0) {
         char line[256];
-        int n = snprintf(line, sizeof(line), T("subtitles: %.*s"),
-                         (int)app->subtitle_name.size, app->subtitle_name.ptr);
+        int n = rubraview_fmt(line, sizeof(line), T("subtitles: {}"),
+                         PROVEN_ARG(rubraview_bytes_view(app->subtitle_name.ptr, (int)app->subtitle_name.size)));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     }
     if (!media_page_ready(app)) {
@@ -1180,7 +1182,45 @@ static void media_adopt(app_state_t *app, int32_t index, proven_u8str_view_t pat
     app->needs_relayout = true;   /* the page has a size now */
 }
 
+/* D-272: the frame on the page kept as the earlier one, and the page given the other texture for the new frame. */
+static bool media_blend_swap(app_state_t *app, app_page_t *page) {
+    if (!app->media_prev_texture) {
+        int32_t w = page->width, h = page->height;
+        app->media_prev_texture = app->media_info.hardware_decode || app->media_info.hdr_tone_mapped
+            ? rubraview_pal_texture_create_video(app->renderer, w, h)
+            : rubraview_pal_texture_create_bgra(app->renderer, w, h);
+        if (!app->media_prev_texture) return false;
+    }
+    rubraview_texture_t *t = page->texture; page->texture = app->media_prev_texture; app->media_prev_texture = t;
+    return true;
+}
+
+void media_blend_drop(app_state_t *app) {
+    if (app->media_prev_texture) rubraview_pal_texture_destroy(app->media_prev_texture);
+    app->media_prev_texture = NULL;
+    app->media_blend_weight = 0.0;
+}
+
+static bool media_blend_on(const app_state_t *app) {
+    return app->media_info.has_video && !app->media_info.hdr_output &&
+           rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("blend_frames")) > 0.5;
+}
+
+static void media_show_blended(app_state_t *app, app_page_t *page, const rubraview_video_frame_t *frame, double weight,
+                               double display_at);
+
 static void media_show(app_state_t *app, app_page_t *page, const rubraview_video_frame_t *frame) {
+    media_show_blended(app, page, frame, 0.0, 0.0);
+}
+
+static void media_show_blended(app_state_t *app, app_page_t *page, const rubraview_video_frame_t *frame, double weight,
+                               double display_at) {
+    if (weight > 0.0 && app->media_has_frame && !app->media_sought && media_blend_swap(app, page)) {   /* not with a frame from before a seek */
+        app->media_blend_weight = weight;
+        app->media_blend_at = display_at;
+    } else {
+        app->media_blend_weight = 0.0;
+    }
     if (frame->gpu_texture) {
         rubraview_pal_texture_copy_video_frame(page->texture, frame->gpu_texture, frame->gpu_subresource);
         if (app->frame_wanted && frame->width > 0 && frame->height > 0) {
@@ -1193,7 +1233,7 @@ static void media_show(app_state_t *app, app_page_t *page, const rubraview_video
                 app->frame_wanted = FRAME_NOT;
                 osd_say(app, TU8("the frame could not be read back from the graphics card"));
             }
-            free(back);
+            rubraview_free(back);
         }
     } else {
         rubraview_pal_texture_upload_bgra(page->texture, frame->pixels, frame->stride);
@@ -1281,6 +1321,10 @@ void media_tick(app_state_t *app) {
         }
     }
     double clock = rubraview_media_clock_now(&app->media_clock, now);
+    if (app->media_paused && app->media_blend_weight > 0.0) {
+        app->media_blend_weight = 0.0;   /* D-272: a paused film shows its frame alone */
+        app->media_new_picture = true;
+    }
 
     if (!app->media_info.has_video) {
         /* Only sound: the position is the clock. */
@@ -1302,11 +1346,20 @@ void media_tick(app_state_t *app) {
             ahead = rubraview_pal_render_seen_in_seconds(app->renderer);
             clock = rubraview_media_clock_now(&app->media_clock, rubraview_pal_time_now_seconds());
         }
+        /* D-272 (RV-215 step 4; owner 2026-11-03: "프레임 섞기"): with Blend frames on, a frame shown as soon as it starts
+           within the refresh it is seen at, drawn over the one before by the share of that refresh that is its own. */
+        bool blend = media_blend_on(app) && app->media_has_frame;
+        double period = rubraview_pal_render_refresh_seconds(app->renderer) * media_rate(app), weight = 0.0;
+        if (!blend && app->media_prev_texture) media_blend_drop(app);
+        if (app->media_blend_weight > 0.0 && clock + ahead >= app->media_blend_at + period * 0.5) {
+            app->media_blend_weight = 0.0;   /* the refresh after a blended one: the new frame alone */
+            app->media_new_picture = true;
+        }
         while (rubraview_pal_media_peek_frame(m, &frame)) {
             /* The first picture after opening or seeking shows at once. */
-            rubraview_frame_decision_t decision = app->media_has_frame
-                ? rubraview_media_schedule_at(frame.pts, frame.duration, clock, ahead)
-                : RUBRAVIEW_FRAME_SHOW;
+            rubraview_frame_decision_t decision = !app->media_has_frame ? RUBRAVIEW_FRAME_SHOW
+                : blend ? rubraview_media_schedule_blend(frame.pts, frame.duration, clock + ahead, period, &weight)
+                : rubraview_media_schedule_at(frame.pts, frame.duration, clock, ahead);
             if (decision == RUBRAVIEW_FRAME_WAIT) break;
             if (decision == RUBRAVIEW_FRAME_DROP && rubraview_pal_media_frames_ready(m) > 1) {
                 rubraview_pal_media_pop_frame(m);
@@ -1315,7 +1368,7 @@ void media_tick(app_state_t *app) {
             }
             bool first = !app->media_has_frame;
             if (app->info_open && !first) { app->stats_shown++; app->stats_late += clock - frame.pts; }   /* RV-215 (D-248) */
-            media_show(app, page, &frame);
+            media_show_blended(app, page, &frame, blend ? weight : 0.0, clock + ahead);
             rubraview_pal_media_pop_frame(m);
             /* Only a wall clock may be moved to the picture. The sound is
                the truth when it is the master; a late picture is dropped. */
@@ -1431,13 +1484,13 @@ static int32_t media_follow_page(app_state_t *app) {
     }
     if (mode == RUBRAVIEW_REPEAT_SHUFFLE) {
         if (app->shuffle_flags_count != count || !app->shuffle_flags) {   /* a new list: a new shuffle */
-            free(app->shuffle_flags);
-            app->shuffle_flags = (uint8_t *)malloc(count ? count : 1);
+            rubraview_free(app->shuffle_flags);
+            app->shuffle_flags = (uint8_t *)rubraview_alloc(count ? count : 1);
             app->shuffle_flags_count = app->shuffle_flags ? count : 0;
             double t = rubraview_pal_time_now_seconds();
             uint64_t seed = 0;
-            memcpy(&seed, &t, sizeof(seed) < sizeof(t) ? sizeof(seed) : sizeof(t));
-            rubraview_shuffle_reset(&app->shuffle, app->shuffle_flags, app->shuffle_flags_count, seed ^ 0xA5A5A5A5u);
+            proven_sys_mem_copy(&seed, &t, sizeof(seed) < sizeof(t) ? sizeof(seed) : sizeof(t));
+            rubraview_shuffle_reset(&app->shuffle, rubraview_mem_mut(app->shuffle_flags, app->shuffle_flags_count), seed ^ 0xA5A5A5A5u);
         }
         rubraview_shuffle_mark(&app->shuffle, (size_t)app->media_page);
     }

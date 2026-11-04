@@ -24,9 +24,9 @@ extern "C" {
  * TIFF's own default when the tag is absent) if the buffer is not a
  * JPEG, has no Exif APP1 segment, or the tag is absent/unparseable.
  */
-int32_t rubraview_exif_read_orientation(const uint8_t *jpeg, size_t size);
+int32_t rubraview_exif_read_orientation(proven_mem_view_t jpeg_view);
 /* RV-210: the same from EXIF's TIFF block alone (from its "II" or "MM"), as a JPEG's APP1 holds it after "Exif\0\0". */
-int32_t rubraview_exif_tiff_orientation(const uint8_t *tiff, size_t size);
+int32_t rubraview_exif_tiff_orientation(proven_mem_view_t tiff_view);
 
 /**
  * What a picture's EXIF says, for the file's information window (owner,
@@ -87,7 +87,7 @@ typedef struct rubraview_iptc_info {
 } rubraview_iptc_info_t;
 
 /** False, with `found` false, when the file holds no IPTC block. */
-bool rubraview_iptc_read(const uint8_t *data, size_t size, rubraview_iptc_info_t *out);
+bool rubraview_iptc_read(proven_mem_view_t data_view, rubraview_iptc_info_t *out);
 
 /**
  * Read the EXIF block of a JPEG (APP1), a TIFF (the file is the block), a
@@ -96,7 +96,7 @@ bool rubraview_iptc_read(const uint8_t *data, size_t size, rubraview_iptc_info_t
  * sub-IFD is followed one level and never back into itself. False, with
  * `found` false, when there is none.
  */
-bool rubraview_exif_read(const uint8_t *data, size_t size, rubraview_exif_info_t *out);
+bool rubraview_exif_read(proven_mem_view_t data_view, rubraview_exif_info_t *out);
 
 typedef struct rubraview_jpeg_strip_result {
     proven_u8str_view_t data;           /* arena-allocated JPEG bytes with the targeted segments removed */
@@ -113,7 +113,7 @@ typedef struct rubraview_jpeg_strip_result {
  * point parsing stopped, with no flags set — never corrupts, only fails
  * to strip.
  */
-rubraview_jpeg_strip_result_t rubraview_jpeg_privacy_strip(proven_arena_t *arena, const uint8_t *jpeg, size_t size);
+rubraview_jpeg_strip_result_t rubraview_jpeg_privacy_strip(proven_arena_t *arena, proven_mem_view_t jpeg_view);
 
 #ifdef __cplusplus
 }

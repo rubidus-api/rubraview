@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/resample.h"
 #include <string.h>
 #include <stdlib.h>
@@ -52,7 +53,7 @@ static void resample_nearest(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *
             int32_t sx = clamp_coord((int32_t)((dx + 0.5f) * scale_x), src->width);
             const uint8_t *spx = src_row + (sx * bpp);
             uint8_t *dpx = dst_row + (dx * bpp);
-            memcpy(dpx, spx, (size_t)bpp);
+            proven_sys_mem_copy(dpx, spx, (size_t)bpp);
         }
     }
 }
@@ -440,7 +441,7 @@ bool rubraview_enlarge_region(const uint8_t *src, int32_t sw, int32_t sh, size_t
                     const uint8_t *p = row + (size_t)index[j] * 4u;
                     for (int c = 0; c < 4; ++c) acc[c] += weight[j] * (float)p[c];
                 }
-                memcpy(out + (size_t)x * 4u, acc, sizeof(acc));
+                proven_sys_mem_copy(out + (size_t)x * 4u, acc, sizeof(acc));
             }
         }
         /* ...then down, and 2. within the four picture pixels around. */
@@ -485,7 +486,7 @@ bool rubraview_enlarge_region(const uint8_t *src, int32_t sw, int32_t sh, size_t
                     const float *p = up + ((size_t)y * (size_t)ww + (size_t)clamp_coord(x + i, ww)) * 4u;
                     for (int c = 0; c < 4; ++c) acc[c] += kernel[i + reach] * p[c];
                 }
-                memcpy(tmp + ((size_t)y * (size_t)ww + (size_t)x) * 4u, acc, sizeof(acc));
+                proven_sys_mem_copy(tmp + ((size_t)y * (size_t)ww + (size_t)x) * 4u, acc, sizeof(acc));
             }
         }
         for (int32_t y = 0; y < wh; ++y) {
@@ -495,7 +496,7 @@ bool rubraview_enlarge_region(const uint8_t *src, int32_t sw, int32_t sh, size_t
                     const float *p = tmp + ((size_t)clamp_coord(y + i, wh) * (size_t)ww + (size_t)x) * 4u;
                     for (int c = 0; c < 4; ++c) acc[c] += kernel[i + reach] * p[c];
                 }
-                memcpy(blur + ((size_t)y * (size_t)ww + (size_t)x) * 4u, acc, sizeof(acc));
+                proven_sys_mem_copy(blur + ((size_t)y * (size_t)ww + (size_t)x) * 4u, acc, sizeof(acc));
             }
         }
         /* ...and the difference added back, within the neighbours' range. */
@@ -522,7 +523,7 @@ bool rubraview_enlarge_region(const uint8_t *src, int32_t sw, int32_t sh, size_t
             }
         }
     }
-    free(xi); free(xw); free(yi); free(yw); free(rows); free(up); free(blur); free(tmp);
+    rubraview_free(xi); rubraview_free(xw); rubraview_free(yi); rubraview_free(yw); rubraview_free(rows); rubraview_free(up); rubraview_free(blur); rubraview_free(tmp);
     return ok;
 }
 
@@ -604,7 +605,7 @@ rubraview_pixbuf_t rubraview_pixbuf_resample_linear(proven_arena_t *arena, const
                 float a = (float)p[3] / 255.0f, wa = w[j] * a;
                 acc[0] += wa * to_lin[p[0]]; acc[1] += wa * to_lin[p[1]]; acc[2] += wa * to_lin[p[2]]; acc[3] += w[j] * a;
             }
-            memcpy(out + (size_t)x * 4u, acc, sizeof(acc));
+            proven_sys_mem_copy(out + (size_t)x * 4u, acc, sizeof(acc));
         }
     }
     /* 2. down, then back to sRGB, alpha divided out */

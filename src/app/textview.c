@@ -134,7 +134,7 @@ void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h) {
             uint32_t link = (text_colour(app, "color_link", 0xFF4A90D9u) & 0x00FFFFFFu) | 0x60000000u;
             for (size_t k = bs; k + 8 < be && n < 10; ++k) {
                 const char *c = t->view.text + k;
-                if (c[0] != 'h' || (memcmp(c, "http://", 7) != 0 && memcmp(c, "https://", 8) != 0)) continue;
+                if (c[0] != 'h' || (proven_sys_mem_cmp(c, "http://", 7) != 0 && proven_sys_mem_cmp(c, "https://", 8) != 0)) continue;
                 size_t e = k;
                 while (e < be && (unsigned char)t->view.text[e] > ' ') ++e;
                 marks[n++] = (rubraview_text_mark_t){ k - bs, e - k, link };
@@ -170,8 +170,8 @@ void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h) {
     if (t->autoscroll) {
         char line[64];
         int n = text_pages_mode(app)
-            ? snprintf(line, sizeof(line), T("auto: a screen every %d s"), (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_page_seconds"))))
-            : snprintf(line, sizeof(line), T("auto %d lines/min"), (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_speed"))));
+            ? rubraview_fmt(line, sizeof(line), T("auto: a screen every {} s"), PROVEN_ARG((int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_page_seconds")))))
+            : rubraview_fmt(line, sizeof(line), T("auto {} lines/min"), PROVEN_ARG((int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_speed")))));
         rubraview_pal_rect_t r = { (double)win_w - 220.0 * dpi, (double)win_h - 30.0 * dpi, 200.0 * dpi, 22.0 * dpi };
         if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n }, r, 13.0 * dpi,
                                                   (ink & 0x00FFFFFFu) | 0x90000000u, RUBRAVIEW_TEXT_RIGHT);
@@ -259,7 +259,7 @@ static void text_speed(app_state_t *app, double factor) {
         if (next > 120.0) next = 120.0;
         rubraview_settings_set(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_page_seconds"), next);
         char line[80];
-        int n = snprintf(line, sizeof(line), T("auto-scroll: a screen every %d s"), (int)next);
+        int n = rubraview_fmt(line, sizeof(line), T("auto-scroll: a screen every {} s"), PROVEN_ARG((int)next));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         return;
     }
@@ -270,7 +270,7 @@ static void text_speed(app_state_t *app, double factor) {
     if (next > 600.0) next = 600.0;
     rubraview_settings_set(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("autoscroll_speed"), next);
     char line[80];
-    int n = snprintf(line, sizeof(line), T("auto-scroll: %d lines a minute"), (int)next);
+    int n = rubraview_fmt(line, sizeof(line), T("auto-scroll: {} lines a minute"), PROVEN_ARG((int)next));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
@@ -278,7 +278,7 @@ static void text_set(app_state_t *app, const char *key, double value, const char
     rubraview_settings_set(&app->settings, PROVEN_LIT("text"), cstr(key), value);
     double now = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), cstr(key));
     char line[80];
-    int n = snprintf(line, sizeof(line), format_text, (int)lround(now));
+    int n = rubraview_fmt(line, sizeof(line), format_text, PROVEN_ARG((int)lround(now)));   /* RV-220: one `{}` */
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
@@ -288,7 +288,7 @@ void text_find_step(app_state_t *app, bool forward) {
     proven_u8str_view_t needle = app->rename_active && app->rename_is_find ? rubraview_textedit_text(&app->rename_edit)
                                                                 : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)t->find, .size = t->find_len };
     if (needle.size == 0) { osd_say(app, TU8("type what to find (Ctrl+F)")); return; }
-    if ((const char *)needle.ptr != t->find && needle.size < sizeof(t->find)) { memcpy(t->find, needle.ptr, needle.size); t->find_len = needle.size; }
+    if ((const char *)needle.ptr != t->find && needle.size < sizeof(t->find)) { proven_sys_mem_copy(t->find, needle.ptr, needle.size); t->find_len = needle.size; }
     size_t from = t->match ? (forward ? t->match_at + 1 : t->match_at)
                            : t->view.paras[t->anchor].start;
     size_t at = 0, len = 0;
@@ -309,7 +309,7 @@ void text_find_step(app_state_t *app, bool forward) {
     text_scroll_to(t, t->tops[i] + top - t->view_h / 3.0);
     size_t which = 0, count = rubraview_text_count(&t->view, needle, at, &which);
     char line[64];
-    int n = snprintf(line, sizeof(line), T("found %zu of %zu"), which, count);
+    int n = rubraview_fmt(line, sizeof(line), T("found {} of {}"), PROVEN_ARG((size_t)which), PROVEN_ARG((size_t)count));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
@@ -331,7 +331,7 @@ void text_encoding_set(app_state_t *app, rubraview_textenc_t next) {
     }
     t->anchor = rubraview_text_view_para_of_source(&t->view, source < t->source_len ? source : 0);
     char line[96];
-    int n = snprintf(line, sizeof(line), T("read as %s (E: the next)"), rubraview_textenc_name(t->enc));
+    int n = rubraview_fmt(line, sizeof(line), T("read as {} (E: the next)"), PROVEN_ARG(rubraview_textenc_name(t->enc)));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     update_window_title(app);
 }
@@ -348,7 +348,7 @@ static void text_encoding_next(app_state_t *app) {
 
 /* The text page's own actions; false for one that is not its. */
 bool text_action(app_state_t *app, proven_u8str_view_t action) {
-    if (action.size < 5 || memcmp(action.ptr, "text_", 5) != 0) return false;
+    if (action.size < 5 || proven_sys_mem_cmp(action.ptr, "text_", 5) != 0) return false;
     text_page_t *t = app->text;
     if (!t || !text_active(app)) { osd_say(app, TU8("for a text file")); return true; }
     double line = text_line_h(app);
@@ -378,10 +378,10 @@ bool text_action(app_state_t *app, proven_u8str_view_t action) {
         text_scroll_to(t, 1e18);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_bigger")) || proven_u8str_view_eq(action, PROVEN_LIT("text_smaller"))) {
         double pt = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("size"));
-        text_set(app, "size", pt + (proven_u8str_view_eq(action, PROVEN_LIT("text_bigger")) ? 1.0 : -1.0), T("text size %d pt"));
+        text_set(app, "size", pt + (proven_u8str_view_eq(action, PROVEN_LIT("text_bigger")) ? 1.0 : -1.0), T("text size {} pt"));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_spacing_more")) || proven_u8str_view_eq(action, PROVEN_LIT("text_spacing_less"))) {
         double pct = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("line_spacing"));
-        text_set(app, "line_spacing", pct + (proven_u8str_view_eq(action, PROVEN_LIT("text_spacing_more")) ? 10.0 : -10.0), T("line spacing %d %%"));
+        text_set(app, "line_spacing", pct + (proven_u8str_view_eq(action, PROVEN_LIT("text_spacing_more")) ? 10.0 : -10.0), T("line spacing {} %"));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_breaks"))) {
         int b = ((int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("breaks"))) + 1) % RUBRAVIEW_TEXT_BREAKS_COUNT;
         rubraview_settings_set(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("breaks"), (double)b);

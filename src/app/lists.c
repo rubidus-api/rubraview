@@ -68,8 +68,8 @@ void listwin_sync(app_state_t *app) {
     app->listwin.tools = app->files_list.tools = true;   /* 1.25.0 */
     size_t count = page_count(app);
     if (app->list_checked_count != count) {
-        free(app->list_checked);
-        app->list_checked = (bool*)calloc(count ? count : 1, sizeof(bool));
+        rubraview_free(app->list_checked);
+        app->list_checked = (bool*)rubraview_alloc_zero(count ? count : 1, sizeof(bool));
         app->list_checked_count = app->list_checked ? count : 0;
     }
 }
@@ -95,7 +95,7 @@ static void list_map_build(app_state_t *app) {
     if (app->list_map_pages == (const void*)app->source.pages && app->list_map_count == count &&
         app->list_map_gen == app->list_view_gen && (app->list_map || count == 0)) return;
     if (app->list_map_cap < count || !app->list_map) {
-        size_t *grown = (size_t*)realloc(app->list_map, (count ? count : 1) * sizeof(size_t));
+        size_t *grown = (size_t*)rubraview_realloc(rubraview_mem_mut(app->list_map, (count ? count : 1) * sizeof(size_t)));
         if (!grown) { app->list_map_n = 0; return; }
         app->list_map = grown;
         app->list_map_cap = count ? count : 1;
@@ -149,8 +149,8 @@ void list_view_changed(app_state_t *app) {
 void list_filter_set(app_state_t *app, proven_u8str_view_t text) {
     size_t keep = text.size < sizeof(app->list_filter) ? text.size : sizeof(app->list_filter) - 1;
     while (keep > 0 && keep < text.size && ((unsigned char)text.ptr[keep] & 0xC0u) == 0x80u) --keep;   /* whole characters */
-    if (keep == strlen(app->list_filter) && memcmp(app->list_filter, text.ptr, keep) == 0) return;
-    memcpy(app->list_filter, text.ptr, keep);
+    if (keep == proven_cstr_len(app->list_filter) && proven_sys_mem_cmp(app->list_filter, text.ptr, keep) == 0) return;
+    proven_sys_mem_copy(app->list_filter, text.ptr, keep);
     app->list_filter[keep] = '\0';
     list_view_changed(app);
 }
@@ -199,8 +199,8 @@ size_t list_checked_total(const app_state_t *app) {
 void list_apply(app_state_t *app, const size_t *order, size_t n, const rubraview_fs_entry_t *added, const char *said) {
     size_t have = page_count(app);
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n ? n : 1, sizeof(rubraview_fs_entry_t));
-    bool *checked = (bool*)calloc(n ? n : 1, sizeof(bool));
-    if (n == 0 || !proven_is_ok(res.err) || !checked) { free(checked); return; }
+    bool *checked = (bool*)rubraview_alloc_zero(n ? n : 1, sizeof(bool));
+    if (n == 0 || !proven_is_ok(res.err) || !checked) { rubraview_free(checked); return; }
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
 
     int32_t at = current_page_index(app);
@@ -227,11 +227,11 @@ void list_apply(app_state_t *app, const size_t *order, size_t n, const rubraview
 
     open_set_ordered(app, entries, n, cstr(said), true, start);
     if (page_count(app) == n) {
-        free(app->list_checked);
+        rubraview_free(app->list_checked);
         app->list_checked = checked;
         app->list_checked_count = n;
     } else {
-        free(checked);
+        rubraview_free(checked);
     }
     app->listwin.first = first;                              /* the rows stay where they were */
     rubraview_listwin_scroll(&app->listwin, 0, page_count(app));
@@ -254,10 +254,10 @@ void list_remove(app_state_t *app, const bool *gone) {
         osd_say(app, TU8("nothing taken out: a list cannot be left empty (uncheck one row)"));
     } else {
         char line[128];
-        snprintf(line, sizeof(line), T("%zu out of the list (%zu in it); the files are where they were"), count - n, n);
+        rubraview_fmt(line, sizeof(line), T("{} out of the list ({} in it); the files are where they were"), PROVEN_ARG((size_t)(count - n)), PROVEN_ARG((size_t)n));
         list_apply(app, order, n, NULL, line);
     }
-    free(order);
+    rubraview_free(order);
 }
 
 /* The rows marked in `moving` go, together, before what is row `to`. */
@@ -266,7 +266,7 @@ static void list_move(app_state_t *app, const bool *moving, size_t to) {
     size_t *order = (size_t*)rubraview_malloc_product((count ? count : 1), sizeof(size_t), 1);
     if (!order) return;
     if (rubraview_list_move(order, count, moving, to)) list_apply(app, order, count, NULL, T("the list's order changed"));
-    free(order);
+    rubraview_free(order);
 }
 
 /* Files from outside go into the list before what is row `to`: those
@@ -276,7 +276,7 @@ void list_insert_paths(app_state_t *app, const proven_u8str_view_t *paths, size_
     if (to > have) to = have;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count ? count : 1, sizeof(rubraview_fs_entry_t));
     size_t *order = (size_t*)rubraview_malloc_product((have + count + 1), sizeof(size_t), 1);
-    if (!proven_is_ok(res.err) || !order) { free(order); return; }
+    if (!proven_is_ok(res.err) || !order) { rubraview_free(order); return; }
     rubraview_fs_entry_t *added = (rubraview_fs_entry_t*)(void*)res.value.ptr;
     size_t n = 0, skipped = 0;
     for (size_t i = 0; i < count; ++i) {
@@ -295,7 +295,7 @@ void list_insert_paths(app_state_t *app, const proven_u8str_view_t *paths, size_
     }
     if (n == 0) {
         osd_say(app, TU8("nothing added: those are in the list already, or not files the viewer opens"));
-        free(order);
+        rubraview_free(order);
         return;
     }
     size_t m = 0;
@@ -303,10 +303,10 @@ void list_insert_paths(app_state_t *app, const proven_u8str_view_t *paths, size_
     for (size_t i = 0; i < n; ++i) order[m++] = SIZE_MAX;
     for (size_t i = to; i < have; ++i) order[m++] = i;
     char line[128];
-    if (skipped > 0) snprintf(line, sizeof(line), T("%zu added at row %zu (%zu left out)"), n, to + 1, skipped);
-    else snprintf(line, sizeof(line), T("%zu added at row %zu"), n, to + 1);
+    if (skipped > 0) rubraview_fmt(line, sizeof(line), T("{} added at row {} ({} left out)"), PROVEN_ARG((size_t)n), PROVEN_ARG((size_t)(to + 1)), PROVEN_ARG((size_t)skipped));
+    else rubraview_fmt(line, sizeof(line), T("{} added at row {}"), PROVEN_ARG((size_t)n), PROVEN_ARG((size_t)(to + 1)));
     list_apply(app, order, m, added, line);
-    free(order);
+    rubraview_free(order);
 }
 
 /* Settings > Files: a saved list names its files from its own folder, or whole. */
@@ -357,8 +357,8 @@ static void list_save(app_state_t *app) {
     }
     char line[160];
     proven_u8str_view_t name = rubraview_path_basename(target);
-    snprintf(line, sizeof(line), T("%zu files in %.*s, %s paths"), count, (int)(name.size < 80 ? name.size : 80), name.ptr,
-             whole ? T("whole") : T("relative"));
+    rubraview_fmt(line, sizeof(line), T("{} files in {}, {} paths"), PROVEN_ARG((size_t)count), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 80 ? name.size : 80))),
+             PROVEN_ARG(whole ? T("whole") : T("relative")));
     osd_say(app, cstr(line));
 }
 
@@ -400,12 +400,11 @@ void list_delete_row(app_state_t *app, size_t row, rubraview_window_t *owner) {
     char path[1024];
     proven_u8str_view_t from = app->source.pages[row].path;
     if (from.size == 0 || from.size >= sizeof(path)) return;
-    memcpy(path, from.ptr, from.size);                       /* the list it points into is made again below */
+    proven_sys_mem_copy(path, from.ptr, from.size);                       /* the list it points into is made again below */
     path[from.size] = '\0';
     proven_u8str_view_t name = rubraview_path_basename((proven_u8str_view_t){ .ptr = (const proven_byte_t *)path, .size = from.size });
     char text[1400];
-    int n = snprintf(text, sizeof(text), T("Move this file to the recycle bin?\n\n%.*s\n\nIt leaves the list and its folder; "
-                     "the recycle bin can give it back."), (int)(name.size < 600 ? name.size : 600), name.ptr);
+    int n = rubraview_fmt(text, sizeof(text), T("Move this file to the recycle bin?\n\n{}\n\nIt leaves the list and its folder; the recycle bin can give it back."), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 600 ? name.size : 600))));
     WCHAR wide[1500];
     if (n <= 0 || MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, 1500) <= 0) return;
     int answer = MessageBoxW((HWND)rubraview_pal_window_native_handle(owner), wide, L"Rubraview - delete a file",
@@ -420,15 +419,15 @@ void list_delete_row(app_state_t *app, size_t row, rubraview_window_t *owner) {
     if (page_count(app) <= 1) {
         reopen_after_removal(app, 0);
     } else {
-        bool *one = (bool*)calloc(page_count(app), sizeof(bool));
+        bool *one = (bool*)rubraview_alloc_zero(page_count(app), sizeof(bool));
         if (one) {
             one[row < page_count(app) ? row : page_count(app) - 1] = true;
             list_remove(app, one);
-            free(one);
+            rubraview_free(one);
         }
     }
     char line[700];
-    int m = snprintf(line, sizeof(line), T("moved to the recycle bin: %.*s"), (int)(name.size < 600 ? name.size : 600), name.ptr);
+    int m = rubraview_fmt(line, sizeof(line), T("moved to the recycle bin: {}"), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 600 ? name.size : 600))));
     if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)m < sizeof(line) ? (size_t)m : sizeof(line) - 1 });
 }
 
@@ -493,7 +492,7 @@ bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, double y, b
         case RUBRAVIEW_LISTWIN_ROW_REMOVE:
         case RUBRAVIEW_LISTWIN_ROW_UP:
         case RUBRAVIEW_LISTWIN_ROW_DOWN:
-            one = (bool*)calloc(count ? count : 1, sizeof(bool));
+            one = (bool*)rubraview_alloc_zero(count ? count : 1, sizeof(bool));
             if (!one || index >= count) break;
             one[index] = true;
             if (part == RUBRAVIEW_LISTWIN_ROW_REMOVE) list_remove(app, one);
@@ -525,7 +524,7 @@ bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, double y, b
         }
         default: break;
     }
-    free(one);
+    rubraview_free(one);
     if (in_files) app->files_dirty = true;
     return true;
 }
@@ -579,12 +578,12 @@ bool listwin_release(app_state_t *app) {
     }
     app->list_row_dragging = false;
     /* A checked row carries every checked row with it; an unchecked one goes alone. */
-    bool *moving = (bool*)calloc(count, sizeof(bool));
+    bool *moving = (bool*)rubraview_alloc_zero(count, sizeof(bool));
     if (!moving) return held;
-    if (row < app->list_checked_count && app->list_checked[row]) memcpy(moving, app->list_checked, count * sizeof(bool));
+    if (row < app->list_checked_count && app->list_checked[row]) proven_sys_mem_copy(moving, app->list_checked, count * sizeof(bool));
     else moving[row] = true;
     list_move(app, moving, app->list_drop_at);
-    free(moving);
+    rubraview_free(moving);
     return held;
 }
 
@@ -641,10 +640,10 @@ static size_t recentwin_checked(const app_state_t *app) {
 
 /* "3.4 MB", "820 KB", "512 B" */
 static void recent_size_text(char *b, size_t cap, uint64_t bytes) {
-    if (bytes >= 1024ull * 1024ull * 1024ull) snprintf(b, cap, "%.1f GB", (double)bytes / (1024.0 * 1024.0 * 1024.0));
-    else if (bytes >= 1024ull * 1024ull) snprintf(b, cap, "%.1f MB", (double)bytes / (1024.0 * 1024.0));
-    else if (bytes >= 1024ull) snprintf(b, cap, "%.0f KB", (double)bytes / 1024.0);
-    else snprintf(b, cap, "%llu B", (unsigned long long)bytes);
+    if (bytes >= 1024ull * 1024ull * 1024ull) rubraview_fmt(b, cap, "{:.1} GB", PROVEN_ARG((double)bytes / (1024.0 * 1024.0 * 1024.0)));
+    else if (bytes >= 1024ull * 1024ull) rubraview_fmt(b, cap, "{:.1} MB", PROVEN_ARG((double)bytes / (1024.0 * 1024.0)));
+    else if (bytes >= 1024ull) rubraview_fmt(b, cap, "{:.0} KB", PROVEN_ARG((double)bytes / 1024.0));
+    else rubraview_fmt(b, cap, "{} B", PROVEN_ARG((unsigned long long)bytes));
 }
 
 /* 1.25.0: in its place's face (Settings › General) */
@@ -666,7 +665,7 @@ static void draw_recentwin_in(app_state_t *app, double win_w, double win_h) {
     rubraview_pal_render_fill_rect(rr, body, (COLOR_BOX_FILL & 0x00FFFFFFu) | 0xF0000000u, 4.0);
     rubraview_pal_render_stroke_rect(rr, body, COLOR_BOX_BORDER, 1.0, 4.0);
     char title[96];
-    int n = snprintf(title, sizeof(title), T("Recent files   %zu"), count);
+    int n = rubraview_fmt(title, sizeof(title), T("Recent files   {}"), PROVEN_ARG((size_t)count));
     rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, rubraview_listwin_title_text_right(lw) - lw->x - lw->row_height * 0.4, lw->title_height };
     if (n > 0) rubraview_pal_render_draw_text(rr, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
@@ -680,7 +679,7 @@ static void draw_recentwin_in(app_state_t *app, double win_w, double win_h) {
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
     size_t checked = recentwin_checked(app);
     char del[48];
-    if (checked > 0) snprintf(del, sizeof(del), T("Remove (%zu)"), checked); else snprintf(del, sizeof(del), "%s", T("Remove"));
+    if (checked > 0) rubraview_fmt(del, sizeof(del), T("Remove ({})"), PROVEN_ARG((size_t)checked)); else rubraview_fmt(del, sizeof(del), "{}", PROVEN_ARG(T("Remove")));
     list_check_mark(rr, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ALL), count > 0 && checked == count, checked > 0);
     list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_DEL), del, small, false,
                 checked > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
@@ -710,7 +709,7 @@ static void draw_recentwin_in(app_state_t *app, double win_w, double win_h) {
         proven_u8str_view_t name = rubraview_path_basename(row->path), dir = rubraview_path_dirname(row->path);
         info_local_time(when, sizeof(when), row->opened);
         when[16] = '\0';   /* to the minute */
-        if (row->there) recent_size_text(size, sizeof(size), row->size); else snprintf(size, sizeof(size), "%s", T("gone"));
+        if (row->there) recent_size_text(size, sizeof(size), row->size); else rubraview_fmt(size, sizeof(size), "{}", PROVEN_ARG(T("gone")));
         double x = text_x;
         rubraview_pal_rect_t c1 = { x, rect.y, c_name - small, rect.height };
         rubraview_pal_render_draw_text(rr, files_fit_text(fit, sizeof(fit), name, c1.width, small), c1, small, ink, RUBRAVIEW_TEXT_LEFT);
@@ -888,7 +887,7 @@ static void draw_favwin_in(app_state_t *app, double win_w, double win_h) {
     rubraview_pal_render_fill_rect(rr, body, (COLOR_BOX_FILL & 0x00FFFFFFu) | 0xF0000000u, 4.0);
     rubraview_pal_render_stroke_rect(rr, body, COLOR_BOX_BORDER, 1.0, 4.0);
     char title[96];
-    int n = snprintf(title, sizeof(title), T("Favourites   %zu"), count);
+    int n = rubraview_fmt(title, sizeof(title), T("Favourites   {}"), PROVEN_ARG((size_t)count));
     rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, rubraview_listwin_title_text_right(lw) - lw->x - lw->row_height * 0.4, lw->title_height };
     if (n > 0) rubraview_pal_render_draw_text(rr, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
@@ -901,7 +900,7 @@ static void draw_favwin_in(app_state_t *app, double win_w, double win_h) {
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
     size_t checked = favwin_checked(app);
     char del[48];
-    if (checked > 0) snprintf(del, sizeof(del), T("Remove (%zu)"), checked); else snprintf(del, sizeof(del), "%s", T("Remove"));
+    if (checked > 0) rubraview_fmt(del, sizeof(del), T("Remove ({})"), PROVEN_ARG((size_t)checked)); else rubraview_fmt(del, sizeof(del), "{}", PROVEN_ARG(T("Remove")));
     list_check_mark(rr, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ALL), count > 0 && checked == count, checked > 0);
     proven_u8str_view_t here = current_file_path(app);
     list_button(rr, app->pointer_x, app->pointer_y, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ADD), T("Add this file"), small, false,
@@ -1173,9 +1172,9 @@ void files_preview_step(app_state_t *app, double now) {
     if (bytes.ok) {
         loaded = bytes.from_disk
             ? rubraview_pal_image_load_texture(app->files_renderer, app->source.pages[page].path, true)
-            : rubraview_pal_image_load_texture_from_memory(app->files_renderer, (const uint8_t*)bytes.data.ptr, bytes.data.size, true);
+            : rubraview_pal_image_load_texture_from_memory(app->files_renderer, rubraview_mem_view((const uint8_t*)bytes.data.ptr, bytes.data.size), true);
     }
-    free(mem);
+    rubraview_free(mem);
     if (!loaded.ok || !loaded.texture) { app->files_preview_state = FILES_PREVIEW_FAILED; return; }
     app->files_preview = loaded.texture;
     app->files_preview_w = loaded.full_width > 0 ? loaded.full_width : loaded.width;
@@ -1185,10 +1184,10 @@ void files_preview_step(app_state_t *app, double now) {
 
 /* "1.2 MB": a size short enough for a row. */
 int files_size_text(char *buf, size_t cap, uint64_t bytes) {
-    if (bytes < 1024u) return snprintf(buf, cap, "%u B", (unsigned)bytes);
-    if (bytes < 1024u * 1024u) return snprintf(buf, cap, T("%.0f KB"), (double)bytes / 1024.0);
-    if (bytes < 1024ull * 1024ull * 1024ull) return snprintf(buf, cap, T("%.1f MB"), (double)bytes / (1024.0 * 1024.0));
-    return snprintf(buf, cap, T("%.2f GB"), (double)bytes / (1024.0 * 1024.0 * 1024.0));
+    if (bytes < 1024u) return rubraview_fmt(buf, cap, "{} B", PROVEN_ARG((unsigned)bytes));
+    if (bytes < 1024u * 1024u) return rubraview_fmt(buf, cap, T("{:.0} KB"), PROVEN_ARG((double)bytes / 1024.0));
+    if (bytes < 1024ull * 1024ull * 1024ull) return rubraview_fmt(buf, cap, T("{:.1} MB"), PROVEN_ARG((double)bytes / (1024.0 * 1024.0)));
+    return rubraview_fmt(buf, cap, T("{:.2} GB"), PROVEN_ARG((double)bytes / (1024.0 * 1024.0 * 1024.0)));
 }
 
 /* As much of `text` as about fits `width` at `size`, cut at a whole
@@ -1212,7 +1211,7 @@ proven_u8str_view_t files_fit_text(char *buf, size_t cap, proven_u8str_view_t te
         at = prev;
     }
     if (at + 4 > cap) at = cap > 4 ? cap - 4 : 0;
-    memcpy(buf, text.ptr, at);
-    memcpy(buf + at, "...", 3);
+    proven_sys_mem_copy(buf, text.ptr, at);
+    proven_sys_mem_copy(buf + at, "...", 3);
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = at + 3 };
 }

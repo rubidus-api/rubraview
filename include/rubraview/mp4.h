@@ -65,11 +65,11 @@ typedef struct rubraview_mp4 {
  * Read an MP4's head: its tracks and their tables. False, with a reason,
  * when it is not one, is fragmented, or its `moov` cannot be read.
  */
-bool rubraview_mp4_open(rubraview_mp4_t *mp4, const uint8_t *data, uint64_t size, const char **out_why);
+bool rubraview_mp4_open(rubraview_mp4_t *mp4, proven_mem_view_t data_view, const char **out_why);
 
 /* RV-210: a `moov` box alone (its bytes, from its header), for its facts: a fragmented file's is read
    too, its length from `mvex/mehd` when `mvhd` gives none. The sample walk is not for such an open. */
-bool rubraview_mp4_open_moov(rubraview_mp4_t *mp4, const uint8_t *moov, uint64_t size);
+bool rubraview_mp4_open_moov(rubraview_mp4_t *mp4, proven_mem_view_t moov_view);
 
 /**
  * RV-202: the first video track's size as it is shown (its matrix's quarter turn applied) and the
@@ -163,7 +163,7 @@ typedef struct rubraview_mp4_check {
     const char     *why;
 } rubraview_mp4_check_t;
 
-bool rubraview_mp4_check_begin(rubraview_mp4_check_t *check, const rubraview_mp4_put_t *put, const uint8_t *made, uint64_t made_size);
+bool rubraview_mp4_check_begin(rubraview_mp4_check_t *check, const rubraview_mp4_put_t *put, proven_mem_view_t made_view);
 int rubraview_mp4_check_step(rubraview_mp4_check_t *check, const rubraview_mp4_put_t *put, const uint8_t *made, size_t budget);
 
 #ifdef __cplusplus

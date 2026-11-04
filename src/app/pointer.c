@@ -219,7 +219,7 @@ bool handle_chrome_click(app_state_t *app, double x, double y) {
         /* A dimmed item does nothing, as a dimmed toolbox tile does. */
         bool enabled = true;
         char scratch[64];
-        (void)menu_tile_caption(&app->menu, tile, scratch, sizeof(scratch), &enabled, NULL);
+        (void)menu_tile_caption(&app->menu, tile, rubraview_mem_mut(scratch, sizeof(scratch)), &enabled, NULL);
         if (!enabled) return true;
         /* Delete asks first (owner, 2026-09-21): the first tap arms it and
            its tile says "Delete?"; a second tap on it within five seconds

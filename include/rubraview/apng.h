@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "rubraview/core.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -46,14 +47,14 @@ typedef struct rubraview_apng {
 } rubraview_apng_t;
 
 /** True for the eight bytes every PNG begins with. */
-bool rubraview_apng_is_png(const uint8_t *data, size_t size);
+bool rubraview_apng_is_png(proven_mem_view_t data_view);
 
 /**
  * Walk the file. False when it is not an animated PNG — an ordinary PNG, a
  * file cut off before any frame, or something else — and then nothing is
  * allocated. A file cut off part-way keeps the frames that are whole.
  */
-bool rubraview_apng_parse(const uint8_t *data, size_t size, rubraview_apng_t *out);
+bool rubraview_apng_parse(proven_mem_view_t data_view, rubraview_apng_t *out);
 
 void rubraview_apng_free(rubraview_apng_t *apng);
 

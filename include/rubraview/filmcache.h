@@ -60,7 +60,7 @@ size_t rubraview_filmcache_map_text(const rubraview_filmcache_map_t *map, proven
 
 /* The map read from `text`, when it is of `path` (as rubraview_path_same
    compares), `size` and `time`; false otherwise, and `map` left empty. */
-bool rubraview_filmcache_map_parse(rubraview_filmcache_map_t *map, const char *text, size_t len,
+bool rubraview_filmcache_map_parse(rubraview_filmcache_map_t *map, proven_u8str_view_t text_view,
                                    proven_u8str_view_t path, uint64_t size, int64_t time);
 
 /* A copy in the cache's folder, for the limit. */

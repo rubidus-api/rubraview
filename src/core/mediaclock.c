@@ -26,6 +26,18 @@ rubraview_frame_decision_t rubraview_media_schedule_at(double frame_pts, double 
     return rubraview_media_schedule(frame_pts, frame_duration, clock_seconds + ahead_seconds);
 }
 
+rubraview_frame_decision_t rubraview_media_schedule_blend(double frame_pts, double frame_duration, double display_at,
+                                                           double period, double *prev_weight) {
+    if (prev_weight) *prev_weight = 0.0;
+    if (!(frame_duration > 0.0)) frame_duration = FALLBACK_FRAME_SECONDS;
+    if (!(period > 0.0 && period < 0.1)) return rubraview_media_schedule(frame_pts, frame_duration, display_at);
+    if (frame_pts + frame_duration <= display_at) return RUBRAVIEW_FRAME_DROP;
+    if (frame_pts >= display_at + period) return RUBRAVIEW_FRAME_WAIT;
+    double w = (frame_pts - display_at) / period;
+    if (prev_weight) *prev_weight = w > 0.0 ? (w < 1.0 ? w : 1.0) : 0.0;
+    return RUBRAVIEW_FRAME_SHOW;
+}
+
 double rubraview_media_display_resample(double frame_rate, double refresh_hz, double max_change) {
     if (!(frame_rate > 1.0 && frame_rate < 400.0) || !(refresh_hz > 10.0 && refresh_hz < 1000.0) || !(max_change > 0.0)) return 1.0;
     double ratio = refresh_hz / frame_rate;

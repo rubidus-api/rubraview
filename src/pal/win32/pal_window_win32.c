@@ -1,4 +1,6 @@
 #ifdef _WIN32
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include <windows.h>
 #include <math.h>
 #include <limits.h>
@@ -250,9 +252,9 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
             if (data->dwData == IPC_REQUEST) {
                 /* D-86: a verb and its files, kept until the viewer asks. */
-                char *copy = g_request_count < IPC_REQUEST_MAX ? (char*)malloc(data->cbData) : NULL;
+                char *copy = g_request_count < IPC_REQUEST_MAX ? (char*)rubraview_alloc(data->cbData) : NULL;
                 if (copy) {
-                    memcpy(copy, data->lpData, data->cbData);
+                    proven_sys_mem_copy(copy, data->lpData, data->cbData);
                     g_requests[g_request_count] = copy;
                     g_request_sizes[g_request_count++] = data->cbData;
                 }
@@ -261,12 +263,12 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
 
             size_t length = data->cbData;
             if (length >= sizeof(w->drop_storage[0])) length = sizeof(w->drop_storage[0]) - 1;
-            memcpy(w->drop_storage[0], data->lpData, length);
+            proven_sys_mem_copy(w->drop_storage[0], data->lpData, length);
             w->drop_storage[0][length] = '\0';
 
             rubraview_window_event_t event = { .kind = RUBRAVIEW_WINDOW_EVENT_OPEN_REQUEST };
             event.drop.paths[0] = w->drop_storage[0];
-            event.drop.path_lengths[0] = strlen(w->drop_storage[0]);
+            event.drop.path_lengths[0] = proven_cstr_len(w->drop_storage[0]);
             event.drop.count = 1;
             queue_push(w, event);
 
@@ -394,7 +396,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             if (name) {
                 rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_KEY_DOWN };
                 e.key.combo.modifiers = current_modifiers();
-                e.key.combo.key_name = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = strlen(name) };
+                e.key.combo.key_name = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = proven_cstr_len(name) };
                 queue_push(w, e);
             }
             if (msg == WM_SYSKEYDOWN) break; /* let Alt+F4 and friends reach DefWindowProc */
@@ -677,7 +679,7 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
     proven_result_mem_mut_t res = proven_arena_alloc(arena, sizeof(struct rubraview_window));
     if (!proven_is_ok(res.err)) return NULL;
     struct rubraview_window *w = (struct rubraview_window*)(void*)res.value.ptr;
-    memset(w, 0, sizeof(*w));
+    proven_sys_mem_set(w, 0, sizeof(*w));
     w->frameless = config->frameless && !config->owner;
     w->owned = config->owner != NULL;
     w->tool = config->tool_window;
@@ -717,7 +719,7 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
     WCHAR wide_title[256];
     const char *title = config->title ? config->title : "Rubraview";
     if (MultiByteToWideChar(CP_UTF8, 0, title, -1, wide_title, 256) <= 0) {
-        wcscpy(wide_title, L"Rubraview");
+        rubraview_wcopy_a(wide_title, L"Rubraview");
     }
 
     HWND hwnd = CreateWindowExW(ex_style, RUBRAVIEW_WINDOW_CLASS, wide_title, style,
@@ -841,7 +843,7 @@ static ULONG STDMETHODCALLTYPE dt_add_ref(IDropTarget *self) {
 
 static ULONG STDMETHODCALLTYPE dt_release(IDropTarget *self) {
     LONG left = InterlockedDecrement(&((rv_drop_target_t*)self)->refs);
-    if (left == 0) free(self);
+    if (left == 0) rubraview_free(self);
     return (ULONG)left;
 }
 
@@ -895,7 +897,7 @@ static bool drop_root(WCHAR *out, size_t cap) {
     WCHAR temp[MAX_PATH];
     DWORD n = GetTempPathW(MAX_PATH, temp);
     if (n == 0 || n >= MAX_PATH) return false;
-    int written = _snwprintf(out, cap, L"%lsrubraview-drop-%lu", temp, (unsigned long)GetCurrentProcessId());
+    int written = rubraview_wfmt(out, cap, "{}rubraview-drop-{}", PROVEN_ARG(rubraview_wide_view(temp)), PROVEN_ARG((unsigned long)((unsigned long)GetCurrentProcessId())));
     return written > 0 && (size_t)written < cap;
 }
 
@@ -945,7 +947,7 @@ static void drop_take_virtual(struct rubraview_window *w, IDataObject *data, rub
     if (group && drop_root(root, MAX_PATH)) {
         /* A folder per drop, so two pictures both called image.jpg stay two. */
         w->drop_serial++;
-        int n = _snwprintf(folder, MAX_PATH, L"%ls\\%u", root, w->drop_serial);
+        int n = rubraview_wfmt(folder, MAX_PATH, "{}\\{}", PROVEN_ARG(rubraview_wide_view(root)), PROVEN_ARG((unsigned)(w->drop_serial)));
         if (n > 0 && n < MAX_PATH) {
             CreateDirectoryW(root, NULL);
             CreateDirectoryW(folder, NULL);
@@ -958,7 +960,7 @@ static void drop_take_virtual(struct rubraview_window *w, IDataObject *data, rub
                 proven_u8str_view_t name = rubraview_path_safe_name(safe, sizeof(safe), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)raw, .size = (size_t)(len - 1) });
                 WCHAR wide_name[MAX_PATH], path[MAX_PATH * 2];
                 if (MultiByteToWideChar(CP_UTF8, 0, (const char *)name.ptr, -1, wide_name, MAX_PATH) <= 0) continue;
-                int m = _snwprintf(path, MAX_PATH * 2, L"%ls\\%ls", folder, wide_name);
+                int m = rubraview_wfmt(path, MAX_PATH * 2, "{}\\{}", PROVEN_ARG(rubraview_wide_view(folder)), PROVEN_ARG(rubraview_wide_view(wide_name)));
                 if (m <= 0 || m >= MAX_PATH * 2) continue;
                 if (drop_write_contents(data, (LONG)i, path)) drop_event_add_wide(w, event, path);
             }
@@ -1000,7 +1002,7 @@ static IDropTargetVtbl g_drop_target_vtbl = {
 static void drop_remove_temp(void) {
     WCHAR root[MAX_PATH + 2];
     if (!drop_root(root, MAX_PATH)) return;
-    size_t n = wcslen(root);
+    size_t n = rubraview_wlen(root);
     root[n + 1] = L'\0';   /* SHFileOperation wants a double terminator */
     if (GetFileAttributesW(root) == INVALID_FILE_ATTRIBUTES) return;
     SHFILEOPSTRUCTW op = {0};
@@ -1088,7 +1090,7 @@ bool rubraview_pal_clipboard_set_image(rubraview_window_t *window, const uint8_t
     BITMAPINFOHEADER header = { .biSize = sizeof(BITMAPINFOHEADER), .biWidth = width, .biHeight = height,
                                 .biPlanes = 1, .biBitCount = 24, .biCompression = BI_RGB,
                                 .biSizeImage = (DWORD)(row * (size_t)height) };
-    memcpy(dib, &header, sizeof(header));
+    proven_sys_mem_copy(dib, &header, sizeof(header));
     for (int32_t y = 0; y < height; ++y) {
         const uint8_t *src = bgra + (size_t)(height - 1 - y) * stride;
         uint8_t *dst = dib + sizeof(header) + (size_t)y * row;
@@ -1294,7 +1296,9 @@ bool rubraview_pal_window_is_fullscreen(const rubraview_window_t *window) {
     return window ? window->fullscreen : false;
 }
 
-bool rubraview_pal_app_icon_bgra(uint8_t *out, int32_t size) {
+bool rubraview_pal_app_icon_bgra(proven_mem_mut_t out_view) {
+    uint8_t *out = (uint8_t *)out_view.ptr;
+    int32_t size = (int32_t)out_view.size;
     if (!out || size <= 0 || size > 1024) return false;
     HICON icon = (HICON)LoadImageW(GetModuleHandleW(NULL), MAKEINTRESOURCEW(1), IMAGE_ICON, size, size, LR_DEFAULTCOLOR);
     if (!icon) return false;
@@ -1427,7 +1431,7 @@ bool rubraview_pal_instance_hand_over(proven_u8str_view_t path) {
 
     char buffer[1024];
     size_t length = path.size < sizeof(buffer) - 1 ? path.size : sizeof(buffer) - 1;
-    memcpy(buffer, path.ptr, length);
+    proven_sys_mem_copy(buffer, path.ptr, length);
     buffer[length] = '\0';
 
     COPYDATASTRUCT data = {
@@ -1444,7 +1448,7 @@ static BOOL CALLBACK config_tell_one(HWND hwnd, LPARAM lparam) {
     DWORD process = 0;
     GetWindowThreadProcessId(hwnd, &process);
     if (process == GetCurrentProcessId()) return TRUE;
-    if (GetClassNameW(hwnd, name, 64) > 0 && wcscmp(name, RUBRAVIEW_WINDOW_CLASS) == 0) {
+    if (GetClassNameW(hwnd, name, 64) > 0 && rubraview_wcmp(name, RUBRAVIEW_WINDOW_CLASS) == 0) {
         PostMessageW(hwnd, IPC_CONFIG_CHANGED, (WPARAM)lparam, 0);
     }
     return TRUE;
@@ -1460,7 +1464,9 @@ int rubraview_pal_instance_take_config_changed(void) {
     return changed;
 }
 
-bool rubraview_pal_instance_send_request(const char *blob, size_t len, uint32_t wait_ms) {
+bool rubraview_pal_instance_send_request(proven_u8str_view_t blob_view, uint32_t wait_ms) {
+    const char *blob = (const char *)blob_view.ptr;
+    size_t len = (size_t)blob_view.size;
     if (!blob || len == 0 || len > 0x7FFFFFFFu) return false;
     HWND target = NULL;
     for (uint32_t waited = 0;; waited += 100) {
@@ -1486,8 +1492,8 @@ bool rubraview_pal_instance_take_request(char **out_blob, size_t *out_len) {
     *out_blob = g_requests[0];
     *out_len = g_request_sizes[0];
     g_request_count--;
-    memmove(g_requests, g_requests + 1, g_request_count * sizeof(g_requests[0]));
-    memmove(g_request_sizes, g_request_sizes + 1, g_request_count * sizeof(g_request_sizes[0]));
+    proven_sys_mem_move(g_requests, g_requests + 1, g_request_count * sizeof(g_requests[0]));
+    proven_sys_mem_move(g_request_sizes, g_request_sizes + 1, g_request_count * sizeof(g_request_sizes[0]));
     return true;
 }
 
@@ -1539,7 +1545,7 @@ void rubraview_pal_window_accept_drops(rubraview_window_t *window, bool accept) 
        well as Explorer. It needs OLE on this thread (the main thread's
        apartment is already single-threaded, so this only adds OLE). When
        it cannot be had, WM_DROPFILES still takes files from Explorer. */
-    rv_drop_target_t *t = (rv_drop_target_t*)calloc(1, sizeof(*t));
+    rv_drop_target_t *t = (rv_drop_target_t*)rubraview_alloc_zero(1, sizeof(*t));
     if (t && SUCCEEDED(OleInitialize(NULL))) {
         t->iface.lpVtbl = &g_drop_target_vtbl;
         t->refs = 1;
@@ -1549,7 +1555,7 @@ void rubraview_pal_window_accept_drops(rubraview_window_t *window, bool accept) 
             return;
         }
     }
-    free(t);
+    rubraview_free(t);
     DragAcceptFiles(window->hwnd, TRUE);
 }
 
@@ -1562,7 +1568,7 @@ static bool write_key(HKEY root, const WCHAR *subkey, const WCHAR *value_name, c
         return false;
     }
     LONG result = RegSetValueExW(key, value_name, 0, REG_SZ, (const BYTE*)value,
-                                 (DWORD)((wcslen(value) + 1) * sizeof(WCHAR)));
+                                 (DWORD)((rubraview_wlen(value) + 1) * sizeof(WCHAR)));
     RegCloseKey(key);
     return result == ERROR_SUCCESS;
 }
@@ -1580,7 +1586,7 @@ static bool for_each_extension(proven_u8str_view_t list, bool (*each)(const WCHA
         if (length == 0 || length > 16) { start = i + 1; continue; }
 
         char narrow[32];
-        memcpy(narrow, list.ptr + start, length);
+        proven_sys_mem_copy(narrow, list.ptr + start, length);
         narrow[length] = '\0';
 
         WCHAR ext[64];
@@ -1588,8 +1594,8 @@ static bool for_each_extension(proven_u8str_view_t list, bool (*each)(const WCHA
         ext[0] = L'.';
         int written = MultiByteToWideChar(CP_UTF8, 0, narrow, -1, ext + 1, 62);
         if (written > 0) {
-            wcscpy(progid, L"Rubraview.");
-            wcscat(progid, ext + 1);
+            rubraview_wcopy_a(progid, L"Rubraview.");
+            rubraview_wcat_a(progid, ext + 1);
             if (!each(ext, progid)) all_ok = false;
         }
         start = i + 1;
@@ -1640,13 +1646,13 @@ static int icon_for_ext(const WCHAR *ext) {
         { 6, L".mp3.flac.wav.ogg.oga.opus.m4a.aac.wma.ape.wv.mka.aiff.aif." },   /* RV-189 */
     };
     WCHAR probe[72];
-    size_t n = wcslen(ext);
+    size_t n = rubraview_wlen(ext);
     if (n == 0 || n + 2 > sizeof(probe) / sizeof(probe[0])) return 1;
-    for (size_t i = 0; i < n; ++i) probe[i] = (WCHAR)towlower(ext[i]);
+    for (size_t i = 0; i < n; ++i) probe[i] = (WCHAR)rubraview_wascii_lower(ext[i]);
     probe[n] = L'.';
     probe[n + 1] = 0;
     for (size_t k = 0; k < sizeof(KINDS) / sizeof(KINDS[0]); ++k)
-        if (wcsstr(KINDS[k].list, probe)) return KINDS[k].id;
+        if (rubraview_wstr(KINDS[k].list, probe)) return KINDS[k].id;
     return 1;
 }
 
@@ -1655,15 +1661,15 @@ static bool register_one(const WCHAR *ext, const WCHAR *progid) {
     if (GetModuleFileNameW(NULL, exe, (DWORD)(sizeof(exe) / sizeof(exe[0]))) == 0) return false;
 
     WCHAR command[MAX_PATH * 3];
-    wcscpy(command, L"\"");
-    wcscat(command, exe);
-    wcscat(command, L"\" \"%1\"");
+    rubraview_wcopy_a(command, L"\"");
+    rubraview_wcat_a(command, exe);
+    rubraview_wcat_a(command, L"\" \"%1\"");
 
     WCHAR subkey[256];
 
-    wcscpy(subkey, L"Software\\Classes\\");
-    wcscat(subkey, progid);
-    wcscat(subkey, L"\\shell\\open\\command");
+    rubraview_wcopy_a(subkey, L"Software\\Classes\\");
+    rubraview_wcat_a(subkey, progid);
+    rubraview_wcat_a(subkey, L"\\shell\\open\\command");
     if (!write_key(g_shell_root, subkey, NULL, command)) return false;
 
     /* D-255 (owner, 2026-11-02: "파일 형식은 철저하게 영어로"): the type named in English, "JPG Picture"; with no name
@@ -1674,29 +1680,29 @@ static bool register_one(const WCHAR *ext, const WCHAR *progid) {
         int n = WideCharToMultiByte(CP_UTF8, 0, ext, -1, narrow, (int)sizeof narrow, NULL, NULL);
         if (n > 1 && rubraview_shell_type_name(proven_u8str_view_from_bytes(narrow, (size_t)n - 1), name, sizeof name) > 0 &&
             MultiByteToWideChar(CP_UTF8, 0, name, -1, wide, 64) > 0) {
-            wcscpy(subkey, L"Software\\Classes\\");
-            wcscat(subkey, progid);
+            rubraview_wcopy_a(subkey, L"Software\\Classes\\");
+            rubraview_wcat_a(subkey, progid);
             write_key(g_shell_root, subkey, NULL, wide);
             write_key(g_shell_root, subkey, L"FriendlyTypeName", wide);
         }
     }
 
-    wcscpy(subkey, L"Software\\Classes\\");
-    wcscat(subkey, progid);
-    wcscat(subkey, L"\\DefaultIcon");
+    rubraview_wcopy_a(subkey, L"Software\\Classes\\");
+    rubraview_wcat_a(subkey, progid);
+    rubraview_wcat_a(subkey, L"\\DefaultIcon");
     WCHAR icon[MAX_PATH * 2 + 8];
-    wcscpy(icon, exe);
+    rubraview_wcopy_a(icon, exe);
     int id = icon_for_ext(ext);
-    wcscat(icon, id == 2 ? L",-2" : id == 3 ? L",-3" : id == 4 ? L",-4" : id == 5 ? L",-5" : id == 6 ? L",-6" : L",0");
+    rubraview_wcat_a(icon, id == 2 ? L",-2" : id == 3 ? L",-3" : id == 4 ? L",-4" : id == 5 ? L",-5" : id == 6 ? L",-6" : L",0");
     write_key(g_shell_root, subkey, NULL, icon);
 
     /* RV-191: the same icon on the extension itself. While another program also offers to open the type (Photos for
        .jxl, System Information for .nfo) and the reader has chosen none, Explorer takes no program's icon and shows a
        blank one; the extension's own DefaultIcon is what it shows then. A chosen program's icon still comes first.
        One another program put there is left alone. */
-    wcscpy(subkey, L"Software\\Classes\\");
-    wcscat(subkey, ext);
-    wcscat(subkey, L"\\DefaultIcon");
+    rubraview_wcopy_a(subkey, L"Software\\Classes\\");
+    rubraview_wcat_a(subkey, ext);
+    rubraview_wcat_a(subkey, L"\\DefaultIcon");
     WCHAR held[MAX_PATH * 2 + 8];
     HKEY mine = NULL;
     bool ours = RegOpenKeyExW(g_shell_root, subkey, 0, KEY_READ, &mine) == ERROR_SUCCESS &&
@@ -1709,20 +1715,20 @@ static bool register_one(const WCHAR *ext, const WCHAR *progid) {
 
     /* Also among the programs "Open with" offers for the type, whoever
        its default is. */
-    wcscpy(subkey, L"Software\\Classes\\");
-    wcscat(subkey, ext);
-    wcscat(subkey, L"\\OpenWithProgids");
+    rubraview_wcopy_a(subkey, L"Software\\Classes\\");
+    rubraview_wcat_a(subkey, ext);
+    rubraview_wcat_a(subkey, L"\\OpenWithProgids");
     write_key(g_shell_root, subkey, progid, L"");
     write_key(g_shell_root, SHELL_ASSOC, ext, progid);   /* RV-174: among Default apps' types */
 
     /* The extension points at the ProgID. Under HKCU no administrator
        rights are needed and nothing another user relies on is touched;
        under HKLM (every user) the caller has asked for exactly that. */
-    wcscpy(subkey, L"Software\\Classes\\");
-    wcscat(subkey, ext);
+    rubraview_wcopy_a(subkey, L"Software\\Classes\\");
+    rubraview_wcat_a(subkey, ext);
     /* Whose the type was is kept beside it, and given back on removal. */
     WCHAR was[128];
-    if (read_default(g_shell_root, subkey, was, sizeof(was)) && was[0] && wcscmp(was, progid) != 0) {
+    if (read_default(g_shell_root, subkey, was, sizeof(was)) && was[0] && rubraview_wcmp(was, progid) != 0) {
         write_key(g_shell_root, subkey, SHELL_WAS, was);
     }
     return write_key(g_shell_root, subkey, NULL, progid);
@@ -1736,8 +1742,8 @@ static void delete_tree(HKEY root, const WCHAR *subkey) {
 static bool unregister_one(const WCHAR *ext, const WCHAR *progid) {
     WCHAR subkey[256];
 
-    wcscpy(subkey, L"Software\\Classes\\");
-    wcscat(subkey, progid);
+    rubraview_wcopy_a(subkey, L"Software\\Classes\\");
+    rubraview_wcat_a(subkey, progid);
     delete_tree(g_shell_root, subkey);
 
     /* Under the extension only what registering wrote is taken back: the
@@ -1746,27 +1752,27 @@ static bool unregister_one(const WCHAR *ext, const WCHAR *progid) {
        Another program's entries, and a choice made since, stay; the key
        goes only when nothing is left in it (VM, 2026-10-09: removing the
        whole key would have taken another program's entries with it). */
-    wcscpy(subkey, L"Software\\Classes\\");
-    wcscat(subkey, ext);
+    rubraview_wcopy_a(subkey, L"Software\\Classes\\");
+    rubraview_wcat_a(subkey, ext);
 
     HKEY key = NULL;
     if (RegOpenKeyExW(g_shell_root, subkey, 0, KEY_READ | KEY_SET_VALUE, &key) != ERROR_SUCCESS) return true;
     WCHAR value[128], was[128];
     DWORD size = sizeof(value), type = 0;
     bool ours = RegQueryValueExW(key, NULL, NULL, &type, (BYTE*)value, &size) == ERROR_SUCCESS &&
-                type == REG_SZ && wcscmp(value, progid) == 0;
+                type == REG_SZ && rubraview_wcmp(value, progid) == 0;
     size = sizeof(was);
     bool had = RegQueryValueExW(key, SHELL_WAS, NULL, &type, (BYTE*)was, &size) == ERROR_SUCCESS && type == REG_SZ && was[0];
     if (ours) {
-        if (had) RegSetValueExW(key, NULL, 0, REG_SZ, (const BYTE*)was, (DWORD)((wcslen(was) + 1) * sizeof(WCHAR)));
+        if (had) RegSetValueExW(key, NULL, 0, REG_SZ, (const BYTE*)was, (DWORD)((rubraview_wlen(was) + 1) * sizeof(WCHAR)));
         else RegDeleteValueW(key, NULL);
     }
     RegDeleteValueW(key, SHELL_WAS);
     RegCloseKey(key);
 
     WCHAR icon_key[300];   /* RV-191: the extension's icon, when we put it there */
-    wcscpy(icon_key, subkey);
-    wcscat(icon_key, L"\\DefaultIcon");
+    rubraview_wcopy_a(icon_key, subkey);
+    rubraview_wcat_a(icon_key, L"\\DefaultIcon");
     HKEY icon = NULL;
     if (RegOpenKeyExW(g_shell_root, icon_key, 0, KEY_READ, &icon) == ERROR_SUCCESS) {
         bool mine = RegQueryValueExW(icon, SHELL_OURS, NULL, NULL, NULL, NULL) == ERROR_SUCCESS;
@@ -1775,8 +1781,8 @@ static bool unregister_one(const WCHAR *ext, const WCHAR *progid) {
     }
 
     WCHAR with[300];
-    wcscpy(with, subkey);
-    wcscat(with, L"\\OpenWithProgids");
+    rubraview_wcopy_a(with, subkey);
+    rubraview_wcat_a(with, L"\\OpenWithProgids");
     HKEY open_with = NULL;
     if (RegOpenKeyExW(g_shell_root, with, 0, KEY_SET_VALUE, &open_with) == ERROR_SUCCESS) {
         RegDeleteValueW(open_with, progid);
@@ -1798,8 +1804,8 @@ static void shell_capabilities(bool any) {
     if (any) {
         WCHAR exe[MAX_PATH * 2], icon[MAX_PATH * 2 + 4];
         if (GetModuleFileNameW(NULL, exe, (DWORD)(sizeof(exe) / sizeof(exe[0]))) == 0) return;
-        wcscpy(icon, exe);
-        wcscat(icon, L",0");
+        rubraview_wcopy_a(icon, exe);
+        rubraview_wcat_a(icon, L",0");
         write_key(g_shell_root, SHELL_CAPS, L"ApplicationName", L"Rubraview");
         write_key(g_shell_root, SHELL_CAPS, L"ApplicationDescription", L"Pictures, books, films, music and text in one viewer");
         write_key(g_shell_root, SHELL_CAPS, L"ApplicationIcon", icon);
@@ -1928,7 +1934,7 @@ bool rubraview_pal_shell_open_folder(proven_u8str_view_t path, bool make) {
 
 /* Windows' own list of types that run something (shlwapi's AssocIsDangerous, looked up: no import library needed) */
 static bool type_is_dangerous(const WCHAR *path) {
-    const WCHAR *dot = wcsrchr(path, L'.'), *sep = wcsrchr(path, L'\\');
+    const WCHAR *dot = rubraview_wrchr(path, L'.'), *sep = rubraview_wrchr(path, L'\\');
     if (!dot || (sep && dot < sep)) return false;
     typedef BOOL (WINAPI *assoc_dangerous_fn)(PCWSTR);
     HMODULE m = LoadLibraryExW(L"shlwapi.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
@@ -1961,7 +1967,7 @@ void rubraview_pal_shell_open_default_apps(void) {
 
 bool rubraview_pal_shell_open_web(const char *https_url) {
     WCHAR wide[512];
-    if (!https_url || strncmp(https_url, "https://", 8) != 0 ||
+    if (!https_url || rubraview_cstr_cmp_n(https_url, rubraview_bytes_view("https://", 8)) != 0 ||
         MultiByteToWideChar(CP_UTF8, 0, https_url, -1, wide, 512) <= 0) return false;
     return (INT_PTR)ShellExecuteW(NULL, L"open", wide, NULL, NULL, SW_SHOWNORMAL) > 32;
 }

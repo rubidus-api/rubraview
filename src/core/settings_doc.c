@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/settings_doc.h"
 #include "rubraview/number.h"
 #include "rubraview/ini.h"
@@ -45,8 +46,8 @@ static bool fail(parser_t *p, const char *message) {
 }
 
 static bool word_is(token_t t, const char *word) {
-    size_t n = strlen(word);
-    return t.kind == TOKEN_WORD && t.text.size == n && memcmp(t.text.ptr, word, n) == 0;
+    size_t n = proven_cstr_len(word);
+    return t.kind == TOKEN_WORD && t.text.size == n && proven_sys_mem_cmp(t.text.ptr, word, n) == 0;
 }
 
 /* Splits one line. A `#` outside quotes ends it. */
@@ -124,7 +125,7 @@ static bool add_node(parser_t *p, rubraview_settings_node_t node) {
 static const char *copy_word(parser_t *p, proven_u8str_view_t word) {
     proven_result_mem_mut_t res = proven_arena_alloc(p->arena, word.size + 1);
     if (!proven_is_ok(res.err)) return NULL;
-    memcpy(res.value.ptr, word.ptr, word.size);
+    proven_sys_mem_copy(res.value.ptr, word.ptr, word.size);
     res.value.ptr[word.size] = '\0';
     return (const char*)res.value.ptr;
 }
@@ -149,8 +150,8 @@ static bool setting(parser_t *p, const token_t *t, int n, rubraview_setting_type
     for (size_t i = 0; i < p->doc.def_count; ++i) {
         const rubraview_setting_def_t *other = &p->doc.defs[i];
         if (other->section.size == def.section.size && other->key.size == def.key.size &&
-            memcmp(other->section.ptr, def.section.ptr, def.section.size) == 0 &&
-            memcmp(other->key.ptr, def.key.ptr, def.key.size) == 0) {
+            proven_sys_mem_cmp(other->section.ptr, def.section.ptr, def.section.size) == 0 &&
+            proven_sys_mem_cmp(other->key.ptr, def.key.ptr, def.key.size) == 0) {
             return fail(p, "this section.key is already on a page");
         }
     }
@@ -170,7 +171,7 @@ static bool setting(parser_t *p, const token_t *t, int n, rubraview_setting_type
             } else if (type == RUBRAVIEW_SETTING_CHOICE) {
                 bool found = false;
                 for (int k = 0; k < choice_count; ++k) {
-                    if (strlen(choices[k]) == v.size && memcmp(choices[k], v.ptr, v.size) == 0) {
+                    if (proven_cstr_len(choices[k]) == v.size && proven_sys_mem_cmp(choices[k], v.ptr, v.size) == 0) {
                         def.default_value = (double)k;
                         found = true;
                     }
@@ -318,8 +319,8 @@ static bool one_line(parser_t *p, proven_u8str_view_t line) {
         }
         for (size_t i = 0; i < p->doc.def_count; ++i) {
             rubraview_setting_def_t *d = &p->doc.defs[i];
-            if (d->section.size == section.size && d->key.size == key.size && memcmp(d->section.ptr, section.ptr, section.size) == 0 &&
-                memcmp(d->key.ptr, key.ptr, key.size) == 0) {
+            if (d->section.size == section.size && d->key.size == key.size && proven_sys_mem_cmp(d->section.ptr, section.ptr, section.size) == 0 &&
+                proven_sys_mem_cmp(d->key.ptr, key.ptr, key.size) == 0) {
                 d->help = t[2].text;
                 return true;
             }

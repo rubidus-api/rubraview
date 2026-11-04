@@ -129,8 +129,8 @@ static void draw_tmenu_in(app_state_t *app) {
         char scratch[160], line[200];
         proven_u8str_view_t text = rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now)
             ? (proven_u8str_view_eq(L.rows[i].action, PROVEN_LIT("recent_clear")) ? TU8("Clear?") : TU8("Delete?"))
-            : rubraview_tile_caption(L.rows[i].words, false, st.mark, st.value, scratch, sizeof(scratch));
-        int k = snprintf(line, sizeof(line), "%.*s%s", (int)text.size, (const char *)text.ptr, on ? "  \xE2\x9C\x93" : "");
+            : rubraview_tile_caption(L.rows[i].words, false, st.mark, st.value, rubraview_mem_mut(scratch, sizeof(scratch)));
+        int k = rubraview_fmt(line, sizeof(line), "{}{}", PROVEN_ARG(rubraview_bytes_view((const char *)text.ptr, (int)text.size)), PROVEN_ARG(on ? "  \xE2\x9C\x93" : ""));
         proven_u8str_view_t shown = k > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k < sizeof(line) ? (size_t)k : sizeof(line) - 1 } : text;
         rubraview_pal_rect_t words = { r.x + 12.0 * dpi, r.y, r.width - 16.0 * dpi, r.height };
         rubraview_pal_render_draw_text(app->renderer, shown, words, size, L.enabled[i] ? COLOR_TEXT : 0x60F0F0F0u, RUBRAVIEW_TEXT_LEFT);
@@ -279,7 +279,7 @@ static void draw_wheel_strip(app_state_t *app) {
                 rubraview_pal_render_draw_texture_opacity(app->renderer, tex, fit, RUBRAVIEW_INTERP_LINEAR, shown);
             } else {
                 char number[24];
-                int n = snprintf(number, sizeof(number), "%zu", index + 1);
+                int n = rubraview_fmt(number, sizeof(number), "{}", PROVEN_ARG((size_t)(index + 1)));
                 rubraview_pal_render_fill_rect(app->renderer, cell, strip_fade(COLOR_TILE_FILL, shown), 3.0);
                 if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)n }, cell,
                                                           14.0 * dpi, strip_fade(COLOR_TEXT, shown), RUBRAVIEW_TEXT_CENTER);
@@ -310,7 +310,7 @@ void draw_chrome(app_state_t *app, double win_w, double win_h) {
 
     if (!app->chrome_hidden && app->menubox.state != RUBRAVIEW_BOX_COLLAPSED && !app->menubox.headless) {
         char crumb[128];
-        proven_u8str_view_t text = rubraview_menu_breadcrumb(&app->menu, crumb, sizeof(crumb));
+        proven_u8str_view_t text = rubraview_menu_breadcrumb(&app->menu, rubraview_mem_mut(crumb, sizeof(crumb)));
         /* Beside the anchor, on its row: the grid is below or above it now. */
         rubraview_rect_t anchor = rubraview_box_anchor_rect(&app->menubox, &metrics);
         rubraview_rect_t pin = rubraview_box_pin_rect(&app->menubox, &metrics);
@@ -338,8 +338,8 @@ void draw_chrome(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_render_stroke_rect(app->renderer, prompt, COLOR_BOX_BORDER, 1.0, 3.0);
 
         char line[128];
-        int written = snprintf(line, sizeof(line), T("Resume page %d / %zu  (Enter)"),
-                               app->resume_page + 1, page_count(app));
+        int written = rubraview_fmt(line, sizeof(line), T("Resume page {} / {}  (Enter)"),
+                               PROVEN_ARG((int)(app->resume_page + 1)), PROVEN_ARG((size_t)(page_count(app))));
         if (written > 0) {
             rubraview_pal_render_draw_text(app->renderer,
                                            (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written },
@@ -370,7 +370,7 @@ void draw_chrome(app_state_t *app, double win_w, double win_h) {
             bool playing = app->media && page == app->media_page;
             bool picture = pg->loaded && !playing;
             char right_buf[192];
-            proven_u8str_view_t right = rubraview_osd_right(right_buf, sizeof(right_buf), (size_t)page, page_count(app),
+            proven_u8str_view_t right = rubraview_osd_right(rubraview_mem_mut(right_buf, sizeof(right_buf)), (size_t)page, page_count(app),
                                                 picture ? real_w(pg) : 0, picture ? real_h(pg) : 0,
                                                 app->osd_size_bytes, picture && pg->reduced,
                                                 playing ? app->media_position : 0.0,
@@ -379,7 +379,7 @@ void draw_chrome(app_state_t *app, double win_w, double win_h) {
             char text_buf[256];
             int through = text_percent(app);
             if (through >= 0 && text_encoding_shown(app)) {
-                int n = snprintf(text_buf, sizeof(text_buf), T("%s, %d %% through  %.*s"), text_encoding_shown(app), through, (int)right.size, right.ptr);
+                int n = rubraview_fmt(text_buf, sizeof(text_buf), T("{}, {} % through  {}"), PROVEN_ARG(text_encoding_shown(app)), PROVEN_ARG((int)through), PROVEN_ARG(rubraview_bytes_view(right.ptr, (int)right.size)));
                 if (n > 0 && (size_t)n < sizeof(text_buf)) right = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text_buf, .size = (size_t)n };
             }
 
@@ -408,11 +408,11 @@ void draw_chrome(app_state_t *app, double win_w, double win_h) {
                 size_t lo = 0, hi = total > 13 ? total - 13 : 0;   /* head characters that fit */
                 while (lo < hi) {
                     size_t mid = (lo + hi + 1) / 2;
-                    proven_u8str_view_t trial = rubraview_middle_ellipsis(name_buf, sizeof(name_buf), name, mid, 10);
+                    proven_u8str_view_t trial = rubraview_middle_ellipsis(rubraview_mem_mut(name_buf, sizeof(name_buf)), name, mid, 10);
                     if (rubraview_pal_render_measure_text(app->renderer, trial, font, &w) && w <= room) lo = mid;
                     else hi = mid - 1;
                 }
-                shown = rubraview_middle_ellipsis(name_buf, sizeof(name_buf), name, lo, 10);
+                shown = rubraview_middle_ellipsis(rubraview_mem_mut(name_buf, sizeof(name_buf)), name, lo, 10);
             }
             if (room > 0.0) {
                 rubraview_pal_rect_t left_box = { pad, bottom, room, bar_h };
@@ -464,7 +464,7 @@ void draw_music_extras(app_state_t *app, int32_t win_w, int32_t win_h) {
         uint32_t ink = (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0xC0000000u;
         if (viz == 1) {
             if (n == RUBRAVIEW_FFT_SIZE && !app->media_paused) {
-                memset(imag, 0, sizeof(imag));
+                proven_sys_mem_set(imag, 0, sizeof(imag));
                 rubraview_apply_hann(samples, RUBRAVIEW_FFT_SIZE);
                 rubraview_fft(samples, imag);
                 double rate = app->media_info.audio_sample_rate > 0 ? (double)app->media_info.audio_sample_rate : 48000.0;
@@ -540,7 +540,7 @@ void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
             else if (app->music_cue.album_performer.size > 0) cue_tags.artist = app->music_cue.album_performer;
             if (app->music_cue.album_title.size > 0) cue_tags.album = app->music_cue.album_title;
             static char number[16];
-            int n = snprintf(number, sizeof(number), "%d/%zu", ct->number, app->music_cue.count);
+            int n = rubraview_fmt(number, sizeof(number), "{}/{}", PROVEN_ARG((int)ct->number), PROVEN_ARG((size_t)app->music_cue.count));
             if (n > 0) cue_tags.track_number = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)n };
         }
     }
@@ -565,11 +565,11 @@ void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
     /* The name, and who made it. */
     if (has_name) {
         if (t->title.size > 0 && t->artist.size > 0) {
-            n = snprintf(line, sizeof(line), "%.*s  —  %.*s",
-                         (int)t->title.size, t->title.ptr, (int)t->artist.size, t->artist.ptr);
+            n = rubraview_fmt(line, sizeof(line), "{}  —  {}",
+                         PROVEN_ARG(rubraview_bytes_view(t->title.ptr, (int)t->title.size)), PROVEN_ARG(rubraview_bytes_view(t->artist.ptr, (int)t->artist.size)));
         } else {
             proven_u8str_view_t one = t->title.size > 0 ? t->title : t->artist;
-            n = snprintf(line, sizeof(line), "%.*s", (int)one.size, one.ptr);
+            n = rubraview_fmt(line, sizeof(line), "{}", PROVEN_ARG(rubraview_bytes_view(one.ptr, (int)one.size)));
         }
         if (n > 0) {
             rubraview_pal_rect_t rect = { 0.0, bottom, (double)win_w, size * 1.6 };
@@ -580,13 +580,13 @@ void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
     }
     /* The record, its year, and the track's number on it. */
     if (has_record) {
-        n = snprintf(line, sizeof(line), "%.*s%s%.*s%s%s%.*s",
-                     (int)t->album.size, t->album.ptr,
-                     t->album.size > 0 && t->year.size > 0 ? "  (" : "",
-                     (int)t->year.size, t->year.ptr,
-                     t->album.size > 0 && t->year.size > 0 ? ")" : "",
-                     t->track_number.size > 0 ? "   no. " : "",
-                     (int)t->track_number.size, t->track_number.ptr);
+        n = rubraview_fmt(line, sizeof(line), "{}{}{}{}{}{}",
+                     PROVEN_ARG(rubraview_bytes_view(t->album.ptr, (int)t->album.size)),
+                     PROVEN_ARG(t->album.size > 0 && t->year.size > 0 ? "  (" : ""),
+                     PROVEN_ARG(rubraview_bytes_view(t->year.ptr, (int)t->year.size)),
+                     PROVEN_ARG(t->album.size > 0 && t->year.size > 0 ? ")" : ""),
+                     PROVEN_ARG(t->track_number.size > 0 ? "   no. " : ""),
+                     PROVEN_ARG(rubraview_bytes_view(t->track_number.ptr, (int)t->track_number.size)));
         if (n > 0) {
             rubraview_pal_rect_t rect = { 0.0, bottom, (double)win_w, size * 1.4 };
             rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
@@ -598,16 +598,16 @@ void draw_music_words(app_state_t *app, int32_t win_w, int32_t win_h) {
     {
         char what[160];
         int w = 0;
-        if (t->codec.size > 0) w += snprintf(what + w, sizeof(what) - (size_t)w, "%.*s", (int)t->codec.size, t->codec.ptr);
-        if (t->bitrate_kbps > 0) w += snprintf(what + w, sizeof(what) - (size_t)w, T("%s%u kbps"), w > 0 ? "  ·  " : "", t->bitrate_kbps);
+        if (t->codec.size > 0) w += rubraview_fmt(what + w, sizeof(what) - (size_t)w, "{}", PROVEN_ARG(rubraview_bytes_view(t->codec.ptr, (int)t->codec.size)));
+        if (t->bitrate_kbps > 0) w += rubraview_fmt(what + w, sizeof(what) - (size_t)w, T("{}{} kbps"), PROVEN_ARG(w > 0 ? "  ·  " : ""), PROVEN_ARG((unsigned)t->bitrate_kbps));
         if (t->sample_rate > 0) {
-            w += snprintf(what + w, sizeof(what) - (size_t)w, T("%s%.1f kHz"), w > 0 ? "  ·  " : "",
-                          (double)t->sample_rate / 1000.0);
+            w += rubraview_fmt(what + w, sizeof(what) - (size_t)w, T("{}{:.1} kHz"), PROVEN_ARG(w > 0 ? "  ·  " : ""),
+                          PROVEN_ARG((double)t->sample_rate / 1000.0));
         }
-        if (t->bits_per_sample > 0) w += snprintf(what + w, sizeof(what) - (size_t)w, T("  ·  %u bit"), t->bits_per_sample);
+        if (t->bits_per_sample > 0) w += rubraview_fmt(what + w, sizeof(what) - (size_t)w, T("  ·  {} bit"), PROVEN_ARG((unsigned)t->bits_per_sample));
         if (t->channels > 0) {
-            w += snprintf(what + w, sizeof(what) - (size_t)w, "  ·  %s",
-                          t->channels == 1 ? "mono" : t->channels == 2 ? "stereo" : "multi");
+            w += rubraview_fmt(what + w, sizeof(what) - (size_t)w, "  ·  {}",
+                          PROVEN_ARG(t->channels == 1 ? "mono" : t->channels == 2 ? "stereo" : "multi"));
         }
         if (w > 0) {
             rubraview_pal_rect_t rect = { 0.0, bottom, (double)win_w, size * 1.4 };
@@ -752,7 +752,15 @@ void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                     app->video_page_w = page->width;
                     app->video_page_h = page->height;
                 }
-                rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture, oriented, interp, opacity);
+                if (cmd->page_index == app->media_page && app->media_prev_texture && app->media_blend_weight > 0.0 &&
+                    opacity >= 1.0) {
+                    /* D-272: the earlier frame under the new one, which covers it by the share of the refresh that is its own */
+                    rubraview_pal_render_draw_texture_opacity(app->renderer, app->media_prev_texture, oriented, interp, 1.0);
+                    rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture, oriented, interp,
+                                                              1.0 - app->media_blend_weight);
+                } else {
+                    rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture, oriented, interp, opacity);
+                }
                 if (opacity >= 1.0 && !g_pose_on) {
                     /* D-40, D-81: zoomed past the texture, the sharper tiles on top. */
                     draw_page_tiles(app, (int)i, cmd->page_index, page,

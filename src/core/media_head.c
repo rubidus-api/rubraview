@@ -7,6 +7,7 @@
  * with Vorbis, Opus (RFC 7845) and Theora, FLAC, RIFF WAVE and RF64, MPEG audio with its Xing and
  * VBRI frames, and AAC's ADTS. Every size and offset in a file is a claim, checked before it is used.
  */
+#include "rubraview/core.h"
 #include "rubraview/media_head.h"
 #include "rubraview/mp4.h"
 #include "rubraview/matroska.h"
@@ -17,7 +18,9 @@
 
 /* ---- the source: a few windows of the file ---- */
 
-void rubraview_head_src_reset(rubraview_head_src_t *src, rubraview_head_read_fn read, void *context, uint64_t size) {
+void rubraview_head_src_reset(rubraview_head_src_t *src, rubraview_head_read_fn read, proven_mem_mut_t context_view) {
+    void *context = (void *)context_view.ptr;
+    uint64_t size = (uint64_t)context_view.size;
     src->read = read;
     src->context = context;
     src->size = size;
@@ -29,8 +32,8 @@ void rubraview_head_src_reset(rubraview_head_src_t *src, rubraview_head_read_fn 
 
 void rubraview_head_src_free(rubraview_head_src_t *src) {
     if (!src) return;
-    for (unsigned i = 0; i < 3; ++i) free(src->win[i].data);
-    free(src->scratch);
+    for (unsigned i = 0; i < 3; ++i) rubraview_free(src->win[i].data);
+    rubraview_free(src->scratch);
     *src = (rubraview_head_src_t){0};
 }
 
@@ -40,7 +43,7 @@ static bool load(rubraview_head_src_t *src, unsigned slot, uint64_t at, size_t l
     if (len == 0 || src->reads >= RUBRAVIEW_HEAD_MAX_READS || src->bytes + len > RUBRAVIEW_HEAD_MAX_BYTES) return false;
     rubraview_head_window_t *w = &src->win[slot];
     if (w->cap < len) {
-        uint8_t *grown = (uint8_t *)realloc(w->data, len);
+        uint8_t *grown = (uint8_t *)rubraview_realloc(rubraview_mem_mut(w->data, len));
         if (!grown) return false;
         w->data = grown;
         w->cap = len;
@@ -92,12 +95,12 @@ const uint8_t *rubraview_head_bytes(rubraview_head_src_t *src, uint64_t at, size
 
 static void *scratch(rubraview_head_src_t *src, size_t size) {
     if (src->scratch_cap < size) {
-        void *grown = realloc(src->scratch, size);
+        void *grown = rubraview_realloc(rubraview_mem_mut(src->scratch, size));
         if (!grown) return NULL;
         src->scratch = grown;
         src->scratch_cap = size;
     }
-    memset(src->scratch, 0, size);
+    proven_sys_mem_set(src->scratch, 0, size);
     return src->scratch;
 }
 
@@ -188,7 +191,7 @@ static bool read_jpeg(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
         if (code == 0xE1 && len >= 8 && orientation == 1) {
             size_t got = 0;
             const uint8_t *p = rubraview_head_view(src, at + 4, (size_t)len - 2, &got);
-            if (p && got >= 14 && memcmp(p, "Exif\0\0", 6) == 0) orientation = rubraview_exif_tiff_orientation(p + 6, got - 6);
+            if (p && got >= 14 && proven_sys_mem_cmp(p, "Exif\0\0", 6) == 0) orientation = rubraview_exif_tiff_orientation(rubraview_mem_view(p + 6, got - 6));
         }
         at += 2u + len;
     }
@@ -198,7 +201,7 @@ static bool read_jpeg(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
 static bool read_png(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
     out->format = "png";
     const uint8_t *p = rubraview_head_bytes(src, 0, 24);
-    if (p && memcmp(p + 12, "IHDR", 4) == 0) set_size(out, be32(p + 16), be32(p + 20), 1);
+    if (p && proven_sys_mem_cmp(p + 12, "IHDR", 4) == 0) set_size(out, be32(p + 16), be32(p + 20), 1);
     return true;
 }
 
@@ -254,10 +257,10 @@ static bool read_webp(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
     out->format = "webp";
     const uint8_t *p = rubraview_head_bytes(src, 0, 30);
     if (!p) return true;
-    if (memcmp(p + 12, "VP8X", 4) == 0) set_size(out, 1u + le24(p + 24), 1u + le24(p + 27), 1);
-    else if (memcmp(p + 12, "VP8 ", 4) == 0 && p[23] == 0x9D && p[24] == 0x01 && p[25] == 0x2A)
+    if (proven_sys_mem_cmp(p + 12, "VP8X", 4) == 0) set_size(out, 1u + le24(p + 24), 1u + le24(p + 27), 1);
+    else if (proven_sys_mem_cmp(p + 12, "VP8 ", 4) == 0 && p[23] == 0x9D && p[24] == 0x01 && p[25] == 0x2A)
         set_size(out, le16(p + 26) & 0x3FFFu, le16(p + 28) & 0x3FFFu, 1);
-    else if (memcmp(p + 12, "VP8L", 4) == 0 && p[20] == 0x2F) {
+    else if (proven_sys_mem_cmp(p + 12, "VP8L", 4) == 0 && p[20] == 0x2F) {
         const uint8_t *b = p + 21;
         set_size(out, 1u + (((uint32_t)(b[1] & 0x3F) << 8) | b[0]),
                  1u + (((uint32_t)(b[3] & 0x0F) << 10) | ((uint32_t)b[2] << 2) | ((uint32_t)(b[1] & 0xC0) >> 6)), 1);
@@ -304,7 +307,9 @@ static bool box_next(rubraview_head_src_t *src, uint64_t at, uint64_t limit, hea
 #define FOURCC(a, b, c, d) (((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) | ((uint32_t)(c) << 8) | (uint32_t)(d))
 
 /* A box inside a buffer: as box_next, over memory. */
-static bool mem_box(const uint8_t *p, size_t n, size_t at, uint32_t *type, size_t *body, size_t *end) {
+static bool mem_box(proven_mem_view_t p_view, size_t at, uint32_t *type, size_t *body, size_t *end) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     if (at >= n || n - at < 8) return false;
     uint64_t size = be32(p + at), header = 8;
     if (size == 1) {
@@ -322,17 +327,19 @@ static bool mem_box(const uint8_t *p, size_t n, size_t at, uint32_t *type, size_
 }
 
 /* HEIF and AVIF: the primary item's `ispe`, turned by its `irot`. */
-static bool heif_meta(const uint8_t *m, size_t n, rubraview_media_facts_t *out) {
+static bool heif_meta(proven_mem_view_t m_view, rubraview_media_facts_t *out) {
+    const uint8_t *m = (const uint8_t *)m_view.ptr;
+    size_t n = (size_t)m_view.size;
     uint32_t primary = 0;
     size_t ipco = 0, ipco_end = 0, ipma = 0, ipma_end = 0;
     uint32_t type = 0;
     size_t body = 0, end = 0;
-    for (size_t at = 4; mem_box(m, n, at, &type, &body, &end); at = end) {   /* past the FullBox's version and flags */
+    for (size_t at = 4; mem_box(rubraview_mem_view(m, n), at, &type, &body, &end); at = end) {   /* past the FullBox's version and flags */
         if (type == FOURCC('p', 'i', 't', 'm') && end - body >= 6) primary = m[body] == 0 ? be16(m + body + 4) : (end - body >= 8 ? be32(m + body + 4) : 0);
         if (type == FOURCC('i', 'p', 'r', 'p')) {
             uint32_t t2 = 0;
             size_t b2 = 0, e2 = 0;
-            for (size_t q = body; mem_box(m, end, q, &t2, &b2, &e2); q = e2) {
+            for (size_t q = body; mem_box(rubraview_mem_view(m, end), q, &t2, &b2, &e2); q = e2) {
                 if (t2 == FOURCC('i', 'p', 'c', 'o')) { ipco = b2; ipco_end = e2; }
                 if (t2 == FOURCC('i', 'p', 'm', 'a')) { ipma = b2; ipma_end = e2; }
             }
@@ -366,7 +373,7 @@ static bool heif_meta(const uint8_t *m, size_t n, rubraview_media_facts_t *out) 
     uint64_t w = 0, h = 0;
     int32_t turn = 1;
     uint16_t index = 0;
-    for (size_t at = ipco; mem_box(m, ipco_end, at, &type, &body, &end); at = end) {
+    for (size_t at = ipco; mem_box(rubraview_mem_view(m, ipco_end), at, &type, &body, &end); at = end) {
         ++index;
         bool mine = all;
         for (size_t k = 0; k < nwanted && !mine; ++k) mine = wanted[k] == index;
@@ -386,7 +393,7 @@ static bool read_heif(rubraview_head_src_t *src, rubraview_media_facts_t *out, c
     for (uint64_t at = 0; box_next(src, at, src->size, &b); at = b.end) {
         if (b.type == FOURCC('m', 'e', 't', 'a') && b.end - b.body <= (1u << 20)) {
             const uint8_t *m = rubraview_head_bytes(src, b.body, (size_t)(b.end - b.body));
-            if (m && heif_meta(m, (size_t)(b.end - b.body), out)) return true;
+            if (m && heif_meta(rubraview_mem_view(m, (size_t)(b.end - b.body)), out)) return true;
             break;
         }
         if (b.end <= at) break;
@@ -447,7 +454,7 @@ static bool read_mp4(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
             uint64_t size = b.end - b.at;
             const uint8_t *p = size <= RUBRAVIEW_HEAD_MAX_BYTES ? rubraview_head_bytes(src, b.at, (size_t)size) : NULL;
             rubraview_mp4_t *mp4 = p ? (rubraview_mp4_t *)scratch(src, sizeof(rubraview_mp4_t)) : NULL;
-            if (mp4 && rubraview_mp4_open_moov(mp4, p, size)) {
+            if (mp4 && rubraview_mp4_open_moov(mp4, rubraview_mem_view(p, size))) {
                 int32_t w = 0, h = 0;
                 double seconds = 0.0;
                 (void)rubraview_mp4_frame(mp4, &w, &h, &seconds);
@@ -462,7 +469,9 @@ static bool read_mp4(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
 }
 
 /* EBML: an element's ID (its marker kept) and size at `p` (n bytes there); false when they do not fit. */
-static bool ebml_head(const uint8_t *p, size_t n, uint32_t *id, uint64_t *size, bool *unknown, size_t *header) {
+static bool ebml_head(proven_mem_view_t p_view, uint32_t *id, uint64_t *size, bool *unknown, size_t *header) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     if (n < 2) return false;
     unsigned id_len = p[0] & 0x80 ? 1 : p[0] & 0x40 ? 2 : p[0] & 0x20 ? 3 : p[0] & 0x10 ? 4 : 0;
     if (id_len == 0 || n < id_len + 1u) return false;
@@ -485,15 +494,19 @@ static bool ebml_head(const uint8_t *p, size_t n, uint32_t *id, uint64_t *size, 
     return true;
 }
 
-static uint64_t ebml_uint(const uint8_t *p, uint64_t n) {
+static uint64_t ebml_uint(proven_mem_view_t p_view) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    uint64_t n = (uint64_t)p_view.size;
     uint64_t v = 0;
     for (uint64_t i = 0; i < n && i < 8; ++i) v = (v << 8) | p[i];
     return v;
 }
 
-static double ebml_float(const uint8_t *p, uint64_t n) {
-    if (n == 4) { uint32_t u = be32(p); float f; memcpy(&f, &u, 4); return (double)f; }
-    if (n == 8) { uint64_t u = be64(p); double d; memcpy(&d, &u, 8); return d; }
+static double ebml_float(proven_mem_view_t p_view) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    uint64_t n = (uint64_t)p_view.size;
+    if (n == 4) { uint32_t u = be32(p); float f; proven_sys_mem_copy(&f, &u, 4); return (double)f; }
+    if (n == 8) { uint64_t u = be64(p); double d; proven_sys_mem_copy(&d, &u, 8); return d; }
     return 0.0;
 }
 
@@ -512,23 +525,27 @@ static double ebml_float(const uint8_t *p, uint64_t n) {
 #define MKV_VIDEO     0xE0u
 #define MKV_TIMESTAMP 0xE7u
 
-static void mkv_info(const uint8_t *p, size_t n, rubraview_mkv_t *mkv) {
+static void mkv_info(proven_mem_view_t p_view, rubraview_mkv_t *mkv) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     uint32_t id = 0;
     uint64_t size = 0;
     bool unknown = false;
     size_t header = 0;
-    for (size_t at = 0; at < n && ebml_head(p + at, n - at, &id, &size, &unknown, &header) && size <= n - at - header; at += header + (size_t)size) {
-        if (id == MKV_TIMESCALE && size > 0) { uint64_t s = ebml_uint(p + at + header, size); if (s > 0) mkv->timestamp_scale = s; }
-        if (id == MKV_DURATION) { double d = ebml_float(p + at + header, size); if (d > 0.0 && d < 1e18) mkv->duration_ticks = d; }
+    for (size_t at = 0; at < n && ebml_head(rubraview_mem_view(p + at, n - at), &id, &size, &unknown, &header) && size <= n - at - header; at += header + (size_t)size) {
+        if (id == MKV_TIMESCALE && size > 0) { uint64_t s = ebml_uint(rubraview_mem_view(p + at + header, size)); if (s > 0) mkv->timestamp_scale = s; }
+        if (id == MKV_DURATION) { double d = ebml_float(rubraview_mem_view(p + at + header, size)); if (d > 0.0 && d < 1e18) mkv->duration_ticks = d; }
     }
 }
 
-static void mkv_tracks(const uint8_t *p, size_t n, rubraview_mkv_t *mkv) {
+static void mkv_tracks(proven_mem_view_t p_view, rubraview_mkv_t *mkv) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     uint32_t id = 0;
     uint64_t size = 0;
     bool unknown = false;
     size_t header = 0;
-    for (size_t at = 0; at < n && ebml_head(p + at, n - at, &id, &size, &unknown, &header) && size <= n - at - header; at += header + (size_t)size) {
+    for (size_t at = 0; at < n && ebml_head(rubraview_mem_view(p + at, n - at), &id, &size, &unknown, &header) && size <= n - at - header; at += header + (size_t)size) {
         if (id != MKV_ENTRY || mkv->track_count >= RUBRAVIEW_MKV_MAX_TRACKS) continue;
         rubraview_mkv_track_t *t = &mkv->tracks[mkv->track_count++];
         const uint8_t *e = p + at + header;
@@ -536,16 +553,16 @@ static void mkv_tracks(const uint8_t *p, size_t n, rubraview_mkv_t *mkv) {
         uint32_t i2 = 0;
         uint64_t s2 = 0;
         size_t h2 = 0;
-        for (size_t q = 0; q < en && ebml_head(e + q, en - q, &i2, &s2, &unknown, &h2) && s2 <= en - q - h2; q += h2 + (size_t)s2) {
-            if (i2 == MKV_TYPE) t->type = (uint8_t)ebml_uint(e + q + h2, s2);
+        for (size_t q = 0; q < en && ebml_head(rubraview_mem_view(e + q, en - q), &i2, &s2, &unknown, &h2) && s2 <= en - q - h2; q += h2 + (size_t)s2) {
+            if (i2 == MKV_TYPE) t->type = (uint8_t)ebml_uint(rubraview_mem_view(e + q + h2, s2));
             if (i2 != MKV_VIDEO) continue;
             const uint8_t *v = e + q + h2;
             size_t vn = (size_t)s2;
             uint32_t i3 = 0;
             uint64_t s3 = 0;
             size_t h3 = 0;
-            for (size_t r = 0; r < vn && ebml_head(v + r, vn - r, &i3, &s3, &unknown, &h3) && s3 <= vn - r - h3; r += h3 + (size_t)s3) {
-                uint64_t x = ebml_uint(v + r + h3, s3);
+            for (size_t r = 0; r < vn && ebml_head(rubraview_mem_view(v + r, vn - r), &i3, &s3, &unknown, &h3) && s3 <= vn - r - h3; r += h3 + (size_t)s3) {
+                uint64_t x = ebml_uint(rubraview_mem_view(v + r + h3, s3));
                 if (i3 == 0xB0) t->pixel_width = x;
                 else if (i3 == 0xBA) t->pixel_height = x;
                 else if (i3 == 0x54B0) t->display_width = x;
@@ -564,7 +581,7 @@ static const uint8_t *mkv_body(rubraview_head_src_t *src, uint64_t at, size_t *o
     uint64_t size = 0;
     bool unknown = false;
     size_t header = 0;
-    if (!p || !ebml_head(p, got, &id, &size, &unknown, &header) || unknown || size > (1u << 20)) return NULL;
+    if (!p || !ebml_head(rubraview_mem_view(p, got), &id, &size, &unknown, &header) || unknown || size > (1u << 20)) return NULL;
     *out_n = (size_t)size;
     return size ? rubraview_head_bytes(src, at + header, (size_t)size) : NULL;
 }
@@ -581,17 +598,17 @@ static bool read_mkv(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
     size_t header = 0;
     /* the EBML head, then the segment */
     const uint8_t *p = rubraview_head_view(src, 0, 12, &got);
-    if (!p || !ebml_head(p, got, &id, &size, &unknown, &header) || unknown) return true;
+    if (!p || !ebml_head(rubraview_mem_view(p, got), &id, &size, &unknown, &header) || unknown) return true;
     uint64_t at = header + size;
     p = rubraview_head_view(src, at, 12, &got);
-    if (!p || !ebml_head(p, got, &id, &size, &unknown, &header) || id != MKV_SEGMENT) return true;
+    if (!p || !ebml_head(rubraview_mem_view(p, got), &id, &size, &unknown, &header) || id != MKV_SEGMENT) return true;
     uint64_t body = at + header, end = unknown || size > src->size - body ? src->size : body + size;
     uint64_t info_at = 0, tracks_at = 0;
     bool have_info = false, have_tracks = false;
     at = body;
     for (unsigned guard = 0; guard < 64 && at < end; ++guard) {
         p = rubraview_head_view(src, at, 12, &got);
-        if (!p || !ebml_head(p, got, &id, &size, &unknown, &header)) break;
+        if (!p || !ebml_head(rubraview_mem_view(p, got), &id, &size, &unknown, &header)) break;
         if (id == MKV_CLUSTER || unknown) break;   /* the head is behind us */
         size_t n = 0;
         const uint8_t *e = NULL;
@@ -599,23 +616,23 @@ static bool read_mkv(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
             uint32_t i2 = 0, i3 = 0;
             uint64_t s2 = 0, s3 = 0;
             size_t h2 = 0, h3 = 0;
-            for (size_t q = 0; q < n && ebml_head(e + q, n - q, &i2, &s2, &unknown, &h2) && s2 <= n - q - h2; q += h2 + (size_t)s2) {
+            for (size_t q = 0; q < n && ebml_head(rubraview_mem_view(e + q, n - q), &i2, &s2, &unknown, &h2) && s2 <= n - q - h2; q += h2 + (size_t)s2) {
                 if (i2 != MKV_SEEK) continue;
                 uint32_t which = 0;
                 uint64_t where = 0;
                 const uint8_t *s = e + q + h2;
-                for (size_t r = 0; r < s2 && ebml_head(s + r, (size_t)s2 - r, &i3, &s3, &unknown, &h3) && s3 <= s2 - r - h3; r += h3 + (size_t)s3) {
-                    if (i3 == MKV_SEEKID) which = (uint32_t)ebml_uint(s + r + h3, s3);
-                    if (i3 == MKV_SEEKPOS) where = ebml_uint(s + r + h3, s3);
+                for (size_t r = 0; r < s2 && ebml_head(rubraview_mem_view(s + r, (size_t)s2 - r), &i3, &s3, &unknown, &h3) && s3 <= s2 - r - h3; r += h3 + (size_t)s3) {
+                    if (i3 == MKV_SEEKID) which = (uint32_t)ebml_uint(rubraview_mem_view(s + r + h3, s3));
+                    if (i3 == MKV_SEEKPOS) where = ebml_uint(rubraview_mem_view(s + r + h3, s3));
                 }
                 if (which == MKV_INFO && where) info_at = body + where;
                 if (which == MKV_TRACKS && where) tracks_at = body + where;
             }
         } else if (id == MKV_INFO && (e = mkv_body(src, at, &n)) != NULL) {
-            mkv_info(e, n, mkv);
+            mkv_info(rubraview_mem_view(e, n), mkv);
             have_info = true;
         } else if (id == MKV_TRACKS && (e = mkv_body(src, at, &n)) != NULL) {
-            mkv_tracks(e, n, mkv);
+            mkv_tracks(rubraview_mem_view(e, n), mkv);
             have_tracks = true;
         }
         if (have_info && have_tracks) break;
@@ -624,8 +641,8 @@ static bool read_mkv(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
     /* what the head did not hold, where the SeekHead says it is */
     size_t n = 0;
     const uint8_t *e = NULL;
-    if (!have_tracks && tracks_at && (e = mkv_body(src, tracks_at, &n)) != NULL) mkv_tracks(e, n, mkv);
-    if (!have_info && info_at && (e = mkv_body(src, info_at, &n)) != NULL) mkv_info(e, n, mkv);
+    if (!have_tracks && tracks_at && (e = mkv_body(src, tracks_at, &n)) != NULL) mkv_tracks(rubraview_mem_view(e, n), mkv);
+    if (!have_info && info_at && (e = mkv_body(src, info_at, &n)) != NULL) mkv_info(rubraview_mem_view(e, n), mkv);
     int32_t w = 0, h = 0;
     double seconds = 0.0;
     (void)rubraview_mkv_frame(mkv, &w, &h, &seconds);
@@ -636,23 +653,23 @@ static bool read_mkv(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
     uint64_t tail = src->size > RUBRAVIEW_HEAD_LATER ? src->size - RUBRAVIEW_HEAD_LATER : 0;
     p = rubraview_head_view(src, tail, RUBRAVIEW_HEAD_LATER, &got);
     for (size_t i = got >= 12 ? got - 12 : 0; p && i-- > 0;) {
-        if (be32(p + i) != MKV_CLUSTER || !ebml_head(p + i, got - i, &id, &size, &unknown, &header)) continue;
+        if (be32(p + i) != MKV_CLUSTER || !ebml_head(rubraview_mem_view(p + i, got - i), &id, &size, &unknown, &header)) continue;
         uint64_t base = 0, latest = 0;
         bool have_base = false;
         uint32_t i2 = 0;
         uint64_t s2 = 0;
         size_t h2 = 0;
-        for (size_t q = i + header; q < got && ebml_head(p + q, got - q, &i2, &s2, &unknown, &h2) && !unknown; q += h2 + (size_t)s2) {
+        for (size_t q = i + header; q < got && ebml_head(rubraview_mem_view(p + q, got - q), &i2, &s2, &unknown, &h2) && !unknown; q += h2 + (size_t)s2) {
             if (s2 > got - q - h2) break;   /* cut by the window */
             const uint8_t *b = p + q + h2;
             uint64_t bn = s2;
             uint32_t kind = i2;
-            if (kind == MKV_TIMESTAMP) { base = ebml_uint(b, bn); have_base = true; }
+            if (kind == MKV_TIMESTAMP) { base = ebml_uint(rubraview_mem_view(b, bn)); have_base = true; }
             if (kind == 0xA0 && bn > 2) {    /* a BlockGroup: its Block */
                 uint32_t i3 = 0;
                 uint64_t s3 = 0;
                 size_t h3 = 0;
-                if (ebml_head(b, (size_t)bn, &i3, &s3, &unknown, &h3) && i3 == 0xA1 && s3 <= bn - h3) { b += h3; bn = s3; kind = 0xA3; }
+                if (ebml_head(rubraview_mem_view(b, (size_t)bn), &i3, &s3, &unknown, &h3) && i3 == 0xA1 && s3 <= bn - h3) { b += h3; bn = s3; kind = 0xA3; }
             }
             if (kind != 0xA3 || bn < 4) continue;   /* a block: its track (a number of one to eight bytes), its time */
             unsigned len = 0;
@@ -671,23 +688,25 @@ static bool read_mkv(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
 /* AVI: `hdrl`'s main header, its video stream's header and format, OpenDML's frame count. */
 typedef struct avi_facts { uint32_t usec, frames, w, h, scale, rate, length, odml, vw, vh; bool video; } avi_facts_t;
 
-static void avi_list(const uint8_t *p, size_t n, avi_facts_t *f, int depth) {
+static void avi_list(proven_mem_view_t p_view, avi_facts_t *f, int depth) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     bool video = false;
     for (size_t at = 0; at + 8 <= n && depth < 4;) {
         uint32_t size = le32(p + at + 4);
         if (size > n - at - 8) size = (uint32_t)(n - at - 8);
         const uint8_t *b = p + at + 8;
-        if (memcmp(p + at, "LIST", 4) == 0 && size >= 4) avi_list(b + 4, size - 4, f, depth + 1);
-        else if (memcmp(p + at, "avih", 4) == 0 && size >= 40) { f->usec = le32(b); f->frames = le32(b + 16); f->w = le32(b + 32); f->h = le32(b + 36); }
-        else if (memcmp(p + at, "strh", 4) == 0 && size >= 36) {
-            video = memcmp(b, "vids", 4) == 0;
+        if (proven_sys_mem_cmp(p + at, "LIST", 4) == 0 && size >= 4) avi_list(rubraview_mem_view(b + 4, size - 4), f, depth + 1);
+        else if (proven_sys_mem_cmp(p + at, "avih", 4) == 0 && size >= 40) { f->usec = le32(b); f->frames = le32(b + 16); f->w = le32(b + 32); f->h = le32(b + 36); }
+        else if (proven_sys_mem_cmp(p + at, "strh", 4) == 0 && size >= 36) {
+            video = proven_sys_mem_cmp(b, "vids", 4) == 0;
             if (video && !f->video) { f->scale = le32(b + 20); f->rate = le32(b + 24); f->length = le32(b + 32); }
-        } else if (memcmp(p + at, "strf", 4) == 0 && size >= 12 && video && !f->video) {
+        } else if (proven_sys_mem_cmp(p + at, "strf", 4) == 0 && size >= 12 && video && !f->video) {
             int32_t h = (int32_t)le32(b + 8);
             f->vw = le32(b + 4);
             f->vh = (uint32_t)(h < 0 ? -(int64_t)h : h);
             f->video = true;
-        } else if (memcmp(p + at, "dmlh", 4) == 0 && size >= 4) f->odml = le32(b);
+        } else if (proven_sys_mem_cmp(p + at, "dmlh", 4) == 0 && size >= 4) f->odml = le32(b);
         at += 8u + size + (size & 1u);
     }
 }
@@ -695,13 +714,13 @@ static void avi_list(const uint8_t *p, size_t n, avi_facts_t *f, int depth) {
 static bool read_avi(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
     out->format = "avi";
     const uint8_t *p = rubraview_head_bytes(src, 12, 12);
-    if (!p || memcmp(p, "LIST", 4) != 0 || memcmp(p + 8, "hdrl", 4) != 0) return true;
+    if (!p || proven_sys_mem_cmp(p, "LIST", 4) != 0 || proven_sys_mem_cmp(p + 8, "hdrl", 4) != 0) return true;
     uint32_t size = le32(p + 4);
     if (size < 4 || size > (1u << 20)) return true;
     const uint8_t *h = rubraview_head_bytes(src, 24, size - 4u);
     if (!h) return true;
     avi_facts_t f = {0};
-    avi_list(h, size - 4u, &f, 0);
+    avi_list(rubraview_mem_view(h, size - 4u), &f, 0);
     set_size(out, f.video ? f.vw : f.w, f.video ? f.vh : f.h, 1);
     uint32_t frames = f.odml > f.length ? f.odml : f.length;
     if (f.rate > 0 && f.scale > 0 && frames > 0) set_seconds(out, (double)frames * f.scale / f.rate, false);
@@ -728,11 +747,11 @@ static bool read_asf(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
         if (len < 24 || len > size - at) break;
         const uint8_t *b = h + at + 24;
         size_t n = (size_t)len - 24;
-        if (memcmp(h + at, ASF_FILE, 16) == 0 && n >= 68 && !(le32(b + 64) & 1u)) {   /* not a broadcast */
+        if (proven_sys_mem_cmp(h + at, ASF_FILE, 16) == 0 && n >= 68 && !(le32(b + 64) & 1u)) {   /* not a broadcast */
             double seconds = (double)le64(b + 40) / 1e7 - (double)le64(b + 56) / 1000.0;
             set_seconds(out, seconds, false);
         }
-        if (memcmp(h + at, ASF_STREAM, 16) == 0 && n >= 54 + 8 && memcmp(b, ASF_VIDEO, 16) == 0 && out->width == 0)
+        if (proven_sys_mem_cmp(h + at, ASF_STREAM, 16) == 0 && n >= 54 + 8 && proven_sys_mem_cmp(b, ASF_VIDEO, 16) == 0 && out->width == 0)
             set_size(out, le32(b + 54), le32(b + 58), 1);
         at += (size_t)len;
     }
@@ -740,7 +759,9 @@ static bool read_asf(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
 }
 
 /* MPEG-2 systems: a PES header's PTS (90 kHz), MPEG-2's or MPEG-1's. */
-static bool pes_pts(const uint8_t *p, size_t n, uint64_t *out) {
+static bool pes_pts(proven_mem_view_t p_view, uint64_t *out) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     if (n < 9 || p[0] != 0 || p[1] != 0 || p[2] != 1) return false;
     uint8_t sid = p[3];
     if (!(sid == 0xBD || (sid >= 0xC0 && sid <= 0xEF))) return false;
@@ -767,7 +788,9 @@ static double pts_span(uint64_t first, uint64_t last) {
 }
 
 /* H.264's SPS (7.3.2.1.1): its cropped size, its sample aspect applied. */
-static bool h264_sps(const uint8_t *nal, size_t n, uint64_t *w, uint64_t *h) {
+static bool h264_sps(proven_mem_view_t nal_view, uint64_t *w, uint64_t *h) {
+    const uint8_t *nal = (const uint8_t *)nal_view.ptr;
+    size_t n = (size_t)nal_view.size;
     bits_t b = { .p = nal + 1, .n = n - 1 };
     uint32_t profile = msb(&b, 8);
     msb(&b, 16);   /* constraints and level */
@@ -826,7 +849,9 @@ static bool h264_sps(const uint8_t *nal, size_t n, uint64_t *w, uint64_t *h) {
 }
 
 /* H.265's SPS (7.3.2.2): its size with the conformance window taken off. */
-static bool h265_sps(const uint8_t *nal, size_t n, uint64_t *w, uint64_t *h) {
+static bool h265_sps(proven_mem_view_t nal_view, uint64_t *w, uint64_t *h) {
+    const uint8_t *nal = (const uint8_t *)nal_view.ptr;
+    size_t n = (size_t)nal_view.size;
     bits_t b = { .p = nal + 2, .n = n - 2 };
     msb(&b, 4);
     uint32_t sub = msb(&b, 3);
@@ -856,7 +881,9 @@ static bool h265_sps(const uint8_t *nal, size_t n, uint64_t *w, uint64_t *h) {
 }
 
 /* A NAL unit without its emulation prevention bytes, its first 256 kept. */
-static size_t unescape(const uint8_t *p, size_t n, uint8_t *dst, size_t cap) {
+static size_t unescape(proven_mem_view_t p_view, uint8_t *dst, size_t cap) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     size_t k = 0, zeros = 0;
     for (size_t i = 0; i < n && k < cap; ++i) {
         if (zeros >= 2 && p[i] == 3) { zeros = 0; continue; }
@@ -869,7 +896,9 @@ static size_t unescape(const uint8_t *p, size_t n, uint8_t *dst, size_t cap) {
 
 /* A video's size from its elementary stream: MPEG-1/2's sequence header (its display aspect when MPEG-2 says one),
    or H.264's or H.265's SPS. `kind` 0 MPEG video, 1 H.264, 2 H.265, -1 any. */
-static bool es_size(const uint8_t *p, size_t n, int kind, uint64_t *w, uint64_t *h) {
+static bool es_size(proven_mem_view_t p_view, int kind, uint64_t *w, uint64_t *h) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     for (size_t i = 0; i + 4 < n; ++i) {
         if (p[i] != 0 || p[i + 1] != 0 || p[i + 2] != 1) continue;
         uint8_t c = p[i + 3];
@@ -890,12 +919,12 @@ static bool es_size(const uint8_t *p, size_t n, int kind, uint64_t *w, uint64_t 
         }
         uint8_t nal[256];
         if ((kind == 1 || kind < 0) && (c & 0x1F) == 7 && (c & 0x80) == 0) {
-            size_t k = unescape(p + i + 3, n - i - 3, nal, sizeof(nal));
-            if (k > 4 && h264_sps(nal, k, w, h)) return true;
+            size_t k = unescape(rubraview_mem_view(p + i + 3, n - i - 3), nal, sizeof(nal));
+            if (k > 4 && h264_sps(rubraview_mem_view(nal, k), w, h)) return true;
         }
         if ((kind == 2 || kind < 0) && ((c >> 1) & 0x3F) == 33 && (c & 0x80) == 0) {
-            size_t k = unescape(p + i + 3, n - i - 3, nal, sizeof(nal));
-            if (k > 4 && h265_sps(nal, k, w, h)) return true;
+            size_t k = unescape(rubraview_mem_view(p + i + 3, n - i - 3), nal, sizeof(nal));
+            if (k > 4 && h265_sps(rubraview_mem_view(nal, k), w, h)) return true;
         }
     }
     return false;
@@ -954,14 +983,14 @@ static bool read_ts(rubraview_head_src_t *src, rubraview_media_facts_t *out, siz
             }
         } else if (pid == video) {
             uint64_t pts = 0;
-            if (start && pes_pts(pl, len, &pts) && (!have_first || ((first - pts) & ((1ull << 33) - 1)) < (1ull << 32))) { first = pts; have_first = true; }   /* the earliest: frames come reordered */
+            if (start && pes_pts(rubraview_mem_view(pl, len), &pts) && (!have_first || ((first - pts) & ((1ull << 33) - 1)) < (1ull << 32))) { first = pts; have_first = true; }   /* the earliest: frames come reordered */
             size_t skip = 0;
             if (start && len >= 9 && pl[0] == 0 && pl[1] == 0 && pl[2] == 1) skip = 9u + pl[8];
-            if (es && skip < len && es_n + (len - skip) <= RUBRAVIEW_HEAD_FIRST) { memcpy(es + es_n, pl + skip, len - skip); es_n += len - skip; }
+            if (es && skip < len && es_n + (len - skip) <= RUBRAVIEW_HEAD_FIRST) { proven_sys_mem_copy(es + es_n, pl + skip, len - skip); es_n += len - skip; }
         }
     }
     uint64_t w = 0, h = 0;
-    if (es && es_size(es, es_n, kind, &w, &h)) set_size(out, w, h, 1);
+    if (es && es_size(rubraview_mem_view(es, es_n), kind, &w, &h)) set_size(out, w, h, 1);
     if (!have_first || video == 0x1FFF) return true;
     uint64_t tail = src->size > RUBRAVIEW_HEAD_LATER ? src->size - RUBRAVIEW_HEAD_LATER : 0;
     p = rubraview_head_view(src, tail, RUBRAVIEW_HEAD_LATER, &got);
@@ -974,7 +1003,7 @@ static bool read_ts(rubraview_head_src_t *src, rubraview_media_facts_t *out, siz
         if (k[0] != 0x47 || (((k[1] & 0x1F) << 8) | k[2]) != video || !(k[1] & 0x40)) continue;
         size_t len = 0, off = ts_payload(k, &len);
         uint64_t pts = 0;
-        if (off && pes_pts(k + off, len, &pts) && (!have_last || ((pts - last) & ((1ull << 33) - 1)) < (1ull << 32))) { last = pts; have_last = true; }   /* the latest */
+        if (off && pes_pts(rubraview_mem_view(k + off, len), &pts) && (!have_last || ((pts - last) & ((1ull << 33) - 1)) < (1ull << 32))) { last = pts; have_last = true; }   /* the latest */
     }
     if (have_last) set_seconds(out, pts_span(first, last), false);
     return true;
@@ -987,23 +1016,25 @@ static bool read_ps(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
     const uint8_t *p = rubraview_head_view(src, 0, RUBRAVIEW_HEAD_FIRST, &got);
     if (!p) return true;
     uint64_t w = 0, h = 0, first = 0, last = 0, pts = 0;
-    if (es_size(p, got, -1, &w, &h)) set_size(out, w, h, 1);
+    if (es_size(rubraview_mem_view(p, got), -1, &w, &h)) set_size(out, w, h, 1);
     bool have_first = false, have_last = false;
     for (size_t i = 0; i + 14 <= got && !have_first; ++i)
-        if (p[i] == 0 && p[i + 1] == 0 && p[i + 2] == 1 && p[i + 3] >= 0xE0 && p[i + 3] <= 0xEF && pes_pts(p + i, got - i, &pts)) { first = pts; have_first = true; }
+        if (p[i] == 0 && p[i + 1] == 0 && p[i + 2] == 1 && p[i + 3] >= 0xE0 && p[i + 3] <= 0xEF && pes_pts(rubraview_mem_view(p + i, got - i), &pts)) { first = pts; have_first = true; }
     if (!have_first) return true;
     uint64_t tail = src->size > RUBRAVIEW_HEAD_LATER ? src->size - RUBRAVIEW_HEAD_LATER : 0;
     p = rubraview_head_view(src, tail, RUBRAVIEW_HEAD_LATER, &got);
     for (size_t i = 0; p && i + 14 <= got; ++i)
-        if (p[i] == 0 && p[i + 1] == 0 && p[i + 2] == 1 && p[i + 3] >= 0xE0 && p[i + 3] <= 0xEF && pes_pts(p + i, got - i, &pts)) { last = pts; have_last = true; }
+        if (p[i] == 0 && p[i + 1] == 0 && p[i + 2] == 1 && p[i + 3] >= 0xE0 && p[i + 3] <= 0xEF && pes_pts(rubraview_mem_view(p + i, got - i), &pts)) { last = pts; have_last = true; }
     if (have_last) set_seconds(out, pts_span(first, last), false);
     return true;
 }
 
 /* FLV: the script tag's onMetaData (AMF0): duration, width, height. */
-static bool amf_skip(const uint8_t *p, size_t n, size_t *at, int depth);
+static bool amf_skip(proven_mem_view_t p_view, size_t *at, int depth);
 
-static bool amf_props(const uint8_t *p, size_t n, size_t *at, int depth, rubraview_media_facts_t *out) {
+static bool amf_props(proven_mem_view_t p_view, size_t *at, int depth, rubraview_media_facts_t *out) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     double w = 0.0, h = 0.0;
     for (unsigned guard = 0; guard < 4096; ++guard) {
         if (*at + 3 > n) return false;
@@ -1015,33 +1046,35 @@ static bool amf_props(const uint8_t *p, size_t n, size_t *at, int depth, rubravi
         if (out && p[*at] == 0 && *at + 9 <= n) {
             uint64_t u = be64(p + *at + 1);
             double d;
-            memcpy(&d, &u, 8);
-            if (key == 8 && memcmp(name, "duration", 8) == 0) set_seconds(out, d, false);
-            if (key == 5 && memcmp(name, "width", 5) == 0) w = d;
-            if (key == 6 && memcmp(name, "height", 6) == 0) h = d;
+            proven_sys_mem_copy(&d, &u, 8);
+            if (key == 8 && proven_sys_mem_cmp(name, "duration", 8) == 0) set_seconds(out, d, false);
+            if (key == 5 && proven_sys_mem_cmp(name, "width", 5) == 0) w = d;
+            if (key == 6 && proven_sys_mem_cmp(name, "height", 6) == 0) h = d;
         }
-        if (!amf_skip(p, n, at, depth + 1)) return false;
+        if (!amf_skip(rubraview_mem_view(p, n), at, depth + 1)) return false;
     }
     if (out && w >= 1.0 && h >= 1.0 && w <= SIDE_MAX && h <= SIDE_MAX) set_size(out, (uint64_t)(w + 0.5), (uint64_t)(h + 0.5), 1);
     return true;
 }
 
-static bool amf_skip(const uint8_t *p, size_t n, size_t *at, int depth) {
+static bool amf_skip(proven_mem_view_t p_view, size_t *at, int depth) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     if (depth > 8 || *at >= n) return false;
     uint8_t type = p[(*at)++];
     switch (type) {
         case 0: *at += 8; break;
         case 1: *at += 1; break;
         case 2: if (*at + 2 > n) return false; *at += 2u + be16(p + *at); break;
-        case 3: return amf_props(p, n, at, depth, NULL);
+        case 3: return amf_props(rubraview_mem_view(p, n), at, depth, NULL);
         case 5: case 6: break;
         case 7: *at += 2; break;
-        case 8: *at += 4; return amf_props(p, n, at, depth, NULL);
+        case 8: *at += 4; return amf_props(rubraview_mem_view(p, n), at, depth, NULL);
         case 10: {
             if (*at + 4 > n) return false;
             uint32_t count = be32(p + *at);
             *at += 4;
-            for (uint32_t i = 0; i < count; ++i) if (!amf_skip(p, n, at, depth + 1)) return false;
+            for (uint32_t i = 0; i < count; ++i) if (!amf_skip(rubraview_mem_view(p, n), at, depth + 1)) return false;
             break;
         }
         case 11: *at += 10; break;
@@ -1062,12 +1095,12 @@ static bool read_flv(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
         uint32_t size = be24(t + 1);
         if (t[0] == 18) {
             const uint8_t *b = size ? rubraview_head_bytes(src, tag + 11, size) : NULL;
-            if (!b || size < 13 || b[0] != 2 || be16(b + 1) != 10 || memcmp(b + 3, "onMetaData", 10) != 0) return true;
+            if (!b || size < 13 || b[0] != 2 || be16(b + 1) != 10 || proven_sys_mem_cmp(b + 3, "onMetaData", 10) != 0) return true;
             size_t at = 13;
             if (b[at] == 8) at += 5;
             else if (b[at] == 3) at += 1;
             else return true;
-            (void)amf_props(b, size, &at, 0, out);
+            (void)amf_props(rubraview_mem_view(b, size), &at, 0, out);
             return true;
         }
         tag += 11u + size + 4u;
@@ -1097,16 +1130,16 @@ static bool read_ogg(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
     ogg_stream_t streams[4];
     size_t count = 0;
     for (size_t at = 0; at + 27 <= got && count < 4;) {
-        if (memcmp(p + at, "OggS", 4) != 0 || !(p[at + 5] & 2)) break;   /* the beginning pages only */
+        if (proven_sys_mem_cmp(p + at, "OggS", 4) != 0 || !(p[at + 5] & 2)) break;   /* the beginning pages only */
         size_t segs = p[at + 26], body = at + 27 + segs, len = 0;
         if (body > got) break;
         for (size_t i = 0; i < segs; ++i) len += p[at + 27 + i];
         if (body + len > got) break;
         const uint8_t *k = p + body;
         ogg_stream_t s = { .serial = le32(p + at + 14) };
-        if (len >= 16 && memcmp(k, "\x01vorbis", 7) == 0) { s.kind = OGG_VORBIS; s.rate = le32(k + 12); }
-        else if (len >= 12 && memcmp(k, "OpusHead", 8) == 0) { s.kind = OGG_OPUS; s.preskip = le16(k + 10); }
-        else if (len >= 42 && memcmp(k, "\x80theora", 7) == 0) {
+        if (len >= 16 && proven_sys_mem_cmp(k, "\x01vorbis", 7) == 0) { s.kind = OGG_VORBIS; s.rate = le32(k + 12); }
+        else if (len >= 12 && proven_sys_mem_cmp(k, "OpusHead", 8) == 0) { s.kind = OGG_OPUS; s.preskip = le16(k + 10); }
+        else if (len >= 42 && proven_sys_mem_cmp(k, "\x80theora", 7) == 0) {
             s.kind = OGG_THEORA;
             s.w = be24(k + 14);
             s.h = be24(k + 17);
@@ -1125,7 +1158,7 @@ static bool read_ogg(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
     p = rubraview_head_view(src, tail, RUBRAVIEW_HEAD_LATER, &got);
     double seconds = 0.0;
     for (size_t at = 0; p && at + 27 <= got; ++at) {
-        if (p[at] != 'O' || memcmp(p + at, "OggS", 4) != 0 || p[at + 4] != 0) continue;
+        if (p[at] != 'O' || proven_sys_mem_cmp(p + at, "OggS", 4) != 0 || p[at + 4] != 0) continue;
         uint64_t granule = le64(p + at + 6);
         if (granule == UINT64_MAX) continue;
         uint32_t serial = le32(p + at + 14);
@@ -1163,10 +1196,10 @@ static bool read_wav(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
         if (!c) break;
         uint32_t size = le32(c + 4);
         const uint8_t *b = NULL;
-        if (memcmp(c, "fmt ", 4) == 0 && (b = rubraview_head_bytes(src, at + 8, 12)) != NULL) { tag = le16(b); rate = le32(b + 4); byte_rate = le32(b + 8); }
-        else if (memcmp(c, "ds64", 4) == 0 && (b = rubraview_head_bytes(src, at + 8, 16)) != NULL) data64 = le64(b + 8);
-        else if (memcmp(c, "fact", 4) == 0 && (b = rubraview_head_bytes(src, at + 8, 4)) != NULL) fact = le32(b);
-        else if (memcmp(c, "data", 4) == 0) { data = size; start = at + 8; have_data = true; }
+        if (proven_sys_mem_cmp(c, "fmt ", 4) == 0 && (b = rubraview_head_bytes(src, at + 8, 12)) != NULL) { tag = le16(b); rate = le32(b + 4); byte_rate = le32(b + 8); }
+        else if (proven_sys_mem_cmp(c, "ds64", 4) == 0 && (b = rubraview_head_bytes(src, at + 8, 16)) != NULL) data64 = le64(b + 8);
+        else if (proven_sys_mem_cmp(c, "fact", 4) == 0 && (b = rubraview_head_bytes(src, at + 8, 4)) != NULL) fact = le32(b);
+        else if (proven_sys_mem_cmp(c, "data", 4) == 0) { data = size; start = at + 8; have_data = true; }
         at += 8u + size + (size & 1u);
     }
     if (!have_data) return true;
@@ -1218,12 +1251,12 @@ static bool read_mp3(rubraview_head_src_t *src, uint64_t base, rubraview_media_f
     }
     if (!p || at + 4 > got) return true;
     const uint8_t *x = p + at + 4 + (f.version == 3 ? (f.mono ? 17 : 32) : (f.mono ? 9 : 17));
-    if (x + 12 <= p + got && (memcmp(x, "Xing", 4) == 0 || memcmp(x, "Info", 4) == 0) && (be32(x + 4) & 1u)) {
+    if (x + 12 <= p + got && (proven_sys_mem_cmp(x, "Xing", 4) == 0 || proven_sys_mem_cmp(x, "Info", 4) == 0) && (be32(x + 4) & 1u)) {
         set_seconds(out, (double)be32(x + 8) * f.samples / f.rate, false);
         return true;
     }
     const uint8_t *v = p + at + 36;
-    if (v + 18 <= p + got && memcmp(v, "VBRI", 4) == 0) {
+    if (v + 18 <= p + got && proven_sys_mem_cmp(v, "VBRI", 4) == 0) {
         set_seconds(out, (double)be32(v + 14) * f.samples / f.rate, false);
         return true;
     }
@@ -1257,7 +1290,7 @@ static bool read_adts(rubraview_head_src_t *src, uint64_t base, rubraview_media_
 /* ---- which kind ---- */
 
 static bool name_is(proven_u8str_view_t name, const char *ext) {
-    size_t n = strlen(ext);
+    size_t n = proven_cstr_len(ext);
     if (name.size <= n || name.ptr[name.size - n - 1] != '.') return false;
     for (size_t i = 0; i < n; ++i) {
         char c = (char)name.ptr[name.size - n + i];
@@ -1269,7 +1302,7 @@ static bool name_is(proven_u8str_view_t name, const char *ext) {
 
 static bool image_brand(const uint8_t *b) {
     static const char *const brands[] = { "avif", "avis", "heic", "heix", "heim", "heis", "mif1", "msf1" };
-    for (size_t i = 0; i < sizeof(brands) / sizeof(brands[0]); ++i) if (memcmp(b, brands[i], 4) == 0) return true;
+    for (size_t i = 0; i < sizeof(brands) / sizeof(brands[0]); ++i) if (proven_sys_mem_cmp(b, brands[i], 4) == 0) return true;
     return false;
 }
 
@@ -1278,13 +1311,13 @@ static bool read_after_id3(rubraview_head_src_t *src, proven_u8str_view_t name, 
     uint64_t at = 0;
     for (unsigned guard = 0; guard < 4; ++guard) {
         const uint8_t *t = rubraview_head_bytes(src, at, 10);
-        if (!t || memcmp(t, "ID3", 3) != 0) break;
+        if (!t || proven_sys_mem_cmp(t, "ID3", 3) != 0) break;
         uint64_t size = ((uint64_t)(t[6] & 0x7F) << 21) | ((uint64_t)(t[7] & 0x7F) << 14) | ((uint64_t)(t[8] & 0x7F) << 7) | (t[9] & 0x7F);
         at += 10u + size + (t[5] & 0x10 ? 10u : 0u);
     }
     size_t got = 0;
     const uint8_t *p = rubraview_head_view(src, at, 4, &got);
-    if (p && got >= 4 && memcmp(p, "fLaC", 4) == 0) return read_flac(src, at, out);
+    if (p && got >= 4 && proven_sys_mem_cmp(p, "fLaC", 4) == 0) return read_flac(src, at, out);
     if (p && got >= 2 && p[0] == 0xFF && (p[1] & 0xF6) == 0xF0) return read_adts(src, at, out);
     if (name_is(name, "aac")) return read_adts(src, at, out);
     return read_mp3(src, at, out);
@@ -1296,30 +1329,30 @@ bool rubraview_media_head_read(rubraview_head_src_t *src, proven_u8str_view_t na
     const uint8_t *h = rubraview_head_view(src, 0, 400, &n);
     if (!h || n < 4) return false;
     if (h[0] == 0xFF && h[1] == 0xD8 && h[2] == 0xFF) return read_jpeg(src, out);
-    if (n >= 8 && memcmp(h, "\x89PNG\r\n\x1a\n", 8) == 0) return read_png(src, out);
-    if (n >= 6 && (memcmp(h, "GIF87a", 6) == 0 || memcmp(h, "GIF89a", 6) == 0)) return read_gif(src, out);
+    if (n >= 8 && proven_sys_mem_cmp(h, "\x89PNG\r\n\x1a\n", 8) == 0) return read_png(src, out);
+    if (n >= 6 && (proven_sys_mem_cmp(h, "GIF87a", 6) == 0 || proven_sys_mem_cmp(h, "GIF89a", 6) == 0)) return read_gif(src, out);
     if (n >= 18 && h[0] == 'B' && h[1] == 'M') {
         uint32_t dib = le32(h + 14);
         if (dib == 12 || dib == 40 || dib == 52 || dib == 56 || dib == 64 || dib == 108 || dib == 124) return read_bmp(src, out);
     }
     if ((h[0] == 'I' && h[1] == 'I' && (le16(h + 2) == 42 || le16(h + 2) == 43)) ||
         (h[0] == 'M' && h[1] == 'M' && (be16(h + 2) == 42 || be16(h + 2) == 43))) return read_tiff(src, out);
-    if (n >= 12 && (memcmp(h, "RIFF", 4) == 0 || memcmp(h, "RF64", 4) == 0)) {
-        if (memcmp(h + 8, "WEBP", 4) == 0) return read_webp(src, out);
-        if (memcmp(h + 8, "AVI ", 4) == 0) return read_avi(src, out);
-        if (memcmp(h + 8, "WAVE", 4) == 0) return read_wav(src, out);
+    if (n >= 12 && (proven_sys_mem_cmp(h, "RIFF", 4) == 0 || proven_sys_mem_cmp(h, "RF64", 4) == 0)) {
+        if (proven_sys_mem_cmp(h + 8, "WEBP", 4) == 0) return read_webp(src, out);
+        if (proven_sys_mem_cmp(h + 8, "AVI ", 4) == 0) return read_avi(src, out);
+        if (proven_sys_mem_cmp(h + 8, "WAVE", 4) == 0) return read_wav(src, out);
     }
-    if (n >= 12 && memcmp(h, "\0\0\0\x0CJXL \r\n\x87\n", 12) == 0) return read_jxl(src, out, true);
+    if (n >= 12 && proven_sys_mem_cmp(h, "\0\0\0\x0CJXL \r\n\x87\n", 12) == 0) return read_jxl(src, out, true);
     if (h[0] == 0xFF && h[1] == 0x0A) return read_jxl(src, out, false);
-    if (n >= 12 && memcmp(h + 4, "ftyp", 4) == 0) return image_brand(h + 8) ? read_heif(src, out, memcmp(h + 8, "avi", 3) == 0 ? "avif" : "heif") : read_mp4(src, out);
-    if (n >= 8 && (memcmp(h + 4, "moov", 4) == 0 || memcmp(h + 4, "mdat", 4) == 0 || memcmp(h + 4, "wide", 4) == 0 ||
-                   memcmp(h + 4, "free", 4) == 0 || memcmp(h + 4, "skip", 4) == 0 || memcmp(h + 4, "pnot", 4) == 0)) return read_mp4(src, out);
+    if (n >= 12 && proven_sys_mem_cmp(h + 4, "ftyp", 4) == 0) return image_brand(h + 8) ? read_heif(src, out, proven_sys_mem_cmp(h + 8, "avi", 3) == 0 ? "avif" : "heif") : read_mp4(src, out);
+    if (n >= 8 && (proven_sys_mem_cmp(h + 4, "moov", 4) == 0 || proven_sys_mem_cmp(h + 4, "mdat", 4) == 0 || proven_sys_mem_cmp(h + 4, "wide", 4) == 0 ||
+                   proven_sys_mem_cmp(h + 4, "free", 4) == 0 || proven_sys_mem_cmp(h + 4, "skip", 4) == 0 || proven_sys_mem_cmp(h + 4, "pnot", 4) == 0)) return read_mp4(src, out);
     if (h[0] == 0x1A && h[1] == 0x45 && h[2] == 0xDF && h[3] == 0xA3) return read_mkv(src, out);
-    if (n >= 16 && memcmp(h, ASF_HEADER, 16) == 0) return read_asf(src, out);
-    if (memcmp(h, "FLV\x01", 4) == 0) return read_flv(src, out);
-    if (memcmp(h, "OggS", 4) == 0) return read_ogg(src, out);
-    if (memcmp(h, "fLaC", 4) == 0) return read_flac(src, 0, out);
-    if (memcmp(h, "ID3", 3) == 0) return read_after_id3(src, name, out);
+    if (n >= 16 && proven_sys_mem_cmp(h, ASF_HEADER, 16) == 0) return read_asf(src, out);
+    if (proven_sys_mem_cmp(h, "FLV\x01", 4) == 0) return read_flv(src, out);
+    if (proven_sys_mem_cmp(h, "OggS", 4) == 0) return read_ogg(src, out);
+    if (proven_sys_mem_cmp(h, "fLaC", 4) == 0) return read_flac(src, 0, out);
+    if (proven_sys_mem_cmp(h, "ID3", 3) == 0) return read_after_id3(src, name, out);
     if (h[0] == 0 && h[1] == 0 && h[2] == 1 && (h[3] == 0xBA || h[3] == 0xB3)) return read_ps(src, out);
     if (n > 376 && h[0] == 0x47 && h[188] == 0x47 && h[376] == 0x47) return read_ts(src, out, 188, 0);
     if (n > 388 && h[4] == 0x47 && h[196] == 0x47 && h[388] == 0x47) return read_ts(src, out, 192, 4);

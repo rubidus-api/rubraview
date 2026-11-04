@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/jpegtran.h"
 
 #include <stdlib.h>
@@ -63,9 +64,11 @@ bool rubraview_jpegtran_is_exact(rubraview_jpegtran_op_t op,
     }
 }
 
-bool rubraview_jpegtran_probe(const uint8_t *data, size_t size,
+bool rubraview_jpegtran_probe(proven_mem_view_t data_view,
                               int32_t *out_width, int32_t *out_height,
                               int32_t *out_mcu_width, int32_t *out_mcu_height) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!data || size < 4) return false;
 
     struct jpeg_decompress_struct src;
@@ -120,7 +123,7 @@ typedef struct jt_dest {
 static void jt_dest_init(j_compress_ptr cinfo) {
     jt_dest_t *d = (jt_dest_t*)cinfo->dest;
     d->cap = 64u * 1024u;
-    d->buffer = malloc(d->cap);
+    d->buffer = rubraview_alloc(d->cap);
     if (!d->buffer) ERREXIT1(cinfo, JERR_OUT_OF_MEMORY, 0);
     d->pub.next_output_byte = d->buffer;
     d->pub.free_in_buffer = d->cap;
@@ -129,7 +132,7 @@ static void jt_dest_init(j_compress_ptr cinfo) {
 static boolean jt_dest_grow(j_compress_ptr cinfo) {
     jt_dest_t *d = (jt_dest_t*)cinfo->dest;
     size_t cap = d->cap * 2u;
-    unsigned char *grown = cap > d->cap ? realloc(d->buffer, cap) : NULL;
+    unsigned char *grown = cap > d->cap ? rubraview_realloc(rubraview_mem_mut(d->buffer, cap)) : NULL;
     if (!grown) ERREXIT1(cinfo, JERR_OUT_OF_MEMORY, 1);
     d->pub.next_output_byte = grown + d->cap;
     d->pub.free_in_buffer = cap - d->cap;
@@ -153,10 +156,12 @@ static void jt_dest_term(j_compress_ptr cinfo) {
  * and MinGW's -Wclobbered is what pointed it out.
  */
 static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
-                                                 const uint8_t *data, size_t size,
+                                                 proven_mem_view_t data_view,
                                                  JXFORM_CODE jxform, bool trim,
                                                  bool copy_markers, bool progressive,
                                                  bool optimise, int restart_rows) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     rubraview_jpegtran_result_t result = {
         .err = RUBRAVIEW_JPEGTRAN_ERR_CORRUPT,
         .data = PROVEN_LIT(""),
@@ -176,7 +181,7 @@ static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
                                .term_destination = jt_dest_term } };
     volatile bool src_created = false, dst_created = false;
 
-    memset(&info, 0, sizeof(info));
+    proven_sys_mem_set(&info, 0, sizeof(info));
     info.transform = jxform;
     info.trim = trim;
     info.perfect = false;
@@ -191,7 +196,7 @@ static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
     dst_err.pub.output_message = jt_output_message;
 
     if (setjmp(src_err.escape) || setjmp(dst_err.escape)) {
-        free(out.buffer);
+        rubraview_free(out.buffer);
         if (dst_created) jpeg_destroy_compress(&dst);
         if (src_created) jpeg_destroy_decompress(&src);
         result.err = RUBRAVIEW_JPEGTRAN_ERR_CORRUPT;
@@ -258,14 +263,14 @@ static rubraview_jpegtran_result_t run_transform(proven_arena_t *arena,
     size_t out_size = out.used;
     proven_result_mem_mut_t res = proven_arena_alloc(arena, out_size + 1);
     if (!proven_is_ok(res.err)) {
-        free(out.buffer);
+        rubraview_free(out.buffer);
         result.err = RUBRAVIEW_JPEGTRAN_ERR_OUT_OF_MEMORY;
         return result;
     }
     char *copy = (char*)(void*)res.value.ptr;
-    memcpy(copy, out.buffer, out_size);
+    proven_sys_mem_copy(copy, out.buffer, out_size);
     copy[out_size] = '\0';
-    free(out.buffer);
+    rubraview_free(out.buffer);
 
     result.err = RUBRAVIEW_JPEGTRAN_OK;
     result.data = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)copy, .size = out_size };
@@ -288,7 +293,7 @@ static rubraview_jpegtran_result_t transform(proven_arena_t *arena,
     if (data[0] != 0xFF || data[1] != 0xD8) return result;
 
     int32_t width = 0, height = 0, mcu_w = 0, mcu_h = 0;
-    if (!rubraview_jpegtran_probe(data, size, &width, &height, &mcu_w, &mcu_h)) {
+    if (!rubraview_jpegtran_probe(rubraview_mem_view(data, size), &width, &height, &mcu_w, &mcu_h)) {
         result.err = RUBRAVIEW_JPEGTRAN_ERR_CORRUPT;
         return result;
     }
@@ -299,34 +304,42 @@ static rubraview_jpegtran_result_t transform(proven_arena_t *arena,
         return result;
     }
 
-    result = run_transform(arena, data, size, to_jxform(op),
+    result = run_transform(arena, rubraview_mem_view(data, size), to_jxform(op),
                            edge_policy == RUBRAVIEW_JPEGTRAN_TRIM, copy_markers, false, false, 0);
     if (result.err == RUBRAVIEW_JPEGTRAN_OK) result.was_exact = exact;
     return result;
 }
 
 rubraview_jpegtran_result_t rubraview_jpegtran_apply(proven_arena_t *arena,
-                                                     const uint8_t *data, size_t size,
+                                                     proven_mem_view_t data_view,
                                                      rubraview_jpegtran_op_t op,
                                                      rubraview_jpegtran_edge_t edge_policy,
                                                      bool privacy_clean) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     return transform(arena, data, size, op, edge_policy, !privacy_clean);
 }
 
 rubraview_jpegtran_result_t rubraview_jpegtran_progressive(proven_arena_t *arena,
-                                                           const uint8_t *data, size_t size) {
-    return run_transform(arena, data, size, JXFORM_NONE, false, true, true, false, 0);
+                                                           proven_mem_view_t data_view) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    return run_transform(arena, rubraview_mem_view(data, size), JXFORM_NONE, false, true, true, false, 0);
 }
 
-rubraview_jpegtran_result_t rubraview_jpegtran_rewrite(proven_arena_t *arena, const uint8_t *data, size_t size,
+rubraview_jpegtran_result_t rubraview_jpegtran_rewrite(proven_arena_t *arena, proven_mem_view_t data_view,
                                                        bool progressive, bool optimise, int32_t restart_rows, bool keep_markers) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (restart_rows < 0) restart_rows = 0;
     if (restart_rows > 64) restart_rows = 64;
-    return run_transform(arena, data, size, JXFORM_NONE, false, keep_markers, progressive, optimise, (int)restart_rows);
+    return run_transform(arena, rubraview_mem_view(data, size), JXFORM_NONE, false, keep_markers, progressive, optimise, (int)restart_rows);
 }
 
 rubraview_jpegtran_result_t rubraview_jpegtran_strip_metadata(proven_arena_t *arena,
-                                                              const uint8_t *data, size_t size) {
+                                                              proven_mem_view_t data_view) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     /* No transform, and no markers copied: the coefficients pass
        straight through and the metadata does not. */
     return transform(arena, data, size, RUBRAVIEW_JPEGTRAN_NONE,

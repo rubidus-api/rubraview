@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/exif.h"
 #include "rubraview/utf8.h"
 #include <math.h>
@@ -75,13 +76,17 @@ static uint16_t tiff_u16(const uint8_t *p, bool big_endian) {
                        : (uint16_t)(((uint16_t)p[1] << 8) | p[0]);
 }
 
-static bool tiff_read_u16(const uint8_t *base, size_t base_len, size_t off, bool big_endian, uint16_t *out) {
+static bool tiff_read_u16(proven_mem_view_t base_view, size_t off, bool big_endian, uint16_t *out) {
+    const uint8_t *base = (const uint8_t *)base_view.ptr;
+    size_t base_len = (size_t)base_view.size;
     if (off + 2 > base_len) return false;
     *out = tiff_u16(base + off, big_endian);
     return true;
 }
 
-static bool tiff_read_u32(const uint8_t *base, size_t base_len, size_t off, bool big_endian, uint32_t *out) {
+static bool tiff_read_u32(proven_mem_view_t base_view, size_t off, bool big_endian, uint32_t *out) {
+    const uint8_t *base = (const uint8_t *)base_view.ptr;
+    size_t base_len = (size_t)base_view.size;
     if (off + 4 > base_len) return false;
     *out = big_endian
         ? ((uint32_t)base[off] << 24) | ((uint32_t)base[off + 1] << 16) | ((uint32_t)base[off + 2] << 8) | base[off + 3]
@@ -91,7 +96,9 @@ static bool tiff_read_u32(const uint8_t *base, size_t base_len, size_t off, bool
 
 /* `base` points at the start of the TIFF header (right after "Exif\0\0"),
    bounded to base_len bytes (the remainder of the APP1 payload). */
-static int32_t orientation_from_tiff(const uint8_t *base, size_t base_len) {
+static int32_t orientation_from_tiff(proven_mem_view_t base_view) {
+    const uint8_t *base = (const uint8_t *)base_view.ptr;
+    size_t base_len = (size_t)base_view.size;
     if (base_len < 8) return 1;
 
     bool big_endian;
@@ -100,32 +107,36 @@ static int32_t orientation_from_tiff(const uint8_t *base, size_t base_len) {
     else return 1;
 
     uint16_t magic;
-    if (!tiff_read_u16(base, base_len, 2, big_endian, &magic) || magic != 42) return 1;
+    if (!tiff_read_u16(rubraview_mem_view(base, base_len), 2, big_endian, &magic) || magic != 42) return 1;
 
     uint32_t ifd0_off;
-    if (!tiff_read_u32(base, base_len, 4, big_endian, &ifd0_off)) return 1;
+    if (!tiff_read_u32(rubraview_mem_view(base, base_len), 4, big_endian, &ifd0_off)) return 1;
 
     uint16_t entry_count;
-    if (!tiff_read_u16(base, base_len, ifd0_off, big_endian, &entry_count)) return 1;
+    if (!tiff_read_u16(rubraview_mem_view(base, base_len), ifd0_off, big_endian, &entry_count)) return 1;
 
     for (uint16_t i = 0; i < entry_count; ++i) {
         size_t entry_off = (size_t)ifd0_off + 2 + (size_t)i * 12;
         uint16_t tag;
-        if (!tiff_read_u16(base, base_len, entry_off, big_endian, &tag)) return 1;
+        if (!tiff_read_u16(rubraview_mem_view(base, base_len), entry_off, big_endian, &tag)) return 1;
         if (tag == 0x0112) {
             uint16_t value;
-            if (!tiff_read_u16(base, base_len, entry_off + 8, big_endian, &value)) return 1;
+            if (!tiff_read_u16(rubraview_mem_view(base, base_len), entry_off + 8, big_endian, &value)) return 1;
             return (value >= 1 && value <= 8) ? (int32_t)value : 1;
         }
     }
     return 1;
 }
 
-int32_t rubraview_exif_tiff_orientation(const uint8_t *tiff, size_t size) {
-    return tiff ? orientation_from_tiff(tiff, size) : 1;
+int32_t rubraview_exif_tiff_orientation(proven_mem_view_t tiff_view) {
+    const uint8_t *tiff = (const uint8_t *)tiff_view.ptr;
+    size_t size = (size_t)tiff_view.size;
+    return tiff ? orientation_from_tiff(rubraview_mem_view(tiff, size)) : 1;
 }
 
-int32_t rubraview_exif_read_orientation(const uint8_t *jpeg, size_t size) {
+int32_t rubraview_exif_read_orientation(proven_mem_view_t jpeg_view) {
+    const uint8_t *jpeg = (const uint8_t *)jpeg_view.ptr;
+    size_t size = (size_t)jpeg_view.size;
     if (!jpeg || size < 2 || jpeg[0] != 0xFF || jpeg[1] != JPEG_MARKER_SOI) return 1;
 
     jpeg_marker_iter_t it = { .data = jpeg, .size = size, .pos = 2 };
@@ -134,8 +145,8 @@ int32_t rubraview_exif_read_orientation(const uint8_t *jpeg, size_t size) {
         if (!m.ok) break;
 
         if (m.code == JPEG_MARKER_APP1 && m.has_length && m.payload_len >= 6 &&
-            memcmp(jpeg + m.payload_start, "Exif\0\0", 6) == 0) {
-            return orientation_from_tiff(jpeg + m.payload_start + 6, m.payload_len - 6);
+            proven_sys_mem_cmp(jpeg + m.payload_start, "Exif\0\0", 6) == 0) {
+            return orientation_from_tiff(rubraview_mem_view(jpeg + m.payload_start + 6, m.payload_len - 6));
         }
 
         if (m.code == JPEG_MARKER_SOS || m.code == JPEG_MARKER_EOI) break;
@@ -143,7 +154,9 @@ int32_t rubraview_exif_read_orientation(const uint8_t *jpeg, size_t size) {
     return 1;
 }
 
-rubraview_jpeg_strip_result_t rubraview_jpeg_privacy_strip(proven_arena_t *arena, const uint8_t *jpeg, size_t size) {
+rubraview_jpeg_strip_result_t rubraview_jpeg_privacy_strip(proven_arena_t *arena, proven_mem_view_t jpeg_view) {
+    const uint8_t *jpeg = (const uint8_t *)jpeg_view.ptr;
+    size_t size = (size_t)jpeg_view.size;
     rubraview_jpeg_strip_result_t result = {0};
     result.data = PROVEN_LIT("");
 
@@ -156,7 +169,7 @@ rubraview_jpeg_strip_result_t rubraview_jpeg_privacy_strip(proven_arena_t *arena
     uint8_t *out = res.value.ptr;
     size_t out_pos = 0;
 
-    memcpy(out, jpeg, 2);
+    proven_sys_mem_copy(out, jpeg, 2);
     out_pos = 2;
 
     jpeg_marker_iter_t it = { .data = jpeg, .size = size, .pos = 2 };
@@ -166,10 +179,10 @@ rubraview_jpeg_strip_result_t rubraview_jpeg_privacy_strip(proven_arena_t *arena
 
         bool strip_this = false;
         if (m.code == JPEG_MARKER_APP1 && m.has_length) {
-            if (m.payload_len >= 6 && memcmp(jpeg + m.payload_start, "Exif\0\0", 6) == 0) {
+            if (m.payload_len >= 6 && proven_sys_mem_cmp(jpeg + m.payload_start, "Exif\0\0", 6) == 0) {
                 strip_this = true;
                 result.stripped_exif = true;
-            } else if (m.payload_len >= 29 && memcmp(jpeg + m.payload_start, "http://ns.adobe.com/xap/1.0/\0", 29) == 0) {
+            } else if (m.payload_len >= 29 && proven_sys_mem_cmp(jpeg + m.payload_start, "http://ns.adobe.com/xap/1.0/\0", 29) == 0) {
                 strip_this = true;
                 result.stripped_xmp = true;
             }
@@ -180,7 +193,7 @@ rubraview_jpeg_strip_result_t rubraview_jpeg_privacy_strip(proven_arena_t *arena
 
         if (!strip_this) {
             size_t seg_len = m.segment_end - m.segment_start;
-            memcpy(out + out_pos, jpeg + m.segment_start, seg_len);
+            proven_sys_mem_copy(out + out_pos, jpeg + m.segment_start, seg_len);
             out_pos += seg_len;
         }
 
@@ -189,7 +202,7 @@ rubraview_jpeg_strip_result_t rubraview_jpeg_privacy_strip(proven_arena_t *arena
 
     if (it.pos < size) {
         size_t tail_len = size - it.pos;
-        memcpy(out + out_pos, jpeg + it.pos, tail_len);
+        proven_sys_mem_copy(out + out_pos, jpeg + it.pos, tail_len);
         out_pos += tail_len;
     }
 
@@ -222,14 +235,14 @@ static size_t type_size(uint16_t type) {
    out of the block. */
 static bool entry_value(const tiff_ctx_t *t, size_t entry, uint16_t *type, uint32_t *count, size_t *at, size_t *bytes) {
     uint32_t c = 0, off = 0;
-    if (!tiff_read_u16(t->base, t->len, entry + 2, t->be, type) ||
-        !tiff_read_u32(t->base, t->len, entry + 4, t->be, &c)) return false;
+    if (!tiff_read_u16(rubraview_mem_view(t->base, t->len), entry + 2, t->be, type) ||
+        !tiff_read_u32(rubraview_mem_view(t->base, t->len), entry + 4, t->be, &c)) return false;
     size_t unit = type_size(*type);
     if (unit == 0 || c == 0 || c > 0x10000u) return false;
     size_t n = unit * (size_t)c;
     if (n <= 4) { *at = entry + 8; }
     else {
-        if (!tiff_read_u32(t->base, t->len, entry + 8, t->be, &off)) return false;
+        if (!tiff_read_u32(rubraview_mem_view(t->base, t->len), entry + 8, t->be, &off)) return false;
         *at = off;
     }
     if (*at > t->len || n > t->len - *at) return false;
@@ -242,8 +255,8 @@ static uint32_t entry_uint(const tiff_ctx_t *t, size_t entry) {
     uint16_t type; uint32_t count; size_t at, bytes;
     if (!entry_value(t, entry, &type, &count, &at, &bytes)) return 0;
     uint16_t v16; uint32_t v32;
-    if (type == 3 && tiff_read_u16(t->base, t->len, at, t->be, &v16)) return v16;
-    if ((type == 4 || type == 9) && tiff_read_u32(t->base, t->len, at, t->be, &v32)) return v32;
+    if (type == 3 && tiff_read_u16(rubraview_mem_view(t->base, t->len), at, t->be, &v16)) return v16;
+    if ((type == 4 || type == 9) && tiff_read_u32(rubraview_mem_view(t->base, t->len), at, t->be, &v32)) return v32;
     if (type == 1 || type == 7) return t->base[at];
     return 0;
 }
@@ -254,8 +267,8 @@ static bool entry_rational(const tiff_ctx_t *t, size_t entry, uint32_t index, do
     uint16_t type; uint32_t count; size_t at, bytes;
     if (!entry_value(t, entry, &type, &count, &at, &bytes) || (type != 5 && type != 10) || index >= count) return false;
     uint32_t n, d;
-    if (!tiff_read_u32(t->base, t->len, at + index * 8, t->be, &n) ||
-        !tiff_read_u32(t->base, t->len, at + index * 8 + 4, t->be, &d) || d == 0) return false;
+    if (!tiff_read_u32(rubraview_mem_view(t->base, t->len), at + index * 8, t->be, &n) ||
+        !tiff_read_u32(rubraview_mem_view(t->base, t->len), at + index * 8 + 4, t->be, &d) || d == 0) return false;
     *out = type == 10 ? (double)(int32_t)n / (double)(int32_t)d : (double)n / (double)d;
     if (num) *num = n;
     if (den) *den = d;
@@ -279,7 +292,7 @@ static void entry_text(const tiff_ctx_t *t, size_t entry, char *dst, size_t cap)
 /* "2024:05:01 13:22:07" -> "2024-05-01 13:22:07" */
 static void entry_date(const tiff_ctx_t *t, size_t entry, char *dst, size_t cap) {
     entry_text(t, entry, dst, cap);
-    if (strlen(dst) >= 10 && dst[4] == ':' && dst[7] == ':') { dst[4] = '-'; dst[7] = '-'; }
+    if (proven_cstr_len(dst) >= 10 && dst[4] == ':' && dst[7] == ':') { dst[4] = '-'; dst[7] = '-'; }
 }
 
 static bool entry_degrees(const tiff_ctx_t *t, size_t entry, double *out) {
@@ -299,13 +312,15 @@ static void entry_version(const tiff_ctx_t *t, size_t entry, char *dst, size_t c
     const uint8_t *d = t->base + at;
     for (int i = 0; i < 4; ++i) if (d[i] < '0' || d[i] > '9') return;
     int major = (d[0] - '0') * 10 + (d[1] - '0');
-    snprintf(dst, cap, "%d.%c%c", major, d[2], d[3]);
-    if (d[3] == '0' && dst[strlen(dst) - 2] != '.') dst[strlen(dst) - 1] = '\0';   /* "2.30" -> "2.3" */
+    rubraview_fmt(dst, cap, "{}.{}{}", PROVEN_ARG((int)major), PROVEN_ARG((char)d[2]), PROVEN_ARG((char)d[3]));
+    if (d[3] == '0' && dst[proven_cstr_len(dst) - 2] != '.') dst[proven_cstr_len(dst) - 1] = '\0';   /* "2.30" -> "2.3" */
 }
 
 /* Bytes as UTF-8 text in dst: kept when they are UTF-8, read as Latin-1
    when not; control characters become spaces, the end trimmed. */
-static void text_utf8(const uint8_t *s, size_t n, char *dst, size_t cap) {
+static void text_utf8(proven_mem_view_t s_view, char *dst, size_t cap) {
+    const uint8_t *s = (const uint8_t *)s_view.ptr;
+    size_t n = (size_t)s_view.size;
     size_t pos = 0;
     if (cap == 0) return;
     while (n > 0 && s[n - 1] == 0) --n;
@@ -313,21 +328,21 @@ static void text_utf8(const uint8_t *s, size_t n, char *dst, size_t cap) {
     for (size_t i = 0; i < n;) {
         uint32_t cp;
         size_t used = 1;
-        if (utf8) cp = rubraview_utf8_decode(s + i, n - i, &used);
+        if (utf8) cp = rubraview_utf8_decode(rubraview_mem_view(s + i, n - i), &used);
         else cp = s[i];
         if (cp == 0) break;
         if (cp < 0x20 || cp == 0x7F) cp = ' ';
         proven_byte_t u[4];
         size_t k = proven_utf8_encode_one(cp, u);
         if (k == 0 || pos + k > cap - 1) break;
-        memcpy(dst + pos, u, k);
+        proven_sys_mem_copy(dst + pos, u, k);
         pos += k;
         i += used;
     }
     while (pos > 0 && dst[pos - 1] == ' ') --pos;
     size_t lead = 0;
     while (lead < pos && dst[lead] == ' ') ++lead;
-    if (lead) memmove(dst, dst + lead, pos - lead);
+    if (lead) proven_sys_mem_move(dst, dst + lead, pos - lead);
     dst[pos - lead] = '\0';
 }
 
@@ -340,8 +355,8 @@ static void entry_comment(const tiff_ctx_t *t, size_t entry, char *dst, size_t c
     if (!entry_value(t, entry, &type, &count, &at, &bytes) || bytes <= 8) return;
     const uint8_t *head = t->base + at, *d = head + 8;
     size_t n = bytes - 8;
-    if (memcmp(head, "JIS", 3) == 0) return;
-    if (memcmp(head, "UNICODE", 7) == 0) {
+    if (proven_sys_mem_cmp(head, "JIS", 3) == 0) return;
+    if (proven_sys_mem_cmp(head, "UNICODE", 7) == 0) {
         size_t pos = 0;
         for (size_t i = 0; i + 1 < n;) {
             uint32_t u = t->be ? ((uint32_t)d[i] << 8 | d[i + 1]) : ((uint32_t)d[i + 1] << 8 | d[i]);
@@ -355,14 +370,14 @@ static void entry_comment(const tiff_ctx_t *t, size_t entry, char *dst, size_t c
             proven_byte_t b[4];
             size_t k = proven_utf8_encode_one(u, b);
             if (k == 0 || pos + k > cap - 1) break;
-            memcpy(dst + pos, b, k);
+            proven_sys_mem_copy(dst + pos, b, k);
             pos += k;
         }
         while (pos > 0 && dst[pos - 1] == ' ') --pos;
         dst[pos] = '\0';
         return;
     }
-    text_utf8(d, n, dst, cap);
+    text_utf8(rubraview_mem_view(d, n), dst, cap);
 }
 
 enum { IFD_MAIN, IFD_EXIF, IFD_GPS };
@@ -370,7 +385,7 @@ enum { IFD_MAIN, IFD_EXIF, IFD_GPS };
 static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_info_t *x,
                      uint32_t *exif_ifd, uint32_t *gps_ifd) {
     uint16_t n;
-    if (!tiff_read_u16(t->base, t->len, at, t->be, &n) || n > 1000) return;
+    if (!tiff_read_u16(rubraview_mem_view(t->base, t->len), at, t->be, &n) || n > 1000) return;
     char lat_ref = 0, lon_ref = 0;
     bool have_lat = false, have_lon = false;
     double lat = 0, lon = 0;
@@ -379,7 +394,7 @@ static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_
     for (uint16_t i = 0; i < n; ++i) {
         size_t e = (size_t)at + 2 + (size_t)i * 12;
         uint16_t tag;
-        if (!tiff_read_u16(t->base, t->len, e, t->be, &tag)) return;
+        if (!tiff_read_u16(rubraview_mem_view(t->base, t->len), e, t->be, &tag)) return;
         double v;
         uint32_t num, den;
         char ref[4];
@@ -469,7 +484,7 @@ static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_
                     double h = 0, m = 0, sec = 0;
                     if (entry_rational(t, e, 0, &h, NULL, NULL) && entry_rational(t, e, 1, &m, NULL, NULL) &&
                         entry_rational(t, e, 2, &sec, NULL, NULL) && h >= 0 && h < 24 && m >= 0 && m < 60 && sec >= 0 && sec < 61) {
-                        snprintf(gps_clock, sizeof(gps_clock), "%02d:%02d:%02d", (int)h, (int)m, (int)sec);
+                        rubraview_fmt(gps_clock, sizeof(gps_clock), "{:02}:{:02}:{:02}", PROVEN_ARG((int)h), PROVEN_ARG((int)m), PROVEN_ARG((int)sec));
                     }
                     break;
                 }
@@ -490,12 +505,14 @@ static void read_ifd(const tiff_ctx_t *t, uint32_t at, int kind, rubraview_exif_
             x->longitude = lon_ref == 'W' ? -lon : lon;
         }
         if (x->has_altitude && alt_below == 1) x->altitude_m = -x->altitude_m;
-        if (gps_day[0] && gps_clock[0]) snprintf(x->gps_time, sizeof(x->gps_time), "%.10s %.8s UTC", gps_day, gps_clock);
-        else if (gps_clock[0]) snprintf(x->gps_time, sizeof(x->gps_time), "%.8s UTC", gps_clock);
+        if (gps_day[0] && gps_clock[0]) rubraview_fmt(x->gps_time, sizeof(x->gps_time), "{:.10} {:.8} UTC", PROVEN_ARG(gps_day), PROVEN_ARG(gps_clock));
+        else if (gps_clock[0]) rubraview_fmt(x->gps_time, sizeof(x->gps_time), "{:.8} UTC", PROVEN_ARG(gps_clock));
     }
 }
 
-static bool parse_tiff_block(const uint8_t *base, size_t len, rubraview_exif_info_t *x) {
+static bool parse_tiff_block(proven_mem_view_t base_view, rubraview_exif_info_t *x) {
+    const uint8_t *base = (const uint8_t *)base_view.ptr;
+    size_t len = (size_t)base_view.size;
     if (len < 8) return false;
     tiff_ctx_t t = { .base = base, .len = len };
     if (base[0] == 'I' && base[1] == 'I') t.be = false;
@@ -503,8 +520,8 @@ static bool parse_tiff_block(const uint8_t *base, size_t len, rubraview_exif_inf
     else return false;
     uint16_t magic;
     uint32_t ifd0;
-    if (!tiff_read_u16(base, len, 2, t.be, &magic) || magic != 42 ||
-        !tiff_read_u32(base, len, 4, t.be, &ifd0) || ifd0 < 8 || ifd0 >= len) return false;
+    if (!tiff_read_u16(rubraview_mem_view(base, len), 2, t.be, &magic) || magic != 42 ||
+        !tiff_read_u32(rubraview_mem_view(base, len), 4, t.be, &ifd0) || ifd0 < 8 || ifd0 >= len) return false;
     uint32_t exif_ifd = 0, gps_ifd = 0;
     read_ifd(&t, ifd0, IFD_MAIN, x, &exif_ifd, &gps_ifd);
     /* one level down, never back into IFD0 */
@@ -522,13 +539,17 @@ static uint32_t rd_le32(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
-static bool starts_exif(const uint8_t *p, size_t n) {
-    return n >= 6 && memcmp(p, "Exif\0\0", 6) == 0;
+static bool starts_exif(proven_mem_view_t p_view) {
+    const uint8_t *p = (const uint8_t *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
+    return n >= 6 && proven_sys_mem_cmp(p, "Exif\0\0", 6) == 0;
 }
 
-bool rubraview_exif_read(const uint8_t *data, size_t size, rubraview_exif_info_t *out) {
+bool rubraview_exif_read(proven_mem_view_t data_view, rubraview_exif_info_t *out) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!out) return false;
-    memset(out, 0, sizeof(*out));
+    proven_sys_mem_set(out, 0, sizeof(*out));
     if (!data || size < 8) return false;
 
     /* JPEG: the APP1 segment that starts "Exif\0\0" */
@@ -537,8 +558,8 @@ bool rubraview_exif_read(const uint8_t *data, size_t size, rubraview_exif_info_t
         for (;;) {
             jpeg_marker_t m = jpeg_next_marker(&it);
             if (!m.ok || m.code == JPEG_MARKER_SOS || m.code == JPEG_MARKER_EOI) break;
-            if (m.code == JPEG_MARKER_APP1 && m.has_length && starts_exif(data + m.payload_start, m.payload_len)) {
-                return parse_tiff_block(data + m.payload_start + 6, m.payload_len - 6, out);
+            if (m.code == JPEG_MARKER_APP1 && m.has_length && starts_exif(rubraview_mem_view(data + m.payload_start, m.payload_len))) {
+                return parse_tiff_block(rubraview_mem_view(data + m.payload_start + 6, m.payload_len - 6), out);
             }
         }
         return false;
@@ -546,32 +567,32 @@ bool rubraview_exif_read(const uint8_t *data, size_t size, rubraview_exif_info_t
     /* TIFF: the file is the block */
     if ((data[0] == 'I' && data[1] == 'I' && data[2] == 42 && data[3] == 0) ||
         (data[0] == 'M' && data[1] == 'M' && data[2] == 0 && data[3] == 42)) {
-        return parse_tiff_block(data, size, out);
+        return parse_tiff_block(rubraview_mem_view(data, size), out);
     }
     /* PNG: the eXIf chunk */
-    if (size >= 8 && memcmp(data, "\x89PNG\r\n\x1a\n", 8) == 0) {
+    if (size >= 8 && proven_sys_mem_cmp(data, "\x89PNG\r\n\x1a\n", 8) == 0) {
         size_t pos = 8;
         while (pos + 8 <= size) {
             uint32_t len = rd_be32(data + pos);
             if (len > size - pos - 8) break;
-            if (memcmp(data + pos + 4, "eXIf", 4) == 0) {
+            if (proven_sys_mem_cmp(data + pos + 4, "eXIf", 4) == 0) {
                 const uint8_t *b = data + pos + 8;
-                return starts_exif(b, len) ? parse_tiff_block(b + 6, len - 6, out) : parse_tiff_block(b, len, out);
+                return starts_exif(rubraview_mem_view(b, len)) ? parse_tiff_block(rubraview_mem_view(b + 6, len - 6), out) : parse_tiff_block(rubraview_mem_view(b, len), out);
             }
-            if (memcmp(data + pos + 4, "IEND", 4) == 0) break;
+            if (proven_sys_mem_cmp(data + pos + 4, "IEND", 4) == 0) break;
             pos += 12u + len;
         }
         return false;
     }
     /* WebP: the EXIF chunk */
-    if (size >= 12 && memcmp(data, "RIFF", 4) == 0 && memcmp(data + 8, "WEBP", 4) == 0) {
+    if (size >= 12 && proven_sys_mem_cmp(data, "RIFF", 4) == 0 && proven_sys_mem_cmp(data + 8, "WEBP", 4) == 0) {
         size_t pos = 12;
         while (pos + 8 <= size) {
             uint32_t len = rd_le32(data + pos + 4);
             if (len > size - pos - 8) break;
-            if (memcmp(data + pos, "EXIF", 4) == 0) {
+            if (proven_sys_mem_cmp(data + pos, "EXIF", 4) == 0) {
                 const uint8_t *b = data + pos + 8;
-                return starts_exif(b, len) ? parse_tiff_block(b + 6, len - 6, out) : parse_tiff_block(b, len, out);
+                return starts_exif(rubraview_mem_view(b, len)) ? parse_tiff_block(rubraview_mem_view(b + 6, len - 6), out) : parse_tiff_block(rubraview_mem_view(b, len), out);
             }
             pos += 8u + len + (len & 1u);
         }
@@ -580,8 +601,8 @@ bool rubraview_exif_read(const uint8_t *data, size_t size, rubraview_exif_info_t
     /* anything else (HEIF): "Exif\0\0" and a TIFF header near the start */
     size_t window = size < (1u << 20) ? size : (1u << 20);
     for (size_t i = 0; i + 10 <= window; ++i) {
-        if (starts_exif(data + i, window - i) && (data[i + 6] == 'I' || data[i + 6] == 'M')) {
-            return parse_tiff_block(data + i + 6, size - i - 6, out);
+        if (starts_exif(rubraview_mem_view(data + i, window - i)) && (data[i + 6] == 'I' || data[i + 6] == 'M')) {
+            return parse_tiff_block(rubraview_mem_view(data + i + 6, size - i - 6), out);
         }
     }
     return false;
@@ -590,9 +611,11 @@ bool rubraview_exif_read(const uint8_t *data, size_t size, rubraview_exif_info_t
 /* ---- IPTC (RV-130) ---- */
 
 /* One record-2 dataset into its field; keywords are joined. */
-static void iptc_put(rubraview_iptc_info_t *x, uint8_t dataset, const uint8_t *d, size_t n) {
+static void iptc_put(rubraview_iptc_info_t *x, uint8_t dataset, proven_mem_view_t d_view) {
+    const uint8_t *d = (const uint8_t *)d_view.ptr;
+    size_t n = (size_t)d_view.size;
     char text[512];
-    text_utf8(d, n, text, sizeof(text));
+    text_utf8(rubraview_mem_view(d, n), text, sizeof(text));
     if (!text[0]) return;
     char *dst = NULL;
     size_t cap = 0;
@@ -605,28 +628,30 @@ static void iptc_put(rubraview_iptc_info_t *x, uint8_t dataset, const uint8_t *d
         IPTC_FIELD(110, credit);    IPTC_FIELD(115, source);     IPTC_FIELD(116, copyright);
         IPTC_FIELD(120, caption);   IPTC_FIELD(122, writer);
         case 25: {   /* keywords repeat: "a, b, c" */
-            size_t have = strlen(x->keywords), add = strlen(text);
+            size_t have = proven_cstr_len(x->keywords), add = proven_cstr_len(text);
             if (have + (have ? 2 : 0) + add + 1 > sizeof(x->keywords)) return;
-            if (have) { memcpy(x->keywords + have, ", ", 2); have += 2; }
-            memcpy(x->keywords + have, text, add + 1);
+            if (have) { proven_sys_mem_copy(x->keywords + have, ", ", 2); have += 2; }
+            proven_sys_mem_copy(x->keywords + have, text, add + 1);
             return;
         }
         case 55:     /* CCYYMMDD */
-            if (strlen(text) == 8) snprintf(x->date_created, sizeof(x->date_created), "%.4s-%.2s-%.2s", text, text + 4, text + 6);
+            if (proven_cstr_len(text) == 8) rubraview_fmt(x->date_created, sizeof(x->date_created), "{:.4}-{:.2}-{:.2}", PROVEN_ARG(text), PROVEN_ARG(text + 4), PROVEN_ARG(text + 6));
             return;
         case 60: {   /* HHMMSS and a zone: after the date */
-            size_t have = strlen(x->date_created);
-            if (have == 10 && strlen(text) >= 6) snprintf(x->date_created + have, sizeof(x->date_created) - have, " %.2s:%.2s:%.2s", text, text + 2, text + 4);
+            size_t have = proven_cstr_len(x->date_created);
+            if (have == 10 && proven_cstr_len(text) >= 6) rubraview_fmt(x->date_created + have, sizeof(x->date_created) - have, " {:.2}:{:.2}:{:.2}", PROVEN_ARG(text), PROVEN_ARG(text + 2), PROVEN_ARG(text + 4));
             return;
         }
         default: return;
     }
 #undef IPTC_FIELD
-    snprintf(dst, cap, "%s", text);
+    rubraview_fmt(dst, cap, "{}", PROVEN_ARG(text));
 }
 
 /* The IIM datasets: 0x1C, record, dataset, length (extended when its top bit is set). */
-static bool iptc_parse(const uint8_t *d, size_t n, rubraview_iptc_info_t *x) {
+static bool iptc_parse(proven_mem_view_t d_view, rubraview_iptc_info_t *x) {
+    const uint8_t *d = (const uint8_t *)d_view.ptr;
+    size_t n = (size_t)d_view.size;
     size_t pos = 0;
     bool any = false;
     while (pos + 5 <= n && d[pos] == 0x1C) {
@@ -641,7 +666,7 @@ static bool iptc_parse(const uint8_t *d, size_t n, rubraview_iptc_info_t *x) {
             pos += k;
         }
         if (len > n - pos) return any;
-        if (record == 2 && dataset != 0) { iptc_put(x, dataset, d + pos, len); any = true; }
+        if (record == 2 && dataset != 0) { iptc_put(x, dataset, rubraview_mem_view(d + pos, len)); any = true; }
         pos += len;
     }
     return any;
@@ -649,9 +674,11 @@ static bool iptc_parse(const uint8_t *d, size_t n, rubraview_iptc_info_t *x) {
 
 /* Photoshop's image resources ("8BIM", id, a Pascal name padded to even,
    size, data padded to even): the IIM is resource 0x0404. */
-static bool iptc_from_resources(const uint8_t *d, size_t n, rubraview_iptc_info_t *x) {
+static bool iptc_from_resources(proven_mem_view_t d_view, rubraview_iptc_info_t *x) {
+    const uint8_t *d = (const uint8_t *)d_view.ptr;
+    size_t n = (size_t)d_view.size;
     size_t pos = 0;
-    while (pos + 12 <= n && memcmp(d + pos, "8BIM", 4) == 0) {
+    while (pos + 12 <= n && proven_sys_mem_cmp(d + pos, "8BIM", 4) == 0) {
         uint16_t id = rd_be16(d + pos + 4);
         size_t name = 1u + d[pos + 6];
         name += name & 1u;
@@ -660,31 +687,35 @@ static bool iptc_from_resources(const uint8_t *d, size_t n, rubraview_iptc_info_
         size_t size = rd_be32(d + at);
         at += 4;
         if (size > n - at) return false;
-        if (id == 0x0404) return iptc_parse(d + at, size, x);
+        if (id == 0x0404) return iptc_parse(rubraview_mem_view(d + at, size), x);
         pos = at + size + (size & 1u);
     }
     return false;
 }
 
 /* A TIFF IFD0 entry's bytes: IPTC (33723) or Photoshop's resources (34377). */
-static bool tiff_tag_bytes(const uint8_t *base, size_t len, uint16_t want, const uint8_t **out, size_t *out_len) {
+static bool tiff_tag_bytes(proven_mem_view_t base_view, uint16_t want, const uint8_t **out, size_t *out_len) {
+    const uint8_t *base = (const uint8_t *)base_view.ptr;
+    size_t len = (size_t)base_view.size;
     if (len < 8) return false;
     tiff_ctx_t t = { .base = base, .len = len, .be = base[0] == 'M' };
     uint32_t ifd0;
     uint16_t n;
-    if (!tiff_read_u32(base, len, 4, t.be, &ifd0) || ifd0 < 8 || !tiff_read_u16(base, len, ifd0, t.be, &n) || n > 1000) return false;
+    if (!tiff_read_u32(rubraview_mem_view(base, len), 4, t.be, &ifd0) || ifd0 < 8 || !tiff_read_u16(rubraview_mem_view(base, len), ifd0, t.be, &n) || n > 1000) return false;
     for (uint16_t i = 0; i < n; ++i) {
         size_t e = (size_t)ifd0 + 2 + (size_t)i * 12;
         uint16_t tag, type; uint32_t count; size_t at, bytes;
-        if (!tiff_read_u16(base, len, e, t.be, &tag)) return false;
+        if (!tiff_read_u16(rubraview_mem_view(base, len), e, t.be, &tag)) return false;
         if (tag == want && entry_value(&t, e, &type, &count, &at, &bytes)) { *out = base + at; *out_len = bytes; return true; }
     }
     return false;
 }
 
-bool rubraview_iptc_read(const uint8_t *data, size_t size, rubraview_iptc_info_t *out) {
+bool rubraview_iptc_read(proven_mem_view_t data_view, rubraview_iptc_info_t *out) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!out) return false;
-    memset(out, 0, sizeof(*out));
+    proven_sys_mem_set(out, 0, sizeof(*out));
     if (!data || size < 8) return false;
     if (data[0] == 0xFF && data[1] == JPEG_MARKER_SOI) {
         jpeg_marker_iter_t it = { .data = data, .size = size, .pos = 2 };
@@ -693,8 +724,8 @@ bool rubraview_iptc_read(const uint8_t *data, size_t size, rubraview_iptc_info_t
             jpeg_marker_t m = jpeg_next_marker(&it);
             if (!m.ok || m.code == JPEG_MARKER_SOS || m.code == JPEG_MARKER_EOI) break;
             if (m.code == JPEG_MARKER_APP13 && m.has_length && m.payload_len > sizeof(PS) &&
-                memcmp(data + m.payload_start, PS, sizeof(PS)) == 0 &&
-                iptc_from_resources(data + m.payload_start + sizeof(PS), m.payload_len - sizeof(PS), out)) {
+                proven_sys_mem_cmp(data + m.payload_start, PS, sizeof(PS)) == 0 &&
+                iptc_from_resources(rubraview_mem_view(data + m.payload_start + sizeof(PS), m.payload_len - sizeof(PS)), out)) {
                 out->found = true;
                 return true;
             }
@@ -704,8 +735,8 @@ bool rubraview_iptc_read(const uint8_t *data, size_t size, rubraview_iptc_info_t
     if ((data[0] == 'I' && data[1] == 'I' && data[2] == 42 && data[3] == 0) ||
         (data[0] == 'M' && data[1] == 'M' && data[2] == 0 && data[3] == 42)) {
         const uint8_t *b; size_t n;
-        if ((tiff_tag_bytes(data, size, 0x83BB, &b, &n) && iptc_parse(b, n, out)) ||
-            (tiff_tag_bytes(data, size, 0x8649, &b, &n) && iptc_from_resources(b, n, out))) {
+        if ((tiff_tag_bytes(rubraview_mem_view(data, size), 0x83BB, &b, &n) && iptc_parse(rubraview_mem_view(b, n), out)) ||
+            (tiff_tag_bytes(rubraview_mem_view(data, size), 0x8649, &b, &n) && iptc_from_resources(rubraview_mem_view(b, n), out))) {
             out->found = true;
             return true;
         }

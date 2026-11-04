@@ -89,7 +89,7 @@ static proven_u8str_view_t program_folder(app_state_t *app) {
 /* The place named for G'MIC: a folder, or the folder of the .exe named. */
 static proven_u8str_view_t gmic_named_folder(app_state_t *app) {
     proven_u8str_view_t where = rubraview_pal_fs_expand_env(app->arena, rubraview_path_typed_folder(cstr(g_gmic_where)));
-    if (where.size > 4 && _strnicmp((const char *)where.ptr + where.size - 4, ".exe", 4) == 0) where = rubraview_path_dirname(where);
+    if (where.size > 4 && proven_u8str_view_eq_ascii_ci(proven_u8str_view_slice(where, where.size - 4, 4), PROVEN_LIT(".exe"))) where = rubraview_path_dirname(where);
     return where;
 }
 
@@ -120,80 +120,80 @@ static size_t settings_info(void *user, proven_u8str_view_t source, char *buffer
             char local[512];
             DWORD got = GetEnvironmentVariableA("LOCALAPPDATA", local, (DWORD)sizeof(local));
             if (got > 0 && got < sizeof(local)) {
-                int m = snprintf(real, sizeof(real), "%s\\Packages\\%s\\LocalCache\\Roaming\\Rubraview\\settings.ini", local, app->package_family);
+                int m = rubraview_fmt(real, sizeof(real), "{}\\Packages\\{}\\LocalCache\\Roaming\\Rubraview\\settings.ini", PROVEN_ARG(local), PROVEN_ARG(app->package_family));
                 proven_u8str_view_t candidate = { .ptr = (const proven_byte_t *)real, .size = m > 0 && (size_t)m < sizeof(real) ? (size_t)m : 0 };
                 if (candidate.size > 0 && rubraview_pal_fs_exists(candidate)) shown = candidate;
             }
         }
-        n = snprintf(buffer, capacity, "%.*s%s", (int)shown.size, shown.ptr,
-                     app->config_mode == RUBRAVIEW_CONFIG_PORTABLE ? T("  (portable)") : "");
+        n = rubraview_fmt(buffer, capacity, "{}{}", PROVEN_ARG(rubraview_bytes_view(shown.ptr, (int)shown.size)),
+                     PROVEN_ARG(app->config_mode == RUBRAVIEW_CONFIG_PORTABLE ? T("  (portable)") : ""));
         /* The folder comes from Windows with backslashes and the file name is
            joined with '/': shown with Windows' own separator throughout. */
         for (int i = 0; i < n && (size_t)i < capacity; i++) if (buffer[i] == '/') buffer[i] = '\\';
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("app.others"))) {
         /* D-154: two copies, two menus: what this machine has besides this one. */
         const rubraview_other_copies_t *o = &app->other_copies;
-        n = snprintf(buffer, capacity, "%s",
-                     o->msi && o->store ? T("the MSI's and the Store's too: Windows 11's menu may show twice")
+        n = rubraview_fmt(buffer, capacity, "{}",
+                     PROVEN_ARG(o->msi && o->store ? T("the MSI's and the Store's too: Windows 11's menu may show twice")
                      : o->store ? T("the Microsoft Store's too: Windows 11's menu is left to it")
                      : o->msi && o->msi_menu && app->packaged ? T("the MSI's too, with its menu: Windows 11's menu shows twice (Remove for every user in that copy)")
                      : o->msi ? T("the one the MSI installed too")
-                     : T("none"));
+                     : T("none")));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("app.folder"))) {   /* RV-185: where this copy runs from */
         proven_u8str_view_t dir = program_folder(app);
-        n = snprintf(buffer, capacity, "%.*s", (int)dir.size, (const char *)dir.ptr);
+        n = rubraview_fmt(buffer, capacity, "{}", PROVEN_ARG(rubraview_bytes_view((const char *)dir.ptr, (int)dir.size)));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("app.kind"))) {
-        n = snprintf(buffer, capacity, "%s",
-                     app->packaged ? T("the Microsoft Store's: Windows has its file types from the package")
+        n = rubraview_fmt(buffer, capacity, "{}",
+                     PROVEN_ARG(app->packaged ? T("the Microsoft Store's: Windows has its file types from the package")
                      : app->config_mode == RUBRAVIEW_CONFIG_PORTABLE ? T("portable: the settings beside it")
-                     : T("from the zip or the installer: register below"));
+                     : T("from the zip or the installer: register below")));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("media.ffmpeg"))) {
         int place = rubraview_pal_ffmpeg_place();
         /* RFC-0009: found where it is named, else beside the program, else where an older Import put it. */
-        n = snprintf(buffer, capacity, "%s",
-                     place == 3 ? T("its DLLs are in the FFmpeg folder")
+        n = rubraview_fmt(buffer, capacity, "{}",
+                     PROVEN_ARG(place == 3 ? T("its DLLs are in the FFmpeg folder")
                      : place == 1 ? T("its DLLs are beside the program")
                      : place == 2 ? T("its DLLs are where an older version's Import put them")
-                     : T("not found (or not 9.x) - Media Foundation only"));
+                     : T("not found (or not 9.x) - Media Foundation only")));
         char encoders[96];   /* RV-139: what it can write pictures with */
-        if (place > 0 && n > 0 && (size_t)n < capacity && rubraview_pal_ffmpeg_image_encoders(encoders, sizeof(encoders)) && encoders[0]) {
-            int m = snprintf(buffer + n, capacity - (size_t)n, T("; writes AVIF / JPEG XL with %s"), encoders);
+        if (place > 0 && n > 0 && (size_t)n < capacity && rubraview_pal_ffmpeg_image_encoders(rubraview_mem_mut(encoders, sizeof(encoders))) && encoders[0]) {
+            int m = rubraview_fmt(buffer + n, capacity - (size_t)n, T("; writes AVIF / JPEG XL with {}"), PROVEN_ARG(encoders));
             if (m > 0) n += m;
         }
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("ffmpeg.filters"))) {   /* RFC-0009 D */
         rubraview_ffilter_state_t s = rubraview_pal_ffilter_state();
         if (s == RUBRAVIEW_FFILTER_READY && ffmpeg_list_ready())
-            n = snprintf(buffer, capacity, T("%d filters, under Edit"), g_ffm.filter_count);
+            n = rubraview_fmt(buffer, capacity, T("{} filters, under Edit"), PROVEN_ARG((int)g_ffm.filter_count));
         else
-            n = snprintf(buffer, capacity, "%s",
-                         s == RUBRAVIEW_FFILTER_NO_FFMPEG ? T("none: FFmpeg is not found")
+            n = rubraview_fmt(buffer, capacity, "{}",
+                         PROVEN_ARG(s == RUBRAVIEW_FFILTER_NO_FFMPEG ? T("none: FFmpeg is not found")
                          : s == RUBRAVIEW_FFILTER_OTHER_VERSION ? T("none: its avfilter DLL is not FFmpeg 9.0's")
                          : s == RUBRAVIEW_FFILTER_READY ? T("none: avfilter lists no filter")
-                         : T("none: avfilter-12.dll is not beside FFmpeg's other DLLs"));
+                         : T("none: avfilter-12.dll is not beside FFmpeg's other DLLs")));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("gmic.status"))) {   /* RFC-0009 C */
-        if (!g_gmic_exe[0]) n = snprintf(buffer, capacity, "%s", !g_gmic_where[0] ? T("not set: name gmic.exe or its folder below")
+        if (!g_gmic_exe[0]) n = rubraview_fmt(buffer, capacity, "{}", PROVEN_ARG(!g_gmic_where[0] ? T("not set: name gmic.exe or its folder below")
                                                               : gmic_qt_named(app) ? T("that is G'MIC-Qt's stand-alone: the command-line (CLI) zip holds gmic.exe")
-                                                              : T("gmic.exe is not in the place named: the command-line (CLI) zip holds it"));
+                                                              : T("gmic.exe is not in the place named: the command-line (CLI) zip holds it")));
         else if (g_gmic_job) n = (int)gmic_list_progress(buffer, capacity, app);   /* RV-186 */
         else if (g_gmic.filter_count > 0)
-            n = snprintf(buffer, capacity, T("found; %d filters in %d categories (G'MIC %.*s), under Edit"), g_gmic.filter_count,
-                         g_gmic.category_count, (int)g_gmic.version.size, (const char *)g_gmic.version.ptr);
-        else n = snprintf(buffer, capacity, T("found; %s"), g_gmic_list_why ? rubraview_tr(g_gmic_list_why) : T("no filter list yet"));
+            n = rubraview_fmt(buffer, capacity, T("found; {} filters in {} categories (G'MIC {}), under Edit"), PROVEN_ARG((int)g_gmic.filter_count),
+                         PROVEN_ARG((int)g_gmic.category_count), PROVEN_ARG(rubraview_bytes_view((const char *)g_gmic.version.ptr, (int)g_gmic.version.size)));
+        else n = rubraview_fmt(buffer, capacity, T("found; {}"), PROVEN_ARG(g_gmic_list_why ? rubraview_tr(g_gmic_list_why) : T("no filter list yet")));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("gpu.adapter"))) {
-        n = snprintf(buffer, capacity, T("run rubraview --probe-gpu <video> for the details"));
+        n = rubraview_fmt(buffer, capacity, T("run rubraview --probe-gpu <video> for the details"));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("memory.use")) && app->mem) {
         /* RFC-0006: the program's memory by use, and the most the session ever held */
         rubraview_mem_stats_t st = rubraview_mem_stats(app->mem);
-        n = snprintf(buffer, capacity, T("session %zu MB (most %zu), a track %zu MB, %zu window(s), %zu MB for the moment; %zu MB held"),
-                     st.persist_used >> 20, st.persist_peak >> 20, st.media_used >> 20, st.windows_live, st.scratch_live >> 20,
-                     st.total_held >> 20);
+        n = rubraview_fmt(buffer, capacity, T("session {} MB (most {}), a track {} MB, {} window(s), {} MB for the moment; {} MB held"),
+                     PROVEN_ARG((size_t)(st.persist_used >> 20)), PROVEN_ARG((size_t)(st.persist_peak >> 20)), PROVEN_ARG((size_t)(st.media_used >> 20)), PROVEN_ARG((size_t)st.windows_live), PROVEN_ARG((size_t)(st.scratch_live >> 20)),
+                     PROVEN_ARG((size_t)(st.total_held >> 20)));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("cache.films"))) {
         /* RV-216: the network films' copies, how much room they take, where */
         uint64_t bytes = 0;
         size_t copies = rubraview_pal_filmcache_usage(&bytes);
         char folder[1024];
         rubraview_pal_filmcache_folder(folder, sizeof folder);
-        n = snprintf(buffer, capacity, T("%zu, %.1f GB, in %s"), copies, (double)bytes / 1073741824.0, folder[0] ? folder : "-");
+        n = rubraview_fmt(buffer, capacity, T("{}, {:.1} GB, in {}"), PROVEN_ARG((size_t)copies), PROVEN_ARG((double)bytes / 1073741824.0), PROVEN_ARG(folder[0] ? folder : "-"));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("cache.used"))) {
         size_t loaded = 0;
         uint64_t bytes = 0;
@@ -203,9 +203,9 @@ static size_t settings_info(void *user, proven_u8str_view_t source, char *buffer
             bytes += (uint64_t)app->pages[i].width * (uint64_t)app->pages[i].height * 4u;
         }
         /* RV-107: and how much that is of the cap. */
-        n = snprintf(buffer, capacity, T("%zu page(s), about %llu MB of %zu MB"), loaded,
-                     (unsigned long long)((bytes + 524288u) / 1048576u),
-                     (app->cache_budget > 0 ? app->cache_budget : PAGE_CACHE_BUDGET) / 1048576u);
+        n = rubraview_fmt(buffer, capacity, T("{} page(s), about {} MB of {} MB"), PROVEN_ARG((size_t)loaded),
+                     PROVEN_ARG((unsigned long long)((bytes + 524288u) / 1048576u)),
+                     PROVEN_ARG((size_t)((app->cache_budget > 0 ? app->cache_budget : PAGE_CACHE_BUDGET) / 1048576u)));
     }
     if (n <= 0) return 0;
     return (size_t)n < capacity ? (size_t)n : capacity - 1;
@@ -273,7 +273,7 @@ void skip_dirs_take_old(app_state_t *app) {
                                         "skip_dir_5", "skip_dir_6", "skip_dir_7", "skip_dir_8" };
     bool moved = false;
     for (int i = 0; i < 8; ++i) {
-        proven_u8str_view_t key = { .ptr = (const proven_byte_t *)OLD[i], .size = strlen(OLD[i]) };
+        proven_u8str_view_t key = { .ptr = (const proven_byte_t *)OLD[i], .size = proven_cstr_len(OLD[i]) };
         proven_u8str_view_t folder = rubraview_settings_get_text(&app->settings, PROVEN_LIT("recent"), key);
         if (folder.size == 0) continue;
         char buffer[8192];
@@ -296,27 +296,26 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
         /* The last row is the box every folder is typed in; the one being changed says so. */
         bool typing = app->spath_active && app->spath_list_index >= 0 && app->spath_list == folders;
         bool changing = typing && (size_t)app->spath_list_index == index - 1;
-        int w = index == 0 ? snprintf(buffer, capacity, T("Folder  (Enter changes it in the box below; Delete or the x at the end takes it off)"))
-              : index <= n ? snprintf(buffer, capacity, "%s%.*s%s", changing ? "> " : "", (int)dirs[index - 1].size, dirs[index - 1].ptr,
-                                      changing ? T("   (being changed below)") : "")
+        int w = index == 0 ? rubraview_fmt(buffer, capacity, T("Folder  (Enter changes it in the box below; Delete or the x at the end takes it off)"))
+              : index <= n ? rubraview_fmt(buffer, capacity, "{}{}{}", PROVEN_ARG(changing ? "> " : ""), PROVEN_ARG(rubraview_bytes_view(dirs[index - 1].ptr, (int)dirs[index - 1].size)),
+                                      PROVEN_ARG(changing ? T("   (being changed below)") : ""))
               : index == n + 1 ? (typing ? 0
-                                  : snprintf(buffer, capacity, T(" type or paste a folder to add  (Enter or a click; Ctrl+O browses)")))
+                                  : rubraview_fmt(buffer, capacity, T(" type or paste a folder to add  (Enter or a click; Ctrl+O browses)")))
               : 0;
         return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
     }
     if (proven_u8str_view_eq(source, PROVEN_LIT("gmic_filters"))) {   /* RV-186: the list G'MIC made, a row a category */
         int w = 0;
-        if (index == 0) w = snprintf(buffer, capacity, "%s", T("Category (filters)  -  the first of them"));
-        else if (g_gmic.category_count == 0) w = index == 1 ? snprintf(buffer, capacity, "%s", T("no list yet: Make the filter list above")) : 0;
+        if (index == 0) w = rubraview_fmt(buffer, capacity, "{}", PROVEN_ARG(T("Category (filters)  -  the first of them")));
+        else if (g_gmic.category_count == 0) w = index == 1 ? rubraview_fmt(buffer, capacity, "{}", PROVEN_ARG(T("no list yet: Make the filter list above"))) : 0;
         else if ((int32_t)index <= g_gmic.category_count) {
             int32_t c = (int32_t)index - 1, count = 0;
             for (int32_t i = 0; i < g_gmic.filter_count; ++i) count += g_gmic.filters[i].category == c;
-            w = snprintf(buffer, capacity, "%.*s (%d)  - ", (int)g_gmic.categories[c].size, (const char *)g_gmic.categories[c].ptr, (int)count);
+            w = rubraview_fmt(buffer, capacity, "{} ({})  - ", PROVEN_ARG(rubraview_bytes_view((const char *)g_gmic.categories[c].ptr, (int)g_gmic.categories[c].size)), PROVEN_ARG((int)count));
             bool first = true;
             for (int32_t i = 0; i < g_gmic.filter_count && w > 0 && (size_t)w + 8 < capacity; ++i) {
                 if (g_gmic.filters[i].category != c) continue;
-                int m = snprintf(buffer + w, capacity - (size_t)w, "%s%.*s", first ? " " : ", ", (int)g_gmic.filters[i].name.size,
-                                 (const char *)g_gmic.filters[i].name.ptr);
+                int m = rubraview_fmt(buffer + w, capacity - (size_t)w, "{}{}", PROVEN_ARG(first ? " " : ", "), PROVEN_ARG(rubraview_bytes_view((const char *)g_gmic.filters[i].name.ptr, (int)g_gmic.filters[i].name.size)));
                 if (m <= 0 || (size_t)m >= capacity - (size_t)w) break;
                 w += m;
                 first = false;
@@ -327,28 +326,28 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
     if (proven_u8str_view_eq(source, PROVEN_LIT("plugins"))) {   /* RFC-0007: what the folder holds */
         int w = 0;
         bool on = rubraview_settings_get(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("plugins")) > 0.5;
-        if (index == 0) w = snprintf(buffer, capacity, "%s", T("Plug-in  (version, licence)  -  file"));
-        else if (!on) w = index == 1 ? snprintf(buffer, capacity, "%s", T("plug-ins are off")) : 0;
-        else if (g_plugin_count == 0) w = index == 1 ? snprintf(buffer, capacity, T("none in %s"), g_plugin_folder) : 0;
+        if (index == 0) w = rubraview_fmt(buffer, capacity, "{}", PROVEN_ARG(T("Plug-in  (version, licence)  -  file")));
+        else if (!on) w = index == 1 ? rubraview_fmt(buffer, capacity, "{}", PROVEN_ARG(T("plug-ins are off"))) : 0;
+        else if (g_plugin_count == 0) w = index == 1 ? rubraview_fmt(buffer, capacity, T("none in {}"), PROVEN_ARG(g_plugin_folder)) : 0;
         else if (index <= g_plugin_count) {
             const rubraview_plugin_t *p = &g_plugins[index - 1];
-            w = p->usable ? snprintf(buffer, capacity, "%s  (%s, %s)  -  %s", p->name, p->version[0] ? p->version : "?",
-                                     p->licence[0] ? p->licence : T("licence not said"), p->file)
-                          : snprintf(buffer, capacity, T("%s  -  not used: %s"), p->file, p->why ? rubraview_tr(p->why) : "?");
+            w = p->usable ? rubraview_fmt(buffer, capacity, "{}  ({}, {})  -  {}", PROVEN_ARG(p->name), PROVEN_ARG(p->version[0] ? p->version : "?"),
+                                     PROVEN_ARG(p->licence[0] ? p->licence : T("licence not said")), PROVEN_ARG(p->file))
+                          : rubraview_fmt(buffer, capacity, T("{}  -  not used: {}"), PROVEN_ARG(p->file), PROVEN_ARG(p->why ? rubraview_tr(p->why) : "?"));
         }
         return w > 0 ? (size_t)w < capacity ? (size_t)w : capacity - 1 : 0;
     }
     if (!proven_u8str_view_eq(source, PROVEN_LIT("keymap"))) return 0;
     if (g_keys_layout) {   /* RV-217: the rows are the keyboard's room; drawn by keys_layout_draw */
         int n = 0;
-        if (index == 0) n = snprintf(buffer, capacity, "%s", T("the keyboard: a dot for each kind of key that does something (click a key: what it does)"));
+        if (index == 0) n = rubraview_fmt(buffer, capacity, "{}", PROVEN_ARG(T("the keyboard: a dot for each kind of key that does something (click a key: what it does)")));
         else if (index == KEYS_LAYOUT_ROWS) {
             proven_u8str_view_t off[24];
             size_t k = rubraview_keyboard_off_layout(&app->keymap, off, 24);
             if (k > 0) {
-                n = snprintf(buffer, capacity, "%s", T("not on this keyboard:"));
+                n = rubraview_fmt(buffer, capacity, "{}", PROVEN_ARG(T("not on this keyboard:")));
                 for (size_t i = 0; i < k && n > 0 && (size_t)n < capacity; ++i)
-                    n += snprintf(buffer + n, capacity - (size_t)n, " %.*s", (int)off[i].size, (const char *)off[i].ptr);
+                    n += rubraview_fmt(buffer + n, capacity - (size_t)n, " {}", PROVEN_ARG(rubraview_bytes_view((const char *)off[i].ptr, (int)off[i].size)));
             }
         }
         return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
@@ -356,9 +355,9 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
     if (index == 0) {
         int32_t pad_key = 20 - rubraview_settings_text_cells(proven_u8str_view_from_cstr(T("key")));
         int32_t pad = 14 - rubraview_settings_text_cells(proven_u8str_view_from_cstr(T("where")));
-        int n = g_keys_by_key ? snprintf(buffer, capacity, "%s%*s %s%*s %s", T("key"), pad_key > 0 ? (int)pad_key : 0, "", T("where"),
-                                         pad > 0 ? (int)pad : 0, "", T("what it does  (Show by function to change them)"))
-                              : snprintf(buffer, capacity, "%-24s %s", T("action"), T("keys  (Enter adds a key, Delete takes the last off)"));
+        int n = g_keys_by_key ? rubraview_fmt(buffer, capacity, "{}{} {}{} {}", PROVEN_ARG(T("key")), PROVEN_ARG(rubraview_spaces((int)pad_key)), PROVEN_ARG(T("where")),
+                                              PROVEN_ARG(rubraview_spaces((int)pad)), PROVEN_ARG(T("what it does  (Show by function to change them)")))
+                              : rubraview_fmt(buffer, capacity, "{:<24} {}", PROVEN_ARG(T("action")), PROVEN_ARG(T("keys  (Enter adds a key, Delete takes the last off)")));
         return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
     }
     if (index > g_key_row_count) return 0;
@@ -374,10 +373,10 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
         const char *words = rubraview_action_words(o->action);
         /* the context's column by cells, not bytes: a Korean heading is two cells a letter */
         int32_t pad = 14 - rubraview_settings_text_cells(proven_u8str_view_from_cstr(where));
-        int n = words ? snprintf(buffer, capacity, "%-20.*s %s%*s %s", (int)named.size, (const char *)named.ptr, where, pad > 0 ? (int)pad : 0, "",
-                                 rubraview_tr(words))
-                      : snprintf(buffer, capacity, "%-20.*s %s%*s %.*s", (int)named.size, (const char *)named.ptr, where, pad > 0 ? (int)pad : 0, "",
-                                 (int)o->action.size, (const char *)o->action.ptr);
+        int n = words ? rubraview_fmt(buffer, capacity, "{:<20} {}{} {}", PROVEN_ARG(named), PROVEN_ARG(where), PROVEN_ARG(rubraview_spaces((int)pad)),
+                                      PROVEN_ARG(rubraview_tr(words)))
+                      : rubraview_fmt(buffer, capacity, "{:<20} {}{} {}", PROVEN_ARG(named), PROVEN_ARG(where), PROVEN_ARG(rubraview_spaces((int)pad)),
+                                      PROVEN_ARG(o->action));
         return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
     }
     int32_t at = g_key_row[index - 1];
@@ -385,8 +384,8 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
         size_t count = 0;
         const rubraview_key_context_info_t *all = rubraview_keymap_contexts(&count);
         size_t c = (size_t)(-at - 1);
-        int n = c < count ? snprintf(buffer, capacity, "-- %s (%s) --", rubraview_tr(all[c].heading), rubraview_tr(all[c].when))
-                          : snprintf(buffer, capacity, "-- %s --", T("other"));
+        int n = c < count ? rubraview_fmt(buffer, capacity, "-- {} ({}) --", PROVEN_ARG(rubraview_tr(all[c].heading)), PROVEN_ARG(rubraview_tr(all[c].when)))
+                          : rubraview_fmt(buffer, capacity, "-- {} --", PROVEN_ARG(T("other")));
         return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
     }
     const rubraview_key_binding_t *b = &app->keymap.bindings[at];
@@ -394,12 +393,12 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
     size_t used = 0;
     keys[0] = '\0';
     if (app->key_capture == (int32_t)index) {
-        used = (size_t)snprintf(keys, sizeof(keys), T("> press a key (Esc: leave it)"));
+        used = (size_t)rubraview_fmt(keys, sizeof(keys), T("> press a key (Esc: leave it)"));
     } else {
         for (size_t c = 0; c < b->combo_count && used + 32 < sizeof(keys); ++c) {
             char one[64];
             proven_u8str_view_t text = rubraview_key_combo_format(one, sizeof(one), b->combos[c]);
-            int n = snprintf(keys + used, sizeof(keys) - used, "%s%.*s", c ? ", " : "", (int)text.size, text.ptr);
+            int n = rubraview_fmt(keys + used, sizeof(keys) - used, "{}{}", PROVEN_ARG(c ? ", " : ""), PROVEN_ARG(rubraview_bytes_view(text.ptr, (int)text.size)));
             if (n > 0) used += (size_t)n;
         }
         /* §3.22.2: a key another action also claims where the two meet —
@@ -412,14 +411,14 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
                 for (size_t y = 0; y < o->combo_count && !clash; ++y)
                     clash = rubraview_key_combo_equal(b->combos[x], o->combos[y]);
             if (!clash) continue;
-            int n = snprintf(keys + used, sizeof(keys) - used, T("  ! also %.*s"), (int)o->action.size, o->action.ptr);
+            int n = rubraview_fmt(keys + used, sizeof(keys) - used, T("  ! also {}"), PROVEN_ARG(rubraview_bytes_view(o->action.ptr, (int)o->action.size)));
             if (n > 0) used += (size_t)n;
             break;
         }
         if (used >= sizeof(keys)) used = sizeof(keys) - 1;
-        if (b->combo_count == 0 && used == 0) used = (size_t)snprintf(keys, sizeof(keys), T("(no key)"));
+        if (b->combo_count == 0 && used == 0) used = (size_t)rubraview_fmt(keys, sizeof(keys), T("(no key)"));
     }
-    int n = snprintf(buffer, capacity, "  %-22.*s %.*s", (int)b->action.size, b->action.ptr, (int)used, keys);
+    int n = rubraview_fmt(buffer, capacity, "  {:<22} {}", PROVEN_ARG(rubraview_bytes_view(b->action.ptr, (int)b->action.size)), PROVEN_ARG(rubraview_bytes_view(keys, (int)used)));
     if (n <= 0) return 0;
     return (size_t)n < capacity ? (size_t)n : capacity - 1;
 }
@@ -685,7 +684,7 @@ void settings_follow(app_state_t *app, int what) {
             app->settings_opened = rubraview_settings_merge_changed(app->arena, &loaded, &app->settings_saved, opened);
         }
         /* The counts of changes are this viewer's own: what it redraws by. */
-        memcpy(mine.revision, app->settings.revision, sizeof(mine.revision));
+        proven_sys_mem_copy(mine.revision, app->settings.revision, sizeof(mine.revision));
         mine.revision_total = app->settings.revision_total + (changed ? 1u : 0u);
         app->settings = mine;
         app->settings_saved = loaded;
@@ -753,19 +752,19 @@ static void lang_apply(app_state_t *app) {
     static const char *const CHOICES[] = { "auto", "en", "ko", "ja", "zh-Hans", "zh-Hant", "fa" };
     int c = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("language")));
     const char *want = CHOICES[c >= 0 && c < 7 ? c : 0];
-    if (strcmp(want, "auto") == 0) {
+    if (rubraview_cstr_cmp(want, "auto") == 0) {
         char tag[96];
         want = rubraview_pal_process_ui_language(tag, sizeof(tag)) ? rubraview_lang_pick(tag, LANG_PACKS, 5) : NULL;
     }
-    if (want && strcmp(want, "en") == 0) want = NULL;
-    if (strcmp(want ? want : "", g_lang_code) == 0) return;
+    if (want && rubraview_cstr_cmp(want, "en") == 0) want = NULL;
+    if (rubraview_cstr_cmp(want ? want : "", g_lang_code) == 0) return;
 
     rubraview_lang_use(NULL);
     rubraview_lang_free(&g_lang);
     g_lang_code[0] = '\0';
     if (want) {
         char name[48];
-        snprintf(name, sizeof(name), "lang/%s.txt", want);
+        rubraview_fmt(name, sizeof(name), "lang/{}.txt", PROVEN_ARG(want));
         proven_u8str_view_t dirs[2] = { rubraview_path_dirname(app->settings_path), app->config_beside };
         bool loaded = false;
         for (int i = 0; i < 2 && !loaded; i++) {
@@ -780,10 +779,10 @@ static void lang_apply(app_state_t *app) {
         }
         if (loaded) {
             rubraview_lang_use(&g_lang);
-            snprintf(g_lang_code, sizeof(g_lang_code), "%s", want);
+            rubraview_fmt(g_lang_code, sizeof(g_lang_code), "{}", PROVEN_ARG(want));
         } else {
             char line[96];
-            int n = snprintf(line, sizeof(line), T("no language pack lang\\%s.txt beside rubraview.exe: English it is"), want);
+            int n = rubraview_fmt(line, sizeof(line), T("no language pack lang\\{}.txt beside rubraview.exe: English it is"), PROVEN_ARG(want));
             if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
         }
     }
@@ -1095,8 +1094,8 @@ static void lang_import(app_state_t *app) {
         proven_u8str_view_t stem = rubraview_path_stem(picked.paths[i]);
         const char *code = NULL;
         for (size_t k = 0; k < 5 && !code; k++) {
-            size_t at = 0, n = strlen(LANG_PACKS[k]);
-            while (at < n && at < stem.size && tolower((unsigned char)stem.ptr[at]) == tolower((unsigned char)LANG_PACKS[k][at])) at++;
+            size_t at = 0, n = proven_cstr_len(LANG_PACKS[k]);
+            while (at < n && at < stem.size && rubraview_ascii_tolower((unsigned char)stem.ptr[at]) == rubraview_ascii_tolower((unsigned char)LANG_PACKS[k][at])) at++;
             if (at == n && stem.size == n) code = LANG_PACKS[k];
         }
         rubraview_scratch_t sc;   /* read only to see that it is a pack */
@@ -1109,7 +1108,7 @@ static void lang_import(app_state_t *app) {
         scratch_end(app, &sc);
         if (!reads) continue;
         char name[32];
-        snprintf(name, sizeof(name), "%s.txt", code);
+        rubraview_fmt(name, sizeof(name), "{}.txt", PROVEN_ARG(code));
         from[count] = picked.paths[i];
         names[count++] = app_keep(app, cstr(name));
     }
@@ -1127,7 +1126,7 @@ static void lang_import(app_state_t *app) {
             if (rubraview_pal_fs_exists(rubraview_path_join(app->arena, own, names[i]))) (void)import_into(app, own, &from[i], &names[i], 1);
         }
     }
-    snprintf(g_lang_code, sizeof(g_lang_code), "?");   /* read again, the one in use too */
+    rubraview_fmt(g_lang_code, sizeof(g_lang_code), "?");   /* read again, the one in use too */
     lang_apply(app);
     settings_say(app, where == 0 ? T("the language packs could not be copied")
                       : count < picked.count ? T("language packs imported; files that are not one were left out")
@@ -1136,7 +1135,7 @@ static void lang_import(app_state_t *app) {
 }
 
 void settings_say(app_state_t *app, const char *text) {
-    snprintf(app->settings_message, sizeof(app->settings_message), "%s", text);
+    rubraview_fmt(app->settings_message, sizeof(app->settings_message), "{}", PROVEN_ARG(text));
 }
 
 /* Settings › Explorer (D-86): the extensions switched on, for the file
@@ -1286,10 +1285,10 @@ static void shell_types_action(app_state_t *app, proven_u8str_view_t name) {
                       : shell_remove(false);
     } else {
         char args[768];
-        int n = adding ? snprintf(args, sizeof(args), "--register-shell --all-users --types=%s%s%s%s%s",
-                                  words_len > 0 ? words : menu_words, menu_len > 0 ? " --menu-types=" : "", menu_len > 0 ? menu_words : "",
-                                  types ? "" : " --remove-types", menu ? "" : " --remove-menu")
-                       : snprintf(args, sizeof(args), "--unregister-shell --all-users");
+        int n = adding ? rubraview_fmt(args, sizeof(args), "--register-shell --all-users --types={}{}{}{}{}",
+                                  PROVEN_ARG(words_len > 0 ? words : menu_words), PROVEN_ARG(menu_len > 0 ? " --menu-types=" : ""), PROVEN_ARG(menu_len > 0 ? menu_words : ""),
+                                  PROVEN_ARG(types ? "" : " --remove-types"), PROVEN_ARG(menu ? "" : " --remove-menu"))
+                       : rubraview_fmt(args, sizeof(args), "--unregister-shell --all-users");
         if (n <= 0 || (size_t)n >= sizeof(args) ||
             !rubraview_pal_shell_run_elevated((proven_u8str_view_t){ .ptr = (const proven_byte_t *)args, .size = (size_t)n }, &code)) {
             settings_say(app, T("not done: the administrator's permission was not given"));
@@ -1301,21 +1300,21 @@ static void shell_types_action(app_state_t *app, proven_u8str_view_t name) {
     char say[200];
     app->other_copies = rubraview_pal_shell_other_copies();
     if (code != SHELL_DONE && code != SHELL_DONE_NO_PARTS && code != SHELL_DONE_REFUSED && code != SHELL_DONE_STORE) {
-        snprintf(say, sizeof(say), T("could not %s %s"), adding ? T("register") : T("remove"), who);
+        rubraview_fmt(say, sizeof(say), T("could not {} {}"), PROVEN_ARG(adding ? T("register") : T("remove")), PROVEN_ARG(who));
     } else if (!adding) {
-        snprintf(say, sizeof(say), T("removed %s"), who);
+        rubraview_fmt(say, sizeof(say), T("removed {}"), PROVEN_ARG(who));
     } else if (!menu) {
-        snprintf(say, sizeof(say), T("registered %s: file types"), who);
+        rubraview_fmt(say, sizeof(say), T("registered {}: file types"), PROVEN_ARG(who));
     } else if (!all) {
-        snprintf(say, sizeof(say), T("registered %s; the menu is under \"Show more options\" (Windows 11's own menu: for every user)"), who);
+        rubraview_fmt(say, sizeof(say), T("registered {}; the menu is under \"Show more options\" (Windows 11's own menu: for every user)"), PROVEN_ARG(who));
     } else if (code == SHELL_DONE_NO_PARTS) {
-        snprintf(say, sizeof(say), T("registered %s; Windows 11's menu needs rubraview_menu.dll and .msix beside the program (they are in the zip)"), who);
+        rubraview_fmt(say, sizeof(say), T("registered {}; Windows 11's menu needs rubraview_menu.dll and .msix beside the program (they are in the zip)"), PROVEN_ARG(who));
     } else if (code == SHELL_DONE_REFUSED) {
-        snprintf(say, sizeof(say), T("registered %s; Windows did not take the Windows 11 menu's package"), who);
+        rubraview_fmt(say, sizeof(say), T("registered {}; Windows did not take the Windows 11 menu's package"), PROVEN_ARG(who));
     } else if (code == SHELL_DONE_STORE) {
-        snprintf(say, sizeof(say), T("registered %s; Windows 11's menu is left to the Store's copy (this one's is under \"Show more options\")"), who);
+        rubraview_fmt(say, sizeof(say), T("registered {}; Windows 11's menu is left to the Store's copy (this one's is under \"Show more options\")"), PROVEN_ARG(who));
     } else {
-        snprintf(say, sizeof(say), T("registered %s, with Windows 11's menu"), who);
+        rubraview_fmt(say, sizeof(say), T("registered {}, with Windows 11's menu"), PROVEN_ARG(who));
     }
     settings_say(app, say);
 }
@@ -1425,16 +1424,16 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             char text[160];
             if (event == RUBRAVIEW_SEVENT_TABLE_EDIT) {
                 app->key_capture = row;
-                snprintf(text, sizeof(text), T("press the key to add to %.*s (Esc: leave it as it is)"),
-                         (int)b->action.size, b->action.ptr);
+                rubraview_fmt(text, sizeof(text), T("press the key to add to {} (Esc: leave it as it is)"),
+                         PROVEN_ARG(rubraview_bytes_view(b->action.ptr, (int)b->action.size)));
             } else if (b->combo_count == 0) {
-                snprintf(text, sizeof(text), T("%.*s has no key to take off"), (int)b->action.size, b->action.ptr);
+                rubraview_fmt(text, sizeof(text), T("{} has no key to take off"), PROVEN_ARG(rubraview_bytes_view(b->action.ptr, (int)b->action.size)));
             } else {
                 char one[64];
                 proven_u8str_view_t last = rubraview_key_combo_format(one, sizeof(one), b->combos[b->combo_count - 1]);
                 rubraview_keymap_unbind_last(&app->keymap, (size_t)at);
-                snprintf(text, sizeof(text), T("took %.*s off %.*s (Revert puts it back)"),
-                         (int)last.size, last.ptr, (int)b->action.size, b->action.ptr);
+                rubraview_fmt(text, sizeof(text), T("took {} off {} (Revert puts it back)"),
+                         PROVEN_ARG(rubraview_bytes_view(last.ptr, (int)last.size)), PROVEN_ARG(rubraview_bytes_view(b->action.ptr, (int)b->action.size)));
             }
             settings_say(app, text);
             break;
@@ -1524,7 +1523,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                    as it is where the files are to be put */
                 proven_u8str_view_t named = rubraview_settings_get_text(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("plugin_folder"));
                 char folder[520] = "";
-                if (named.size > 0 && named.size < sizeof(folder)) { memcpy(folder, named.ptr, named.size); folder[named.size] = '\0'; }
+                if (named.size > 0 && named.size < sizeof(folder)) { proven_sys_mem_copy(folder, named.ptr, named.size); folder[named.size] = '\0'; }
                 else (void)rubraview_pal_plugins_default_folder(folder, sizeof(folder), true);
                 settings_say(app, folder[0] && rubraview_pal_shell_open_folder(cstr(folder), true)
                                       ? T("the plug-in folder is opening") : T("the folder could not be opened"));
@@ -1540,7 +1539,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 app->picker_generation++;
                 if (app->thumbs) rubraview_pal_thumbs_generation(app->thumbs, app->picker_generation);
                 if (app->picker_open) {
-                    app->picker_thumbs = (struct picker_thumb *)calloc(app->picker_listing.count ? app->picker_listing.count : 1,
+                    app->picker_thumbs = (struct picker_thumb *)rubraview_alloc_zero(app->picker_listing.count ? app->picker_listing.count : 1,
                                                                        sizeof(*app->picker_thumbs));
                     app->picker_thumb_count = app->picker_thumbs ? app->picker_listing.count : 0;
                 }
@@ -1549,7 +1548,7 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 /* RV-216: every copy not playing now */
                 uint64_t freed = rubraview_pal_filmcache_clear();
                 char said[96];
-                snprintf(said, sizeof said, T("the network films' copies were deleted: %.1f GB"), (double)freed / 1073741824.0);
+                rubraview_fmt(said, sizeof said, T("the network films' copies were deleted: {:.1} GB"), PROVEN_ARG((double)freed / 1073741824.0));
                 settings_say(app, said);
             } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("cache.reset_history"))) {
                 /* Every place read to, here and in the file. Another viewer that is open still has its own. */
@@ -1609,20 +1608,20 @@ static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) 
     const rubraview_key_binding_t *b = &app->keymap.bindings[index];
     switch (result) {
         case RUBRAVIEW_BIND_ADDED:
-            snprintf(text, sizeof(text), T("%.*s added to %.*s"), (int)name.size, name.ptr, (int)b->action.size, b->action.ptr);
+            rubraview_fmt(text, sizeof(text), T("{} added to {}"), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)), PROVEN_ARG(rubraview_bytes_view(b->action.ptr, (int)b->action.size)));
             break;
         case RUBRAVIEW_BIND_ALREADY:
-            snprintf(text, sizeof(text), T("%.*s already has %.*s"), (int)b->action.size, b->action.ptr, (int)name.size, name.ptr);
+            rubraview_fmt(text, sizeof(text), T("{} already has {}"), PROVEN_ARG(rubraview_bytes_view(b->action.ptr, (int)b->action.size)), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)));
             break;
         case RUBRAVIEW_BIND_TAKEN:
-            snprintf(text, sizeof(text), T("not changed: %.*s is %.*s's key%s%.*s%s"), (int)name.size, name.ptr,
-                     (int)holder->action.size, holder->action.ptr,
-                     holder->context.size ? " (" : "", (int)holder->context.size, holder->context.ptr,
-                     holder->context.size ? ")" : "");
+            rubraview_fmt(text, sizeof(text), T("not changed: {} is {}'s key{}{}{}"), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)),
+                     PROVEN_ARG(rubraview_bytes_view(holder->action.ptr, (int)holder->action.size)),
+                     PROVEN_ARG(holder->context.size ? " (" : ""), PROVEN_ARG(rubraview_bytes_view(holder->context.ptr, (int)holder->context.size)),
+                     PROVEN_ARG(holder->context.size ? ")" : ""));
             break;
         case RUBRAVIEW_BIND_FAILED:
         default:
-            snprintf(text, sizeof(text), T("could not add %.*s"), (int)name.size, name.ptr);
+            rubraview_fmt(text, sizeof(text), T("could not add {}"), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)));
             break;
     }
     settings_say(app, text);
@@ -1653,7 +1652,7 @@ void settings_number_begin(app_state_t *app) {
     if (!def || (def->type != RUBRAVIEW_SETTING_INT && def->type != RUBRAVIEW_SETTING_FLOAT)) return;
     char now[32];
     double v = rubraview_settings_get(&app->settings, def->section, def->key);
-    int n = def->type == RUBRAVIEW_SETTING_FLOAT ? snprintf(now, sizeof(now), "%.2f", v) : snprintf(now, sizeof(now), "%.0f", v);
+    int n = def->type == RUBRAVIEW_SETTING_FLOAT ? rubraview_fmt(now, sizeof(now), "{:.2}", PROVEN_ARG((double)v)) : rubraview_fmt(now, sizeof(now), "{:.0}", PROVEN_ARG((double)v));
     app->spath_edit = rubraview_textedit_make(app->spath_buffer, sizeof(app->spath_buffer));
     rubraview_textedit_set(&app->spath_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
     rubraview_textedit_select_all(&app->spath_edit);
@@ -1665,7 +1664,7 @@ void settings_number_begin(app_state_t *app) {
     app->spath_active = true;
     rubraview_pal_window_text_input(app->settings_window, true);
     char line[160];
-    snprintf(line, sizeof(line), T("type a number, %g to %g; Enter keeps it, Esc leaves it"), def->min_value, def->max_value);
+    rubraview_fmt(line, sizeof(line), T("type a number, {} to {}; Enter keeps it, Esc leaves it"), PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(def->min_value), 6)), PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(def->max_value), 6)));
     settings_say(app, line);
 }
 
@@ -1684,11 +1683,11 @@ static void settings_path_commit(app_state_t *app) {
     if (app->spath_number) {   /* 1.24.0 */
         char buf[48];
         size_t n = text.size < sizeof(buf) - 1 ? text.size : sizeof(buf) - 1;
-        memcpy(buf, text.ptr, n);
+        proven_sys_mem_copy(buf, text.ptr, n);
         buf[n] = '\0';
         for (size_t i = 0; i < n; ++i) if (buf[i] == ',') buf[i] = '.';
         char *end = NULL;
-        double v = strtod(buf, &end);
+        double v = proven_strtod(buf, &end);
         if (!end || end == buf) { settings_say(app, T("that is not a number - put it right, or Esc")); return; }
         rubraview_settings_set(&app->settings, app->spath_section, app->spath_key, v);   /* kept inside its range */
         settings_path_end(app);
@@ -2120,7 +2119,7 @@ size_t settings_pump(app_state_t *app) {
                         app->spath_composing_length = 0;
                     } else {
                         size_t n = typed.size < sizeof(app->spath_composing) ? typed.size : sizeof(app->spath_composing) - 1;
-                        memcpy(app->spath_composing, typed.ptr, n);
+                        proven_sys_mem_copy(app->spath_composing, typed.ptr, n);
                         app->spath_composing_length = n;
                     }
                     app->settings_dirty = true;
@@ -2269,7 +2268,7 @@ static void settings_text_link(app_state_t *app, proven_u8str_view_t text, doubl
 static proven_u8str_view_t fontpick_sample(void) {
     static char buf[96];
     /* "Abc" in a pack is that language's own short word (한글, かな漢字, ...). */
-    int n = snprintf(buf, sizeof(buf), "Iil1 aoO0 %s", T("Abc"));
+    int n = rubraview_fmt(buf, sizeof(buf), "Iil1 aoO0 {}", PROVEN_ARG(T("Abc")));
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
 }
 
@@ -2286,7 +2285,9 @@ static size_t fontpick_rows(const app_state_t *app) {
 }
 
 /* Does `name` hold the words typed, letters of any case alike? */
-static bool fontpick_finds(proven_u8str_view_t name, const char *find, size_t len) {
+static bool fontpick_finds(proven_u8str_view_t name, proven_u8str_view_t find_view) {
+    const char *find = (const char *)find_view.ptr;
+    size_t len = (size_t)find_view.size;
     if (len == 0) return true;
     for (size_t i = 0; i + len <= name.size; ++i) {
         if (proven_u8str_view_eq_ascii_ci(proven_u8str_view_slice(name, i, len), proven_u8str_view_from_bytes(find, len))) return true;
@@ -2298,7 +2299,7 @@ static void fontpick_filter(app_state_t *app) {
     app->fontpick_list_count = 0;
     for (size_t i = 0; i < app->fontpick_all_count; ++i) {
         const rubraview_font_family_t *f = &app->fontpick_all[i];
-        if (fontpick_finds(f->shown, app->fontpick_find, app->fontpick_find_len) || fontpick_finds(f->name, app->fontpick_find, app->fontpick_find_len))
+        if (fontpick_finds(f->shown, rubraview_bytes_view(app->fontpick_find, app->fontpick_find_len)) || fontpick_finds(f->name, rubraview_bytes_view(app->fontpick_find, app->fontpick_find_len)))
             app->fontpick_list[app->fontpick_list_count++] = (uint32_t)i;
     }
     if (app->fontpick_sel >= (int32_t)app->fontpick_list_count) app->fontpick_sel = app->fontpick_list_count ? 0 : -1;
@@ -2310,8 +2311,8 @@ static void fontpick_filter(app_state_t *app) {
             const rubraview_font_family_t *f = &app->fontpick_all[app->fontpick_list[i]];
             proven_u8str_view_t a = { f->shown.ptr, f->shown.size < app->fontpick_find_len ? f->shown.size : app->fontpick_find_len };
             proven_u8str_view_t b = { f->name.ptr, f->name.size < app->fontpick_find_len ? f->name.size : app->fontpick_find_len };
-            if ((a.size == app->fontpick_find_len && fontpick_finds(a, app->fontpick_find, app->fontpick_find_len)) ||
-                (b.size == app->fontpick_find_len && fontpick_finds(b, app->fontpick_find, app->fontpick_find_len))) {
+            if ((a.size == app->fontpick_find_len && fontpick_finds(a, rubraview_bytes_view(app->fontpick_find, app->fontpick_find_len))) ||
+                (b.size == app->fontpick_find_len && fontpick_finds(b, rubraview_bytes_view(app->fontpick_find, app->fontpick_find_len)))) {
                 app->fontpick_sel = (int32_t)i;
                 break;
             }
@@ -2336,7 +2337,7 @@ void fontpick_close(app_state_t *app) {
     window_block_give(app, &app->fontpick_block);
     app->fontpick_renderer = NULL;
     app->fontpick_window = NULL;
-    free(app->fontpick_mem);
+    rubraview_free(app->fontpick_mem);
     app->fontpick_mem = NULL;
     app->fontpick_all = NULL;
     app->fontpick_list = NULL;
@@ -2348,21 +2349,21 @@ void fontpick_close(app_state_t *app) {
 void fontpick_show(app_state_t *app, proven_u8str_view_t section, proven_u8str_view_t key) {
     if (app->fontpick_open) fontpick_close(app);
     size_t cap = 4u << 20;
-    app->fontpick_mem = malloc(cap);
+    app->fontpick_mem = rubraview_alloc(cap);
     if (!app->fontpick_mem) return;
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)app->fontpick_mem, .size = cap });
     app->fontpick_all_count = rubraview_pal_font_families(&arena, &app->fontpick_all);
     proven_result_mem_mut_t list = proven_arena_alloc(&arena, (app->fontpick_all_count + 1) * sizeof(uint32_t));
     proven_result_mem_mut_t drawn = proven_arena_alloc(&arena, app->fontpick_all_count + 1);
     if (app->fontpick_all_count == 0 || !proven_is_ok(list.err) || !proven_is_ok(drawn.err)) {
-        free(app->fontpick_mem);
+        rubraview_free(app->fontpick_mem);
         app->fontpick_mem = NULL;
         settings_say(app, T("no fonts could be listed"));
         return;
     }
     app->fontpick_list = (uint32_t*)(void*)list.value.ptr;
     app->fontpick_drawn = (uint8_t*)drawn.value.ptr;
-    memset(app->fontpick_drawn, 0, app->fontpick_all_count + 1);
+    proven_sys_mem_set(app->fontpick_drawn, 0, app->fontpick_all_count + 1);
     rubraview_window_config_t config = { .title = T("Rubraview font"), .width = 680, .height = 600, .owner = app->settings_window };
     app->fontpick_window = rubraview_pal_window_create(window_block_take(app, &app->fontpick_block), &config);
     int32_t w = 0, h = 0;
@@ -2373,7 +2374,7 @@ void fontpick_show(app_state_t *app, proven_u8str_view_t section, proven_u8str_v
         if (app->fontpick_window) rubraview_pal_window_destroy(app->fontpick_window);
         window_block_give(app, &app->fontpick_block);
         app->fontpick_window = NULL;
-        free(app->fontpick_mem);
+        rubraview_free(app->fontpick_mem);
         app->fontpick_mem = NULL;
         settings_say(app, T("the font picker could not open"));
         return;
@@ -2454,8 +2455,8 @@ void draw_fontpick_window(app_state_t *app) {
     rubraview_pal_render_stroke_rect(r, find, 0xFF5B9BD5u, 1.0, 3.0);
     char line[256];
     int n = app->fontpick_find_len
-        ? snprintf(line, sizeof(line), "%.*s|   %zu / %zu", (int)app->fontpick_find_len, app->fontpick_find, app->fontpick_list_count, app->fontpick_all_count)
-        : snprintf(line, sizeof(line), T("type to find a font   %zu"), app->fontpick_all_count);
+        ? rubraview_fmt(line, sizeof(line), "{}|   {} / {}", PROVEN_ARG(rubraview_bytes_view(app->fontpick_find, (int)app->fontpick_find_len)), PROVEN_ARG((size_t)app->fontpick_list_count), PROVEN_ARG((size_t)app->fontpick_all_count))
+        : rubraview_fmt(line, sizeof(line), T("type to find a font   {}"), PROVEN_ARG((size_t)app->fontpick_all_count));
     if (n > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)line, (size_t)n }, (rubraview_pal_rect_t){ find.x + 8.0 * d, find.y, find.width - 16.0 * d, find.height },
                                               font, app->fontpick_find_len ? COLOR_TEXT : 0xFF909090u, RUBRAVIEW_TEXT_LEFT);
 
@@ -2503,7 +2504,7 @@ void draw_fontpick_window(app_state_t *app) {
         rubraview_pal_render_set_text_family(r, PROVEN_LIT(""));
     }
     char weight[64];
-    snprintf(weight, sizeof(weight), "<  %s  >", rubraview_font_weight_name(app->fontpick_weight));
+    rubraview_fmt(weight, sizeof(weight), "<  {}  >", PROVEN_ARG(rubraview_font_weight_name(app->fontpick_weight)));
     const char *words[FONTPICK_PLACES] = { weight, app->fontpick_italic ? T("[x] Italic") : T("[ ] Italic"), T("Default"), T("OK"), T("Cancel") };
     for (int i = 0; i < FONTPICK_PLACES; ++i) {
         rubraview_pal_rect_t b = fontpick_place(app, i);
@@ -2551,7 +2552,7 @@ static void fontpick_step_weight(app_state_t *app, int dir) {
     int32_t at = 3;
     for (int32_t i = 0; i < RUBRAVIEW_FONT_WEIGHTS; ++i) if (rubraview_font_weight_at(i) == app->fontpick_weight) at = i;
     app->fontpick_weight = rubraview_font_weight_at(at + dir);
-    memset(app->fontpick_drawn, 0, app->fontpick_all_count);   /* the samples again, in the new weight */
+    proven_sys_mem_set(app->fontpick_drawn, 0, app->fontpick_all_count);   /* the samples again, in the new weight */
     app->fontpick_dirty = true;
 }
 
@@ -2606,7 +2607,7 @@ size_t fontpick_pump(app_state_t *app) {
                     rubraview_pal_rect_t b = fontpick_place(app, i);
                     if (!(event.mouse.x >= b.x && event.mouse.x < b.x + b.width && event.mouse.y >= b.y && event.mouse.y < b.y + b.height)) continue;
                     if (i == FONTPICK_WEIGHT) fontpick_step_weight(app, event.mouse.x < b.x + b.width * 0.5 ? -1 : +1);
-                    else if (i == FONTPICK_ITALIC) { app->fontpick_italic = !app->fontpick_italic; memset(app->fontpick_drawn, 0, app->fontpick_all_count); }
+                    else if (i == FONTPICK_ITALIC) { app->fontpick_italic = !app->fontpick_italic; proven_sys_mem_set(app->fontpick_drawn, 0, app->fontpick_all_count); }
                     else if (i == FONTPICK_DEFAULT) { fontpick_keep(app, true); return handled; }
                     else if (i == FONTPICK_OK) { fontpick_keep(app, false); return handled; }
                     else { fontpick_close(app); return handled; }
@@ -2637,7 +2638,7 @@ size_t fontpick_pump(app_state_t *app) {
                     break;
                 }
                 if (ctrl && key_is(combo, "B")) { fontpick_step_weight(app, app->fontpick_weight >= 600 ? -3 : +3); break; }
-                if (ctrl && key_is(combo, "I")) { app->fontpick_italic = !app->fontpick_italic; memset(app->fontpick_drawn, 0, app->fontpick_all_count); app->fontpick_dirty = true; break; }
+                if (ctrl && key_is(combo, "I")) { app->fontpick_italic = !app->fontpick_italic; proven_sys_mem_set(app->fontpick_drawn, 0, app->fontpick_all_count); app->fontpick_dirty = true; break; }
                 if (key_is(combo, "Left")) { fontpick_step_weight(app, -1); break; }
                 if (key_is(combo, "Right")) { fontpick_step_weight(app, +1); break; }
                 if (key_is(combo, "Up")) step = -1;
@@ -2668,7 +2669,7 @@ static void settings_grid_keep(app_state_t *app, int32_t row, proven_u8str_view_
     size_t n = text.size < sizeof(app->settings_grid_text[0]) ? text.size : sizeof(app->settings_grid_text[0]) - 1;
     /* Cut on a character, never inside one. */
     while (n > 0 && n < text.size && ((unsigned char)text.ptr[n] & 0xC0u) == 0x80u) --n;
-    memcpy(app->settings_grid_text[row], text.ptr, n);
+    proven_sys_mem_copy(app->settings_grid_text[row], text.ptr, n);
     app->settings_grid_len[row] = (uint16_t)n;
 }
 
@@ -2689,15 +2690,12 @@ static rubraview_window_t *chooser_window(const app_state_t *app, int where) {
          : where == CHOOSE_IN_NAMES ? app->names_window : app->window;
 }
 
-static void chooser_word(chooser_t *c, double value, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
-static void chooser_word(chooser_t *c, double value, const char *fmt, ...) {
+static void chooser_word_args(chooser_t *c, double value, const char *fmt, const proven_arg_t *fmt_args, size_t fmt_count) {
     if (c->count >= CHOOSE_MAX) return;
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(c->words[c->count], sizeof(c->words[0]), fmt, ap);
-    va_end(ap);
+    rubraview_fmt_length(proven_fmt_to_internal(c->words[c->count], sizeof(c->words[0]), fmt, fmt_args, fmt_count));
     c->values[c->count++] = value;
 }
+#define chooser_word(c, value, fmt, ...) chooser_word_args(c, value, fmt, RUBRAVIEW_FMT_ARGS(__VA_ARGS__))
 
 static void chooser_dirty(app_state_t *app) {
     if (app->chooser.where == CHOOSE_IN_SETTINGS) app->settings_dirty = true;
@@ -2724,8 +2722,8 @@ static void chooser_show(app_state_t *app, int where, double at_x, double at_y, 
     rubraview_pal_window_get_size(win, &w, &h);
     double row_h, width;
     if (where == CHOOSE_IN_SETTINGS) {   /* a list of text, a line a choice */
-        size_t longest = strlen(c->title);
-        for (size_t i = 0; i < c->count; ++i) { size_t n = strlen(c->words[i]); if (n > longest) longest = n; }
+        size_t longest = proven_cstr_len(c->title);
+        for (size_t i = 0; i < c->count; ++i) { size_t n = proven_cstr_len(c->words[i]); if (n > longest) longest = n; }
         row_h = app->settings_cell_h;
         width = app->settings_cell_w * (double)(longest + 6);
     } else {                             /* for a finger */
@@ -2753,68 +2751,68 @@ bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, d
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_TILE, .current = -1 };
     if (action.size >= sizeof(c->action)) return false;
-    memcpy(c->action, action.ptr, action.size);
+    proven_sys_mem_copy(c->action, action.ptr, action.size);
     const char *title = NULL;
     if (proven_u8str_view_eq(action, PROVEN_LIT("zoom_cycle"))) {
         title = T("Zoom");
-        chooser_word(c, 0.0, "%s", T("Real size"));
-        for (int p = 20; p <= 200; p += 20) chooser_word(c, (double)p, "%d%%", p);
+        chooser_word(c, 0.0, "{}", PROVEN_ARG(T("Real size")));
+        for (int p = 20; p <= 200; p += 20) chooser_word(c, (double)p, "{}%", PROVEN_ARG((int)p));
         c->current = at_real_size(app) ? 0 : chooser_nearest(c, app->zoom * 100.0);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("fit_cycle"))) {
         title = T("Fit");
-        chooser_word(c, RUBRAVIEW_FIT_WINDOW, "%s", T("fit: the window"));
-        chooser_word(c, RUBRAVIEW_FIT_WIDTH, "%s", T("fit: the width"));
-        chooser_word(c, RUBRAVIEW_FIT_HEIGHT, "%s", T("fit: the height"));
-        chooser_word(c, RUBRAVIEW_FIT_SMART, "%s", T("fit: smart (never enlarged)"));
-        chooser_word(c, RUBRAVIEW_FIT_STRETCH, "%s", T("fit: stretched to fill"));
+        chooser_word(c, RUBRAVIEW_FIT_WINDOW, "{}", PROVEN_ARG(T("fit: the window")));
+        chooser_word(c, RUBRAVIEW_FIT_WIDTH, "{}", PROVEN_ARG(T("fit: the width")));
+        chooser_word(c, RUBRAVIEW_FIT_HEIGHT, "{}", PROVEN_ARG(T("fit: the height")));
+        chooser_word(c, RUBRAVIEW_FIT_SMART, "{}", PROVEN_ARG(T("fit: smart (never enlarged)")));
+        chooser_word(c, RUBRAVIEW_FIT_STRETCH, "{}", PROVEN_ARG(T("fit: stretched to fill")));
         c->current = chooser_nearest(c, (double)app->fit_mode);
         if (fabs(c->values[c->current] - (double)app->fit_mode) > 0.5) c->current = -1;
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_layout"))) {
         title = T("Layout");
-        for (int i = 0; i < (int)RUBRAVIEW_LAYOUT_CHOICE_COUNT; ++i) chooser_word(c, i, "%s", layout_said((rubraview_layout_choice_t)i));
+        for (int i = 0; i < (int)RUBRAVIEW_LAYOUT_CHOICE_COUNT; ++i) chooser_word(c, i, "{}", PROVEN_ARG(layout_said((rubraview_layout_choice_t)i)));
         c->current = (int32_t)rubraview_layout_choice_of(app->layout_opts.mode, app->layout_opts.direction);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_speed_cycle"))) {
         title = T("Speed");
         static const double SPEEDS[] = { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0 };
-        for (size_t i = 0; i < 6; ++i) chooser_word(c, SPEEDS[i], "%gx", SPEEDS[i]);
+        for (size_t i = 0; i < 6; ++i) chooser_word(c, SPEEDS[i], "{}x", PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(SPEEDS[i]), 6)));
         c->current = chooser_nearest(c, app->media_speed > 0.0 ? app->media_speed : 1.0);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("interval_cycle"))) {
         title = T("Delay");
         static const double DELAYS[] = { 1.0, 2.0, 3.0, 5.0, 10.0 };
-        for (size_t i = 0; i < 5; ++i) chooser_word(c, DELAYS[i], T("%g s"), DELAYS[i]);
+        for (size_t i = 0; i < 5; ++i) chooser_word(c, DELAYS[i], T("{} s"), PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(DELAYS[i]), 6)));
         c->current = chooser_nearest(c, app->slideshow.interval_seconds);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_repeat_cycle")) && anim_plays(app)) {
         title = T("At the end");
-        chooser_word(c, 0, "%s", T("an animation goes round and round"));
-        chooser_word(c, 1, "%s", T("an animation plays once and stops"));
-        chooser_word(c, 2, "%s", T("after an animation, the next file"));
+        chooser_word(c, 0, "{}", PROVEN_ARG(T("an animation goes round and round")));
+        chooser_word(c, 1, "{}", PROVEN_ARG(T("an animation plays once and stops")));
+        chooser_word(c, 2, "{}", PROVEN_ARG(T("after an animation, the next file")));
         c->current = anim_end_mode(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_repeat_cycle"))) {
         title = T("At the end");
-        for (int i = 0; i < (int)RUBRAVIEW_REPEAT_MODE_COUNT; ++i) chooser_word(c, i, "%s", rubraview_repeat_sentence((rubraview_repeat_mode_t)i));
+        for (int i = 0; i < (int)RUBRAVIEW_REPEAT_MODE_COUNT; ++i) chooser_word(c, i, "{}", PROVEN_ARG(rubraview_repeat_sentence((rubraview_repeat_mode_t)i)));
         c->current = (int32_t)repeat_mode(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_eq_cycle"))) {
         title = T("Equaliser");
-        for (int i = 0; i < RUBRAVIEW_EQWIN_PRESETS; ++i) { proven_u8str_view_t n = eq_preset_label(i); chooser_word(c, i, "%.*s", (int)n.size, n.ptr); }
+        for (int i = 0; i < RUBRAVIEW_EQWIN_PRESETS; ++i) { proven_u8str_view_t n = eq_preset_label(i); chooser_word(c, i, "{}", PROVEN_ARG(rubraview_bytes_view(n.ptr, (int)n.size))); }
         c->current = eq_preset_now(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_visualizer_cycle"))) {
         title = T("Analyser");
-        chooser_word(c, 0, "%s", T("analyser off"));
-        chooser_word(c, 1, "%s", T("analyser: spectrum"));
-        chooser_word(c, 2, "%s", T("analyser: oscilloscope"));
+        chooser_word(c, 0, "{}", PROVEN_ARG(T("analyser off")));
+        chooser_word(c, 1, "{}", PROVEN_ARG(T("analyser: spectrum")));
+        chooser_word(c, 2, "{}", PROVEN_ARG(T("analyser: oscilloscope")));
         c->current = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("visualizer")));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_breaks")) && app->text) {
         title = T("Line breaks");
-        chooser_word(c, 0, "%s", T("line breaks as they are"));
-        chooser_word(c, 1, "%s", T("all in one run, no line breaks"));
-        chooser_word(c, 2, "%s", T("blank lines dropped"));
-        chooser_word(c, 3, "%s", T("paragraphs found (a sentence's end and more line breaks)"));
+        chooser_word(c, 0, "{}", PROVEN_ARG(T("line breaks as they are")));
+        chooser_word(c, 1, "{}", PROVEN_ARG(T("all in one run, no line breaks")));
+        chooser_word(c, 2, "{}", PROVEN_ARG(T("blank lines dropped")));
+        chooser_word(c, 3, "{}", PROVEN_ARG(T("paragraphs found (a sentence's end and more line breaks)")));
         c->current = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("breaks")));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_encoding")) && app->text) {
         title = T("Encoding");
         for (int i = 0; i < (int)RUBRAVIEW_TEXTENC_COUNT; ++i) {
             if (i == (int)RUBRAVIEW_TEXTENC_AUTO) continue;
-            chooser_word(c, i, "%s", rubraview_textenc_name((rubraview_textenc_t)i));
+            chooser_word(c, i, "{}", PROVEN_ARG(rubraview_textenc_name((rubraview_textenc_t)i)));
         }
         c->current = chooser_nearest(c, (double)text_enc_now(app));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_audio_track")) && app->media) {
@@ -2822,15 +2820,15 @@ bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, d
         for (size_t i = 0; i < app->tracks.count; ++i) {
             if (app->tracks.tracks[i].kind != RUBRAVIEW_TRACK_AUDIO) continue;
             char label[160];
-            proven_u8str_view_t text = rubraview_track_label(label, sizeof(label), &app->tracks, (int32_t)i);
+            proven_u8str_view_t text = rubraview_track_label(rubraview_mem_mut(label, sizeof(label)), &app->tracks, (int32_t)i);
             if ((int32_t)i == app->tracks.current_audio) c->current = (int32_t)c->count;
-            chooser_word(c, (double)i, "%.*s", (int)text.size, text.ptr);
+            chooser_word(c, (double)i, "{}", PROVEN_ARG(rubraview_bytes_view(text.ptr, (int)text.size)));
         }
         if (c->count < 2) { osd_say(app, TU8("this file has only one sound track")); c->count = 0; return true; }
     } else {
         return false;
     }
-    snprintf(c->title, sizeof(c->title), "%s", title);
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(title));
     chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
     return true;
 }
@@ -2870,7 +2868,7 @@ static void chooser_pick_tile(app_state_t *app, size_t i) {
         rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("eq_preset"), v);
         audio_chain_update(app);
         char line[96];
-        int n = snprintf(line, sizeof(line), T("equaliser: %s"), c->words[i]);
+        int n = rubraview_fmt(line, sizeof(line), T("equaliser: {}"), PROVEN_ARG(c->words[i]));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_visualizer_cycle"))) {
         rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("visualizer"), v);
@@ -2908,15 +2906,15 @@ void chooser_open_panel(app_state_t *app, int32_t which, int32_t row, double x, 
     if (row < 0 || (size_t)row >= panel->row_count || panel->rows[row].kind != RUBRAVIEW_ROW_CHOICE) return;
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_PANEL, .panel = which, .row = row, .current = (int32_t)lround(panel->rows[row].value) };
-    snprintf(c->title, sizeof(c->title), "%.*s", (int)panel->rows[row].label.size, panel->rows[row].label.ptr);
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(rubraview_bytes_view(panel->rows[row].label.ptr, (int)panel->rows[row].label.size)));
     int32_t n = panel->rows[row].choice_count > 0 ? panel->rows[row].choice_count : (int32_t)panel->rows[row].max_value + 1;
     for (int32_t i = 0; i < n && i < CHOOSE_MAX; ++i) {
         rubraview_panel_row_t probe = panel->rows[row];
         probe.value = (double)i;
         char words[96];
-        proven_u8str_view_t text = which == 1 && (app->panel_is_print || app->panel_is_convert) ? print_row_text(&probe, words, sizeof(words))
-                                                                                     : adjust_row_text(app, &probe, words, sizeof(words));
-        chooser_word(c, (double)i, "%.*s", (int)text.size, text.ptr);
+        proven_u8str_view_t text = which == 1 && (app->panel_is_print || app->panel_is_convert) ? print_row_text(&probe, rubraview_mem_mut(words, sizeof(words)))
+                                                                                     : adjust_row_text(app, &probe, rubraview_mem_mut(words, sizeof(words)));
+        chooser_word(c, (double)i, "{}", PROVEN_ARG(rubraview_bytes_view(text.ptr, (int)text.size)));
     }
     chooser_show(app, which == 3 ? CHOOSE_IN_BATCH : which == 4 ? CHOOSE_IN_NAMES
                     : app->edit_window && edit_panel_open(app) ? CHOOSE_IN_EDIT : CHOOSE_IN_MAIN, x, y, above_y);
@@ -2931,10 +2929,10 @@ void chooser_open_setting(app_state_t *app) {
     *c = (chooser_t){ .kind = CHOOSE_SETTING, .def = def,
                       .current = (int32_t)lround(rubraview_settings_get(&app->settings, def->section, def->key)) };
     proven_u8str_view_t label = rubraview_tr_u8(def->label);
-    snprintf(c->title, sizeof(c->title), "%.*s", (int)label.size, label.ptr);
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(rubraview_bytes_view(label.ptr, (int)label.size)));
     for (int32_t i = 0; i < def->choice_count && i < CHOOSE_MAX; ++i) {
         proven_u8str_view_t w = rubraview_settings_choice_word(def, i);
-        chooser_word(c, (double)i, "%.*s", (int)w.size, w.ptr);
+        chooser_word(c, (double)i, "{}", PROVEN_ARG(rubraview_bytes_view(w.ptr, (int)w.size)));
     }
     int32_t row = rubraview_settings_view_screen_row(v, (size_t)v->focus_line);
     double x = app->settings_cell_w * (double)(v->content_col + v->label_cols);
@@ -2948,13 +2946,13 @@ void chooser_open_sort(app_state_t *app, bool order, double x, double y, double 
     int key = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
     bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
     if (order) {
-        snprintf(c->title, sizeof(c->title), "%s", T("Order"));
-        chooser_word(c, 0, "%s \xE2\x96\xB2", T("Rising"));
-        chooser_word(c, 1, "%s \xE2\x96\xBC", T("Falling"));
+        rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Order")));
+        chooser_word(c, 0, "{} \xE2\x96\xB2", PROVEN_ARG(T("Rising")));
+        chooser_word(c, 1, "{} \xE2\x96\xBC", PROVEN_ARG(T("Falling")));
         c->current = desc ? 1 : 0;
     } else {
-        snprintf(c->title, sizeof(c->title), "%s", T("Sort by"));
-        for (int k = 0; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) chooser_word(c, k, "%s", rubraview_picker_sort_name((rubraview_picker_sort_key_t)k));
+        rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Sort by")));
+        for (int k = 0; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) chooser_word(c, k, "{}", PROVEN_ARG(rubraview_picker_sort_name((rubraview_picker_sort_key_t)k)));
         c->current = key;
     }
     chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
@@ -2966,8 +2964,8 @@ void chooser_open_listext(app_state_t *app, int where, double x, double y, doubl
     chooser_t *c = &app->chooser;
     size_t first = c->open && c->kind == CHOOSE_LISTEXT ? c->layout.first : 0;
     *c = (chooser_t){ .kind = CHOOSE_LISTEXT, .current = -1 };
-    snprintf(c->title, sizeof(c->title), "%s", T("Extensions shown"));
-    chooser_word(c, -1.0, "%s", T("All"));
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Extensions shown")));
+    chooser_word(c, -1.0, "{}", PROVEN_ARG(T("All")));
     char seen[CHOOSE_MAX][16];
     size_t counts[CHOOSE_MAX] = {0}, kinds = 0, count = page_count(app);
     for (size_t i = 0; i < count; ++i) {
@@ -2987,9 +2985,9 @@ void chooser_open_listext(app_state_t *app, int where, double x, double y, doubl
         counts[k]++;
     }
     for (size_t k = 0; k < kinds; ++k)
-        chooser_word(c, (double)k, "%s  %s  (%d)", list_ext_is_off(app, cstr(seen[k])) ? "\xE2\x98\x90" : "\xE2\x98\x91",
-                     seen[k][1] ? seen[k] : T("(none)"), (int)counts[k]);
-    memcpy(app->list_ext_seen, seen, sizeof(seen));
+        chooser_word(c, (double)k, "{}  {}  ({})", PROVEN_ARG(list_ext_is_off(app, cstr(seen[k])) ? "\xE2\x98\x90" : "\xE2\x98\x91"),
+                     PROVEN_ARG(seen[k][1] ? seen[k] : T("(none)")), PROVEN_ARG((int)counts[k]));
+    proven_sys_mem_copy(app->list_ext_seen, seen, sizeof(seen));
     chooser_show(app, where, x, y, above_y);
     if (first > 0 && first < c->count) c->layout.first = first;
 }
@@ -3001,7 +2999,7 @@ void chooser_open_pickext(app_state_t *app, double x, double y, double above_y) 
     chooser_t *c = &app->chooser;
     size_t first = c->open && c->kind == CHOOSE_PICKEXT ? c->layout.first : 0;
     *c = (chooser_t){ .kind = CHOOSE_PICKEXT, .current = -1 };
-    snprintf(c->title, sizeof(c->title), "%s", T("Pick by extension"));
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Pick by extension")));
     char seen[CHOOSE_MAX][16];
     size_t counts[CHOOSE_MAX] = {0}, picked[CHOOSE_MAX] = {0}, kinds = 0;
     for (size_t i = 0; i < app->picker_listing.count; ++i) {
@@ -3022,9 +3020,9 @@ void chooser_open_pickext(app_state_t *app, double x, double y, double above_y) 
     }
     if (kinds == 0) { osd_say(app, TU8("no files here")); return; }
     for (size_t k = 0; k < kinds; ++k)
-        chooser_word(c, (double)k, "%s  %s  %d / %d", picked[k] == counts[k] ? "\xE2\x98\x91" : "\xE2\x98\x90",
-                     seen[k][1] ? seen[k] : T("(none)"), (int)picked[k], (int)counts[k]);
-    memcpy(app->picker_ext_seen, seen, sizeof(seen));
+        chooser_word(c, (double)k, "{}  {}  {} / {}", PROVEN_ARG(picked[k] == counts[k] ? "\xE2\x98\x91" : "\xE2\x98\x90"),
+                     PROVEN_ARG(seen[k][1] ? seen[k] : T("(none)")), PROVEN_ARG((int)picked[k]), PROVEN_ARG((int)counts[k]));
+    proven_sys_mem_copy(app->picker_ext_seen, seen, sizeof(seen));
     chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
     if (first > 0 && first < c->count) c->layout.first = first;
 }
@@ -3049,7 +3047,7 @@ static void picker_ext_pick(app_state_t *app, size_t k) {
         if (pass == 1) {
             if (app->picker.mode == RUBRAVIEW_PICK_SINGLE) rubraview_picker_set_mode(&app->picker, RUBRAVIEW_PICK_INDIVIDUAL);   /* as Same type does */
             char line[96];
-            int n = snprintf(line, sizeof(line), pick ? T("%zu %s picked") : T("%zu %s let go"), total, want.size > 1 ? app->picker_ext_seen[k] : T("(none)"));
+            int n = rubraview_fmt(line, sizeof(line), pick ? T("{} {} picked") : T("{} {} let go"), PROVEN_ARG((size_t)total), PROVEN_ARG(want.size > 1 ? app->picker_ext_seen[k] : T("(none)")));
             if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         }
     }
@@ -3064,17 +3062,17 @@ void chooser_open_shape(app_state_t *app, int where, double x, double y, double 
     if (!shape_table(app, app->shape_for, &shapes, &rows, &n, &selected)) return;
     size_t total[RUBRAVIEW_SHAPE_COUNT], picked[RUBRAVIEW_SHAPE_COUNT];
     rubraview_shape_count(selected, shapes, rows, n, total, picked);
-    free(shapes);
-    free(rows);
+    rubraview_free(shapes);
+    rubraview_free(rows);
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_SHAPE, .current = -1 };
-    snprintf(c->title, sizeof(c->title), "%s", T("Pick by shape"));
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Pick by shape")));
     for (int k = RUBRAVIEW_SHAPE_WIDE; k < RUBRAVIEW_SHAPE_COUNT; ++k) {
         bool all = total[k] > 0 && picked[k] == total[k];
-        chooser_word(c, (double)k, "%s  %s  %d / %d", all ? "\xE2\x98\x91" : "\xE2\x98\x90", shape_name(k), (int)picked[k], (int)total[k]);
+        chooser_word(c, (double)k, "{}  {}  {} / {}", PROVEN_ARG(all ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(shape_name(k)), PROVEN_ARG((int)picked[k]), PROVEN_ARG((int)total[k]));
     }
     if (total[RUBRAVIEW_SHAPE_UNKNOWN] > 0)   /* folders, music, text, what could not be read: never picked by shape */
-        chooser_word(c, 0.0, "    %s  (%d)", shape_name(RUBRAVIEW_SHAPE_UNKNOWN), (int)total[RUBRAVIEW_SHAPE_UNKNOWN]);
+        chooser_word(c, 0.0, "    {}  ({})", PROVEN_ARG(shape_name(RUBRAVIEW_SHAPE_UNKNOWN)), PROVEN_ARG((int)total[RUBRAVIEW_SHAPE_UNKNOWN]));
     chooser_show(app, where, x, y, above_y);
 }
 
@@ -3083,13 +3081,13 @@ static void list_ext_toggle(app_state_t *app, int32_t k) {
     proven_u8str_view_t e = cstr(app->list_ext_seen[k]);
     for (size_t i = 0; i < app->list_ext_off_n; ++i) {
         if (!proven_u8str_view_eq(cstr(app->list_ext_off[i]), e)) continue;
-        memmove(app->list_ext_off[i], app->list_ext_off[i + 1], (app->list_ext_off_n - i - 1) * sizeof(app->list_ext_off[0]));
+        proven_sys_mem_move(app->list_ext_off[i], app->list_ext_off[i + 1], (app->list_ext_off_n - i - 1) * sizeof(app->list_ext_off[0]));
         app->list_ext_off_n--;
         list_view_changed(app);
         return;
     }
     if (app->list_ext_off_n >= sizeof(app->list_ext_off) / sizeof(app->list_ext_off[0]) || e.size >= sizeof(app->list_ext_off[0])) return;
-    memcpy(app->list_ext_off[app->list_ext_off_n], e.ptr, e.size);
+    proven_sys_mem_copy(app->list_ext_off[app->list_ext_off_n], e.ptr, e.size);
     app->list_ext_off[app->list_ext_off_n][e.size] = '\0';
     app->list_ext_off_n++;
     list_view_changed(app);
@@ -3110,8 +3108,8 @@ const char *list_sort_word(int key) {
 void chooser_open_listsort(app_state_t *app, int where, double x, double y, double above_y) {
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_LISTSORT, .current = app->list_sort_key - 1 };
-    snprintf(c->title, sizeof(c->title), "%s", T("Sort the list by"));
-    for (int k = 1; k <= 6; ++k) chooser_word(c, (double)k, "%s", list_sort_word(k));
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Sort the list by")));
+    for (int k = 1; k <= 6; ++k) chooser_word(c, (double)k, "{}", PROVEN_ARG(list_sort_word(k)));
     chooser_show(app, where, x, y, above_y);
 }
 
@@ -3149,7 +3147,7 @@ void list_sort(app_state_t *app, int key, bool desc) {
     app->list_sort_desc = desc;
     size_t *order = (size_t*)rubraview_malloc_product(count, sizeof(size_t), 1);
     struct list_sort_key *keys = (struct list_sort_key*)rubraview_malloc_product(count, sizeof(*keys), 1);
-    if (!order || !keys) { free(order); free(keys); return; }
+    if (!order || !keys) { rubraview_free(order); rubraview_free(keys); return; }
     rubraview_scratch_t sc;
     proven_arena_t *pa = scratch_begin(app, &sc, 4096u + count * 64u);
     for (size_t i = 0; i < count; ++i) {
@@ -3165,10 +3163,10 @@ void list_sort(app_state_t *app, int key, bool desc) {
     qsort(order, count, sizeof(size_t), list_sort_cmp);
     g_list_keys = NULL;
     char line[96];
-    snprintf(line, sizeof(line), T("the list by %s, %s"), list_sort_word(key), desc ? T("falling") : T("rising"));
+    rubraview_fmt(line, sizeof(line), T("the list by {}, {}"), PROVEN_ARG(list_sort_word(key)), PROVEN_ARG(desc ? T("falling") : T("rising")));
     list_apply(app, order, count, NULL, line);
-    free(order);
-    free(keys);
+    rubraview_free(order);
+    rubraview_free(keys);
     app->files_dirty = true;
 }
 
@@ -3310,7 +3308,7 @@ void draw_chooser(app_state_t *app, rubraview_renderer_t *r, int where, double p
             rubraview_rect_t row = rubraview_chooser_row_rect(l, i);
             if ((int32_t)i == hover) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ row.x, row.y, row.width, ch }, SETTINGS_FOCUS, 0.0);
             char line[112];
-            snprintf(line, sizeof(line), "%s %s", (int32_t)i == c->current ? "\xE2\x97\x8F" : " ", c->words[i]);
+            rubraview_fmt(line, sizeof(line), "{} {}", PROVEN_ARG((int32_t)i == c->current ? "\xE2\x97\x8F" : " "), PROVEN_ARG(c->words[i]));
             rubraview_pal_render_draw_text_mono(r, cstr(line), row.x + cw, row.y, fs, SETTINGS_TEXT);
         }
         draw_scrollbar(app, r, RVSB_CHOOSER, px, py);   /* RV-170 */
@@ -3430,7 +3428,7 @@ static bool keys_layout_click(app_state_t *app, double px, double py) {
     size_t count = 0;
     const rubraview_keycap_t *k = &rubraview_keyboard_caps(&count)[at];
     char said[sizeof(app->settings_message)];
-    int n = snprintf(said, sizeof said, "%s:", k->label);
+    int n = rubraview_fmt(said, sizeof said, "{}:", PROVEN_ARG(k->label));
     bool any = false;
     for (size_t i = 0; k->name && i < app->keymap.count && n > 0 && (size_t)n < sizeof said; ++i) {
         const rubraview_key_binding_t *bd = &app->keymap.bindings[i];
@@ -3438,12 +3436,12 @@ static bool keys_layout_click(app_state_t *app, double px, double py) {
             if (!proven_u8str_view_eq_ascii_ci(bd->combos[c].key_name, proven_u8str_view_from_cstr(k->name))) continue;
             char combo[64];
             proven_u8str_view_t keys = rubraview_key_combo_format(combo, sizeof combo, bd->combos[c]);
-            n += snprintf(said + n, sizeof said - (size_t)n, "%s %.*s %.*s", any ? ";" : "", (int)keys.size, (const char *)keys.ptr,
-                          (int)bd->action.size, (const char *)bd->action.ptr);
+            n += rubraview_fmt(said + n, sizeof said - (size_t)n, "{} {} {}", PROVEN_ARG(any ? ";" : ""), PROVEN_ARG(rubraview_bytes_view((const char *)keys.ptr, (int)keys.size)),
+                          PROVEN_ARG(rubraview_bytes_view((const char *)bd->action.ptr, (int)bd->action.size)));
             any = true;
         }
     }
-    if (!any) snprintf(said, sizeof said, k->name ? T("%s: nothing") : T("%s: a modifier, held with other keys"), k->label);
+    if (!any) rubraview_fmt(said, sizeof said, k->name ? T("{}: nothing") : T("{}: a modifier, held with other keys"), PROVEN_ARG(k->label));
     settings_say(app, said);
     return true;
 }
@@ -3479,7 +3477,7 @@ void draw_settings_window(app_state_t *app) {
     }
 
     /* The page. Each row's text is kept as drawn, for a marked block to copy. */
-    memset(app->settings_grid_len, 0, sizeof(app->settings_grid_len));
+    proven_sys_mem_set(app->settings_grid_len, 0, sizeof(app->settings_grid_len));
     double x0 = cw * v->content_col;
     settings_grid_keep(app, 0, rubraview_tr_u8(rubraview_settings_page_title((size_t)v->page)));
     settings_text(app, rubraview_tr_u8(rubraview_settings_page_title((size_t)v->page)), x0, 0.0, SETTINGS_ACCENT);
@@ -3571,7 +3569,7 @@ void draw_settings_window(app_state_t *app) {
         const char *words = rubraview_action_words(b->action);
         if (words) words = rubraview_tr(words);
         char tip[400];
-        int n = snprintf(tip, sizeof(tip), "%.*s: %s", (int)b->action.size, b->action.ptr, words ? words : T("(no words for it)"));
+        int n = rubraview_fmt(tip, sizeof(tip), "{}: {}", PROVEN_ARG(rubraview_bytes_view(b->action.ptr, (int)b->action.size)), PROVEN_ARG(words ? words : T("(no words for it)")));
         if (n > 0) {
             int32_t ww = 0, wh = 0;
             rubraview_pal_window_get_size(app->settings_window, &ww, &wh);

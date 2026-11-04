@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/comicinfo.h"
 #include "rubraview/number.h"
 #include <stdio.h>
@@ -24,16 +25,16 @@ static int32_t parse_int_or(proven_u8str_view_t s, int32_t default_value) {
    a self-closing <tag/> (empty value) is treated as absent. */
 static bool find_scalar_element(proven_u8str_view_t xml, const char *tag, proven_u8str_view_t *out_text) {
     char open_buf[32], close_buf[32];
-    int open_len = snprintf(open_buf, sizeof(open_buf), "<%s>", tag);
-    int close_len = snprintf(close_buf, sizeof(close_buf), "</%s>", tag);
+    int open_len = rubraview_fmt(open_buf, sizeof(open_buf), "<{}>", PROVEN_ARG(tag));
+    int close_len = rubraview_fmt(close_buf, sizeof(close_buf), "</{}>", PROVEN_ARG(tag));
     if (open_len <= 0 || close_len <= 0) return false;
 
     for (size_t i = 0; i + (size_t)open_len <= xml.size; ++i) {
-        if (memcmp(xml.ptr + i, open_buf, (size_t)open_len) != 0) continue;
+        if (proven_sys_mem_cmp(xml.ptr + i, open_buf, (size_t)open_len) != 0) continue;
 
         size_t content_start = i + (size_t)open_len;
         for (size_t j = content_start; j + (size_t)close_len <= xml.size; ++j) {
-            if (memcmp(xml.ptr + j, close_buf, (size_t)close_len) == 0) {
+            if (proven_sys_mem_cmp(xml.ptr + j, close_buf, (size_t)close_len) == 0) {
                 *out_text = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)xml.ptr + content_start, j - content_start));
                 return true;
             }
@@ -46,12 +47,14 @@ static bool find_scalar_element(proven_u8str_view_t xml, const char *tag, proven
 /* Finds attr="value" within a bounded span (an element's attribute list),
    requiring the name to start at a whitespace boundary so "Type" does not
    match inside some other "XType" attribute. */
-static bool find_attr_in_span(const char *ptr, size_t len, const char *attr_name, proven_u8str_view_t *out_value) {
-    size_t name_len = strlen(attr_name);
+static bool find_attr_in_span(proven_u8str_view_t ptr_view, const char *attr_name, proven_u8str_view_t *out_value) {
+    const char *ptr = (const char *)ptr_view.ptr;
+    size_t len = (size_t)ptr_view.size;
+    size_t name_len = proven_cstr_len(attr_name);
     for (size_t i = 0; i + name_len + 2 < len; ++i) {
         bool boundary_ok = (i == 0) || ptr[i - 1] == ' ' || ptr[i - 1] == '\t' || ptr[i - 1] == '\n' || ptr[i - 1] == '\r';
         if (!boundary_ok) continue;
-        if (memcmp(ptr + i, attr_name, name_len) != 0) continue;
+        if (proven_sys_mem_cmp(ptr + i, attr_name, name_len) != 0) continue;
 
         size_t after = i + name_len;
         if (after >= len || ptr[after] != '=') continue;
@@ -81,7 +84,7 @@ static bool page_buf_push(proven_arena_t *arena, page_buf_t *b, rubraview_comici
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_comicinfo_page_t));
         if (!proven_is_ok(res.err)) return false;
         rubraview_comicinfo_page_t *new_data = (rubraview_comicinfo_page_t*)(void*)res.value.ptr;
-        if (b->data && b->count > 0) memcpy(new_data, b->data, b->count * sizeof(rubraview_comicinfo_page_t));
+        if (b->data && b->count > 0) proven_sys_mem_copy(new_data, b->data, b->count * sizeof(rubraview_comicinfo_page_t));
         b->data = new_data;
         b->capacity = new_cap;
     }
@@ -96,7 +99,7 @@ static void parse_pages(proven_arena_t *arena, proven_u8str_view_t xml, rubravie
     while (search_from + 5 <= xml.size) {
         size_t found = (size_t)-1;
         for (size_t i = search_from; i + 5 <= xml.size; ++i) {
-            if (memcmp(xml.ptr + i, "<Page", 5) != 0) continue;
+            if (proven_sys_mem_cmp(xml.ptr + i, "<Page", 5) != 0) continue;
             char after = (i + 5 < xml.size) ? xml.ptr[i + 5] : '\0';
             if (after == ' ' || after == '\t' || after == '\n' || after == '\r' || after == '/' || after == '>') {
                 found = i;
@@ -121,11 +124,11 @@ static void parse_pages(proven_arena_t *arena, proven_u8str_view_t xml, rubravie
 
         rubraview_comicinfo_page_t page = { .image_index = -1, .type = PROVEN_LIT("") };
         proven_u8str_view_t image_val;
-        if (find_attr_in_span((const char *)xml.ptr + attr_start, attr_len, "Image", &image_val)) {
+        if (find_attr_in_span(rubraview_bytes_view((const char *)xml.ptr + attr_start, attr_len), "Image", &image_val)) {
             page.image_index = parse_int_or(image_val, -1);
         }
         proven_u8str_view_t type_val;
-        if (find_attr_in_span((const char *)xml.ptr + attr_start, attr_len, "Type", &type_val)) {
+        if (find_attr_in_span(rubraview_bytes_view((const char *)xml.ptr + attr_start, attr_len), "Type", &type_val)) {
             page.type = type_val;
         }
 
@@ -174,8 +177,8 @@ rubraview_comicinfo_t rubraview_comicinfo_parse(proven_arena_t *arena, proven_u8
 static bool type_is_cover(proven_u8str_view_t type) {
     static const char FRONT[] = "FrontCover";
     static const char INNER[] = "InnerCover";
-    if (type.size == sizeof(FRONT) - 1 && memcmp(type.ptr, FRONT, sizeof(FRONT) - 1) == 0) return true;
-    if (type.size == sizeof(INNER) - 1 && memcmp(type.ptr, INNER, sizeof(INNER) - 1) == 0) return true;
+    if (type.size == sizeof(FRONT) - 1 && proven_sys_mem_cmp(type.ptr, FRONT, sizeof(FRONT) - 1) == 0) return true;
+    if (type.size == sizeof(INNER) - 1 && proven_sys_mem_cmp(type.ptr, INNER, sizeof(INNER) - 1) == 0) return true;
     return false;
 }
 

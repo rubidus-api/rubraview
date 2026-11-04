@@ -1,10 +1,11 @@
+#include "rubraview/core.h"
 #include "rubraview/audio_chain.h"
 #include <math.h>
 #include <string.h>
 
 void rubraview_audio_chain_init(rubraview_audio_chain_t *chain, double sample_rate, uint32_t channels) {
     if (!chain) return;
-    memset(chain, 0, sizeof(*chain));
+    proven_sys_mem_set(chain, 0, sizeof(*chain));
     chain->sample_rate = sample_rate > 0.0 ? sample_rate : 48000.0;
     chain->channels = channels == 0 ? 1 : channels > RUBRAVIEW_CHAIN_MAX_CHANNELS ? RUBRAVIEW_CHAIN_MAX_CHANNELS : channels;
     chain->config = (rubraview_audio_chain_config_t){ .eq_preset = RUBRAVIEW_EQ_FLAT, .night_mode = false, .gain = 1.0 };
@@ -14,7 +15,7 @@ void rubraview_audio_chain_init(rubraview_audio_chain_t *chain, double sample_ra
 void rubraview_audio_chain_configure(rubraview_audio_chain_t *chain, const rubraview_audio_chain_config_t *config) {
     if (!chain || !config) return;
     bool changed = config->eq_custom != chain->config.eq_custom ||
-                   (config->eq_custom ? memcmp(config->eq_gains_db, chain->config.eq_gains_db, sizeof(config->eq_gains_db)) != 0
+                   (config->eq_custom ? proven_sys_mem_cmp(config->eq_gains_db, chain->config.eq_gains_db, sizeof(config->eq_gains_db)) != 0
                                       : config->eq_preset != chain->config.eq_preset);
     if (changed) {
         for (uint32_t c = 0; c < chain->channels; ++c) {

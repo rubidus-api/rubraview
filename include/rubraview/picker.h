@@ -296,7 +296,7 @@ bool rubraview_shape_cache_unverified(const rubraview_shape_cache_t *cache, prov
 bool rubraview_shape_cache_confirm(rubraview_shape_cache_t *cache, proven_u8str_view_t path, int64_t mtime);
 /* The file on disk (rubraview facts 1): its lines taken in where this run has none for the path, not seen yet.
    Returns how many. */
-size_t rubraview_shape_cache_parse(rubraview_shape_cache_t *cache, const char *text, size_t size);
+size_t rubraview_shape_cache_parse(rubraview_shape_cache_t *cache, proven_u8str_view_t text_view);
 /* The newest `max_entries` with a time, but those `kept_out` says (may be NULL), as the file's text (malloc'ed, ended by a NUL not counted in `*out_size`). */
 char *rubraview_shape_cache_serialize(const rubraview_shape_cache_t *cache, size_t max_entries,
                                       bool (*kept_out)(void *context, proven_u8str_view_t path), void *context, size_t *out_size);

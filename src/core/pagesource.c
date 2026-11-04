@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/pagesource.h"
 #include "rubraview/stream.h"
 #include "rubraview/glob.h"
@@ -28,7 +29,7 @@ static bool ref_buf_push(proven_arena_t *arena, ref_buf_t *b, rubraview_page_ref
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_page_ref_t));
         if (!proven_is_ok(res.err)) return false;
         rubraview_page_ref_t *data = (rubraview_page_ref_t*)(void*)res.value.ptr;
-        if (b->data && b->count > 0) memcpy(data, b->data, b->count * sizeof(rubraview_page_ref_t));
+        if (b->data && b->count > 0) proven_sys_mem_copy(data, b->data, b->count * sizeof(rubraview_page_ref_t));
         b->data = data;
         b->capacity = new_cap;
     }
@@ -102,7 +103,7 @@ static fulta_arc_err_t ps_mem_read(void *ctx, uint64_t offset, void *buf, size_t
     if (offset >= map->size) return FULTA_ARC_OK;
     uint64_t left = map->size - offset;
     if ((uint64_t)n > left) n = (size_t)left;
-    memcpy(buf, map->data + offset, n);
+    proven_sys_mem_copy(buf, map->data + offset, n);
     *got = n;
     return FULTA_ARC_OK;
 }
@@ -110,7 +111,7 @@ static fulta_arc_err_t ps_mem_read(void *ctx, uint64_t offset, void *buf, size_t
 static void ps_volume_close(void *ctx) {
     ps_volume_t *v = (ps_volume_t*)ctx;      /* its map is the struct's first member */
     rubraview_pal_fs_unmap(&v->map);
-    free(v);
+    rubraview_free(v);
 }
 
 /* A set's next volume, by the name its format gives it, mapped like the first. */
@@ -118,11 +119,11 @@ static fulta_arc_err_t ps_volume_open(void *ctx, uint32_t index, const char *nam
     struct rubraview_page_source_io *io = (struct rubraview_page_source_io*)ctx;
     (void)index;
     if (!name || !name[0]) return FULTA_ARC_ERR_VOLUME_MISSING;
-    ps_volume_t *v = (ps_volume_t*)calloc(1, sizeof(*v));
+    ps_volume_t *v = (ps_volume_t*)rubraview_alloc_zero(1, sizeof(*v));
     if (!v) return FULTA_ARC_ERR_NOMEM;
     v->io = io;
-    if (!rubraview_pal_fs_map((proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = strlen(name) }, &v->map)) { free(v); return FULTA_ARC_ERR_VOLUME_MISSING; }
-    if (v->map.size > (uint64_t)SIZE_MAX) { rubraview_pal_fs_unmap(&v->map); free(v); return FULTA_ARC_ERR_VOLUME_MISSING; }
+    if (!rubraview_pal_fs_map((proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = proven_cstr_len(name) }, &v->map)) { rubraview_free(v); return FULTA_ARC_ERR_VOLUME_MISSING; }
+    if (v->map.size > (uint64_t)SIZE_MAX) { rubraview_pal_fs_unmap(&v->map); rubraview_free(v); return FULTA_ARC_ERR_VOLUME_MISSING; }
     atomic_fetch_add(&io->volumes, 1);
     atomic_fetch_add(&io->volume_bytes, v->map.size);
     *out = (fulta_arc_source_t){ .ctx = v, .size = v->map.size, .read_at = ps_mem_read, .close = ps_volume_close };
@@ -143,9 +144,9 @@ static int ps_cancelled(void *ctx) {
 }
 
 static char *ps_strdup(proven_u8str_view_t s) {
-    char *out = (char*)malloc(s.size + 1);
+    char *out = (char*)rubraview_alloc(s.size + 1);
     if (!out) return NULL;
-    if (s.size) memcpy(out, s.ptr, s.size);
+    if (s.size) proven_sys_mem_copy(out, s.ptr, s.size);
     out[s.size] = '\0';
     return out;
 }
@@ -155,11 +156,11 @@ static void ps_io_free(struct rubraview_page_source_io *io) {
     if (io->password) {
         volatile char *wipe = (volatile char*)io->password;
         for (size_t k = 0; io->password[k]; ++k) wipe[k] = 0;
-        free(io->password);
+        rubraview_free(io->password);
     }
     if (io->first_mapped) rubraview_pal_fs_unmap(&io->first);
-    free(io->name);
-    free(io);
+    rubraview_free(io->name);
+    rubraview_free(io);
 }
 
 /* ---- a RAR set's volume names (RARLAB's own naming, from its manual) ----
@@ -221,7 +222,7 @@ static char *rar_first_volume_path(proven_u8str_view_t path) {
     if (rar_part_digits(path, &at, &len) || sevenz_part_digits(path, &at, &len)) {
         for (size_t i = 0; i < len; ++i) out[at + i] = i + 1 == len ? '1' : '0';
     } else {
-        memcpy(out + path.size - 3, rubraview_ascii_lower(path.ptr[path.size - 3]) == 'z' ? "zip" : "rar", 3);
+        proven_sys_mem_copy(out + path.size - 3, rubraview_ascii_lower(path.ptr[path.size - 3]) == 'z' ? "zip" : "rar", 3);
     }
     return out;
 }
@@ -249,10 +250,10 @@ static proven_u8str_view_t ps_display_name(proven_arena_t *arena, const fulta_ar
     /* Copied into the arena: a page's name outlives the archive it came from
        (FultaArc frees its own when the archive closes). */
     proven_u8str_view_t name = PROVEN_LIT("");
-    size_t given = en->name ? strlen(en->name) : 0;
+    size_t given = en->name ? proven_cstr_len(en->name) : 0;
     proven_result_mem_mut_t own = proven_arena_alloc(arena, given + 1);
     if (proven_is_ok(own.err)) {
-        if (given) memcpy(own.value.ptr, en->name, given);
+        if (given) proven_sys_mem_copy(own.value.ptr, en->name, given);
         ((char*)own.value.ptr)[given] = '\0';
         name = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)own.value.ptr, .size = given };
     }
@@ -283,7 +284,7 @@ static fulta_arc_err_t ps_sink_write(void *ctx, const void *data, size_t n) {
     ps_sink_t *s = (ps_sink_t*)ctx;
     if (s->out) {
         if (n > s->cap - s->len) return FULTA_ARC_ERR_LIMIT;
-        memcpy(s->out + s->len, data, n);
+        proven_sys_mem_copy(s->out + s->len, data, n);
     }
     s->len += n;
     atomic_fetch_add(&s->io->done, n);
@@ -383,29 +384,33 @@ static bool err_is_password(fulta_arc_err_t err) {
 }
 
 rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena,
-                                                            const uint8_t *data, size_t size,
+                                                            proven_mem_view_t data_view,
                                                             proven_u8str_view_t archive_path,
                                                             proven_u8str_view_t extension_filter,
                                                             rubraview_codepage_t override_choice,
                                                             uint32_t max_entry_bytes,
                                                             uint64_t max_block_bytes) {
-    return rubraview_page_source_from_archive_password(arena, data, size, archive_path, extension_filter, override_choice,
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    return rubraview_page_source_from_archive_password(arena, rubraview_mem_view(data, size), archive_path, extension_filter, override_choice,
                                                        max_entry_bytes, max_block_bytes, PROVEN_LIT(""));
 }
 
 rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena_t *arena,
-                                                                     const uint8_t *data, size_t size,
+                                                                     proven_mem_view_t data_view,
                                                                      proven_u8str_view_t archive_path,
                                                                      proven_u8str_view_t extension_filter,
                                                                      rubraview_codepage_t override_choice,
                                                                      uint32_t max_entry_bytes,
                                                                      uint64_t max_block_bytes,
                                                                      proven_u8str_view_t password) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     rubraview_page_source_t source = { .kind = RUBRAVIEW_PAGE_SOURCE_ARCHIVE, .archive_path = archive_path };
     if (!arena || !data || size == 0) return source;
     (void)max_block_bytes;   /* the old 7z reader's block held in memory; FultaArc streams and holds none */
 
-    struct rubraview_page_source_io *io = (struct rubraview_page_source_io*)calloc(1, sizeof(*io));
+    struct rubraview_page_source_io *io = (struct rubraview_page_source_io*)rubraview_alloc_zero(1, sizeof(*io));
     if (!io) return source;
     source.io = io;
     io->first_bytes = size;
@@ -415,14 +420,14 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
     rubraview_fs_mapping_t whole = { .data = data, .size = size };
     io->name = rar_first_volume_path(archive_path);
     if (io->name) {
-        if (rubraview_pal_fs_map((proven_u8str_view_t){ .ptr = (const proven_byte_t *)io->name, .size = strlen(io->name) }, &io->first) &&
+        if (rubraview_pal_fs_map((proven_u8str_view_t){ .ptr = (const proven_byte_t *)io->name, .size = proven_cstr_len(io->name) }, &io->first) &&
             io->first.size <= (uint64_t)SIZE_MAX) {
             io->first_mapped = true;
             whole = io->first;
             io->first_bytes = io->first.size;
         } else {
             if (io->first.os) rubraview_pal_fs_unmap(&io->first);
-            free(io->name);
+            rubraview_free(io->name);
             io->name = NULL;                                  /* its first volume is not there: read alone */
         }
     }
@@ -522,7 +527,7 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
 
 proven_u8str_view_t rubraview_page_source_first_volume(const rubraview_page_source_t *source) {
     if (!source || !source->io || !source->io->name) return PROVEN_LIT("");
-    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)source->io->name, .size = strlen(source->io->name) };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)source->io->name, .size = proven_cstr_len(source->io->name) };
 }
 
 proven_u8str_view_t rubraview_page_source_entry_name(proven_arena_t *arena, const fulta_arc_entry_t *entry,
@@ -582,7 +587,7 @@ uint64_t rubraview_page_source_entry_size(const rubraview_page_source_t *source,
 proven_u8str_view_t rubraview_page_source_format_name(const rubraview_page_source_t *source) {
     if (!source || !source->arc) return PROVEN_LIT("");
     const char *name = fulta_arc_format_name(fulta_arc_format(source->arc));
-    return proven_u8str_view_from_bytes(name ? name : "", name ? strlen(name) : 0);
+    return proven_u8str_view_from_bytes(name ? name : "", name ? proven_cstr_len(name) : 0);
 }
 
 static bool ps_any_flag(const rubraview_page_source_t *source, uint32_t flag) {

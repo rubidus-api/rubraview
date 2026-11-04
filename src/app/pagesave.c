@@ -56,7 +56,7 @@ bool on_archive_page(const app_state_t *app) {
 }
 
 void arc_ask_clear(app_state_t *app) {
-    free(app->arc_ask_data);
+    rubraview_free(app->arc_ask_data);
     app->arc_ask_data = NULL;
     app->arc_ask_size = 0;
     app->arc_ask = ARC_ASK_NONE;
@@ -96,14 +96,14 @@ void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target) {
     proven_u8str_view_t first = rubraview_page_source_first_volume(&app->source);
     proven_u8str_view_t opened = app->source.archive_path;
     if (first.size == 0) first = opened;
-    job = (arc_job_t*)calloc(1, sizeof(*job));
+    job = (arc_job_t*)rubraview_alloc_zero(1, sizeof(*job));
     if (!job) goto fail;
     if (first.size >= sizeof(job->archive) || opened.size >= sizeof(job->opened) || first.size + 16 >= sizeof(job->out)) goto fail;
-    memcpy(job->archive, first.ptr, first.size);
-    memcpy(job->opened, opened.ptr, opened.size);
-    memcpy(job->out, first.ptr, first.size);
-    memcpy(job->out + first.size, ".rvnew", 7);
-    memcpy(job->name, app->arc_ask_name, sizeof(job->name));
+    proven_sys_mem_copy(job->archive, first.ptr, first.size);
+    proven_sys_mem_copy(job->opened, opened.ptr, opened.size);
+    proven_sys_mem_copy(job->out, first.ptr, first.size);
+    proven_sys_mem_copy(job->out + first.size, ".rvnew", 7);
+    proven_sys_mem_copy(job->name, app->arc_ask_name, sizeof(job->name));
 
     /* A 7z is packed from a copy of every file laid beside it first. */
     if (target == RUBRAVIEW_ARCEDIT_7Z) {
@@ -115,8 +115,8 @@ void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target) {
         }
         if (rubraview_pal_fs_free_bytes(rubraview_path_dirname(first), &free_bytes) && free_bytes < unpacked * 2u + (64u << 20)) {
             static char line[128];
-            snprintf(line, sizeof(line), T("not changed: a 7z needs about %llu MB free beside the archive"),
-                     (unsigned long long)((unpacked * 2u + (64u << 20)) >> 20));
+            rubraview_fmt(line, sizeof(line), T("not changed: a 7z needs about {} MB free beside the archive"),
+                     PROVEN_ARG((unsigned long long)((unpacked * 2u + (64u << 20)) >> 20)));
             why = line;
             goto fail;
         }
@@ -132,7 +132,7 @@ void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target) {
        name, or (a page deleted) on the one that takes its number. */
     proven_u8str_view_t shown = page_display_name(app, (size_t)page);
     if (op == RUBRAVIEW_ARCEDIT_REPLACE && job->name[0] == '\0') {
-        if (shown.size < sizeof(job->land)) memcpy(job->land, shown.ptr, shown.size);
+        if (shown.size < sizeof(job->land)) proven_sys_mem_copy(job->land, shown.ptr, shown.size);
     } else if (op != RUBRAVIEW_ARCEDIT_DELETE) {
         rubraview_arcedit_sibling_name(shown, cstr(job->name), job->land, sizeof(job->land));
     }
@@ -146,7 +146,7 @@ void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target) {
     arc_undo_drop(app);   /* one step back, and it is this edit's from here */
     /* The choice holds for this book for the session. */
     if (job->convert && opened.size < sizeof(app->arc_choice_path)) {
-        memcpy(app->arc_choice_path, opened.ptr, opened.size);
+        proven_sys_mem_copy(app->arc_choice_path, opened.ptr, opened.size);
         app->arc_choice_path[opened.size] = '\0';
         app->arc_choice = target;
     }
@@ -158,37 +158,39 @@ void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target) {
     return;
 
 fail:
-    if (job) free(job->data);
-    free(job);
-    free(data);
+    if (job) rubraview_free(job->data);
+    rubraview_free(job);
+    rubraview_free(data);
     osd_say(app, cstr(why));
 }
 
 /* An edit of entry `entry` is asked for. `data` (malloc) becomes this
    function's, whatever happens. */
-void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry, const char *name, uint8_t *data, size_t size) {
-    if (op == RUBRAVIEW_ARCEDIT_DELETE) { free(data); arc_delete_ask(app, false); return; }   /* RV-212: it asks which */
+void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry, const char *name, proven_mem_mut_t data_view) {
+    uint8_t *data = (uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    if (op == RUBRAVIEW_ARCEDIT_DELETE) { rubraview_free(data); arc_delete_ask(app, false); return; }   /* RV-212: it asks which */
     const char *why = NULL;
     if (app->arc_job) why = T("the archive is still being written");
     else if (!on_archive_page(app)) why = T("not changed: the page is not in an archive");
     rubraview_arcedit_route_t route = why ? RUBRAVIEW_ARCEDIT_NOT_AN_ARCHIVE : rubraview_arcedit_route(&app->source);
     if (!why && route == RUBRAVIEW_ARCEDIT_ENCRYPTED) why = rubraview_arcedit_result_text(RUBRAVIEW_ARCEDIT_REFUSED_ENCRYPTED);
     if (!why && route == RUBRAVIEW_ARCEDIT_NOT_AN_ARCHIVE) why = T("not changed: the page is not in an archive");
-    if (!why && name && strlen(name) >= sizeof(app->arc_ask_name)) why = T("not changed: that name is too long");
+    if (!why && name && proven_cstr_len(name) >= sizeof(app->arc_ask_name)) why = T("not changed: that name is too long");
     if (why) {
-        free(data);
+        rubraview_free(data);
         osd_say(app, cstr(why));
         return;
     }
     arc_ask_clear(app);
     app->arc_ask_op = op;
     app->arc_ask_entry = entry;
-    memset(app->arc_ask_name, 0, sizeof(app->arc_ask_name));
-    if (name) memcpy(app->arc_ask_name, name, strlen(name));
+    proven_sys_mem_set(app->arc_ask_name, 0, sizeof(app->arc_ask_name));
+    if (name) proven_sys_mem_copy(app->arc_ask_name, name, proven_cstr_len(name));
     app->arc_ask_data = data;
     app->arc_ask_size = size;
-    memset(app->arc_ask_path, 0, sizeof(app->arc_ask_path));
-    if (app->source.archive_path.size < sizeof(app->arc_ask_path)) memcpy(app->arc_ask_path, app->source.archive_path.ptr, app->source.archive_path.size);
+    proven_sys_mem_set(app->arc_ask_path, 0, sizeof(app->arc_ask_path));
+    if (app->source.archive_path.size < sizeof(app->arc_ask_path)) proven_sys_mem_copy(app->arc_ask_path, app->source.archive_path.ptr, app->source.archive_path.size);
 
     bool chosen = app->arc_choice != RUBRAVIEW_ARCEDIT_SAME &&
                   rubraview_path_same(cstr(app->arc_choice_path), app->source.archive_path);
@@ -213,13 +215,13 @@ void arc_delete_ask(app_state_t *app, bool purge) {
     arc_ask_clear(app);
     app->arc_ask_op = RUBRAVIEW_ARCEDIT_DELETE;
     app->arc_ask_entry = app->source.pages[current_page_index(app)].entry_index;
-    memset(app->arc_ask_name, 0, sizeof(app->arc_ask_name));
-    memset(app->arc_ask_path, 0, sizeof(app->arc_ask_path));
-    if (app->source.archive_path.size < sizeof(app->arc_ask_path)) memcpy(app->arc_ask_path, app->source.archive_path.ptr, app->source.archive_path.size);
+    proven_sys_mem_set(app->arc_ask_name, 0, sizeof(app->arc_ask_name));
+    proven_sys_mem_set(app->arc_ask_path, 0, sizeof(app->arc_ask_path));
+    if (app->source.archive_path.size < sizeof(app->arc_ask_path)) proven_sys_mem_copy(app->arc_ask_path, app->source.archive_path.ptr, app->source.archive_path.size);
     app->arc_ask_page_ok = why == NULL;
     app->arc_ask_whole_ok = whole;
     app->arc_ask_purge = purge;
-    snprintf(app->arc_ask_why, sizeof(app->arc_ask_why), "%s", why ? why : (whole ? "" : T("a split archive: its parts are deleted in Explorer")));
+    rubraview_fmt(app->arc_ask_why, sizeof(app->arc_ask_why), "{}", PROVEN_ARG(why ? why : (whole ? "" : T("a split archive: its parts are deleted in Explorer"))));
     app->arc_ask = ARC_ASK_DELETE;
 }
 
@@ -286,7 +288,7 @@ bool arc_ask_press(app_state_t *app, double x, double y) {
 /* The same, of the page on screen. */
 void arc_edit_on_page(app_state_t *app, rubraview_arcedit_op_t op, const char *name) {
     if (!on_archive_page(app)) return;
-    arc_edit_request(app, op, app->source.pages[current_page_index(app)].entry_index, name, NULL, 0);
+    arc_edit_request(app, op, app->source.pages[current_page_index(app)].entry_index, name, rubraview_mem_mut(NULL, 0));
 }
 
 bool arc_ask_key(app_state_t *app, rubraview_key_combo_t combo) {
@@ -330,7 +332,7 @@ static proven_u8str_view_t arc_free_name(app_state_t *app, proven_u8str_view_t w
     proven_u8str_view_t ext = { .ptr = base.ptr + stem.size, .size = base.size - stem.size };
     for (int n = 1; n < 1000; ++n) {
         char name[1024];
-        int len = snprintf(name, sizeof(name), "%.*s-%d%.*s", (int)stem.size, stem.ptr, n, (int)ext.size, ext.ptr);
+        int len = rubraview_fmt(name, sizeof(name), "{}-{}{}", PROVEN_ARG(rubraview_bytes_view(stem.ptr, (int)stem.size)), PROVEN_ARG((int)n), PROVEN_ARG(rubraview_bytes_view(ext.ptr, (int)ext.size)));
         if (len <= 0 || (size_t)len >= sizeof(name)) break;
         proven_u8str_view_t path = rubraview_path_join(app->arena, dir, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = (size_t)len });
         if (path.size > 0 && !arc_file_exists(path)) return path;
@@ -345,7 +347,7 @@ static void arc_reopen(app_state_t *app, proven_u8str_view_t path, const char *l
     if (land && land[0]) {
         for (size_t i = 0; i < page_count(app); ++i) {
             proven_u8str_view_t name = page_display_name(app, i);
-            if (name.size == strlen(land) && memcmp(name.ptr, land, name.size) == 0) { start = i; break; }
+            if (name.size == proven_cstr_len(land) && proven_sys_mem_cmp(name.ptr, land, name.size) == 0) { start = i; break; }
         }
     }
     finish_open(app, start);
@@ -371,16 +373,16 @@ static void arc_job_finish(app_state_t *app, arc_job_t *job) {
         char backup[sizeof(app->arc_undo_backup)];
         bool kept = first.size + 7 < sizeof(backup);
         if (kept) {
-            memcpy(backup, first.ptr, first.size);
-            memcpy(backup + first.size, ".rvold", 7);
+            proven_sys_mem_copy(backup, first.ptr, first.size);
+            proven_sys_mem_copy(backup + first.size, ".rvold", 7);
             kept = rubraview_pal_fs_replace(first, cstr(backup));
         }
         done = rubraview_pal_fs_replace(out, first);
         if (!done && kept) (void)rubraview_pal_fs_replace(cstr(backup), first);   /* back where it was */
         if (done && kept) {
-            memcpy(app->arc_undo_backup, backup, sizeof(backup));
-            memset(app->arc_undo_path, 0, sizeof(app->arc_undo_path));
-            memcpy(app->arc_undo_path, first.ptr, first.size);
+            proven_sys_mem_copy(app->arc_undo_backup, backup, sizeof(backup));
+            proven_sys_mem_set(app->arc_undo_path, 0, sizeof(app->arc_undo_path));
+            proven_sys_mem_copy(app->arc_undo_path, first.ptr, first.size);
             can_undo = true;
         }
         said = done ? NULL : T("not changed: the archive could not be replaced (is it open elsewhere?)");
@@ -432,7 +434,7 @@ static void arc_job_finish(app_state_t *app, arc_job_t *job) {
     final = app_keep(app, final);
     /* The format chosen holds for the book under its new name too. */
     if (done && job->convert && final.size < sizeof(app->arc_choice_path)) {
-        memcpy(app->arc_choice_path, final.ptr, final.size);
+        proven_sys_mem_copy(app->arc_choice_path, final.ptr, final.size);
         app->arc_choice_path[final.size] = '\0';
     }
 
@@ -443,8 +445,8 @@ static void arc_job_finish(app_state_t *app, arc_job_t *job) {
     proven_u8str_view_t base = rubraview_path_basename(final);
     const char *what = op == RUBRAVIEW_ARCEDIT_DELETE ? T("page deleted") : op == RUBRAVIEW_ARCEDIT_RENAME ? T("page renamed")
                      : op == RUBRAVIEW_ARCEDIT_REPLACE ? T("page saved over") : T("copy saved in the archive");
-    if (job->convert) snprintf(line, sizeof(line), T("%s; the book is now %.*s"), what, (int)(base.size < 160 ? base.size : 160), base.ptr);
-    else snprintf(line, sizeof(line), "%s%s", what, can_undo ? T("  (Ctrl+Z takes it back)") : "");
+    if (job->convert) rubraview_fmt(line, sizeof(line), T("{}; the book is now {}"), PROVEN_ARG(what), PROVEN_ARG(rubraview_bytes_view(base.ptr, (int)(base.size < 160 ? base.size : 160))));
+    else rubraview_fmt(line, sizeof(line), "{}{}", PROVEN_ARG(what), PROVEN_ARG(can_undo ? T("  (Ctrl+Z takes it back)") : ""));
     osd_say(app, cstr(line));
 }
 
@@ -479,9 +481,9 @@ void arc_job_poll(app_state_t *app, bool quitting) {
     if (!quitting && !InterlockedCompareExchange(&job->done, 0, 0)) {
         uint64_t done = atomic_load(&job->job.done), total = atomic_load(&job->job.total);
         char line[96];
-        if (atomic_load(&job->job.cancel)) snprintf(line, sizeof(line), T("stopping..."));
-        else if (total > 0) snprintf(line, sizeof(line), T("writing the archive... %d %%  (Esc stops it)"), (int)(done * 100u / total));
-        else snprintf(line, sizeof(line), T("writing the archive...  (Esc stops it)"));
+        if (atomic_load(&job->job.cancel)) rubraview_fmt(line, sizeof(line), T("stopping..."));
+        else if (total > 0) rubraview_fmt(line, sizeof(line), T("writing the archive... {} %  (Esc stops it)"), PROVEN_ARG((int)(done * 100u / total)));
+        else rubraview_fmt(line, sizeof(line), T("writing the archive...  (Esc stops it)"));
         osd_say(app, cstr(line));
         return;
     }
@@ -495,8 +497,8 @@ void arc_job_poll(app_state_t *app, bool quitting) {
         (void)rubraview_pal_fs_delete(cstr(job->out));   /* written, but the reader left: the old one stands */
     }
     rubraview_arcedit_job_free(&job->job);
-    free(job->data);
-    free(job);
+    rubraview_free(job->data);
+    rubraview_free(job);
 }
 
 /* A file for a moment's use in the system's temporary folder. */
@@ -506,8 +508,8 @@ bool arc_temp_path(char *dst, size_t cap, const char *tag, proven_u8str_view_t l
     DWORD n = GetTempPathW(MAX_PATH + 1, wide);
     if (n == 0 || n > MAX_PATH) return false;
     if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, dir, (int)sizeof(dir), NULL, NULL) <= 1) return false;
-    int len = snprintf(dst, cap, "%srubraview-%s-%lu-%lu-%.*s", dir, tag, (unsigned long)GetCurrentProcessId(),
-                       (unsigned long)GetTickCount(), (int)leaf.size, leaf.ptr);
+    int len = rubraview_fmt(dst, cap, "{}rubraview-{}-{}-{}-{}", PROVEN_ARG(dir), PROVEN_ARG(tag), PROVEN_ARG((unsigned long)GetCurrentProcessId()),
+                       PROVEN_ARG((unsigned long)GetTickCount()), PROVEN_ARG(rubraview_bytes_view(leaf.ptr, (int)leaf.size)));
     return len > 0 && (size_t)len < cap;
 }
 
@@ -524,7 +526,7 @@ static proven_u8str_view_t save_read_whole(proven_u8str_view_t path, void **out_
         return PROVEN_LIT("");
     }
     size_t size = (size_t)entry.size_bytes + 4096;
-    *out_mem = malloc(size);
+    *out_mem = rubraview_alloc(size);
     if (!*out_mem) return PROVEN_LIT("");
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)*out_mem, .size = size });
     return rubraview_pal_fs_read_file(&arena, path, MAX_ARCHIVE_BYTES);
@@ -570,11 +572,11 @@ int details_keep(proven_u8str_view_t source, proven_u8str_view_t written, proven
         size_t room = 0;
         if (out.size > 0 && !PROVEN_CKD_ADD(&room, out.size, src.size) && !PROVEN_CKD_MUL(&room, room, (size_t)3) &&
             !PROVEN_CKD_ADD(&room, room, (size_t)(8u << 20))) {
-            void *work_mem = malloc(room);
+            void *work_mem = rubraview_alloc(room);
             if (work_mem) {
                 proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = room });
                 rubraview_details_src_t details, beside;
-                bool own = rubraview_details_read(&work, (const uint8_t*)src.ptr, src.size, &details);
+                bool own = rubraview_details_read(&work, rubraview_mem_view((const uint8_t*)src.ptr, src.size), &details);
                 /* 1.18.0: what a .txt beside the source kept for it goes on with it */
                 if (details_beside(&work, source, &beside, NULL)) { rubraview_details_merge(&work, &details, &beside); own = true; }
                 if (own) {
@@ -590,20 +592,20 @@ int details_keep(proven_u8str_view_t source, proven_u8str_view_t written, proven
                             /* a mark that says UTF-8, for Notepad and the like */
                             proven_result_mem_mut_t res = proven_arena_alloc(&work, txt.size + 3);
                             if (proven_is_ok(res.err)) {
-                                memcpy(res.value.ptr, "\xEF\xBB\xBF", 3);
-                                memcpy(res.value.ptr + 3, txt.ptr, txt.size);
+                                proven_sys_mem_copy(res.value.ptr, "\xEF\xBB\xBF", 3);
+                                proven_sys_mem_copy(res.value.ptr + 3, txt.ptr, txt.size);
                                 said = rubraview_pal_fs_write_file(txt_path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = txt.size + 3 })
                                            ? DETAILS_TXT : DETAILS_FAILED;
                             }
                         }
                     }
                 }
-                free(work_mem);
+                rubraview_free(work_mem);
             }
         }
     }
-    free(out_mem);
-    free(src_mem);
+    rubraview_free(out_mem);
+    rubraview_free(src_mem);
     return said;
 }
 
@@ -614,8 +616,8 @@ static proven_u8str_view_t save_job_named(const save_job_t *job) {
 }
 
 static int save_job_work(save_job_t *job) {
-    proven_u8str_view_t source = { .ptr = (const proven_byte_t *)job->source, .size = strlen(job->source) };
-    proven_u8str_view_t out_path = { .ptr = (const proven_byte_t *)job->out, .size = strlen(job->out) };
+    proven_u8str_view_t source = { .ptr = (const proven_byte_t *)job->source, .size = proven_cstr_len(job->source) };
+    proven_u8str_view_t out_path = { .ptr = (const proven_byte_t *)job->out, .size = proven_cstr_len(job->out) };
 
     if (job->route == RUBRAVIEW_EXPORT_STRIP_ONLY || job->route == RUBRAVIEW_EXPORT_COPY || job->route == RUBRAVIEW_EXPORT_JPEG_LOSSLESS) {
         void *mem = NULL;
@@ -626,21 +628,21 @@ static int save_job_work(save_job_t *job) {
         } else if (bytes.size > 0) {
             /* the strip's output is at most the input: room for it beside */
             size_t room = bytes.size * 2u + (1u << 20);
-            void *work_mem = malloc(room);
+            void *work_mem = rubraview_alloc(room);
             result = SAVE_NO_MEMORY;
             if (work_mem) {
                 proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = room });
                 /* 1.17.0: or its scans, tables and restarts written again, its markers kept unless privacy clean */
                 rubraview_jpegtran_result_t stripped = job->route == RUBRAVIEW_EXPORT_JPEG_LOSSLESS
-                    ? rubraview_jpegtran_rewrite(&work, (const uint8_t*)bytes.ptr, bytes.size, job->options.jpeg_progressive,
+                    ? rubraview_jpegtran_rewrite(&work, rubraview_mem_view((const uint8_t*)bytes.ptr, bytes.size), job->options.jpeg_progressive,
                                                  job->options.jpeg_optimise, job->options.jpeg_restart_rows, !job->options.privacy_clean)
-                    : rubraview_jpegtran_strip_metadata(&work, (const uint8_t*)bytes.ptr, bytes.size);
+                    : rubraview_jpegtran_strip_metadata(&work, rubraview_mem_view((const uint8_t*)bytes.ptr, bytes.size));
                 result = stripped.err != RUBRAVIEW_JPEGTRAN_OK ? SAVE_UNREADABLE
                        : rubraview_pal_fs_write_file(out_path, stripped.data) ? SAVE_OK : SAVE_UNWRITABLE;
-                free(work_mem);
+                rubraview_free(work_mem);
             }
         }
-        free(mem);
+        rubraview_free(mem);
         return result;
     }
 
@@ -650,8 +652,8 @@ static int save_job_work(save_job_t *job) {
         rubraview_export_format_t to = job->options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE ? job->source_format
                                                                                               : job->options.format;
         if ((to == RUBRAVIEW_EXPORT_WEBP || to == RUBRAVIEW_EXPORT_AVIF || to == RUBRAVIEW_EXPORT_JXL) && !job->apply_edit) {
-            int moved = to == RUBRAVIEW_EXPORT_WEBP ? rubraview_pal_image_save_animation_webp(out_path, source, NULL, 0, &job->options)
-                      : rubraview_pal_image_save_animation_ffmpeg(out_path, source, NULL, 0, &job->options, to == RUBRAVIEW_EXPORT_AVIF);   /* 1.31.0 */
+            int moved = to == RUBRAVIEW_EXPORT_WEBP ? rubraview_pal_image_save_animation_webp(out_path, source, rubraview_mem_view(NULL, 0), &job->options)
+                      : rubraview_pal_image_save_animation_ffmpeg(out_path, source, rubraview_mem_view(NULL, 0), &job->options, to == RUBRAVIEW_EXPORT_AVIF);   /* 1.31.0 */
             if (moved > 0) (void)details_keep(source, out_path, save_job_named(job), to, &job->options);
             if (moved < 0) job->why = rubraview_pal_image_save_why();
             if (moved != 0) return moved > 0 ? SAVE_OK : SAVE_UNWRITABLE;
@@ -672,12 +674,12 @@ static int save_job_work(save_job_t *job) {
        (each a copy plus a row buffer's worth), then the resize */
     size_t need = bytes_scaled(src_bytes, 8u, 0), twice_out = bytes_scaled(out_bytes, 2u, 16u << 20);
     if (need == SIZE_MAX || twice_out == SIZE_MAX || PROVEN_CKD_ADD(&need, need, twice_out)) need = SIZE_MAX;   /* malloc refuses it */
-    void *work_mem = malloc(need);
+    void *work_mem = rubraview_alloc(need);
     if (!work_mem) return SAVE_NO_MEMORY;
     proven_arena_t work = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)work_mem, .size = need });
 
     int result = SAVE_OK;
-    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(&work, source, NULL, 0, true);
+    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(&work, source, rubraview_mem_view(NULL, 0), true);
     if (!rubraview_pixbuf_is_valid(&pixels)) result = SAVE_UNREADABLE;
     void *steps_mem = NULL;
     if (result == SAVE_OK && job->apply_edit && job->steps.cursor > 0) {
@@ -691,7 +693,7 @@ static int save_job_work(save_job_t *job) {
             if (b > biggest) biggest = b;
         }
         size_t half = bytes_scaled(biggest, 6u, 16u << 20), both = bytes_scaled(half, 2u, 0);
-        steps_mem = both == SIZE_MAX ? NULL : malloc(both);
+        steps_mem = both == SIZE_MAX ? NULL : rubraview_alloc(both);
         if (!steps_mem) {
             result = SAVE_NO_MEMORY;
         } else {
@@ -718,8 +720,8 @@ static int save_job_work(save_job_t *job) {
         if (!rubraview_pal_image_save(out_path, &pixels, &options)) { result = SAVE_UNWRITABLE; job->why = rubraview_pal_image_save_why(); }
         else (void)details_keep(source, out_path, save_job_named(job), options.format, &options);
     }
-    free(steps_mem);
-    free(work_mem);
+    rubraview_free(steps_mem);
+    rubraview_free(work_mem);
     return result;
 }
 
@@ -766,7 +768,7 @@ void panel_write_archive_page(app_state_t *app, bool over) {
                                                    : rubraview_batch_format_name(app->arena, PROVEN_LIT("{name}.{ext}"), stem, ext, 0, 0, PROVEN_LIT("")))
                         : rubraview_batch_format_name(app->arena, PROVEN_LIT("{name}_edit.{ext}"), stem, ext, 0, 0, PROVEN_LIT(""));
 
-    save_job_t *job = (save_job_t*)calloc(1, sizeof(*job));
+    save_job_t *job = (save_job_t*)rubraview_alloc_zero(1, sizeof(*job));
     if (!job) { osd_say(app, TU8("not saved: not enough memory")); return; }
     proven_u8str_view_t out_leaf = rubraview_batch_format_name(app->arena, PROVEN_LIT("out.{ext}"), stem, ext, 0, 0, PROVEN_LIT(""));
     bool ok = name.size < sizeof(job->arc_name) && app->source.archive_path.size < sizeof(job->arc_path) &&
@@ -776,22 +778,22 @@ void panel_write_archive_page(app_state_t *app, bool over) {
     if (ok) {
         page_job_stop(app);
         size_t budget = rubraview_page_source_read_budget(&app->source, (size_t)page);
-        void *mem = budget > 0 ? malloc(budget) : NULL;
+        void *mem = budget > 0 ? rubraview_alloc(budget) : NULL;
         ok = false;
         if (mem) {
             proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)mem, .size = budget });
             rubraview_page_bytes_t bytes = rubraview_page_source_read(&arena, &app->source, (size_t)page, MAX_PAGE_BYTES);
             ok = bytes.ok && bytes.data.size > 0 && rubraview_pal_fs_write_file(cstr(job->source), bytes.data);
-            free(mem);
+            rubraview_free(mem);
         }
     }
-    if (!ok) { free(job); osd_say(app, TU8("not saved: the page could not be read")); return; }
+    if (!ok) { rubraview_free(job); osd_say(app, TU8("not saved: the page could not be read")); return; }
 
     job->into_archive = true;
     job->arc_op = over ? RUBRAVIEW_ARCEDIT_REPLACE : RUBRAVIEW_ARCEDIT_ADD;
     job->arc_entry = app->source.pages[page].entry_index;
-    memcpy(job->arc_path, app->source.archive_path.ptr, app->source.archive_path.size);
-    if (name.size) memcpy(job->arc_name, name.ptr, name.size);
+    proven_sys_mem_copy(job->arc_path, app->source.archive_path.ptr, app->source.archive_path.size);
+    if (name.size) proven_sys_mem_copy(job->arc_name, name.ptr, name.size);
     job->edit = app->edit;
     job->edit.crop_active = false;   /* the selection is not a cut: the steps say what is cut (the owner's edit) */
     job->edit.resize_width = job->edit.resize_height = 0;
@@ -806,7 +808,7 @@ void panel_write_archive_page(app_state_t *app, bool over) {
     job->thread = CreateThread(NULL, 0, save_job_run, job, 0, NULL);
     if (!job->thread) {
         (void)rubraview_pal_fs_delete(cstr(job->source));
-        free(job);
+        rubraview_free(job);
         osd_say(app, TU8("not saved: could not start"));
         return;
     }
@@ -852,10 +854,10 @@ void panel_write_current(app_state_t *app, bool apply_edit) {
 
     /* The copy is made on a thread of its own (owner, 2026-09-28): a
        large picture took the window with it for as long as it took. */
-    save_job_t *job = (save_job_t*)calloc(1, sizeof(*job));
+    save_job_t *job = (save_job_t*)rubraview_alloc_zero(1, sizeof(*job));
     if (!job) { osd_say(app, TU8("not saved: not enough memory")); return; }
-    memcpy(job->source, source.ptr, source.size);
-    memcpy(job->out, out_path.ptr, out_path.size);
+    proven_sys_mem_copy(job->source, source.ptr, source.size);
+    proven_sys_mem_copy(job->out, out_path.ptr, out_path.size);
     job->edit = app->edit;
     job->edit.crop_active = false;   /* the selection is not a cut: the steps say what is cut (the owner's edit) */
     job->edit.resize_width = job->edit.resize_height = 0;
@@ -868,7 +870,7 @@ void panel_write_current(app_state_t *app, bool apply_edit) {
     job->height = h;
     job->wake = app->window;
     job->thread = CreateThread(NULL, 0, save_job_run, job, 0, NULL);
-    if (!job->thread) { free(job); osd_say(app, TU8("not saved: could not start")); return; }
+    if (!job->thread) { rubraview_free(job); osd_say(app, TU8("not saved: could not start")); return; }
     app->save_job = job;
     osd_say(app, TU8("saving a copy..."));
 }
@@ -899,16 +901,16 @@ void save_job_poll(app_state_t *app, bool wait) {
         } else if (!on_archive_page(app) || !rubraview_path_same(cstr(job->arc_path), app->source.archive_path)) {
             osd_say(app, TU8("not saved: another book is open now"));
         } else {
-            uint8_t *data = (uint8_t*)malloc(bytes.size);
+            uint8_t *data = (uint8_t*)rubraview_alloc(bytes.size);
             if (data) {
-                memcpy(data, bytes.ptr, bytes.size);
-                arc_edit_request(app, job->arc_op, job->arc_entry, job->arc_name[0] ? job->arc_name : NULL, data, bytes.size);
+                proven_sys_mem_copy(data, bytes.ptr, bytes.size);
+                arc_edit_request(app, job->arc_op, job->arc_entry, job->arc_name[0] ? job->arc_name : NULL, rubraview_mem_mut(data, bytes.size));
             } else {
                 osd_say(app, cstr(SAID[SAVE_NO_MEMORY]));
             }
         }
-        free(mem);
-        free(job);
+        rubraview_free(mem);
+        rubraview_free(job);
         return;
     }
     if (job->over_original && job->result == SAVE_OK) {
@@ -928,17 +930,17 @@ void save_job_poll(app_state_t *app, bool wait) {
                 }
             }
         }
-        free(job);
+        rubraview_free(job);
         app->save_job = NULL;
         return;
     }
     if (job->over_original) (void)rubraview_pal_fs_delete(cstr(job->out));
     if (!wait && (job->result == SAVE_UNWRITABLE || job->result == SAVE_EDIT_FAILED) && job->why) {   /* RV-139; RFC-0007 */
         char line[256];
-        snprintf(line, sizeof(line), T("not saved: %s"), rubraview_tr(job->why));
+        rubraview_fmt(line, sizeof(line), T("not saved: {}"), PROVEN_ARG(rubraview_tr(job->why)));
         osd_say(app, cstr(line));
     } else if (!wait && job->result >= 0 && job->result < (int)(sizeof(SAID) / sizeof(SAID[0]))) osd_say(app, cstr(SAID[job->result]));
-    free(job);
+    rubraview_free(job);
     app->save_job = NULL;
 }
 
@@ -970,10 +972,10 @@ void edit_save_over(app_state_t *app) {
     proven_u8str_view_t out_path = rubraview_path_join(app->arena, rubraview_path_dirname(source), name);
     int32_t w = real_w(&app->pages[page]), h = real_h(&app->pages[page]);
     if (out_path.size == 0 || w <= 0 || h <= 0) { osd_say(app, TU8("not saved: the page is not read yet")); return; }
-    save_job_t *job = (save_job_t*)calloc(1, sizeof(*job));
-    if (!job || source.size >= sizeof(job->source) || out_path.size >= sizeof(job->out)) { free(job); osd_say(app, TU8("not saved: not enough memory")); return; }
-    memcpy(job->source, source.ptr, source.size);
-    memcpy(job->out, out_path.ptr, out_path.size);
+    save_job_t *job = (save_job_t*)rubraview_alloc_zero(1, sizeof(*job));
+    if (!job || source.size >= sizeof(job->source) || out_path.size >= sizeof(job->out)) { rubraview_free(job); osd_say(app, TU8("not saved: not enough memory")); return; }
+    proven_sys_mem_copy(job->source, source.ptr, source.size);
+    proven_sys_mem_copy(job->out, out_path.ptr, out_path.size);
     job->edit = app->edit;
     job->edit.crop_active = false;   /* the selection is not a cut: the steps say what is cut (the owner's edit) */
     job->edit.resize_width = job->edit.resize_height = 0;
@@ -987,7 +989,7 @@ void edit_save_over(app_state_t *app) {
     job->height = h;
     job->wake = app->window;
     job->thread = CreateThread(NULL, 0, save_job_run, job, 0, NULL);
-    if (!job->thread) { free(job); osd_say(app, TU8("not saved: could not start")); return; }
+    if (!job->thread) { rubraview_free(job); osd_say(app, TU8("not saved: could not start")); return; }
     app->save_job = job;
     osd_say(app, TU8("saving over the original..."));
 }

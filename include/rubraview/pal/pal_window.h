@@ -233,9 +233,9 @@ bool rubraview_pal_shell_menu_parts_present(void);
  * bring it forward. The window may still be starting: it is looked for
  * up to `wait_ms`. False when there is none, or it did not answer.
  */
-bool rubraview_pal_instance_send_request(const char *blob, size_t len, uint32_t wait_ms);
+bool rubraview_pal_instance_send_request(proven_u8str_view_t blob_view, uint32_t wait_ms);
 
-/** The next request that arrived, to be freed with free(); false when there is none. */
+/** The next request that arrived, to be freed with rubraview_free(); false when there is none. */
 bool rubraview_pal_instance_take_request(char **out_blob, size_t *out_len);
 
 /**
@@ -377,7 +377,7 @@ void rubraview_pal_window_set_fullscreen(rubraview_window_t *window, bool enable
 bool rubraview_pal_window_is_fullscreen(const rubraview_window_t *window);
 /** 1.25.0: the program's own icon, `size` x `size`, as blue-green-red-alpha rows (straight alpha) into `out`
     (size * size * 4 bytes). False when it cannot be had. */
-bool rubraview_pal_app_icon_bgra(uint8_t *out, int32_t size);
+bool rubraview_pal_app_icon_bgra(proven_mem_mut_t out_view);
 /** 1.25.0: maximised (the title bar's [] says so). */
 bool rubraview_pal_window_is_maximized(const rubraview_window_t *window);
 

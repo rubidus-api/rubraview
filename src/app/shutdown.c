@@ -76,7 +76,7 @@ void app_end(app_state_t *app) {
     media_close(app);
     unload_all_pages(app);
     source_close(app);
-    secure_wipe(app->passwords, sizeof(app->passwords));   /* owner, 2026-10-01: memory only, and not after */
+    secure_wipe(rubraview_mem_mut(app->passwords, sizeof(app->passwords)));   /* owner, 2026-10-01: memory only, and not after */
     rubraview_pal_render_destroy(app->renderer);
     rubraview_pal_window_destroy(app->window);
 }

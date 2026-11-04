@@ -2,6 +2,7 @@
  * RV-216: the network film cache's map, its copies' names and the limit (see filmcache.h). Nothing here
  * touches a file: the platform reads and writes the copy and hands the map's text in and out.
  */
+#include "rubraview/core.h"
 #include "rubraview/filmcache.h"
 #include "rubraview/path.h"
 
@@ -20,7 +21,7 @@ void rubraview_filmcache_name(char out[17], proven_u8str_view_t path) {
         if (c == '/') c = '\\';
         h = (h ^ c) * 0x100000001B3ull;
     }
-    snprintf(out, 17, "%016" PRIx64, h);
+    (void)rubraview_fmt(out, 17, "{:016x}", PROVEN_ARG((unsigned long long)h));
 }
 
 bool rubraview_filmcache_map_make(rubraview_filmcache_map_t *map, uint64_t size, int64_t time) {
@@ -28,13 +29,13 @@ bool rubraview_filmcache_map_make(rubraview_filmcache_map_t *map, uint64_t size,
     *map = (rubraview_filmcache_map_t){ .size = size, .time = time };
     map->blocks = (size + RUBRAVIEW_FILMCACHE_BLOCK - 1) / RUBRAVIEW_FILMCACHE_BLOCK;
     if (map->blocks > ((uint64_t)SIZE_MAX - 7) / 8 * 8) return false;
-    map->bits = (uint8_t *)calloc((size_t)((map->blocks + 7) / 8) + 1, 1);
+    map->bits = (uint8_t *)rubraview_alloc_zero((size_t)((map->blocks + 7) / 8) + 1, 1);
     return map->bits != NULL;
 }
 
 void rubraview_filmcache_map_free(rubraview_filmcache_map_t *map) {
     if (!map) return;
-    free(map->bits);
+    rubraview_free(map->bits);
     *map = (rubraview_filmcache_map_t){ 0 };
 }
 
@@ -75,8 +76,9 @@ size_t rubraview_filmcache_map_text_size(const rubraview_filmcache_map_t *map, p
 size_t rubraview_filmcache_map_text(const rubraview_filmcache_map_t *map, proven_u8str_view_t path, char *buf, size_t cap) {
     if (!map || !buf || cap < rubraview_filmcache_map_text_size(map, path)) return 0;
     for (size_t i = 0; i < path.size; ++i) if (path.ptr[i] == '\n' || path.ptr[i] == '\r' || path.ptr[i] == 0) return 0;
-    int n = snprintf(buf, cap, "%spath %.*s\nsize %" PRIu64 "\ntime %" PRId64 "\nblock %u\nblocks ",
-                     MAGIC, (int)path.size, (const char *)path.ptr, map->size, map->time, RUBRAVIEW_FILMCACHE_BLOCK);
+    int n = rubraview_fmt(buf, cap, "{}path {}\nsize {}\ntime {}\nblock {}\nblocks ",
+                          PROVEN_ARG(MAGIC), PROVEN_ARG(path), PROVEN_ARG((unsigned long long)map->size), PROVEN_ARG((long long)map->time),
+                          PROVEN_ARG((unsigned)RUBRAVIEW_FILMCACHE_BLOCK));
     if (n <= 0 || (size_t)n >= cap) return 0;
     size_t at = (size_t)n;
     for (uint64_t d = 0; d < digits(map->blocks); ++d) {
@@ -91,8 +93,8 @@ size_t rubraview_filmcache_map_text(const rubraview_filmcache_map_t *map, proven
 
 /* The line after `key ` at `*at`, its end; false when it is not there. */
 static bool line(const char *text, size_t len, size_t *at, const char *key, const char **value, size_t *value_len) {
-    size_t k = strlen(key);
-    if (len - *at < k + 1 || memcmp(text + *at, key, k) != 0 || text[*at + k] != ' ') return false;
+    size_t k = proven_cstr_len(key);
+    if (len - *at < k + 1 || proven_sys_mem_cmp(text + *at, key, k) != 0 || text[*at + k] != ' ') return false;
     size_t from = *at + k + 1, end = from;
     while (end < len && text[end] != '\n') ++end;
     if (end >= len) return false;
@@ -118,12 +120,14 @@ static bool number(const char *s, size_t n, bool sign, uint64_t *out) {
     return true;
 }
 
-bool rubraview_filmcache_map_parse(rubraview_filmcache_map_t *map, const char *text, size_t len,
+bool rubraview_filmcache_map_parse(rubraview_filmcache_map_t *map, proven_u8str_view_t text_view,
                                    proven_u8str_view_t path, uint64_t size, int64_t time) {
+    const char *text = (const char *)text_view.ptr;
+    size_t len = (size_t)text_view.size;
     if (!map) return false;
     *map = (rubraview_filmcache_map_t){ 0 };
     size_t at = sizeof(MAGIC) - 1;
-    if (!text || len < at || memcmp(text, MAGIC, at) != 0) return false;
+    if (!text || len < at || proven_sys_mem_cmp(text, MAGIC, at) != 0) return false;
     const char *v; size_t n; uint64_t got;
     if (!line(text, len, &at, "path", &v, &n) ||
         !rubraview_path_same((proven_u8str_view_t){ .ptr = (const proven_byte_t *)v, .size = n }, path)) return false;

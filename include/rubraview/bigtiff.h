@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "rubraview/core.h"
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -23,16 +24,16 @@ extern "C" {
  */
 
 /* The eight bytes of a BigTIFF's header ("II" 43 or "MM" 43, offsets of 8). */
-bool rubraview_bigtiff_is(const uint8_t *bytes, size_t size);
+bool rubraview_bigtiff_is(proven_mem_view_t bytes_view);
 
 /* How many bytes the ordinary directories take after the file's own;
    0 when the file is not a BigTIFF that can be read this way (damaged,
    a value that does not fit in four bytes, or past 4 GB with them). */
-size_t rubraview_bigtiff_classic_extra(const uint8_t *bytes, size_t size);
+size_t rubraview_bigtiff_classic_extra(proven_mem_view_t bytes_view);
 
 /* Writes the ordinary TIFF into `out`, which holds `size` plus the
    extra bytes: the file's bytes, the new header, the directories. */
-bool rubraview_bigtiff_to_classic(const uint8_t *bytes, size_t size, uint8_t *out, size_t out_size);
+bool rubraview_bigtiff_to_classic(proven_mem_view_t bytes_view, proven_mem_mut_t out_view);
 
 #ifdef __cplusplus
 }

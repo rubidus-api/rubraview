@@ -14,6 +14,7 @@
  */
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/core.h"
 #include <windows.h>
 #include <d3d11.h>
 #include <d3dcommon.h>
@@ -147,14 +148,14 @@ static bool resize_locked(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst
     bool ok = false;
     int32_t *xi = rubraview_malloc_product(sizeof(int32_t), dw, (size_t)taps), *yi = rubraview_malloc_product(sizeof(int32_t), dh, (size_t)taps);
     float *xw = rubraview_malloc_product(sizeof(float), dw, (size_t)taps), *yw = rubraview_malloc_product(sizeof(float), dh, (size_t)taps);
-    uint32_t *packed = malloc((size_t)src_bytes);
+    uint32_t *packed = rubraview_alloc((size_t)src_bytes);
     ID3D11Buffer *b_src = NULL, *b_xi = NULL, *b_xw = NULL, *b_yi = NULL, *b_yw = NULL, *b_inter = NULL, *b_out = NULL, *b_read = NULL;
     ID3D11ShaderResourceView *v_src = NULL, *v_xi = NULL, *v_xw = NULL, *v_yi = NULL, *v_yw = NULL, *v_inter_in = NULL;
     ID3D11UnorderedAccessView *u_inter = NULL, *u_out = NULL;
     if (!xi || !yi || !xw || !yw || !packed) goto done;
     if (!rubraview_resample_axis_weights(filter, src->width, dst->width, xi, xw) ||
         !rubraview_resample_axis_weights(filter, src->height, dst->height, yi, yw)) goto done;
-    for (size_t y = 0; y < sh; ++y) memcpy(packed + y * sw, src->pixels + (ptrdiff_t)y * src->stride, sw * 4u);
+    for (size_t y = 0; y < sh; ++y) proven_sys_mem_copy(packed + y * sw, src->pixels + (ptrdiff_t)y * src->stride, sw * 4u);
 
     /* Bands of destination rows small enough that the source rows they
        need fit the intermediate. */
@@ -231,7 +232,7 @@ static bool resize_locked(const rubraview_pixbuf_t *src, rubraview_pixbuf_t *dst
             break;
         }
         for (size_t y = y0; y < y1; ++y) {
-            memcpy(dst->pixels + (ptrdiff_t)y * dst->stride, (const uint8_t*)mapped.pData + (y - y0) * dw * 4u, dw * 4u);
+            proven_sys_mem_copy(dst->pixels + (ptrdiff_t)y * dst->stride, (const uint8_t*)mapped.pData + (y - y0) * dw * 4u, dw * 4u);
         }
         ID3D11DeviceContext_Unmap(g_context, (ID3D11Resource*)b_read, 0);
     }
@@ -255,10 +256,10 @@ done:
     SAFE_RELEASE(b_xw, ID3D11Buffer_Release);
     SAFE_RELEASE(b_xi, ID3D11Buffer_Release);
     SAFE_RELEASE(b_src, ID3D11Buffer_Release);
-    free(xi); free(yi); free(xw); free(yw); free(packed);
+    rubraview_free(xi); rubraview_free(yi); rubraview_free(xw); rubraview_free(yw); rubraview_free(packed);
     if (!ok && g_device && ID3D11Device_GetDeviceRemovedReason(g_device) != S_OK) {
         release_all();   /* a lost card: no more tries this run */
-        snprintf(g_describe, sizeof(g_describe), "%s", "lost (the CPU resizes)");
+        rubraview_fmt(g_describe, sizeof(g_describe), "{}", PROVEN_ARG("lost (the CPU resizes)"));
         rubraview_resample_set_accel(NULL, NULL, 0);
     }
     return ok;
@@ -280,12 +281,12 @@ bool rubraview_pal_gpu_resample_start(rubraview_gpu_resize_mode_t mode) {
     release_all();
     bool started = false;
     if (mode == RUBRAVIEW_GPU_RESIZE_OFF) {
-        snprintf(g_describe, sizeof(g_describe), "%s", "off");
+        rubraview_fmt(g_describe, sizeof(g_describe), "{}", PROVEN_ARG("off"));
         goto out;
     }
     HMODULE compiler = LoadLibraryExW(L"d3dcompiler_47.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
     d3dcompile_fn compile_fn = compiler ? (d3dcompile_fn)(void*)GetProcAddress(compiler, "D3DCompile") : NULL;
-    if (!compile_fn) { snprintf(g_describe, sizeof(g_describe), "%s", "no shader compiler (d3dcompiler_47.dll)"); goto out; }
+    if (!compile_fn) { rubraview_fmt(g_describe, sizeof(g_describe), "{}", PROVEN_ARG("no shader compiler (d3dcompiler_47.dll)")); goto out; }
 
     D3D_FEATURE_LEVEL levels[] = { D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0 };
     const char *kind = "hardware";
@@ -297,7 +298,7 @@ bool rubraview_pal_gpu_resample_start(rubraview_gpu_resize_mode_t mode) {
                                &g_device, NULL, &g_context);
         kind = "WARP (software)";
     }
-    if (FAILED(hr) || !g_device) { g_device = NULL; g_context = NULL; snprintf(g_describe, sizeof(g_describe), "%s", "no card with compute shaders"); goto out; }
+    if (FAILED(hr) || !g_device) { g_device = NULL; g_context = NULL; rubraview_fmt(g_describe, sizeof(g_describe), "{}", PROVEN_ARG("no card with compute shaders")); goto out; }
     /* Without a card, Windows still offers a "hardware" device: the Basic
        Render Driver, which runs on the CPU and is slower than resizing
        there directly (VM, 2026-09-25). `on` leaves it alone. */
@@ -316,7 +317,7 @@ bool rubraview_pal_gpu_resample_start(rubraview_gpu_resize_mode_t mode) {
         if (basic) {
             if (mode != RUBRAVIEW_GPU_RESIZE_ALWAYS) {
                 release_all();
-                snprintf(g_describe, sizeof(g_describe), "%s", "no graphics card (Basic Render Driver): the CPU resizes");
+                rubraview_fmt(g_describe, sizeof(g_describe), "{}", PROVEN_ARG("no graphics card (Basic Render Driver): the CPU resizes"));
                 goto out;
             }
             kind = "Basic Render Driver (software)";
@@ -325,9 +326,9 @@ bool rubraview_pal_gpu_resample_start(rubraview_gpu_resize_mode_t mode) {
     g_hpass = compile(compile_fn, "hpass");
     g_vpass = compile(compile_fn, "vpass");
     g_params = make_buffer(sizeof(params_t), D3D11_BIND_CONSTANT_BUFFER, 0, 0, D3D11_USAGE_DEFAULT, 0, NULL);
-    if (!g_hpass || !g_vpass || !g_params) { release_all(); snprintf(g_describe, sizeof(g_describe), "%s", "the shaders would not build"); goto out; }
+    if (!g_hpass || !g_vpass || !g_params) { release_all(); rubraview_fmt(g_describe, sizeof(g_describe), "{}", PROVEN_ARG("the shaders would not build")); goto out; }
     rubraview_resample_set_accel(accel, NULL, mode == RUBRAVIEW_GPU_RESIZE_ALWAYS ? 0 : GPU_MIN_PIXELS_ON);
-    snprintf(g_describe, sizeof(g_describe), "%s", kind);
+    rubraview_fmt(g_describe, sizeof(g_describe), "{}", PROVEN_ARG(kind));
     started = true;
 out:
     LeaveCriticalSection(&g_lock);
@@ -339,7 +340,7 @@ void rubraview_pal_gpu_resample_stop(void) {
     EnterCriticalSection(&g_lock);
     rubraview_resample_set_accel(NULL, NULL, 0);
     release_all();
-    snprintf(g_describe, sizeof(g_describe), "%s", "stopped");
+    rubraview_fmt(g_describe, sizeof(g_describe), "{}", PROVEN_ARG("stopped"));
     LeaveCriticalSection(&g_lock);
 }
 

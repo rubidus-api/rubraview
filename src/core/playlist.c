@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/playlist.h"
 #include "rubraview/number.h"
 #include "rubraview/path.h"
@@ -22,7 +23,7 @@ static bool entry_buf_push(proven_arena_t *arena, entry_buf_t *b, rubraview_play
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_playlist_entry_t));
         if (!proven_is_ok(res.err)) return false;
         rubraview_playlist_entry_t *new_data = (rubraview_playlist_entry_t*)(void*)res.value.ptr;
-        if (b->data && b->count > 0) memcpy(new_data, b->data, b->count * sizeof(rubraview_playlist_entry_t));
+        if (b->data && b->count > 0) proven_sys_mem_copy(new_data, b->data, b->count * sizeof(rubraview_playlist_entry_t));
         b->data = new_data;
         b->capacity = new_cap;
     }
@@ -84,7 +85,7 @@ static void m3u8_line_cb(proven_u8str_view_t line, void *raw_ctx) {
     static const char extinf_prefix[] = "#EXTINF:";
     size_t prefix_len = sizeof(extinf_prefix) - 1;
 
-    if (line.size >= prefix_len && memcmp(line.ptr, extinf_prefix, prefix_len) == 0) {
+    if (line.size >= prefix_len && proven_sys_mem_cmp(line.ptr, extinf_prefix, prefix_len) == 0) {
         proven_u8str_view_t rest = { .ptr = line.ptr + prefix_len, .size = line.size - prefix_len };
         size_t comma = 0;
         while (comma < rest.size && rest.ptr[comma] != ',') comma++;
@@ -124,8 +125,8 @@ proven_u8str_view_t rubraview_playlist_serialize_rvlist(proven_arena_t *arena, c
 
     proven_u8str_t buf = {0};
     for (size_t i = 0; i < pl->count; ++i) {
-        rubraview_text_append(arena, &buf, (pl->entries[i].path).ptr, (pl->entries[i].path).size);
-        rubraview_text_append(arena, &buf, "\n", 1);
+        rubraview_text_append(arena, &buf, rubraview_mem_view((pl->entries[i].path).ptr, (pl->entries[i].path).size));
+        rubraview_text_append(arena, &buf, rubraview_mem_view("\n", 1));
     }
     return rubraview_text_view(&buf);
 }
@@ -134,21 +135,21 @@ proven_u8str_view_t rubraview_playlist_serialize_m3u8(proven_arena_t *arena, con
     if (!arena || !pl) return PROVEN_LIT("");
 
     proven_u8str_t buf = {0};
-    rubraview_text_append(arena, &buf, "#EXTM3U\n", 8);
+    rubraview_text_append(arena, &buf, rubraview_mem_view("#EXTM3U\n", 8));
 
     for (size_t i = 0; i < pl->count; ++i) {
         const rubraview_playlist_entry_t *e = &pl->entries[i];
         if (e->title.size > 0 || e->duration_seconds >= 0.0) {
-            rubraview_text_append(arena, &buf, "#EXTINF:", 8);
+            rubraview_text_append(arena, &buf, rubraview_mem_view("#EXTINF:", 8));
             char num[32];
-            int n = snprintf(num, sizeof(num), "%g", e->duration_seconds);
-            if (n > 0) rubraview_text_append(arena, &buf, num, (size_t)n);
-            rubraview_text_append(arena, &buf, ",", 1);
-            rubraview_text_append(arena, &buf, (e->title).ptr, (e->title).size);
-            rubraview_text_append(arena, &buf, "\n", 1);
+            int n = rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(e->duration_seconds), 6)));
+            if (n > 0) rubraview_text_append(arena, &buf, rubraview_mem_view(num, (size_t)n));
+            rubraview_text_append(arena, &buf, rubraview_mem_view(",", 1));
+            rubraview_text_append(arena, &buf, rubraview_mem_view((e->title).ptr, (e->title).size));
+            rubraview_text_append(arena, &buf, rubraview_mem_view("\n", 1));
         }
-        rubraview_text_append(arena, &buf, (e->path).ptr, (e->path).size);
-        rubraview_text_append(arena, &buf, "\n", 1);
+        rubraview_text_append(arena, &buf, rubraview_mem_view((e->path).ptr, (e->path).size));
+        rubraview_text_append(arena, &buf, rubraview_mem_view("\n", 1));
     }
 
     return rubraview_text_view(&buf);
@@ -157,7 +158,9 @@ proven_u8str_view_t rubraview_playlist_serialize_m3u8(proven_arena_t *arena, con
 /* ---- RV-157: .pls and .asx, read only ---- */
 
 /* `s` starts with `word`, ASCII case aside. */
-static bool starts_nocase(const char *s, size_t len, const char *word) {
+static bool starts_nocase(proven_u8str_view_t s_view, const char *word) {
+    const char *s = (const char *)s_view.ptr;
+    size_t len = (size_t)s_view.size;
     return proven_u8str_view_starts_with_ascii_ci(proven_u8str_view_from_bytes(s, len), proven_u8str_view_from_cstr(word));
 }
 
@@ -188,7 +191,7 @@ static void pls_line_cb(proven_u8str_view_t line, void *raw_ctx) {
     uint8_t key = 0;
     size_t at = 0;
     for (; key < 3; ++key) {
-        if (starts_nocase((const char *)line.ptr, line.size, KEYS[key])) { at = strlen(KEYS[key]); break; }
+        if (starts_nocase(rubraview_bytes_view((const char *)line.ptr, line.size), KEYS[key])) { at = proven_cstr_len(KEYS[key]); break; }
     }
     if (key == 3) return;   /* [playlist], NumberOfEntries, Version, comments */
     uint64_t number = 0;
@@ -202,7 +205,7 @@ static void pls_line_cb(proven_u8str_view_t line, void *raw_ctx) {
         size_t cap = ctx->capacity ? ctx->capacity * 2 : 32;
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(ctx->arena, cap, sizeof(pls_item_t));
         if (!proven_is_ok(res.err)) { ctx->failed = true; return; }
-        if (ctx->count) memcpy(res.value.ptr, ctx->items, ctx->count * sizeof(pls_item_t));
+        if (ctx->count) proven_sys_mem_copy(res.value.ptr, ctx->items, ctx->count * sizeof(pls_item_t));
         ctx->items = (pls_item_t*)(void*)res.value.ptr;
         ctx->capacity = cap;
     }
@@ -241,11 +244,13 @@ rubraview_playlist_t rubraview_playlist_parse_pls(proven_arena_t *arena, proven_
 
 /* The text between two tags or in an attribute, its entities decoded and its
    spaces trimmed: into the arena when it holds one, else a view. */
-static proven_u8str_view_t xml_text(proven_arena_t *arena, const char *ptr, size_t len) {
+static proven_u8str_view_t xml_text(proven_arena_t *arena, proven_u8str_view_t ptr_view) {
+    const char *ptr = (const char *)ptr_view.ptr;
+    size_t len = (size_t)ptr_view.size;
     proven_u8str_view_t t = proven_u8str_view_trim(proven_u8str_view_from_bytes(ptr, len));
     while (t.size > 0 && (t.ptr[0] == '\r' || t.ptr[0] == '\n')) { t.ptr++; t.size--; t = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)t.ptr, t.size)); }
     while (t.size > 0 && (t.ptr[t.size - 1] == '\r' || t.ptr[t.size - 1] == '\n')) { t.size--; t = proven_u8str_view_trim(proven_u8str_view_from_bytes((const char *)t.ptr, t.size)); }
-    if (t.size == 0 || !memchr(t.ptr, '&', t.size)) return t;   /* proven's empty view has no pointer */
+    if (t.size == 0 || !rubraview_mem_chr(t.ptr, '&', t.size)) return t;   /* proven's empty view has no pointer */
     proven_result_mem_mut_t res = proven_arena_alloc(arena, t.size + 1);
     if (!proven_is_ok(res.err)) return PROVEN_LIT("");
     char *out = (char*)res.value.ptr;
@@ -257,8 +262,8 @@ static proven_u8str_view_t xml_text(proven_arena_t *arena, const char *ptr, size
         bool done = false;
         if (t.ptr[i] == '&') {
             for (size_t e = 0; e < sizeof(ENT) / sizeof(ENT[0]) && !done; ++e) {
-                size_t el = strlen(ENT[e].name);
-                if (t.size - i >= el && memcmp(t.ptr + i, ENT[e].name, el) == 0) { out[n++] = ENT[e].c; i += el; done = true; }
+                size_t el = proven_cstr_len(ENT[e].name);
+                if (t.size - i >= el && proven_sys_mem_cmp(t.ptr + i, ENT[e].name, el) == 0) { out[n++] = ENT[e].c; i += el; done = true; }
             }
         }
         if (!done) out[n++] = t.ptr[i++];
@@ -268,11 +273,13 @@ static proven_u8str_view_t xml_text(proven_arena_t *arena, const char *ptr, size
 }
 
 /* The value of attribute `name` within a tag's text, or empty. */
-static proven_u8str_view_t xml_attr(proven_arena_t *arena, const char *tag, size_t len, const char *name) {
-    size_t nl = strlen(name);
+static proven_u8str_view_t xml_attr(proven_arena_t *arena, proven_u8str_view_t tag_view, const char *name) {
+    const char *tag = (const char *)tag_view.ptr;
+    size_t len = (size_t)tag_view.size;
+    size_t nl = proven_cstr_len(name);
     for (size_t i = 0; i + nl < len; ++i) {
         bool before = i == 0 || tag[i - 1] == ' ' || tag[i - 1] == '\t' || tag[i - 1] == '\r' || tag[i - 1] == '\n';
-        if (!before || !starts_nocase(tag + i, len - i, name)) continue;
+        if (!before || !starts_nocase(rubraview_bytes_view(tag + i, len - i), name)) continue;
         size_t at = i + nl;
         while (at < len && (tag[at] == ' ' || tag[at] == '\t')) at++;
         if (at >= len || tag[at] != '=') continue;
@@ -290,7 +297,7 @@ static proven_u8str_view_t xml_attr(proven_arena_t *arena, const char *tag, size
             while (at < len && tag[at] != ' ' && tag[at] != '\t' && tag[at] != '/') at++;
             end = at;
         }
-        return xml_text(arena, tag + start, end - start);
+        return xml_text(arena, rubraview_bytes_view(tag + start, end - start));
     }
     return PROVEN_LIT("");
 }
@@ -307,9 +314,9 @@ rubraview_playlist_t rubraview_playlist_parse_asx(proven_arena_t *arena, proven_
     size_t len = text.size;
     for (size_t i = 0; i < len;) {
         if (s[i] != '<') { i++; continue; }
-        if (len - i >= 4 && memcmp(s + i, "<!--", 4) == 0) {
+        if (len - i >= 4 && proven_sys_mem_cmp(s + i, "<!--", 4) == 0) {
             size_t j = i + 4;
-            while (j + 2 < len && memcmp(s + j, "-->", 3) != 0) j++;
+            while (j + 2 < len && proven_sys_mem_cmp(s + j, "-->", 3) != 0) j++;
             i = j + 3;
             continue;
         }
@@ -324,9 +331,9 @@ rubraview_playlist_t rubraview_playlist_parse_asx(proven_arena_t *arena, proven_
         size_t name_len = 0;
         while (name_len < wl && word[name_len] != ' ' && word[name_len] != '\t' && word[name_len] != '/' &&
                word[name_len] != '\r' && word[name_len] != '\n') name_len++;
-        bool is_entry = name_len == 5 && starts_nocase(word, wl, "entry");
-        bool is_ref = name_len == 3 && starts_nocase(word, wl, "ref");
-        bool is_title = name_len == 5 && starts_nocase(word, wl, "title");
+        bool is_entry = name_len == 5 && starts_nocase(rubraview_bytes_view(word, wl), "entry");
+        bool is_ref = name_len == 3 && starts_nocase(rubraview_bytes_view(word, wl), "ref");
+        bool is_title = name_len == 5 && starts_nocase(rubraview_bytes_view(word, wl), "title");
         if (is_entry && !closing) {
             in_entry = true; have_ref = false;
             title = ref = PROVEN_LIT("");
@@ -336,7 +343,7 @@ rubraview_playlist_t rubraview_playlist_parse_asx(proven_arena_t *arena, proven_
             if (in_entry && have_ref && other_count > 0) {
                 proven_result_mem_mut_t m = rubraview_arena_alloc_array(arena, other_count, sizeof(others[0]));
                 if (proven_is_ok(m.err)) {
-                    memcpy(m.value.ptr, others, other_count * sizeof(others[0]));
+                    proven_sys_mem_copy(m.value.ptr, others, other_count * sizeof(others[0]));
                     e.alternates = (proven_u8str_view_t *)m.value.ptr;
                     e.alternate_count = other_count;
                 }
@@ -344,7 +351,7 @@ rubraview_playlist_t rubraview_playlist_parse_asx(proven_arena_t *arena, proven_
             if (in_entry && have_ref && !entry_buf_push(arena, &buf, e)) break;
             in_entry = false; have_ref = false;
         } else if (is_ref && !closing) {
-            proven_u8str_view_t href = xml_attr(arena, word + name_len, wl - name_len, "href");
+            proven_u8str_view_t href = xml_attr(arena, rubraview_bytes_view(word + name_len, wl - name_len), "href");
             if (href.size > 0) {
                 if (in_entry && !have_ref) { ref = href; have_ref = true; }
                 else if (in_entry) { if (other_count < RUBRAVIEW_PLAYLIST_MAX_ALTERNATES) others[other_count++] = href; }
@@ -353,7 +360,7 @@ rubraview_playlist_t rubraview_playlist_parse_asx(proven_arena_t *arena, proven_
         } else if (is_title && !closing && in_entry) {
             size_t from = end + 1, to = from;
             while (to < len && s[to] != '<') to++;
-            title = xml_text(arena, s + from, to - from);
+            title = xml_text(arena, rubraview_bytes_view(s + from, to - from));
             i = to;
             continue;
         }
@@ -365,14 +372,14 @@ rubraview_playlist_t rubraview_playlist_parse_asx(proven_arena_t *arena, proven_
 }
 
 rubraview_playlist_t rubraview_playlist_parse_named(proven_arena_t *arena, proven_u8str_view_t name, proven_u8str_view_t text) {
-    if (text.size >= 3 && memcmp(text.ptr, "\xEF\xBB\xBF", 3) == 0) { text.ptr += 3; text.size -= 3; }
+    if (text.size >= 3 && proven_sys_mem_cmp(text.ptr, "\xEF\xBB\xBF", 3) == 0) { text.ptr += 3; text.size -= 3; }
     if (rubraview_path_has_ext(name, ".rvlist")) return rubraview_playlist_parse_rvlist(arena, text);
     if (rubraview_path_has_ext(name, ".pls")) return rubraview_playlist_parse_pls(arena, text);
     if (rubraview_path_has_ext(name, ".asx") || rubraview_path_has_ext(name, ".wax") || rubraview_path_has_ext(name, ".wvx"))
         return rubraview_playlist_parse_asx(arena, text);
     size_t at = 0;
     while (at < text.size && (text.ptr[at] == ' ' || text.ptr[at] == '\t' || text.ptr[at] == '\r' || text.ptr[at] == '\n')) at++;
-    if (starts_nocase((const char *)text.ptr + at, text.size - at, "[playlist]")) return rubraview_playlist_parse_pls(arena, text);
-    if (starts_nocase((const char *)text.ptr + at, text.size - at, "<asx")) return rubraview_playlist_parse_asx(arena, text);
+    if (starts_nocase(rubraview_bytes_view((const char *)text.ptr + at, text.size - at), "[playlist]")) return rubraview_playlist_parse_pls(arena, text);
+    if (starts_nocase(rubraview_bytes_view((const char *)text.ptr + at, text.size - at), "<asx")) return rubraview_playlist_parse_asx(arena, text);
     return rubraview_playlist_parse_m3u8(arena, text);
 }

@@ -1,4 +1,6 @@
 #ifdef _WIN32
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include <windows.h>
 #include <shlobj.h>
 #include <stdio.h>
@@ -36,13 +38,13 @@ bool rubraview_pal_plugins_default_folder(char *out, size_t capacity, bool make)
     PWSTR local = NULL;
     if (FAILED(SHGetKnownFolderPath(&FOLDERID_LocalAppData, 0, NULL, &local)) || !local) return false;
     WCHAR path[MAX_PATH];
-    int n = _snwprintf(path, MAX_PATH, L"%ls\\Rubraview\\plugins", local);
+    int n = rubraview_wfmt(path, MAX_PATH, "{}\\Rubraview\\plugins", PROVEN_ARG(rubraview_wide_view(local)));
     CoTaskMemFree(local);
     if (n <= 0 || n >= MAX_PATH) return false;
     if (make) {
         WCHAR parent[MAX_PATH];
-        wcscpy(parent, path);
-        WCHAR *cut = wcsrchr(parent, L'\\');
+        rubraview_wcopy_a(parent, path);
+        WCHAR *cut = rubraview_wrchr(parent, L'\\');
         if (cut) { *cut = L'\0'; CreateDirectoryW(parent, NULL); }
         CreateDirectoryW(path, NULL);
     }
@@ -51,10 +53,12 @@ bool rubraview_pal_plugins_default_folder(char *out, size_t capacity, bool make)
 }
 
 /* The machine a DLL is built for, from its PE header; 0 when it is not one. */
-static WORD pe_machine(const uint8_t *b, size_t n) {
+static WORD pe_machine(proven_mem_view_t b_view) {
+    const uint8_t *b = (const uint8_t *)b_view.ptr;
+    size_t n = (size_t)b_view.size;
     if (n < 0x40 || b[0] != 'M' || b[1] != 'Z') return 0;
     uint32_t pe = (uint32_t)b[0x3C] | (uint32_t)b[0x3D] << 8 | (uint32_t)b[0x3E] << 16 | (uint32_t)b[0x3F] << 24;
-    if ((size_t)pe + 6 > n || memcmp(b + pe, "PE\0\0", 4) != 0) return 0;
+    if ((size_t)pe + 6 > n || proven_sys_mem_cmp(b + pe, "PE\0\0", 4) != 0) return 0;
     return (WORD)(b[pe + 4] | b[pe + 5] << 8);
 }
 
@@ -63,11 +67,11 @@ static bool read_whole(const WCHAR *path, uint8_t **data, size_t *size) {
     if (f == INVALID_HANDLE_VALUE) return false;
     LARGE_INTEGER len;
     bool ok = GetFileSizeEx(f, &len) && len.QuadPart > 0 && len.QuadPart < (1LL << 30);
-    uint8_t *buf = ok ? (uint8_t*)malloc((size_t)len.QuadPart) : NULL;
+    uint8_t *buf = ok ? (uint8_t*)rubraview_alloc((size_t)len.QuadPart) : NULL;
     DWORD got = 0;
     ok = buf && ReadFile(f, buf, (DWORD)len.QuadPart, &got, NULL) && got == (DWORD)len.QuadPart;
     CloseHandle(f);
-    if (!ok) { free(buf); return false; }
+    if (!ok) { rubraview_free(buf); return false; }
     *data = buf;
     *size = (size_t)len.QuadPart;
     return true;
@@ -78,14 +82,14 @@ static bool child_run(HANDLE mapping, rubraview_plugin_shared_t *shared, const c
                       bool (*tick)(void *context, double progress), void *context, const char **why) {
     WCHAR exe[MAX_PATH], dll[MAX_PATH], line[2 * MAX_PATH + 64];
     if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) { *why = N_("the plug-in could not be started"); return false; }
-    wide_of((proven_u8str_view_t){ .ptr = (const proven_byte_t *)dll_utf8, .size = strlen(dll_utf8) }, dll, MAX_PATH);
-    _snwprintf(line, sizeof(line) / sizeof(line[0]), L"\"%ls\" --filter-host %llu \"%ls\"", exe,
-               (unsigned long long)(uintptr_t)mapping, dll);
+    wide_of((proven_u8str_view_t){ .ptr = (const proven_byte_t *)dll_utf8, .size = proven_cstr_len(dll_utf8) }, dll, MAX_PATH);
+    rubraview_wfmt(line, sizeof(line) / sizeof(line[0]), "\"{}\" --filter-host {} \"{}\"", PROVEN_ARG(rubraview_wide_view(exe)),
+               PROVEN_ARG((unsigned long long)((unsigned long long)(uintptr_t)mapping)), PROVEN_ARG(rubraview_wide_view(dll)));
 
     SIZE_T attr_size = 0;
     InitializeProcThreadAttributeList(NULL, 1, 0, &attr_size);
-    LPPROC_THREAD_ATTRIBUTE_LIST attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(attr_size);
-    if (!attrs || !InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size)) { free(attrs); *why = N_("the plug-in could not be started"); return false; }
+    LPPROC_THREAD_ATTRIBUTE_LIST attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)rubraview_alloc(attr_size);
+    if (!attrs || !InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size)) { rubraview_free(attrs); *why = N_("the plug-in could not be started"); return false; }
     HANDLE inherit[1] = { mapping };   /* the mapping and nothing else of ours */
     UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof(inherit), NULL, NULL);
     STARTUPINFOEXW si = { .StartupInfo = { .cb = sizeof(STARTUPINFOEXW) }, .lpAttributeList = attrs };
@@ -97,7 +101,7 @@ static bool child_run(HANDLE mapping, rubraview_plugin_shared_t *shared, const c
     BOOL started = CreateProcessW(exe, line, NULL, NULL, TRUE, CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
                                   NULL, NULL, &si.StartupInfo, &pi);
     DeleteProcThreadAttributeList(attrs);
-    free(attrs);
+    rubraview_free(attrs);
     if (!started) { if (job) CloseHandle(job); *why = N_("the plug-in could not be started"); return false; }
     if (job) AssignProcessToJobObject(job, pi.hProcess);
     ResumeThread(pi.hThread);
@@ -128,7 +132,7 @@ static bool child_run(HANDLE mapping, rubraview_plugin_shared_t *shared, const c
     if (shared->state == RUBRAVIEW_PLUGIN_DONE && code == 0) return true;
     if (cancelled_at) { *why = N_("cancelled"); return false; }
     if (shared->state == RUBRAVIEW_PLUGIN_FAILED && shared->error[0]) {
-        snprintf(g_why, sizeof(g_why), "%.*s", (int)sizeof(shared->error), shared->error);   /* the child's words: never past their field (D-189) */
+        rubraview_fmt(g_why, sizeof(g_why), "{}", PROVEN_ARG(rubraview_bytes_view(shared->error, (int)sizeof(shared->error))));   /* the child's words: never past their field (D-189) */
         *why = g_why;
         return false;
     }
@@ -143,7 +147,7 @@ static SRWLOCK g_known_lock = SRWLOCK_INIT;
 
 static void describe(rubraview_plugin_t *p) {
     for (size_t i = 0; i < g_known_count; ++i) {
-        if (strcmp(g_known[i].path, p->path) == 0 && memcmp(g_known[i].sha256, p->sha256, 32) == 0) { *p = g_known[i]; return; }
+        if (rubraview_cstr_cmp(g_known[i].path, p->path) == 0 && proven_sys_mem_cmp(g_known[i].sha256, p->sha256, 32) == 0) { *p = g_known[i]; return; }
     }
     size_t bytes = rubraview_plugin_shared_bytes(1, 1);
     SECURITY_ATTRIBUTES sa = { .nLength = sizeof(sa), .bInheritHandle = TRUE };
@@ -164,9 +168,9 @@ size_t rubraview_pal_plugins_find(proven_u8str_view_t folder, rubraview_plugin_t
     if (!out || capacity == 0 || folder.size == 0) return 0;
     WCHAR dir[MAX_PATH], pattern[MAX_PATH];
     wide_of(folder, dir, MAX_PATH);
-    size_t dn = wcslen(dir);
+    size_t dn = rubraview_wlen(dir);
     while (dn > 0 && (dir[dn - 1] == L'\\' || dir[dn - 1] == L'/')) dir[--dn] = L'\0';
-    if (_snwprintf(pattern, MAX_PATH, L"%ls\\*.rvf.dll", dir) <= 0) return 0;
+    if (rubraview_wfmt(pattern, MAX_PATH, "{}\\*.rvf.dll", PROVEN_ARG(rubraview_wide_view(dir))) <= 0) return 0;
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW(pattern, &fd);
     if (h == INVALID_HANDLE_VALUE) return 0;
@@ -175,17 +179,17 @@ size_t rubraview_pal_plugins_find(proven_u8str_view_t folder, rubraview_plugin_t
     do {
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         rubraview_plugin_t *p = &out[count];
-        memset(p, 0, sizeof(*p));
+        proven_sys_mem_set(p, 0, sizeof(*p));
         WCHAR full[MAX_PATH];
-        if (_snwprintf(full, MAX_PATH, L"%ls\\%ls", dir, fd.cFileName) <= 0) continue;
+        if (rubraview_wfmt(full, MAX_PATH, "{}\\{}", PROVEN_ARG(rubraview_wide_view(dir)), PROVEN_ARG(rubraview_wide_view(fd.cFileName))) <= 0) continue;
         utf8_of(fd.cFileName, p->file, sizeof(p->file));
         utf8_of(full, p->path, sizeof(p->path));
         uint8_t *data = NULL;
         size_t size = 0;
         if (!read_whole(full, &data, &size)) { p->why = N_("it could not be read"); count++; continue; }
-        rubraview_sha256(data, size, p->sha256);
-        WORD machine = pe_machine(data, size);
-        free(data);
+        rubraview_sha256(rubraview_mem_view(data, size), p->sha256);
+        WORD machine = pe_machine(rubraview_mem_view(data, size));
+        rubraview_free(data);
         if (machine == IMAGE_FILE_MACHINE_I386) p->why = N_("it is a 32-bit DLL; Rubraview takes 64-bit plug-ins");
         else if (machine != IMAGE_FILE_MACHINE_AMD64) p->why = N_("it is not a DLL for this processor");
         else describe(p);
@@ -214,9 +218,9 @@ bool rubraview_pal_plugin_run(const rubraview_plugin_t *plugin, const double *pa
         s->param_count = plugin->param_count;
         for (int32_t i = 0; i < plugin->param_count; ++i) s->params[i] = params ? params[i] : plugin->params[i].value;
         size_t picture = (size_t)width * (size_t)height * 4u;
-        memcpy(rubraview_plugin_shared_in(s), bgra, picture);
+        proven_sys_mem_copy(rubraview_plugin_shared_in(s), bgra, picture);
         ok = child_run(mapping, s, plugin->path, 0, tick, context, why);
-        if (ok) memcpy(out, rubraview_plugin_shared_out(s), picture);
+        if (ok) proven_sys_mem_copy(out, rubraview_plugin_shared_out(s), picture);
         UnmapViewOfFile(s);
     } else {
         *why = N_("there is not enough memory for the plug-in's picture");
@@ -232,7 +236,7 @@ static rubraview_plugin_shared_t *g_child;
 static LONG WINAPI child_crash(EXCEPTION_POINTERS *e) {
     (void)e;
     if (g_child) {
-        snprintf(g_child->error, sizeof(g_child->error), "%s", "the plug-in stopped: it crashed");
+        rubraview_fmt(g_child->error, sizeof(g_child->error), "{}", PROVEN_ARG("the plug-in stopped: it crashed"));
         g_child->state = RUBRAVIEW_PLUGIN_FAILED;
     }
     TerminateProcess(GetCurrentProcess(), 3);
@@ -246,7 +250,7 @@ static int child_progress(void *context, double done) {
 }
 
 static void child_text(char *dst, size_t cap, const char *src) {
-    snprintf(dst, cap, "%s", src ? src : "");
+    rubraview_fmt(dst, cap, "{}", PROVEN_ARG(src ? src : ""));
 }
 
 int rubraview_pal_plugin_host_main(const wchar_t *mapping_text, const wchar_t *dll) {

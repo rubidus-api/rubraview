@@ -159,7 +159,7 @@ void zoom_leave_real_fit(app_state_t *app) {
 
 void zoom_say(app_state_t *app) {
     char line[24];
-    proven_u8str_view_t text = at_real_size(app) ? TU8("0% (real size)") : rubraview_scale_caption(line, sizeof(line), app->zoom);
+    proven_u8str_view_t text = at_real_size(app) ? TU8("0% (real size)") : rubraview_scale_caption(rubraview_mem_mut(line, sizeof(line)), app->zoom);
     if (text.size > 0) osd_say(app, text);
     note_activity(app);
 }
@@ -197,7 +197,7 @@ void update_window_title(app_state_t *app) {
         proven_u8str_view_t name = rubraview_picker_is_places(app->picker_dir) ? TU8("PC")
                      : rubraview_picker_is_recent(app->picker_dir) ? TU8("Recent") : rubraview_path_basename(app->picker_dir);
         if (name.size == 0) name = app->picker_dir;
-        snprintf(title, sizeof(title), "Rubraview - %.*s", (int)(name.size < 600 ? name.size : 600), name.ptr);
+        rubraview_fmt(title, sizeof(title), "Rubraview - {}", PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 600 ? name.size : 600))));
         rubraview_pal_window_set_title(app->window, title);
         return;
     }
@@ -207,40 +207,40 @@ void update_window_title(app_state_t *app) {
            has no path of its own (found by T037). */
         proven_u8str_view_t name = page_display_name(app, (size_t)page);
         bool song = app->media && page == app->media_page && app->media_info.live && app->station_title[0];   /* RV-158 */
-        int n = snprintf(title, sizeof(title), "%.*s%s%s (%d/%zu) ",
-                         (int)name.size, name.ptr, song ? " \xE2\x80\x94 " : "", song ? app->station_title : "",
-                         (int)page + 1, page_count(app));
+        int n = rubraview_fmt(title, sizeof(title), "{}{}{} ({}/{}) ",
+                         PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)), PROVEN_ARG(song ? " \xE2\x80\x94 " : ""), PROVEN_ARG(song ? app->station_title : ""),
+                         PROVEN_ARG((int)page + 1), PROVEN_ARG((size_t)(page_count(app))));
         used = n > 0 ? ((size_t)n < sizeof(title) ? (size_t)n : sizeof(title) - 1) : 0;
         if (app->media && page == app->media_page) {
             /* A video shows where it is, to the millisecond — which is
                also how a frame step can be checked from outside. */
             char at[32], total[32];
-            proven_u8str_view_t a = rubraview_format_timecode(at, sizeof(at), app->media_position, true);
+            proven_u8str_view_t a = rubraview_format_timecode(rubraview_mem_mut(at, sizeof(at)), app->media_position, true);
             proven_u8str_view_t t = app->media_info.live ? TU8("live")   /* RV-157 */
-                      : rubraview_format_timecode(total, sizeof(total), app->media_info.duration_seconds, true);
-            n = snprintf(title + used, sizeof(title) - used, "%.*s / %.*s%s%s ",
-                         (int)a.size, a.ptr, (int)t.size, t.ptr,
-                         app->media_paused ? " paused" : "",
-                         app->media_info.backend == RUBRAVIEW_BACKEND_FFMPEG ? " ffmpeg" : "");
+                      : rubraview_format_timecode(rubraview_mem_mut(total, sizeof(total)), app->media_info.duration_seconds, true);
+            n = rubraview_fmt(title + used, sizeof(title) - used, "{} / {}{}{} ",
+                         PROVEN_ARG(rubraview_bytes_view(a.ptr, (int)a.size)), PROVEN_ARG(rubraview_bytes_view(t.ptr, (int)t.size)),
+                         PROVEN_ARG(app->media_paused ? " paused" : ""),
+                         PROVEN_ARG(app->media_info.backend == RUBRAVIEW_BACKEND_FFMPEG ? " ffmpeg" : ""));
             if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
         } else if (!app->media && page == station_connecting_page(app)) {
-            n = snprintf(title + used, sizeof(title) - used, "%s ", T("connecting..."));   /* RV-157 */
+            n = rubraview_fmt(title + used, sizeof(title) - used, "{} ", PROVEN_ARG(T("connecting...")));   /* RV-157 */
             if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
         } else if (text_encoding_shown(app)) {
             /* RFC-0005 §6: what the text is read as. */
-            n = snprintf(title + used, sizeof(title) - used, "[%s] ", text_encoding_shown(app));
+            n = rubraview_fmt(title + used, sizeof(title) - used, "[{}] ", PROVEN_ARG(text_encoding_shown(app)));
             if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
         } else if (anim_plays(app) && page == app->anim_page) {
             /* D-82: an animation says where it is as a film does. */
             char at[32], total[32];
-            proven_u8str_view_t a = rubraview_format_timecode(at, sizeof(at), rubraview_animation_position(&app->animation), true);
-            proven_u8str_view_t t = rubraview_format_timecode(total, sizeof(total), rubraview_animation_cycle_seconds(&app->animation), true);
-            n = snprintf(title + used, sizeof(title) - used, "%.*s / %.*s%s ",
-                         (int)a.size, a.ptr, (int)t.size, t.ptr, app->animation.paused ? " paused" : "");
+            proven_u8str_view_t a = rubraview_format_timecode(rubraview_mem_mut(at, sizeof(at)), rubraview_animation_position(&app->animation), true);
+            proven_u8str_view_t t = rubraview_format_timecode(rubraview_mem_mut(total, sizeof(total)), rubraview_animation_cycle_seconds(&app->animation), true);
+            n = rubraview_fmt(title + used, sizeof(title) - used, "{} / {}{} ",
+                         PROVEN_ARG(rubraview_bytes_view(a.ptr, (int)a.size)), PROVEN_ARG(rubraview_bytes_view(t.ptr, (int)t.size)), PROVEN_ARG(app->animation.paused ? " paused" : ""));
             if (n > 0) used += (size_t)n < sizeof(title) - used ? (size_t)n : sizeof(title) - used - 1;
         }
     }
-    snprintf(title + used, sizeof(title) - used, T("%sRubraview %s"), used > 0 ? "- " : "", RUBRAVIEW_VERSION_STRING);
+    rubraview_fmt(title + used, sizeof(title) - used, T("{}Rubraview {}"), PROVEN_ARG(used > 0 ? "- " : ""), PROVEN_ARG(RUBRAVIEW_VERSION_STRING));
     rubraview_pal_window_set_title(app->window, title);
 }
 
@@ -408,7 +408,7 @@ void prev_spread(app_state_t *app) {
     past_the_end(app, false);
 }
 
-proven_u8str_view_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size,
+proven_u8str_view_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, proven_mem_mut_t scratch_view,
                                  bool *out_enabled, bool *out_current);
 
 void toggle_slideshow(app_state_t *app) {

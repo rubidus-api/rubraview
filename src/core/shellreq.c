@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/shellreq.h"
 #include "rubraview/lang.h"
 #include "rubraview/filemanage.h"
@@ -69,15 +70,17 @@ size_t rubraview_shellreq_pack(rubraview_shell_verb_t verb, bool whole, const pr
     dst[1] = whole ? '1' : '0';
     size_t at = 2;
     for (size_t i = 0; i < count; ++i) {
-        if (paths[i].size) memcpy(dst + at, paths[i].ptr, paths[i].size);
+        if (paths[i].size) proven_sys_mem_copy(dst + at, paths[i].ptr, paths[i].size);
         at += paths[i].size;
         dst[at++] = '\0';
     }
     return need;
 }
 
-bool rubraview_shellreq_unpack(const char *blob, size_t len, rubraview_shell_verb_t *out_verb, bool *out_whole,
+bool rubraview_shellreq_unpack(proven_u8str_view_t blob_view, rubraview_shell_verb_t *out_verb, bool *out_whole,
                                proven_u8str_view_t *paths, size_t cap, size_t *out_count) {
+    const char *blob = (const char *)blob_view.ptr;
+    size_t len = (size_t)blob_view.size;
     if (out_count) *out_count = 0;
     if (!blob || len < 2) return false;
     int verb = blob[0] - 'A';
@@ -88,7 +91,7 @@ bool rubraview_shellreq_unpack(const char *blob, size_t len, rubraview_shell_ver
 
     size_t count = 0;
     for (size_t at = 2; at < len;) {
-        size_t n = strlen(blob + at);
+        size_t n = proven_cstr_len(blob + at);
         if (n > 0) {
             if (paths && count < cap) paths[count] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)blob + at, .size = n };
             count++;
@@ -131,7 +134,7 @@ bool rubraview_shellreq_collect(rubraview_shellreq_collector_t *c, rubraview_she
     if (need > c->text_cap) {
         size_t grown = c->text_cap ? c->text_cap : 1024;
         while (grown < need) grown *= 2;
-        char *more = (char*)realloc(c->text, grown);
+        char *more = (char*)rubraview_realloc(rubraview_mem_mut(c->text, grown));
         if (!more) return false;
         c->text = more;
         c->text_cap = grown;
@@ -143,7 +146,7 @@ bool rubraview_shellreq_collect(rubraview_shellreq_collector_t *c, rubraview_she
     }
     for (size_t i = 0; i < count; ++i) {
         if (paths[i].size == 0) continue;
-        memcpy(c->text + c->text_len, paths[i].ptr, paths[i].size);
+        proven_sys_mem_copy(c->text + c->text_len, paths[i].ptr, paths[i].size);
         c->text_len += paths[i].size;
         c->text[c->text_len++] = '\0';
         c->count++;
@@ -162,7 +165,7 @@ bool rubraview_shellreq_ready(const rubraview_shellreq_collector_t *c, double no
 
 const char *rubraview_shellreq_next(const rubraview_shellreq_collector_t *c, const char *prev) {
     if (!c || !c->pending || c->text_len == 0) return NULL;
-    const char *next = prev ? prev + strlen(prev) + 1 : c->text;
+    const char *next = prev ? prev + proven_cstr_len(prev) + 1 : c->text;
     return next < c->text + c->text_len ? next : NULL;
 }
 
@@ -176,7 +179,7 @@ void rubraview_shellreq_clear(rubraview_shellreq_collector_t *c) {
 
 void rubraview_shellreq_free(rubraview_shellreq_collector_t *c) {
     if (!c) return;
-    free(c->text);
+    rubraview_free(c->text);
     *c = (rubraview_shellreq_collector_t){ 0 };
 }
 

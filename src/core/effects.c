@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/effects.h"
 
 #include <math.h>
@@ -108,7 +109,7 @@ static int32_t median_cut(proven_arena_t *arena, const rubraview_pixbuf_t *src, 
     proven_result_mem_mut_t lm = proven_arena_alloc(arena, 32768u * sizeof(uint32_t));
     if (!proven_is_ok(hm.err) || !proven_is_ok(lm.err)) return 0;
     uint32_t *hist = (uint32_t*)(void*)hm.value.ptr, *bins = (uint32_t*)(void*)lm.value.ptr;
-    memset(hist, 0, 32768u * sizeof(uint32_t));
+    proven_sys_mem_set(hist, 0, 32768u * sizeof(uint32_t));
     const int R = bgra ? 2 : 0, B = bgra ? 0 : 2;
     for (int32_t y = 0; y < src->height; ++y)
         for (int32_t x = 0; x < src->width; ++x) {
@@ -191,7 +192,7 @@ static bool whole_picture_filter(proven_arena_t *arena, const rubraview_pixbuf_t
         proven_result_mem_mut_t m = proven_arena_alloc(arena, (size_t)(w + 2) * 2u * sizeof(float));
         if (!proven_is_ok(m.err)) return false;
         float *row = (float*)(void*)m.value.ptr, *next = row + w + 2;
-        memset(row, 0, (size_t)(w + 2) * 2u * sizeof(float));
+        proven_sys_mem_set(row, 0, (size_t)(w + 2) * 2u * sizeof(float));
         for (int32_t y = 0; y < h; ++y) {
             for (int32_t x = 0; x < w; ++x) {
                 const uint8_t *s = at(src, x, y);
@@ -209,7 +210,7 @@ static bool whole_picture_filter(proven_arena_t *arena, const rubraview_pixbuf_t
                 o[3] = s[3];
             }
             float *t = row; row = next; next = t;
-            memset(next, 0, (size_t)(w + 2) * sizeof(float));
+            proven_sys_mem_set(next, 0, (size_t)(w + 2) * sizeof(float));
         }
         return true;
     }
@@ -220,9 +221,9 @@ static bool whole_picture_filter(proven_arena_t *arena, const rubraview_pixbuf_t
         proven_result_mem_mut_t em = proven_arena_alloc(arena, (size_t)(w + 2) * 6u * sizeof(float));
         if (count <= 0 || !proven_is_ok(cm.err) || !proven_is_ok(em.err)) return false;
         int16_t *cache = (int16_t*)(void*)cm.value.ptr;
-        memset(cache, 0xFF, 32768u * sizeof(int16_t));
+        proven_sys_mem_set(cache, 0xFF, 32768u * sizeof(int16_t));
         float *err = (float*)(void*)em.value.ptr, *row = err, *next = err + (w + 2) * 3;
-        memset(err, 0, (size_t)(w + 2) * 6u * sizeof(float));
+        proven_sys_mem_set(err, 0, (size_t)(w + 2) * 6u * sizeof(float));
         bool spread = effect == RUBRAVIEW_EFFECT_COLOURS_DITHER;
         for (int32_t y = 0; y < h; ++y) {
             for (int32_t x = 0; x < w; ++x) {
@@ -244,7 +245,7 @@ static bool whole_picture_filter(proven_arena_t *arena, const rubraview_pixbuf_t
                 o[3] = s[3];
             }
             float *t = row; row = next; next = t;
-            memset(next, 0, (size_t)(w + 2) * 3u * sizeof(float));
+            proven_sys_mem_set(next, 0, (size_t)(w + 2) * 3u * sizeof(float));
         }
         return true;
     }
@@ -363,7 +364,7 @@ rubraview_pixbuf_t rubraview_effect_apply(proven_arena_t *arena, const rubraview
                     int r = (int)lround(amount), n = (2 * r + 1) * (2 * r + 1);
                     for (int k = 0; k < 3; ++k) {
                         uint16_t count[256];
-                        memset(count, 0, sizeof(count));
+                        proven_sys_mem_set(count, 0, sizeof(count));
                         for (int dy = -r; dy <= r; ++dy) for (int dx = -r; dx <= r; ++dx) count[at(src, x + dx, y + dy)[k]]++;
                         int seen = 0, v = 0;
                         while (v < 255 && seen + count[v] <= n / 2) { seen += count[v]; v++; }
@@ -376,7 +377,7 @@ rubraview_pixbuf_t rubraview_effect_apply(proven_arena_t *arena, const rubraview
                     int r = (int)lround(amount);
                     int count[20] = {0};
                     double sum[20][3];
-                    memset(sum, 0, sizeof(sum));
+                    proven_sys_mem_set(sum, 0, sizeof(sum));
                     for (int dy = -r; dy <= r; ++dy) {
                         for (int dx = -r; dx <= r; ++dx) {
                             const uint8_t *q = at(src, x + dx, y + dy);
@@ -497,7 +498,7 @@ rubraview_pixbuf_t rubraview_effect_apply(proven_arena_t *arena, const rubraview
                     break;
                 }
                 default:
-                    memcpy(o, s, 4);
+                    proven_sys_mem_copy(o, s, 4);
                     break;
             }
         }

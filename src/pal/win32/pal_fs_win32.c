@@ -1,4 +1,6 @@
 #ifdef _WIN32
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -23,10 +25,12 @@ static int64_t filetime_to_unix_seconds(FILETIME ft) {
     return (int64_t)((v.QuadPart - (ULONGLONG)FILETIME_UNIX_EPOCH_DIFF) / 10000000ULL);
 }
 
-static proven_u8str_view_t arena_dup(proven_arena_t *arena, const char *src, size_t n) {
+static proven_u8str_view_t arena_dup(proven_arena_t *arena, proven_u8str_view_t src_view) {
+    const char *src = (const char *)src_view.ptr;
+    size_t n = (size_t)src_view.size;
     proven_result_mem_mut_t res = proven_arena_alloc(arena, n + 1);
     if (!proven_is_ok(res.err)) return PROVEN_LIT("");
-    if (n > 0) memcpy(res.value.ptr, src, n);
+    if (n > 0) proven_sys_mem_copy(res.value.ptr, src, n);
     res.value.ptr[n] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = n };
 }
@@ -72,7 +76,7 @@ static bool entry_buf_push(proven_arena_t *arena, entry_buf_t *b, rubraview_fs_e
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(rubraview_fs_entry_t));
         if (!proven_is_ok(res.err)) return false;
         rubraview_fs_entry_t *new_data = (rubraview_fs_entry_t*)(void*)res.value.ptr;
-        if (b->data && b->count > 0) memcpy(new_data, b->data, b->count * sizeof(rubraview_fs_entry_t));
+        if (b->data && b->count > 0) proven_sys_mem_copy(new_data, b->data, b->count * sizeof(rubraview_fs_entry_t));
         b->data = new_data;
         b->capacity = new_cap;
     }
@@ -84,7 +88,7 @@ rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, proven_u
     rubraview_fs_listing_t listing = {0};
     if (!arena || dir_path.size == 0 || !dir_path.ptr) return listing;
 
-    proven_u8str_view_t dir_z = arena_dup(arena, (const char *)dir_path.ptr, dir_path.size);
+    proven_u8str_view_t dir_z = arena_dup(arena, rubraview_bytes_view((const char *)dir_path.ptr, dir_path.size));
     if (dir_z.size == 0) return listing;
 
     /* FindFirstFileW needs a wildcard pattern: "<dir>\*". */
@@ -98,7 +102,7 @@ rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, proven_u
 
     entry_buf_t buf = {0};
     do {
-        if (wcscmp(find_data.cFileName, L".") == 0 || wcscmp(find_data.cFileName, L"..") == 0) continue;
+        if (rubraview_wcmp(find_data.cFileName, L".") == 0 || rubraview_wcmp(find_data.cFileName, L"..") == 0) continue;
 
         rubraview_fs_entry_t entry = {0};
         entry.name = wide_to_u8str(arena, find_data.cFileName);
@@ -152,7 +156,7 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
         if (SUCCEEDED(SHGetKnownFolderPath(FOLDERS[i].id, KF_FLAG_DONT_VERIFY, NULL, &wide)) && wide) {
             DWORD attrs = GetFileAttributesW(wide);
             if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-                push_place(arena, &buf, arena_dup(arena, FOLDERS[i].name, strlen(FOLDERS[i].name)),
+                push_place(arena, &buf, arena_dup(arena, rubraview_bytes_view(FOLDERS[i].name, proven_cstr_len(FOLDERS[i].name))),
                            wide_to_u8str(arena, wide));
             }
         }
@@ -164,8 +168,8 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
     WCHAR roots[512];
     DWORD got = GetLogicalDriveStringsW((DWORD)(sizeof(roots) / sizeof(roots[0])), roots);
     if (got > 0 && got < sizeof(roots) / sizeof(roots[0])) {
-        for (const WCHAR *root = roots; *root; root += wcslen(root) + 1) {
-            if (wcslen(root) < 2 || root[1] != L':') continue;
+        for (const WCHAR *root = roots; *root; root += rubraview_wlen(root) + 1) {
+            if (rubraview_wlen(root) < 2 || root[1] != L':') continue;
             UINT type = GetDriveTypeW(root);
             if (type == DRIVE_NO_ROOT_DIR || type == DRIVE_UNKNOWN) continue;
 
@@ -176,14 +180,13 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
                 const WCHAR *kind = type == DRIVE_REMOVABLE ? L"Removable" :
                                     type == DRIVE_CDROM     ? L"CD/DVD" :
                                     type == DRIVE_REMOTE    ? L"Network" : L"";
-                wcsncpy(label, kind, MAX_PATH);
-                label[MAX_PATH] = L'\0';
+                rubraview_wcopy(label, MAX_PATH + 1, kind);
             }
             WCHAR name[MAX_PATH + 8];
-            if (label[0]) swprintf(name, sizeof(name) / sizeof(name[0]), L"%lc: %ls", root[0], label);
-            else          swprintf(name, sizeof(name) / sizeof(name[0]), L"%lc:", root[0]);
+            if (label[0]) (void)rubraview_wfmt(name, RUBRAVIEW_COUNT_OF(name), "{}: {}", PROVEN_ARG((char)root[0]), PROVEN_ARG(rubraview_wide_view(label)));
+            else          (void)rubraview_wfmt(name, RUBRAVIEW_COUNT_OF(name), "{}:", PROVEN_ARG((char)root[0]));
             char path[4] = { (char)root[0], ':', '/', '\0' };
-            push_place(arena, &buf, wide_to_u8str(arena, name), arena_dup(arena, path, 3));
+            push_place(arena, &buf, wide_to_u8str(arena, name), arena_dup(arena, rubraview_bytes_view(path, 3)));
         }
     }
 
@@ -194,7 +197,7 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
 
 proven_u8str_view_t rubraview_pal_fs_absolute(proven_arena_t *arena, proven_u8str_view_t path) {
     if (!arena || path.size == 0) return path;
-    proven_u8str_view_t path_z = arena_dup(arena, (const char *)path.ptr, path.size);
+    proven_u8str_view_t path_z = arena_dup(arena, rubraview_bytes_view((const char *)path.ptr, path.size));
     WCHAR *wide = utf8_to_wide(arena, path_z);
     if (!wide || GetFileAttributesW(wide) == INVALID_FILE_ATTRIBUTES) return path_z;
     WCHAR full[MAX_PATH * 2];
@@ -206,7 +209,7 @@ proven_u8str_view_t rubraview_pal_fs_absolute(proven_arena_t *arena, proven_u8st
 
 proven_u8str_view_t rubraview_pal_fs_expand_env(proven_arena_t *arena, proven_u8str_view_t path) {
     if (!arena || path.size == 0) return path;
-    proven_u8str_view_t path_z = arena_dup(arena, (const char *)path.ptr, path.size);
+    proven_u8str_view_t path_z = arena_dup(arena, rubraview_bytes_view((const char *)path.ptr, path.size));
     WCHAR *wide = utf8_to_wide(arena, path_z);
     if (!wide) return path_z;
     WCHAR full[MAX_PATH * 2];
@@ -219,7 +222,7 @@ proven_u8str_view_t rubraview_pal_fs_expand_env(proven_arena_t *arena, proven_u8
 bool rubraview_pal_fs_stat(proven_arena_t *arena, proven_u8str_view_t path, rubraview_fs_entry_t *out_entry) {
     if (!arena || !out_entry || path.size == 0) return false;
 
-    proven_u8str_view_t path_z = arena_dup(arena, (const char *)path.ptr, path.size);
+    proven_u8str_view_t path_z = arena_dup(arena, rubraview_bytes_view((const char *)path.ptr, path.size));
     if (path_z.size == 0) return false;
 
     WCHAR *wide_path = utf8_to_wide(arena, path_z);
@@ -307,7 +310,7 @@ bool rubraview_pal_fs_exists(proven_u8str_view_t path) {
     /* The caller's slice need not be NUL-terminated, so convert from a
        bounded stack copy rather than reading past path.len. */
     char narrow[MAX_PATH * 4];
-    memcpy(narrow, path.ptr, path.size);
+    proven_sys_mem_copy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
 
     WCHAR wide[MAX_PATH * 2];
@@ -321,7 +324,7 @@ proven_u8str_view_t rubraview_pal_fs_read_file(proven_arena_t *arena, proven_u8s
     proven_u8str_view_t empty = PROVEN_LIT("");
     if (!arena || path.size == 0 || !path.ptr) return empty;
 
-    proven_u8str_view_t path_z = arena_dup(arena, (const char *)path.ptr, path.size);
+    proven_u8str_view_t path_z = arena_dup(arena, rubraview_bytes_view((const char *)path.ptr, path.size));
     if (path_z.size == 0) return empty;
 
     /* UTF-16 for the same reason as writing: a Hangul user name. */
@@ -351,7 +354,7 @@ bool rubraview_pal_fs_writer_open(rubraview_fs_writer_t *writer, proven_u8str_vi
     if (path.size == 0 || !path.ptr || path.size >= 4096) return false;
     WCHAR wide[4096];
     char path_z[4096];
-    memcpy(path_z, path.ptr, path.size);
+    proven_sys_mem_copy(path_z, path.ptr, path.size);
     path_z[path.size] = '\0';
     if (MultiByteToWideChar(CP_UTF8, 0, path_z, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return false;
     /* CREATE_NEW: a file of that name already there is never written over. */
@@ -361,7 +364,9 @@ bool rubraview_pal_fs_writer_open(rubraview_fs_writer_t *writer, proven_u8str_vi
     return true;
 }
 
-bool rubraview_pal_fs_writer_write(rubraview_fs_writer_t *writer, const void *bytes, size_t size) {
+bool rubraview_pal_fs_writer_write(rubraview_fs_writer_t *writer, proven_mem_view_t bytes_view) {
+    const void *bytes = (const void *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
     if (!writer || !writer->os || writer->failed) return false;
     const uint8_t *p = bytes;
     while (size > 0) {
@@ -397,7 +402,7 @@ bool rubraview_pal_fs_write_file(proven_u8str_view_t path, proven_u8str_view_t c
        Hangul puts Hangul in %APPDATA%. */
     WCHAR wide[4096];
     char path_z[4096];
-    memcpy(path_z, path.ptr, path.size);
+    proven_sys_mem_copy(path_z, path.ptr, path.size);
     path_z[path.size] = '\0';
     if (MultiByteToWideChar(CP_UTF8, 0, path_z, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return false;
 
@@ -429,10 +434,10 @@ bool rubraview_pal_fs_write_file(proven_u8str_view_t path, proven_u8str_view_t c
 static void sweep_state_temps(const char *final) {
     WCHAR pattern[4096], found_path[4096];
     char pattern_utf8[4096];
-    int n = snprintf(pattern_utf8, sizeof(pattern_utf8), "%s.*.tmp", final);
+    int n = rubraview_fmt(pattern_utf8, sizeof(pattern_utf8), "{}.*.tmp", PROVEN_ARG(final));
     if (n <= 0 || (size_t)n >= sizeof(pattern_utf8)) return;
     if (MultiByteToWideChar(CP_UTF8, 0, pattern_utf8, -1, pattern, 4096) <= 0) return;
-    const char *slash = strrchr(final, '\\'), *other = strrchr(final, '/');
+    const char *slash = rubraview_cstr_rchr(final, '\\'), *other = rubraview_cstr_rchr(final, '/');
     if (other && (!slash || other > slash)) slash = other;
     const char *base = slash ? slash + 1 : final;
     size_t dir_len = (size_t)(base - final);
@@ -444,7 +449,7 @@ static void sweep_state_temps(const char *final) {
         char name[1024];
         if (WideCharToMultiByte(CP_UTF8, 0, data.cFileName, -1, name, sizeof(name), NULL, NULL) <= 0) continue;
         uint32_t pid = 0;
-        if (!rubraview_path_state_temp((proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = strlen(name) }, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)base, .size = strlen(base) }, &pid)) continue;
+        if (!rubraview_path_state_temp((proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = proven_cstr_len(name) }, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)base, .size = proven_cstr_len(base) }, &pid)) continue;
         if (pid == GetCurrentProcessId()) continue;
         HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
         if (process) {
@@ -456,7 +461,7 @@ static void sweep_state_temps(const char *final) {
             continue;   /* someone's process, alive */
         }
         char whole[4096];
-        int m = snprintf(whole, sizeof(whole), "%.*s%s", (int)dir_len, final, name);
+        int m = rubraview_fmt(whole, sizeof(whole), "{}{}", PROVEN_ARG(rubraview_bytes_view(final, (int)dir_len)), PROVEN_ARG(name));
         if (m > 0 && (size_t)m < sizeof(whole) && MultiByteToWideChar(CP_UTF8, 0, whole, -1, found_path, 4096) > 0) DeleteFileW(found_path);
     } while (FindNextFileW(find, &data));
     FindClose(find);
@@ -466,11 +471,11 @@ bool rubraview_pal_fs_write_file_atomic(proven_u8str_view_t path, proven_u8str_v
     if (path.size == 0 || !path.ptr || path.size >= 4000) return false;
     char temp[4096], final[4096];
     WCHAR wide_temp[4096], wide_final[4096];
-    memcpy(final, path.ptr, path.size);
+    proven_sys_mem_copy(final, path.ptr, path.size);
     final[path.size] = '\0';
     sweep_state_temps(final);
     /* The process and the moment: two viewers, or two writes of one, never share it. */
-    int n = snprintf(temp, sizeof(temp), "%s.%lu-%lu.tmp", final, (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount());
+    int n = rubraview_fmt(temp, sizeof(temp), "{}.{}-{}.tmp", PROVEN_ARG(final), PROVEN_ARG((unsigned long)GetCurrentProcessId()), PROVEN_ARG((unsigned long)GetTickCount()));
     if (n <= 0 || (size_t)n >= sizeof(temp)) return false;
     if (MultiByteToWideChar(CP_UTF8, 0, temp, -1, wide_temp, 4096) <= 0 ||
         MultiByteToWideChar(CP_UTF8, 0, final, -1, wide_final, 4096) <= 0) return false;
@@ -553,7 +558,9 @@ static LONG CALLBACK mapping_guard(PEXCEPTION_POINTERS info) {
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
-static void guard_add(const void *view, uint64_t size) {
+static void guard_add(proven_mem_view_t view_view) {
+    const void *view = (const void *)view_view.ptr;
+    uint64_t size = (uint64_t)view_view.size;
     AcquireSRWLockExclusive(&g_guard_lock);
     if (!g_guard_handler) g_guard_handler = AddVectoredExceptionHandler(1, mapping_guard);
     for (int i = 0; i < GUARDED_MAPS; ++i) {
@@ -594,7 +601,7 @@ bool rubraview_pal_fs_map(proven_u8str_view_t path, rubraview_fs_mapping_t *out)
     WCHAR wide[MAX_PATH * 2];
     char narrow[MAX_PATH * 4];
     if (path.size == 0 || path.size >= sizeof(narrow)) return false;
-    memcpy(narrow, path.ptr, path.size);
+    proven_sys_mem_copy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
     if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return false;
     HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -613,7 +620,7 @@ bool rubraview_pal_fs_map(proven_u8str_view_t path, rubraview_fs_mapping_t *out)
     out->data = (const uint8_t*)view;
     out->size = (uint64_t)size.QuadPart;
     out->os = (void*)view;
-    guard_add(view, out->size);
+    guard_add(rubraview_mem_view(view, out->size));
     return true;
 }
 
@@ -636,7 +643,7 @@ static bool utf8_to_wide_buf(proven_u8str_view_t path, WCHAR *out, size_t capaci
 
     char narrow[MAX_PATH * 4];
     if (path.size >= sizeof(narrow)) return false;
-    memcpy(narrow, path.ptr, path.size);
+    proven_sys_mem_copy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
 
     return MultiByteToWideChar(CP_UTF8, 0, narrow, -1, out, (int)capacity) > 0;
@@ -649,7 +656,7 @@ static bool to_wide_double_null(proven_u8str_view_t path, WCHAR *out, size_t cap
 
     char narrow[MAX_PATH * 4];
     if (path.size >= sizeof(narrow)) return false;
-    memcpy(narrow, path.ptr, path.size);
+    proven_sys_mem_copy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
 
     int written = MultiByteToWideChar(CP_UTF8, 0, narrow, -1, out, (int)capacity - 1);
@@ -736,8 +743,8 @@ bool rubraview_pal_fs_copy_tree(proven_u8str_view_t from, proven_u8str_view_t to
     if (!utf8_to_wide_buf(from, wfrom, MAX_PATH * 2)) return false;
     if (!utf8_to_wide_buf(to, wto, MAX_PATH * 2)) return false;
     if (GetFileAttributesW(wto) != INVALID_FILE_ATTRIBUTES) return false;   /* never over what is there */
-    wfrom[wcslen(wfrom) + 1] = 0;   /* SHFileOperation's lists end in two NULs */
-    wto[wcslen(wto) + 1] = 0;
+    wfrom[rubraview_wlen(wfrom) + 1] = 0;   /* SHFileOperation's lists end in two NULs */
+    wto[rubraview_wlen(wto) + 1] = 0;
     SHFILEOPSTRUCTW op = { .wFunc = FO_COPY, .pFrom = wfrom, .pTo = wto,
                            .fFlags = FOF_NOCONFIRMATION | FOF_NOCONFIRMMKDIR | FOF_NOERRORUI | FOF_SILENT };
     return SHFileOperationW(&op) == 0 && !op.fAnyOperationsAborted;
@@ -776,30 +783,32 @@ bool rubraview_pal_fs_make_dirs(proven_u8str_view_t path) {
     return CreateDirectoryW(wide, NULL) != 0 || GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
-char *rubraview_pal_text_decode(const uint8_t *bytes, size_t size, uint32_t codepage, size_t *out_len) {
+char *rubraview_pal_text_decode(proven_mem_view_t bytes_view, uint32_t codepage, size_t *out_len) {
+    const uint8_t *bytes = (const uint8_t *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
     if (out_len) *out_len = 0;
     if (size > 0x7FFFFFFFu) return NULL;
-    if (size == 0) { char *e = (char *)malloc(1); if (e) e[0] = '\0'; return e; }
+    if (size == 0) { char *e = (char *)rubraview_alloc(1); if (e) e[0] = '\0'; return e; }
     int wide_len = MultiByteToWideChar(codepage, 0, (LPCCH)bytes, (int)size, NULL, 0);
     if (wide_len <= 0) return NULL;
-    WCHAR *wide = (WCHAR *)malloc((size_t)wide_len * sizeof(WCHAR));
+    WCHAR *wide = (WCHAR *)rubraview_alloc((size_t)wide_len * sizeof(WCHAR));
     if (!wide) return NULL;
     MultiByteToWideChar(codepage, 0, (LPCCH)bytes, (int)size, wide, wide_len);
     int n = WideCharToMultiByte(CP_UTF8, 0, wide, wide_len, NULL, 0, NULL, NULL);
-    char *out = n > 0 ? (char *)malloc((size_t)n + 1) : NULL;
+    char *out = n > 0 ? (char *)rubraview_alloc((size_t)n + 1) : NULL;
     if (out) {
         WideCharToMultiByte(CP_UTF8, 0, wide, wide_len, out, n, NULL, NULL);
         out[n] = '\0';
         if (out_len) *out_len = (size_t)n;
     }
-    free(wide);
+    rubraview_free(wide);
     return out;
 }
 
 bool rubraview_pal_fs_set_mtime(proven_u8str_view_t path, int64_t mtime) {
     uint8_t mem[8192];
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = mem, .size = sizeof(mem) });
-    proven_u8str_view_t path_z = arena_dup(&arena, (const char *)path.ptr, path.size);
+    proven_u8str_view_t path_z = arena_dup(&arena, rubraview_bytes_view((const char *)path.ptr, path.size));
     WCHAR *wide = path_z.size ? utf8_to_wide(&arena, path_z) : NULL;
     if (!wide) return false;
     HANDLE h = CreateFileW(wide, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
@@ -809,4 +818,25 @@ bool rubraview_pal_fs_set_mtime(proven_u8str_view_t path, int64_t mtime) {
     BOOL ok = SetFileTime(h, NULL, NULL, &ft);
     CloseHandle(h);
     return ok != 0;
+}
+
+/* ---- RV-220 (D-275): wide formatting through proven's formatter (pal_wide.h) ---- */
+
+static _Thread_local char g_wfmt_scratch[RUBRAVIEW_WFMT_SCRATCH];
+
+char *rubraview_wfmt_scratch(void) {
+    return g_wfmt_scratch;
+}
+
+int rubraview_wfmt_finish(wchar_t *dst, size_t cap, int utf8_length, const char *utf8) {
+    if (!dst || cap == 0) return -1;
+    dst[0] = 0;
+    if (utf8_length < 0 || (size_t)utf8_length >= RUBRAVIEW_WFMT_SCRATCH) return -1;
+    proven_size_t written = 0;
+    if (proven_utf8_to_utf16(rubraview_bytes_view(utf8, utf8_length), (proven_u16 *)dst, cap - 1, &written) != PROVEN_OK) {
+        dst[0] = 0;
+        return -1;
+    }
+    dst[written] = 0;
+    return (int)written;
 }

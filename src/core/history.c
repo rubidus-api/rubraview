@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/history.h"
 #include "rubraview/number.h"
 #include "rubraview/path.h"
@@ -16,7 +17,7 @@ static bool entries_reserve(proven_arena_t *arena, rubraview_history_t *history,
 
     rubraview_history_entry_t *data = (rubraview_history_entry_t*)(void*)res.value.ptr;
     if (history->entries && history->count > 0) {
-        memcpy(data, history->entries, history->count * sizeof(rubraview_history_entry_t));
+        proven_sys_mem_copy(data, history->entries, history->count * sizeof(rubraview_history_entry_t));
     }
     history->entries = data;
     history->capacity = new_cap;
@@ -115,7 +116,7 @@ rubraview_history_t rubraview_history_parse(proven_arena_t *arena, proven_u8str_
         /* The format before D-13, still read: under [history], the path
            as the key and `page:58, total:192, time:172...` as the value. */
         if (e->section.size != sizeof(HISTORY_SECTION) - 1 ||
-            memcmp(e->section.ptr, HISTORY_SECTION, sizeof(HISTORY_SECTION) - 1) != 0) {
+            proven_sys_mem_cmp(e->section.ptr, HISTORY_SECTION, sizeof(HISTORY_SECTION) - 1) != 0) {
             continue;
         }
         if (e->key.size == 0) continue;
@@ -190,11 +191,11 @@ proven_u8str_view_t rubraview_history_serialize(proven_arena_t *arena, const rub
     for (size_t i = 0; i < history->count; ++i) {
         const rubraview_history_entry_t *e = &history->entries[i];
         char name[32];
-        int n = snprintf(name, sizeof(name), "entry-%zu", i + 1);
+        int n = rubraview_fmt(name, sizeof(name), "entry-{}", PROVEN_ARG((size_t)(i + 1)));
         if (n <= 0) continue;
         proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n + 1);
         if (!proven_is_ok(res.err)) break;
-        memcpy(res.value.ptr, name, (size_t)n + 1);
+        proven_sys_mem_copy(res.value.ptr, name, (size_t)n + 1);
         proven_u8str_view_t section = { .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = (size_t)n };
 
         rubraview_ini_set_string(arena, &doc, section, PROVEN_LIT("path"), e->path);
@@ -267,22 +268,22 @@ proven_u8str_view_t rubraview_recent_serialize(proven_arena_t *arena, const rubr
     rubraview_ini_set_int(arena, &doc, PROVEN_LIT("cleared"), PROVEN_LIT("time"), recent->cleared);
     for (size_t i = 0; i < recent->list.count; ++i) {
         char name[32];
-        int n = snprintf(name, sizeof(name), "entry-%zu", i + 1);
+        int n = rubraview_fmt(name, sizeof(name), "entry-{}", PROVEN_ARG((size_t)(i + 1)));
         if (n <= 0) continue;
         proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n + 1);
         if (!proven_is_ok(res.err)) break;
-        memcpy(res.value.ptr, name, (size_t)n + 1);
+        proven_sys_mem_copy(res.value.ptr, name, (size_t)n + 1);
         proven_u8str_view_t section = { .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = (size_t)n };
         rubraview_ini_set_string(arena, &doc, section, PROVEN_LIT("path"), recent->list.entries[i].path);
         rubraview_ini_set_int(arena, &doc, section, PROVEN_LIT("time"), recent->list.entries[i].timestamp);
     }
     for (size_t i = 0; i < recent->removed.count; ++i) {
         char name[32];
-        int n = snprintf(name, sizeof(name), "removed-%zu", i + 1);
+        int n = rubraview_fmt(name, sizeof(name), "removed-{}", PROVEN_ARG((size_t)(i + 1)));
         if (n <= 0) continue;
         proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n + 1);
         if (!proven_is_ok(res.err)) break;
-        memcpy(res.value.ptr, name, (size_t)n + 1);
+        proven_sys_mem_copy(res.value.ptr, name, (size_t)n + 1);
         proven_u8str_view_t section = { .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = (size_t)n };
         rubraview_ini_set_string(arena, &doc, section, PROVEN_LIT("path"), recent->removed.entries[i].path);
         rubraview_ini_set_int(arena, &doc, section, PROVEN_LIT("time"), recent->removed.entries[i].timestamp);
@@ -330,7 +331,7 @@ static bool history_rehome(proven_arena_t *arena, rubraview_history_t *h) {
         if (moved[i].path.size == 0) continue;
         proven_result_mem_mut_t p = proven_arena_alloc(arena, moved[i].path.size);
         if (!proven_is_ok(p.err)) return false;
-        memcpy(p.value.ptr, moved[i].path.ptr, moved[i].path.size);
+        proven_sys_mem_copy(p.value.ptr, moved[i].path.ptr, moved[i].path.size);
         moved[i].path = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)p.value.ptr, .size = moved[i].path.size };
     }
     *h = (rubraview_history_t){ .entries = moved, .count = h->count, .capacity = h->count };
@@ -421,7 +422,7 @@ static proven_u8str_view_t folder_list_build(char *buffer, size_t capacity, prov
         if (piece.size == 0) continue;
         if (len + (len ? 1 : 0) + piece.size + 1 > capacity) { buffer[0] = '\0'; return none; }
         if (len) buffer[len++] = '|';
-        memcpy(buffer + len, piece.ptr, piece.size);
+        proven_sys_mem_copy(buffer + len, piece.ptr, piece.size);
         len += piece.size;
     }
     buffer[len] = '\0';

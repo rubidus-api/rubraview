@@ -1,5 +1,6 @@
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/core.h"
 #include <windows.h>
 #include <mmreg.h>
 #include <mmdeviceapi.h>
@@ -201,7 +202,7 @@ bool rubraview_pal_audio_last_failure(char *buffer, size_t capacity) {
     uint32_t hr = atomic_load_explicit(&last_open_hr, memory_order_relaxed);
     const char *step = last_open_step;
     if (!buffer || capacity == 0 || hr == 0 || !step) return false;
-    snprintf(buffer, capacity, "%s 0x%08lX", step, (unsigned long)hr);
+    rubraview_fmt(buffer, capacity, "{} 0x{:08X}", PROVEN_ARG(step), PROVEN_ARG((unsigned long)hr));
     return true;
 }
 
@@ -283,8 +284,8 @@ static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
     float *scratch = (float*)rubraview_malloc_product(scratch_frames, out->channels, sizeof(float));
     if (!scratch) return false;
     /* The equaliser, the gain and night mode, owned by this thread. */
-    rubraview_audio_chain_t *chain = (rubraview_audio_chain_t*)malloc(sizeof(*chain));
-    if (!chain) { free(scratch); return false; }
+    rubraview_audio_chain_t *chain = (rubraview_audio_chain_t*)rubraview_alloc(sizeof(*chain));
+    if (!chain) { rubraview_free(scratch); return false; }
     rubraview_audio_chain_init(chain, (double)out->rate, out->channels);
     LONG chain_seen = 0;
     publish(out, base);
@@ -390,8 +391,8 @@ static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
                               memory_order_release);
     }
     if (started && !lost) IAudioClient_Stop(client);
-    free(chain);
-    free(scratch);
+    rubraview_free(chain);
+    rubraview_free(scratch);
     /* What the device had queued is gone with it: go on from the ring. */
     *io_base = base + source_frames / (double)out->rate;
     return lost;
@@ -497,13 +498,13 @@ void rubraview_pal_audio_close(rubraview_audio_out_t *out) {
     }
     if (out->ready) CloseHandle(out->ready);
     if (out->wake) CloseHandle(out->wake);
-    free(out);
+    rubraview_free(out);
 }
 
 rubraview_audio_out_t *rubraview_pal_audio_open(uint32_t sample_rate, uint32_t channels,
                                                 rubraview_pcm_ring_t *ring) {
     if (!ring || sample_rate == 0 || channels == 0 || channels > 8) return NULL;
-    rubraview_audio_out_t *out = (rubraview_audio_out_t*)calloc(1, sizeof(*out));
+    rubraview_audio_out_t *out = (rubraview_audio_out_t*)rubraview_alloc_zero(1, sizeof(*out));
     if (!out) return NULL;
     out->rate = sample_rate;
     out->channels = channels;

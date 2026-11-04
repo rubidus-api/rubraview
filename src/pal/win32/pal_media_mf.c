@@ -1,5 +1,6 @@
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/core.h"
 #include <windows.h>
 #include <mfapi.h>
 #include <mfidl.h>
@@ -222,9 +223,9 @@ static proven_u8str_view_t mf_codec_name(const GUID *subtype, char *buffer, size
     uint32_t id = (uint32_t)subtype->Data1;
     for (size_t i = 0; i < sizeof(AUDIO) / sizeof(AUDIO[0]); ++i) {
         if (AUDIO[i].id == id) {
-            size_t len = strlen(AUDIO[i].name);
+            size_t len = proven_cstr_len(AUDIO[i].name);
             if (len >= capacity) len = capacity - 1;
-            memcpy(buffer, AUDIO[i].name, len);
+            proven_sys_mem_copy(buffer, AUDIO[i].name, len);
             buffer[len] = '\0';
             return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = len };
         }
@@ -238,7 +239,7 @@ static proven_u8str_view_t mf_codec_name(const GUID *subtype, char *buffer, size
         }
     }
     if (capacity < 5) { buffer[0] = '\0'; return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 0 }; }
-    memcpy(buffer, chars, 4);
+    proven_sys_mem_copy(buffer, chars, 4);
     buffer[4] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 4 };
 }
@@ -295,14 +296,14 @@ static void mf_detail_codec(rubraview_details_t *d, const GUID *subtype, bool vi
     char code[16];
     proven_u8str_view_t four = mf_codec_name(subtype, code, sizeof(code));
     const char *words = mf_codec_words(subtype);
-    if (words && four.size && video) rubraview_details_add(d, "Codec", "%s (%s)", words, code);
-    else if (words) rubraview_details_add(d, "Codec", "%s", words);
-    else if (four.size) rubraview_details_add(d, "Codec", "%s", code);
-    if (!video && (uint32_t)subtype->Data1 <= 0xFFFF) rubraview_details_add(d, "Format tag", "0x%04X", (unsigned)subtype->Data1);
+    if (words && four.size && video) rubraview_details_add(d, "Codec", "{} ({})", PROVEN_ARG(words), PROVEN_ARG(code));
+    else if (words) rubraview_details_add(d, "Codec", "{}", PROVEN_ARG(words));
+    else if (four.size) rubraview_details_add(d, "Codec", "{}", PROVEN_ARG(code));
+    if (!video && (uint32_t)subtype->Data1 <= 0xFFFF) rubraview_details_add(d, "Format tag", "0x{:04X}", PROVEN_ARG((unsigned)subtype->Data1));
     if (!words && !four.size) {
-        rubraview_details_add(d, "Codec", "{%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}", (unsigned long)subtype->Data1,
-                              subtype->Data2, subtype->Data3, subtype->Data4[0], subtype->Data4[1], subtype->Data4[2],
-                              subtype->Data4[3], subtype->Data4[4], subtype->Data4[5], subtype->Data4[6], subtype->Data4[7]);
+        rubraview_details_add(d, "Codec", "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}", PROVEN_ARG((unsigned long)subtype->Data1),
+                              PROVEN_ARG((unsigned)subtype->Data2), PROVEN_ARG((unsigned)subtype->Data3), PROVEN_ARG((unsigned)subtype->Data4[0]), PROVEN_ARG((unsigned)subtype->Data4[1]), PROVEN_ARG((unsigned)subtype->Data4[2]),
+                              PROVEN_ARG((unsigned)subtype->Data4[3]), PROVEN_ARG((unsigned)subtype->Data4[4]), PROVEN_ARG((unsigned)subtype->Data4[5]), PROVEN_ARG((unsigned)subtype->Data4[6]), PROVEN_ARG((unsigned)subtype->Data4[7]));
     }
 }
 
@@ -316,65 +317,65 @@ static void mf_detail_video(mf_media_t *m, IMFMediaType *type, const GUID *subty
     UINT32 profile = 0, level = 0;
     mf_u32(type, &MF_MT_MPEG2_PROFILE, &profile);
     mf_u32(type, &MF_MT_MPEG2_LEVEL, &level);
-    if (avc && rubraview_detail_h264_profile(b, sizeof(b), profile, level)) rubraview_details_add(d, "Profile", "%s", b);
-    else if (hevc && rubraview_detail_hevc_profile(b, sizeof(b), profile, level)) rubraview_details_add(d, "Profile", "%s", b);
-    else if (profile || level) rubraview_details_add(d, "Profile", "profile %u, level %u", (unsigned)profile, (unsigned)level);
+    if (avc && rubraview_detail_h264_profile(b, sizeof(b), profile, level)) rubraview_details_add(d, "Profile", "{}", PROVEN_ARG(b));
+    else if (hevc && rubraview_detail_hevc_profile(b, sizeof(b), profile, level)) rubraview_details_add(d, "Profile", "{}", PROVEN_ARG(b));
+    else if (profile || level) rubraview_details_add(d, "Profile", "profile {}, level {}", PROVEN_ARG((unsigned)profile), PROVEN_ARG((unsigned)level));
     UINT32 width = 0, height = 0;
-    if (mf_pair(type, &MF_MT_FRAME_SIZE, &width, &height)) rubraview_details_add(d, "Frame", "%u x %u", (unsigned)width, (unsigned)height);
+    if (mf_pair(type, &MF_MT_FRAME_SIZE, &width, &height)) rubraview_details_add(d, "Frame", "{} x {}", PROVEN_ARG((unsigned)width), PROVEN_ARG((unsigned)height));
     if (mf_pair(type, &MF_MT_PIXEL_ASPECT_RATIO, &a, &c) && a && c) {
         if (a == c) rubraview_details_add(d, "Pixel shape", "square (1:1)");
-        else rubraview_details_add(d, "Pixel shape", "%u:%u, shown as %.0f x %u", (unsigned)a, (unsigned)c,
-                                   (double)width * (double)a / (double)c, (unsigned)height);
+        else rubraview_details_add(d, "Pixel shape", "{}:{}, shown as {:.0} x {}", PROVEN_ARG((unsigned)a), PROVEN_ARG((unsigned)c),
+                                   PROVEN_ARG((double)width * (double)a / (double)c), PROVEN_ARG((unsigned)height));
     }
     UINT32 num = 0, den = 0;
     double fps = 0.0;
     if (mf_pair(type, &MF_MT_FRAME_RATE, &num, &den) && num && den) {
         fps = (double)num / (double)den;
-        rubraview_details_add(d, "Frame rate", "%.3f a second (%u/%u)", fps, (unsigned)num, (unsigned)den);
+        rubraview_details_add(d, "Frame rate", "{:.3} a second ({}/{})", PROVEN_ARG((double)fps), PROVEN_ARG((unsigned)num), PROVEN_ARG((unsigned)den));
     }
     if (mf_u32(type, &MF_MT_INTERLACE_MODE, &v) && v) {
         static const char *const MODE[8] = { "", "", "progressive", "interlaced, upper field first", "interlaced, lower field first",
                                              "one field a sample, upper first", "one field a sample, lower first", "mixed" };
-        if (v < 8) rubraview_details_add(d, "Scan", "%s", MODE[v]);
+        if (v < 8) rubraview_details_add(d, "Scan", "{}", PROVEN_ARG(MODE[v]));
     }
     UINT32 bitrate = 0;
     if (mf_u32(type, &MF_MT_AVG_BITRATE, &bitrate) && bitrate) {
         rubraview_detail_bitrate(b, sizeof(b), (double)bitrate);
-        rubraview_details_add(d, "Bit rate", "%s", b);
+        rubraview_details_add(d, "Bit rate", "{}", PROVEN_ARG(b));
         if (width && height && fps > 0.0) {
             double per_pixel = (double)bitrate / ((double)width * (double)height * fps);
             /* Against 4:2:0 at eight bits, twelve bits a pixel: what most films are before they are packed. */
-            rubraview_details_add(d, "Compression", "%.3f bits a pixel, 1 : %.0f of 8-bit 4:2:0", per_pixel, 12.0 / per_pixel);
+            rubraview_details_add(d, "Compression", "{:.3} bits a pixel, 1 : {:.0} of 8-bit 4:2:0", PROVEN_ARG((double)per_pixel), PROVEN_ARG((double)(12.0 / per_pixel)));
         }
-        if (seconds > 0.0) rubraview_details_add(d, "Stream size", "about %.1f MB", (double)bitrate / 8.0 * seconds / 1048576.0);
+        if (seconds > 0.0) rubraview_details_add(d, "Stream size", "about {:.1} MB", PROVEN_ARG((double)bitrate / 8.0 * seconds / 1048576.0));
     }
-    if (mf_u32(type, &MF_MT_MAX_KEYFRAME_SPACING, &v) && v) rubraview_details_add(d, "Key frames", "at most %u frames apart", (unsigned)v);
+    if (mf_u32(type, &MF_MT_MAX_KEYFRAME_SPACING, &v) && v) rubraview_details_add(d, "Key frames", "at most {} frames apart", PROVEN_ARG((unsigned)v));
     if (mf_u32(type, &MF_MT_VIDEO_NOMINAL_RANGE, &v) && v) {
         static const char *const RANGE[5] = { "", "full (0-255)", "limited (16-235)", "48-208", "64-127" };
-        if (v < 5) rubraview_details_add(d, "Colour range", "%s", RANGE[v]);
+        if (v < 5) rubraview_details_add(d, "Colour range", "{}", PROVEN_ARG(RANGE[v]));
     }
     if (mf_u32(type, &MF_MT_VIDEO_PRIMARIES, &v) && v) {
         static const char *const NAME[] = { "", "reserved", "BT.709", "BT.470-2 System M", "BT.470-2 System B/G", "SMPTE 170M", "SMPTE 240M",
                                             "EBU 3213", "SMPTE C", "BT.2020", "CIE XYZ", "DCI-P3", "ACES" };
-        if (v < sizeof(NAME) / sizeof(NAME[0])) rubraview_details_add(d, "Colour primaries", "%s", NAME[v]);
-        else rubraview_details_add(d, "Colour primaries", "%u", (unsigned)v);
+        if (v < sizeof(NAME) / sizeof(NAME[0])) rubraview_details_add(d, "Colour primaries", "{}", PROVEN_ARG(NAME[v]));
+        else rubraview_details_add(d, "Colour primaries", "{}", PROVEN_ARG((unsigned)v));
     }
     if (mf_u32(type, &MF_MT_TRANSFER_FUNCTION, &v) && v) {
         static const char *const NAME[] = { "", "linear", "gamma 1.8", "gamma 2.0", "gamma 2.2", "BT.709", "SMPTE 240M", "sRGB", "gamma 2.8",
                                             "log 100:1", "log 316:1", "BT.709 symmetric", "BT.2020 constant luminance", "BT.2020",
                                             "gamma 2.6", "SMPTE ST 2084 (PQ, HDR10)", "HLG (BT.2100)", "gamma 2.4 (BT.1886)" };
-        if (v < sizeof(NAME) / sizeof(NAME[0])) rubraview_details_add(d, "Transfer", "%s", NAME[v]);
-        else rubraview_details_add(d, "Transfer", "%u", (unsigned)v);
+        if (v < sizeof(NAME) / sizeof(NAME[0])) rubraview_details_add(d, "Transfer", "{}", PROVEN_ARG(NAME[v]));
+        else rubraview_details_add(d, "Transfer", "{}", PROVEN_ARG((unsigned)v));
     }
     if (mf_u32(type, &MF_MT_YUV_MATRIX, &v) && v) {
         static const char *const NAME[] = { "", "BT.709", "BT.601", "SMPTE 240M", "BT.2020", "BT.2020 constant luminance" };
-        if (v < sizeof(NAME) / sizeof(NAME[0])) rubraview_details_add(d, "Colour matrix", "%s", NAME[v]);
+        if (v < sizeof(NAME) / sizeof(NAME[0])) rubraview_details_add(d, "Colour matrix", "{}", PROVEN_ARG(NAME[v]));
     }
-    if (mf_u32(type, &MF_MT_VIDEO_CHROMA_SITING, &v) && v) rubraview_details_add(d, "Chroma siting", "0x%X", (unsigned)v);
-    if (mf_u32(type, &MF_MT_VIDEO_ROTATION, &v) && v) rubraview_details_add(d, "Rotation", "%u degrees", (unsigned)v);
+    if (mf_u32(type, &MF_MT_VIDEO_CHROMA_SITING, &v) && v) rubraview_details_add(d, "Chroma siting", "0x{:X}", PROVEN_ARG((unsigned)v));
+    if (mf_u32(type, &MF_MT_VIDEO_ROTATION, &v) && v) rubraview_details_add(d, "Rotation", "{} degrees", PROVEN_ARG((unsigned)v));
     UINT32 blob = 0;
     if (SUCCEEDED(IMFMediaType_GetBlobSize(type, &MF_MT_MPEG_SEQUENCE_HEADER, &blob)) && blob) {
-        rubraview_details_add(d, "Codec setup", "%u bytes of headers (parameter sets)", (unsigned)blob);
+        rubraview_details_add(d, "Codec setup", "{} bytes of headers (parameter sets)", PROVEN_ARG((unsigned)blob));
     }
 }
 
@@ -386,35 +387,35 @@ static void mf_detail_audio(mf_media_t *m, IMFMediaType *type, const GUID *subty
     uint32_t id = (uint32_t)subtype->Data1;
     if (id == 0x1610 || id == 0x00FF || id == 0x1600 || id == 0x1602) {
         if (mf_u32(type, &MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, &v) && rubraview_detail_aac_profile(b, sizeof(b), v)) {
-            rubraview_details_add(d, "Profile", "%s", b);
+            rubraview_details_add(d, "Profile", "{}", PROVEN_ARG(b));
         }
         if (mf_u32(type, &MF_MT_AAC_PAYLOAD_TYPE, &v)) {
             static const char *const PAYLOAD[4] = { "raw AAC frames", "ADTS", "ADIF", "LOAS / LATM" };
-            if (v < 4) rubraview_details_add(d, "Framing", "%s", PAYLOAD[v]);
+            if (v < 4) rubraview_details_add(d, "Framing", "{}", PROVEN_ARG(PAYLOAD[v]));
         }
     }
     mf_u32(type, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &rate);
     mf_u32(type, &MF_MT_AUDIO_NUM_CHANNELS, &channels);
     mf_u32(type, &MF_MT_AUDIO_BITS_PER_SAMPLE, &bits);
     mf_u32(type, &MF_MT_AUDIO_CHANNEL_MASK, &mask);
-    if (rate) rubraview_details_add(d, "Sample rate", "%u Hz (as the header says)", (unsigned)rate);
-    if (channels && rubraview_detail_channels(b, sizeof(b), channels, mask)) rubraview_details_add(d, "Channels", "%u: %s", (unsigned)channels, b);
-    if (bits) rubraview_details_add(d, "Bits a sample", "%u", (unsigned)bits);
+    if (rate) rubraview_details_add(d, "Sample rate", "{} Hz (as the header says)", PROVEN_ARG((unsigned)rate));
+    if (channels && rubraview_detail_channels(b, sizeof(b), channels, mask)) rubraview_details_add(d, "Channels", "{}: {}", PROVEN_ARG((unsigned)channels), PROVEN_ARG(b));
+    if (bits) rubraview_details_add(d, "Bits a sample", "{}", PROVEN_ARG((unsigned)bits));
     if (mf_u32(type, &MF_MT_AUDIO_AVG_BYTES_PER_SECOND, &bytes) && bytes) {
         rubraview_detail_bitrate(b, sizeof(b), (double)bytes * 8.0);
-        rubraview_details_add(d, "Bit rate", "%s", b);
+        rubraview_details_add(d, "Bit rate", "{}", PROVEN_ARG(b));
         if (rate && channels) {
             /* Against sixteen-bit PCM at the same rate and channels. */
             double pcm = (double)rate * (double)channels * 16.0;
-            rubraview_details_add(d, "Compression", "1 : %.1f of 16-bit PCM (%.0f %%)", pcm / ((double)bytes * 8.0), (double)bytes * 800.0 / pcm);
+            rubraview_details_add(d, "Compression", "1 : {:.1} of 16-bit PCM ({:.0} %)", PROVEN_ARG((double)(pcm / ((double)bytes * 8.0))), PROVEN_ARG((double)bytes * 800.0 / pcm));
         }
-        if (seconds > 0.0) rubraview_details_add(d, "Stream size", "about %.1f MB", (double)bytes * seconds / 1048576.0);
+        if (seconds > 0.0) rubraview_details_add(d, "Stream size", "about {:.1} MB", PROVEN_ARG((double)bytes * seconds / 1048576.0));
     }
-    if (mf_u32(type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, &v) && v > 1) rubraview_details_add(d, "Block", "%u bytes", (unsigned)v);
-    if (mf_u32(type, &MF_MT_AUDIO_SAMPLES_PER_BLOCK, &v) && v) rubraview_details_add(d, "Samples a block", "%u", (unsigned)v);
+    if (mf_u32(type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, &v) && v > 1) rubraview_details_add(d, "Block", "{} bytes", PROVEN_ARG((unsigned)v));
+    if (mf_u32(type, &MF_MT_AUDIO_SAMPLES_PER_BLOCK, &v) && v) rubraview_details_add(d, "Samples a block", "{}", PROVEN_ARG((unsigned)v));
     UINT32 blob = 0;
     if (SUCCEEDED(IMFMediaType_GetBlobSize(type, &MF_MT_USER_DATA, &blob)) && blob) {
-        rubraview_details_add(d, "Codec setup", "%u bytes", (unsigned)blob);
+        rubraview_details_add(d, "Codec setup", "{} bytes", PROVEN_ARG((unsigned)blob));
     }
 }
 
@@ -425,13 +426,13 @@ static void mf_detail_stream(mf_media_t *m, IMFSourceReader *reader, DWORD strea
     IMFMediaType_GetGUID(type, &MF_MT_MAJOR_TYPE, &major);
     IMFMediaType_GetGUID(type, &MF_MT_SUBTYPE, &subtype);
     bool video = IsEqualGUID(&major, &MFMediaType_Video), audio = IsEqualGUID(&major, &MFMediaType_Audio);
-    rubraview_details_heading(d, "%s stream %u", video ? "Picture" : audio ? "Sound" : "Other", (unsigned)stream);
+    rubraview_details_heading(d, "{} stream {}", PROVEN_ARG(video ? "Picture" : audio ? "Sound" : "Other"), PROVEN_ARG((unsigned)stream));
     char text[64];
     proven_u8str_view_t language = mf_stream_string(reader, stream, &MF_SD_LANGUAGE, text, sizeof(text));
-    if (language.size) rubraview_details_add(d, "Language", "%s", text);
+    if (language.size) rubraview_details_add(d, "Language", "{}", PROVEN_ARG(text));
     proven_u8str_view_t title = mf_stream_string(reader, stream, &MF_SD_STREAM_NAME, text, sizeof(text));
-    if (title.size) rubraview_details_add(d, "Name", "%s", text);
-    if (audio || video) rubraview_details_add(d, "Played", "%s", playing ? "yes" : "no");
+    if (title.size) rubraview_details_add(d, "Name", "{}", PROVEN_ARG(text));
+    if (audio || video) rubraview_details_add(d, "Played", "{}", PROVEN_ARG(playing ? "yes" : "no"));
     if (video) mf_detail_video(m, type, &subtype, seconds);
     else if (audio) mf_detail_audio(m, type, &subtype, seconds);
     UINT32 transfer = 0;
@@ -725,7 +726,7 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
                alone. A file that is only sound still "plays" — on the
                wall clock, silently — so its time and its end are right. */
             IMFSourceReader_SetStreamSelection(reader, audio_stream, FALSE);
-            free(m->pcm_storage);
+            rubraview_free(m->pcm_storage);
             m->pcm_storage = NULL;
         }
     }
@@ -754,7 +755,7 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
             pv.vt == VT_LPWSTR && pv.pwszVal) {
             char mime[96];
             if (WideCharToMultiByte(CP_UTF8, 0, pv.pwszVal, -1, mime, sizeof(mime), NULL, NULL) > 0) {
-                rubraview_details_add(&m->details, "Kind", "%s", mime);
+                rubraview_details_add(&m->details, "Kind", "{}", PROVEN_ARG(mime));
             }
         }
         PropVariantClear(&pv);
@@ -767,7 +768,7 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
                 pv.vt == VT_UI4 && pv.ulVal) {
                 char rate[48];
                 rubraview_detail_bitrate(rate, sizeof(rate), (double)pv.ulVal);
-                rubraview_details_add(&m->details, RATES[i].label, "%s", rate);
+                rubraview_details_add(&m->details, RATES[i].label, "{}", PROVEN_ARG(rate));
             }
             PropVariantClear(&pv);
         }
@@ -779,17 +780,17 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
             count++;
             if (type) IMFMediaType_Release(type);
         }
-        rubraview_details_add(&m->details, "Streams", "%u", (unsigned)count);
+        rubraview_details_add(&m->details, "Streams", "{}", PROVEN_ARG((unsigned)count));
         for (DWORD s = 0; s < count; ++s) {
             IMFMediaType *type = NULL;
             if (FAILED(IMFSourceReader_GetNativeMediaType(reader, s, 0, &type)) || !type) continue;
             mf_detail_stream(m, reader, s, type, s == video_stream || s == m->audio_stream, duration);
             if (s == m->audio_stream && audio_rate) {
-                rubraview_details_add(&m->details, "Decoded as", "%u Hz, %u channel%s, 32-bit float", (unsigned)audio_rate,
-                                      (unsigned)audio_channels, audio_channels == 1 ? "" : "s");
+                rubraview_details_add(&m->details, "Decoded as", "{} Hz, {} channel{}, 32-bit float", PROVEN_ARG((unsigned)audio_rate),
+                                      PROVEN_ARG((unsigned)audio_channels), PROVEN_ARG(audio_channels == 1 ? "" : "s"));
             }
             if (s == video_stream) {
-                rubraview_details_add(&m->details, "Decoded as", "%d x %d, 32-bit BGRA", (int)width, (int)height);
+                rubraview_details_add(&m->details, "Decoded as", "{} x {}, 32-bit BGRA", PROVEN_ARG((int)width), PROVEN_ARG((int)height));
             }
             IMFMediaType_Release(type);
         }
@@ -832,7 +833,7 @@ static bool copy_sample(mf_media_t *m, IMFSample *sample, uint8_t *dst) {
         LONG pitch = 0;
         if (SUCCEEDED(IMF2DBuffer_Lock2D(two_d, &scan0, &pitch)) && scan0) {
             for (int32_t y = 0; y < m->height; ++y) {
-                memcpy(dst + (size_t)y * row, scan0 + (ptrdiff_t)y * pitch, row);
+                proven_sys_mem_copy(dst + (size_t)y * row, scan0 + (ptrdiff_t)y * pitch, row);
             }
             IMF2DBuffer_Unlock2D(two_d);
             ok = true;
@@ -847,7 +848,7 @@ static bool copy_sample(mf_media_t *m, IMFSample *sample, uint8_t *dst) {
             if (abs_stride >= row && (size_t)cur_len >= abs_stride * (size_t)m->height) {
                 for (int32_t y = 0; y < m->height; ++y) {
                     int32_t src_y = stride < 0 ? (m->height - 1 - y) : y;
-                    memcpy(dst + (size_t)y * row, data + (size_t)src_y * abs_stride, row);
+                    proven_sys_mem_copy(dst + (size_t)y * row, data + (size_t)src_y * abs_stride, row);
                 }
                 ok = true;
             }
@@ -909,7 +910,7 @@ static bool store_gpu_picture(mf_media_t *m, media_slot_t *slot, ID3D11Texture2D
             if (SUCCEEDED(ID3D11DeviceContext_Map(context, (ID3D11Resource*)copy, 0, D3D11_MAP_READ, 0, &mapped))) {
                 const size_t row = (size_t)m->width * 4u;
                 for (int32_t y = 0; y < m->height; ++y) {
-                    memcpy(slot->pixels + (size_t)y * row, (const uint8_t*)mapped.pData + (size_t)y * mapped.RowPitch, row);
+                    proven_sys_mem_copy(slot->pixels + (size_t)y * row, (const uint8_t*)mapped.pData + (size_t)y * mapped.RowPitch, row);
                 }
                 ID3D11DeviceContext_Unmap(context, (ID3D11Resource*)copy, 0);
                 slot->on_gpu = false;
@@ -1038,14 +1039,14 @@ static bool mf_reopen_audio(mf_media_t *m, UINT32 rate, UINT32 channels) {
     AcquireSRWLockExclusive(&m->audio_lock);
     rubraview_pal_audio_close(m->audio);
     m->audio = NULL;
-    free(m->pcm_storage);
+    rubraview_free(m->pcm_storage);
     size_t capacity = (size_t)rate * channels * PCM_RING_SECONDS;
     m->pcm_storage = (float*)rubraview_malloc_product(capacity, sizeof(float), 1);
     if (m->pcm_storage && rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
         m->audio = rubraview_pal_audio_open(rate, channels, &m->pcm);
     }
     if (!m->audio) {
-        free(m->pcm_storage);
+        rubraview_free(m->pcm_storage);
         m->pcm_storage = NULL;
         m->audio_stream = NO_STREAM;
         ReleaseSRWLockExclusive(&m->audio_lock);
@@ -1250,10 +1251,10 @@ static bool make_manager(mf_media_t *m) {
 static void undo_open(mf_media_t *m) {
     rubraview_pal_audio_close(m->audio);
     m->audio = NULL;
-    free(m->pcm_storage);
+    rubraview_free(m->pcm_storage);
     m->pcm_storage = NULL;
     for (int i = 0; i < SLOT_COUNT; ++i) {
-        free(m->slots[i].pixels);
+        rubraview_free(m->slots[i].pixels);
         m->slots[i].pixels = NULL;
     }
     m->video_stream = NO_STREAM;
@@ -1363,19 +1364,19 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
     if (opened && m->video_stream != NO_STREAM) {
         rubraview_media_info_t *in = &m->info;
         if (m->gpu_active) {
-            snprintf(in->path_decoder, sizeof(in->path_decoder), "%s", N_("Media Foundation's decoder on the graphics card (DXVA, Direct3D 11)"));
-            snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("Media Foundation's video processor, on the card, to BGRA"));
-            snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("a shared texture (keyed mutex), copied on the card into the page's"));
+            rubraview_fmt(in->path_decoder, sizeof(in->path_decoder), "{}", PROVEN_ARG(N_("Media Foundation's decoder on the graphics card (DXVA, Direct3D 11)")));
+            rubraview_fmt(in->path_colours, sizeof(in->path_colours), "{}", PROVEN_ARG(N_("Media Foundation's video processor, on the card, to BGRA")));
+            rubraview_fmt(in->path_handover, sizeof(in->path_handover), "{}", PROVEN_ARG(N_("a shared texture (keyed mutex), copied on the card into the page's")));
         } else {
-            snprintf(in->path_decoder, sizeof(in->path_decoder), "%s", N_("Media Foundation's decoder on the processor"));
-            snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("Media Foundation's video processor, on the processor, to RGB32"));
-            snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("pixels written into the page's texture, a picture at a time"));
-            snprintf(in->path_why_software, sizeof(in->path_why_software), "%s",
-                     m->gpu.mode <= 0 ? N_("GPU decoding is off (Settings > Video)")
+            rubraview_fmt(in->path_decoder, sizeof(in->path_decoder), "{}", PROVEN_ARG(N_("Media Foundation's decoder on the processor")));
+            rubraview_fmt(in->path_colours, sizeof(in->path_colours), "{}", PROVEN_ARG(N_("Media Foundation's video processor, on the processor, to RGB32")));
+            rubraview_fmt(in->path_handover, sizeof(in->path_handover), "{}", PROVEN_ARG(N_("pixels written into the page's texture, a picture at a time")));
+            rubraview_fmt(in->path_why_software, sizeof(in->path_why_software), "{}",
+                     PROVEN_ARG(m->gpu.mode <= 0 ? N_("GPU decoding is off (Settings > Video)")
                      : !m->gpu.device ? N_("no Direct3D 11 device for decoding was made")
                      : !wanted_gpu ? N_("the graphics card offers no video decoders")
                      : !tried_gpu ? N_("Media Foundation's device manager could not take the card")
-                     : N_("the card could not decode this film; decoded on the processor instead"));
+                     : N_("the card could not decode this film; decoded on the processor instead")));
         }
     }
     SetEvent(m->opened);
@@ -1401,16 +1402,16 @@ static void mf_close(void *handle) {
     if (media->opened) CloseHandle(media->opened);
     /* The output thread reads the PCM storage, so it goes before the storage does. */
     rubraview_pal_audio_close(media->audio);
-    free(media->pcm_storage);
+    rubraview_free(media->pcm_storage);
     for (int i = 0; i < SLOT_COUNT; ++i) {
-        free(media->slots[i].pixels);
+        rubraview_free(media->slots[i].pixels);
         if (media->slots[i].mutex) IDXGIKeyedMutex_Release(media->slots[i].mutex);
         if (media->slots[i].texture) ID3D11Texture2D_Release(media->slots[i].texture);
     }
     if (media->manager) IMFDXGIDeviceManager_Release(media->manager);
     /* The decoder's device outlives a renderer rebuilt meanwhile: held here. */
     if (media->gpu.device) IUnknown_Release((IUnknown*)media->gpu.device);
-    free(media);
+    rubraview_free(media);
 }
 
 static void *mf_open(proven_u8str_view_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
@@ -1418,17 +1419,17 @@ static void *mf_open(proven_u8str_view_t path, rubraview_media_failure_t *out_fa
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
     if (!mf_load() || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
 
-    mf_media_t *m = (mf_media_t*)calloc(1, sizeof(*m));
+    mf_media_t *m = (mf_media_t*)rubraview_alloc_zero(1, sizeof(*m));
     if (m) InitializeSRWLock(&m->audio_lock);
     if (!m) return NULL;
     if (gpu) m->gpu = *gpu;
     if (m->gpu.device) IUnknown_AddRef((IUnknown*)m->gpu.device);
 
     char narrow[MAX_PATH * 4];
-    memcpy(narrow, path.ptr, path.size);
+    proven_sys_mem_copy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
     if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, m->path, (int)(sizeof(m->path) / sizeof(m->path[0]))) <= 0) {
-        free(m);
+        rubraview_free(m);
         return NULL;
     }
 

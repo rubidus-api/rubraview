@@ -42,8 +42,8 @@ void draw_files_window(app_state_t *app) {
     proven_u8str_view_t what = app->list_is_set ? TU8("Playlist")
                  : in_archive ? rubraview_path_basename(app->source.archive_path)
                  : rubraview_path_basename(app->source_dir);
-    int hn = current >= 0 ? snprintf(head, sizeof(head), "%d / %zu   %.*s", current + 1, count, (int)(what.size < 560 ? what.size : 560), what.ptr)
-                          : snprintf(head, sizeof(head), "%zu   %.*s", count, (int)(what.size < 560 ? what.size : 560), what.ptr);
+    int hn = current >= 0 ? rubraview_fmt(head, sizeof(head), "{} / {}   {}", PROVEN_ARG((int)(current + 1)), PROVEN_ARG((size_t)count), PROVEN_ARG(rubraview_bytes_view(what.ptr, (int)(what.size < 560 ? what.size : 560))))
+                          : rubraview_fmt(head, sizeof(head), "{}   {}", PROVEN_ARG((size_t)count), PROVEN_ARG(rubraview_bytes_view(what.ptr, (int)(what.size < 560 ? what.size : 560))));
     rubraview_pal_rect_t head_box = { lw->x, lw->y, lw->width, lw->title_height };
     rubraview_pal_render_fill_rect(r, head_box, COLOR_TILE_FILL, 0.0);
     rubraview_pal_rect_t head_text = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->row_height * 0.8, lw->title_height };
@@ -82,7 +82,7 @@ void draw_files_window(app_state_t *app) {
         }
         char line[640];
         proven_u8str_view_t name = page_display_name(app, i);
-        int m = snprintf(line, sizeof(line), "%4zu   %.*s", i + 1, (int)(name.size < 600 ? name.size : 600), name.ptr);
+        int m = rubraview_fmt(line, sizeof(line), "{:4}   {}", PROVEN_ARG((size_t)(i + 1)), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 600 ? name.size : 600))));
         rubraview_pal_rect_t text = { text_left + lw->row_height * 0.3, row.y, row.x + row.width - text_left - lw->row_height * 0.9 - size_w, row.height };
         if (m > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) }, text.width, font),
                                                   text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
@@ -119,7 +119,7 @@ void draw_files_window(app_state_t *app) {
         }
         if (say) {
             rubraview_pal_rect_t mid = { room.x + 8.0 * dpi, room.y, room.width - 16.0 * dpi, room.height };
-            rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)say, strlen(say) }, mid, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+            rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)say, proven_cstr_len(say) }, mid, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
         if (page >= 0 && (size_t)page < count) {
             rubraview_pal_rect_t line1 = { pv.x + 8.0 * dpi, pv.y + pv.height - caption_h, pv.width - 16.0 * dpi, caption_h * 0.5 };
@@ -131,10 +131,10 @@ void draw_files_window(app_state_t *app) {
             uint64_t bytes = rubraview_page_source_entry_size(&app->source, (size_t)page);
             if (bytes > 0) files_size_text(size_text, sizeof(size_text), bytes); else size_text[0] = '\0';
             if (app->files_preview_state == FILES_PREVIEW_SHOWN) {
-                fn = bytes > 0 ? snprintf(facts, sizeof(facts), "%d x %d   %s", app->files_preview_w, app->files_preview_h, size_text)
-                               : snprintf(facts, sizeof(facts), "%d x %d", app->files_preview_w, app->files_preview_h);
+                fn = bytes > 0 ? rubraview_fmt(facts, sizeof(facts), "{} x {}   {}", PROVEN_ARG((int)app->files_preview_w), PROVEN_ARG((int)app->files_preview_h), PROVEN_ARG(size_text))
+                               : rubraview_fmt(facts, sizeof(facts), "{} x {}", PROVEN_ARG((int)app->files_preview_w), PROVEN_ARG((int)app->files_preview_h));
             } else if (bytes > 0) {
-                fn = snprintf(facts, sizeof(facts), "%s", size_text);
+                fn = rubraview_fmt(facts, sizeof(facts), "{}", PROVEN_ARG(size_text));
             }
             if (fn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)facts, (size_t)fn }, line2, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
@@ -157,8 +157,8 @@ size_t files_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_TEXT:   /* 1.25.0: the filter typed in the tools row */
                 if (app->list_filter_in_files) {
                     char next[sizeof(app->list_filter)];
-                    size_t n = strlen(app->list_filter);
-                    memcpy(next, app->list_filter, n);
+                    size_t n = proven_cstr_len(app->list_filter);
+                    proven_sys_mem_copy(next, app->list_filter, n);
                     (void)rubraview_rename_append(next, sizeof(next), &n, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event.text.utf8, .size = event.text.length });
                     list_filter_set(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)next, .size = n });
                     app->files_dirty = true;
@@ -239,7 +239,7 @@ size_t files_pump(app_state_t *app) {
                     if (key_is(combo, "Escape")) { list_filter_set(app, PROVEN_LIT("")); list_filter_files_end(app); break; }
                     if (key_is(combo, "Enter")) { list_filter_files_end(app); break; }
                     if (key_is(combo, "Backspace")) {
-                        size_t n = strlen(app->list_filter);
+                        size_t n = proven_cstr_len(app->list_filter);
                         while (n > 0 && ((unsigned char)app->list_filter[n - 1] & 0xC0u) == 0x80u) --n;
                         if (n > 0) --n;
                         list_filter_set(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->list_filter, .size = n });

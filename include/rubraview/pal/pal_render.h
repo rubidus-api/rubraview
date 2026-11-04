@@ -57,7 +57,7 @@ uint32_t rubraview_pal_render_last_hresult(void);
  * difference between "the GPU path" and "the software fallback" is
  * exactly the sort of thing that explains a slow or wrong picture.
  */
-proven_u8str_view_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, char *buffer, size_t buffer_size);
+proven_u8str_view_t rubraview_pal_render_describe(rubraview_renderer_t *renderer, proven_mem_mut_t buffer_view);
 
 /* D-179: how the swap chain hands a frame to the compositor. */
 enum { RUBRAVIEW_PRESENT_COPY = 0, RUBRAVIEW_PRESENT_FLIP_DISCARD = 1, RUBRAVIEW_PRESENT_FLIP_SEQUENTIAL = 2 };

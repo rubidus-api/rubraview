@@ -120,7 +120,7 @@ proven_u8str_view_t rubraview_pal_transcode_codepage(proven_arena_t *arena, prov
  * malloc'd and NUL-terminated (a character that does not decode becomes
  * U+FFFD). NULL when the code page is not on this machine or out of memory.
  */
-char *rubraview_pal_text_decode(const uint8_t *bytes, size_t size, uint32_t codepage, size_t *out_len);
+char *rubraview_pal_text_decode(proven_mem_view_t bytes_view, uint32_t codepage, size_t *out_len);
 
 /**
  * The other way: UTF-8 text into a legacy code page's bytes (0 = the host's
@@ -156,7 +156,7 @@ bool rubraview_pal_fs_write_file_atomic(proven_u8str_view_t path, proven_u8str_v
  */
 typedef struct rubraview_fs_writer { void *os; bool failed; uint64_t written; } rubraview_fs_writer_t;
 bool rubraview_pal_fs_writer_open(rubraview_fs_writer_t *writer, proven_u8str_view_t path);
-bool rubraview_pal_fs_writer_write(rubraview_fs_writer_t *writer, const void *bytes, size_t size);
+bool rubraview_pal_fs_writer_write(rubraview_fs_writer_t *writer, proven_mem_view_t bytes_view);
 bool rubraview_pal_fs_writer_close(rubraview_fs_writer_t *writer);
 void rubraview_pal_fs_writer_abort(rubraview_fs_writer_t *writer, proven_u8str_view_t path);
 

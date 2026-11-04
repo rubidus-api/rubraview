@@ -50,7 +50,7 @@ typedef struct rubraview_head_src {
 } rubraview_head_src_t;
 
 /* Ready for a file of `size` bytes read by `read`; the windows of the file before are kept for their room. */
-void rubraview_head_src_reset(rubraview_head_src_t *src, rubraview_head_read_fn read, void *context, uint64_t size);
+void rubraview_head_src_reset(rubraview_head_src_t *src, rubraview_head_read_fn read, proven_mem_mut_t context_view);
 void rubraview_head_src_free(rubraview_head_src_t *src);
 
 /* `len` bytes at `at`: a pointer good until the next call (one into the head stays good), or NULL when

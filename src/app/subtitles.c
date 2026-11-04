@@ -10,10 +10,10 @@
 void subtitle_say(app_state_t *app) {
     char label[160];
     proven_u8str_view_t text = app->tracks.current_subtitle >= 0
-                       ? rubraview_track_label(label, sizeof(label), &app->tracks, app->tracks.current_subtitle)
+                       ? rubraview_track_label(rubraview_mem_mut(label, sizeof(label)), &app->tracks, app->tracks.current_subtitle)
                        : TU8("off");
     char line[192];
-    int n = snprintf(line, sizeof(line), T("subtitles %.*s"), (int)text.size, text.ptr);
+    int n = rubraview_fmt(line, sizeof(line), T("subtitles {}"), PROVEN_ARG(rubraview_bytes_view(text.ptr, (int)text.size)));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
@@ -116,7 +116,7 @@ void sub_tile_result(app_state_t *app, rubraview_tap_result_t r) {
 
 void takeout_end(app_state_t *app) {
     for (size_t i = 0; i < RUBRAVIEW_MKV_MAX_TRACKS; ++i) {
-        free(app->takeout.out[i].data);
+        rubraview_free(app->takeout.out[i].data);
         app->takeout.out[i].data = NULL;
         app->takeout.out[i].len = app->takeout.out[i].cap = 0;
         app->takeout.out[i].cues = 0;
@@ -137,7 +137,7 @@ static bool takeout_room(app_state_t *app, size_t track, size_t need) {
         if (PROVEN_CKD_MUL(&cap, cap, (size_t)2)) return false;
     }
     if (cap > SUBTITLE_MAX_BYTES) return false;       /* more than the viewer would read back */
-    char *data = realloc(app->takeout.out[track].data, cap);
+    char *data = rubraview_realloc(rubraview_mem_mut(app->takeout.out[track].data, cap));
     if (!data) return false;
     app->takeout.out[track].data = data;
     app->takeout.out[track].cap = cap;
@@ -156,10 +156,10 @@ static void takeout_write(app_state_t *app);
 
 static void takeout_mp4(app_state_t *app, proven_u8str_view_t film) {
     const char *why = NULL;
-    if (!rubraview_mp4_open(&app->takeout.mp4, app->takeout.map.data, app->takeout.map.size, &why)) {
+    if (!rubraview_mp4_open(&app->takeout.mp4, rubraview_mem_view(app->takeout.map.data, app->takeout.map.size), &why)) {
         takeout_end(app);
         char line[200];
-        int n = snprintf(line, sizeof(line), T("subtitles are taken out of Matroska and MP4 films only (%s)"), why ? why : T("not one of them"));
+        int n = rubraview_fmt(line, sizeof(line), T("subtitles are taken out of Matroska and MP4 films only ({})"), PROVEN_ARG(why ? why : T("not one of them")));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
         return;
     }
@@ -169,7 +169,7 @@ static void takeout_mp4(app_state_t *app, proven_u8str_view_t film) {
         const rubraview_mp4_track_t *t = &app->takeout.mp4.tracks[i];
         rubraview_mkv_track_t *as = &app->takeout.mkv.tracks[app->takeout.mkv.track_count++];
         *as = (rubraview_mkv_track_t){ .number = t->id, .type = t->subtitle ? 0x11 : 0,
-                                       .language = { .ptr = (const proven_byte_t *)t->language, .size = strlen(t->language) },
+                                       .language = { .ptr = (const proven_byte_t *)t->language, .size = proven_cstr_len(t->language) },
                                        .subtitle = t->subtitle == RUBRAVIEW_MP4_SUB_TX3G ? RUBRAVIEW_MKV_SUB_SRT
                                                  : t->subtitle == RUBRAVIEW_MP4_SUB_OTHER ? RUBRAVIEW_MKV_SUB_OTHER : RUBRAVIEW_MKV_SUB_NONE };
         if (t->subtitle == RUBRAVIEW_MP4_SUB_OTHER) other++;
@@ -193,7 +193,7 @@ static void takeout_mp4(app_state_t *app, proven_u8str_view_t film) {
                                : TU8("the film holds no subtitles"));
         return;
     }
-    memcpy(app->takeout.film, film.ptr, film.size);
+    proven_sys_mem_copy(app->takeout.film, film.ptr, film.size);
     app->takeout.film[film.size] = '\0';
     takeout_write(app);
 }
@@ -215,7 +215,7 @@ void takeout_begin(app_state_t *app) {
         return;
     }
     const char *why = NULL;
-    if (!rubraview_mkv_open(&app->takeout.mkv, app->takeout.map.data, app->takeout.map.size, &why)) {
+    if (!rubraview_mkv_open(&app->takeout.mkv, rubraview_mem_view(app->takeout.map.data, app->takeout.map.size), &why)) {
         takeout_mp4(app, film);
         return;
     }
@@ -240,7 +240,7 @@ void takeout_begin(app_state_t *app) {
                    : TU8("the film holds no subtitles"));
         return;
     }
-    memcpy(app->takeout.film, film.ptr, film.size);
+    proven_sys_mem_copy(app->takeout.film, film.ptr, film.size);
     app->takeout.film[film.size] = '\0';
     rubraview_mkv_walk_begin(&app->takeout.mkv, &app->takeout.walk);
     app->takeout.running = true;
@@ -252,7 +252,7 @@ void takeout_begin(app_state_t *app) {
 /* The walk is over: each track's text goes to its file. One already there
    with the same bytes is left; another is kept under a numbered name (D-126). */
 static void takeout_write(app_state_t *app) {
-    proven_u8str_view_t film = { .ptr = (const proven_byte_t *)app->takeout.film, .size = strlen(app->takeout.film) };
+    proven_u8str_view_t film = { .ptr = (const proven_byte_t *)app->takeout.film, .size = proven_cstr_len(app->takeout.film) };
     char said[400];
     size_t said_len = 0, written = 0, same = 0, failed = 0, empty = 0;
     proven_u8str_view_t first = PROVEN_LIT("");
@@ -264,7 +264,7 @@ static void takeout_write(app_state_t *app) {
         for (size_t k = 0; k < i; ++k) {
             const rubraview_mkv_track_t *o = &app->takeout.mkv.tracks[k];
             if (takeout_wanted(o) && app->takeout.out[k].cues > 0 && proven_u8str_view_eq(o->language, t->language) &&
-                strcmp(rubraview_mkv_subtitle_ext(o), rubraview_mkv_subtitle_ext(t)) == 0) ordinal++;
+                rubraview_cstr_cmp(rubraview_mkv_subtitle_ext(o), rubraview_mkv_subtitle_ext(t)) == 0) ordinal++;
         }
         char name[1100];
         size_t name_len = rubraview_mkv_subtitle_name(t, film, ordinal, name, sizeof(name));
@@ -290,15 +290,15 @@ static void takeout_write(app_state_t *app) {
         written++;
         proven_u8str_view_t base = rubraview_path_basename(path);
         if (first.size == 0) first = app_keep(app, path);
-        int n = snprintf(said + said_len, sizeof(said) - said_len, "%s%.*s", said_len ? ", " : "", (int)(base.size < 120 ? base.size : 120), base.ptr);
+        int n = rubraview_fmt(said + said_len, sizeof(said) - said_len, "{}{}", PROVEN_ARG(said_len ? ", " : ""), PROVEN_ARG(rubraview_bytes_view(base.ptr, (int)(base.size < 120 ? base.size : 120))));
         if (n > 0 && (size_t)n < sizeof(said) - said_len) said_len += (size_t)n;
     }
     char line[520];
     int n;
-    if (written > 0) n = snprintf(line, sizeof(line), T("taken out: %.*s%s"), (int)said_len, said, failed ? T(" (some could not be written)") : "");
-    else if (same > 0) n = snprintf(line, sizeof(line), T("the film's subtitles are beside it already"));
-    else if (failed > 0) n = snprintf(line, sizeof(line), T("the subtitles could not be written beside the film"));
-    else n = snprintf(line, sizeof(line), "%s", empty ? T("the film's subtitle tracks are empty") : T("nothing was taken out"));
+    if (written > 0) n = rubraview_fmt(line, sizeof(line), T("taken out: {}{}"), PROVEN_ARG(rubraview_bytes_view(said, (int)said_len)), PROVEN_ARG(failed ? T(" (some could not be written)") : ""));
+    else if (same > 0) n = rubraview_fmt(line, sizeof(line), T("the film's subtitles are beside it already"));
+    else if (failed > 0) n = rubraview_fmt(line, sizeof(line), T("the subtitles could not be written beside the film"));
+    else n = rubraview_fmt(line, sizeof(line), "{}", PROVEN_ARG(empty ? T("the film's subtitle tracks are empty") : T("nothing was taken out")));
     app->takeout.mp4 = (rubraview_mp4_t){0};
     takeout_end(app);
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
@@ -357,7 +357,7 @@ void takeout_step(app_state_t *app) {
         app->takeout.percent = percent;
         app->takeout.said_at = began;
         char line[64];
-        int n = snprintf(line, sizeof(line), T("taking the subtitles out... %d %%"), percent);
+        int n = rubraview_fmt(line, sizeof(line), T("taking the subtitles out... {} %"), PROVEN_ARG((int)percent));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         app->subs_dirty = true;
     }
@@ -452,11 +452,11 @@ static void subs_sync(app_state_t *app) {
     app->subs_dirty = true;
     if (of_count == 0) return;
     if (of_count > app->subs_room) {
-        uint32_t *rows = realloc(app->subs_rows, of_count * sizeof(rows[0]));
+        uint32_t *rows = rubraview_realloc(rubraview_mem_mut(app->subs_rows, of_count * sizeof(rows[0])));
         if (rows) app->subs_rows = rows;
-        bool *chosen = realloc(app->subs_chosen, of_count * sizeof(chosen[0]));
+        bool *chosen = rubraview_realloc(rubraview_mem_mut(app->subs_chosen, of_count * sizeof(chosen[0])));
         if (chosen) app->subs_chosen = chosen;
-        bool *marks = realloc(app->subs_marks, of_count * sizeof(marks[0]));
+        bool *marks = rubraview_realloc(rubraview_mem_mut(app->subs_marks, of_count * sizeof(marks[0])));
         if (marks) app->subs_marks = marks;
         if (!rows || !chosen || !marks) return;      /* no room: an empty list, and the old room is kept */
         app->subs_room = of_count;
@@ -484,7 +484,7 @@ static void subs_focus_amount(app_state_t *app, bool on) {
     app->subs_amount_focus = on;
     if (app->subs_window) rubraview_pal_window_text_input(app->subs_window, on || app->subs_edit_row >= 0);
     if (!on && app->subs_amount_len == 0) {           /* left empty: the tenth it came with */
-        memcpy(app->subs_amount, "0.1", 3);
+        proven_sys_mem_copy(app->subs_amount, "0.1", 3);
         app->subs_amount_len = 3;
     }
     app->subs_dirty = true;
@@ -492,7 +492,7 @@ static void subs_focus_amount(app_state_t *app, bool on) {
 
 /* ---- A subtitle put into a Matroska film (RV-115 stage 4, D-128) ---- */
 
-static proven_u8str_view_t putin_temp(const app_state_t *app) { return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->putin.temp, .size = strlen(app->putin.temp) }; }
+static proven_u8str_view_t putin_temp(const app_state_t *app) { return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->putin.temp, .size = proven_cstr_len(app->putin.temp) }; }
 
 /* Done, stopped or failed: everything let go; unless the swap happened, the temporary file goes. */
 void putin_end(app_state_t *app, bool swapped) {
@@ -511,7 +511,7 @@ void putin_end(app_state_t *app, bool swapped) {
 static void putin_fail(app_state_t *app, const char *why) {
     putin_end(app, false);
     char line[300];
-    int n = snprintf(line, sizeof(line), T("the subtitle was not put in: %s; the film is as it was"), why ? why : T("it could not be done"));
+    int n = rubraview_fmt(line, sizeof(line), T("the subtitle was not put in: {}; the film is as it was"), PROVEN_ARG(why ? why : T("it could not be done")));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
 }
 
@@ -533,7 +533,7 @@ app->subtitle.format != RUBRAVIEW_SUBTITLE_SRT && app->subtitle.format != RUBRAV
 }
 
 static bool putin_emit(void *ctx, const void *bytes, size_t size) {
-    return rubraview_pal_fs_writer_write((rubraview_fs_writer_t*)ctx, bytes, size);
+    return rubraview_pal_fs_writer_write((rubraview_fs_writer_t*)ctx, rubraview_mem_view(bytes, size));
 }
 
 static void putin_begin(app_state_t *app) {
@@ -541,18 +541,18 @@ static void putin_begin(app_state_t *app) {
     if (why) { putin_fail(app, why); return; }
     proven_u8str_view_t film = app->source.pages[app->media_page].path;
     if (film.size == 0 || film.size >= sizeof(app->putin.film)) { putin_fail(app, T("the film's name is too long")); return; }
-    memcpy(app->putin.film, film.ptr, film.size);
+    proven_sys_mem_copy(app->putin.film, film.ptr, film.size);
     app->putin.film[film.size] = '\0';
-    int tn = snprintf(app->putin.temp, sizeof(app->putin.temp), "%s.rubraview-part", app->putin.film);
+    int tn = rubraview_fmt(app->putin.temp, sizeof(app->putin.temp), "{}.rubraview-part", PROVEN_ARG(app->putin.film));
     if (tn <= 0 || (size_t)tn >= sizeof(app->putin.temp)) { putin_fail(app, T("the film's name is too long")); return; }
     if (!rubraview_pal_fs_map(film, &app->putin.map)) { putin_fail(app, T("the film could not be read")); return; }
     proven_u8str_view_t tag = rubraview_subtitle_language_tag(film, app->subtitle.source_path);
     proven_u8str_view_t name = rubraview_path_basename(app->subtitle.source_path);
     uint64_t total = 0;
     app->putin.is_mp4 = false;
-    if (!rubraview_mkv_open(&app->putin.mkv, app->putin.map.data, app->putin.map.size, &why)) {
+    if (!rubraview_mkv_open(&app->putin.mkv, rubraview_mem_view(app->putin.map.data, app->putin.map.size), &why)) {
         /* D-130: an MP4 — the subtitle's words, any format, as 3GPP text after the film's own bytes */
-        if (!rubraview_mp4_open(&app->putin.mp4, app->putin.map.data, app->putin.map.size, &why)) {
+        if (!rubraview_mp4_open(&app->putin.mp4, rubraview_mem_view(app->putin.map.data, app->putin.map.size), &why)) {
             putin_fail(app, T("subtitles are put into Matroska and MP4 films only"));
             return;
         }
@@ -594,7 +594,7 @@ static void putin_swap(app_state_t *app) {
     if (app->putin.made_map.os) rubraview_pal_fs_unmap(&app->putin.made_map);
     if (app->putin.map.os) rubraview_pal_fs_unmap(&app->putin.map);
     app->putin.made_map = app->putin.map = (rubraview_fs_mapping_t){0};
-    proven_u8str_view_t film = { .ptr = (const proven_byte_t *)app->putin.film, .size = strlen(app->putin.film) };
+    proven_u8str_view_t film = { .ptr = (const proven_byte_t *)app->putin.film, .size = proven_cstr_len(app->putin.film) };
     proven_u8str_view_t kept = PROVEN_LIT("");
     for (unsigned number = 1; number < 10000 && kept.size == 0; ++number) {
         proven_u8str_view_t name = rubraview_subtitle_backup_path(app->arena, film, number);
@@ -618,7 +618,7 @@ static void putin_swap(app_state_t *app) {
     putin_end(app, true);
     char line[400];
     proven_u8str_view_t kept_name = rubraview_path_basename(kept);
-    int n = snprintf(line, sizeof(line), T("the subtitle is in the film now; the film as it was is %.*s"), (int)(kept_name.size < 300 ? kept_name.size : 300), kept_name.ptr);
+    int n = rubraview_fmt(line, sizeof(line), T("the subtitle is in the film now; the film as it was is {}"), PROVEN_ARG(rubraview_bytes_view(kept_name.ptr, (int)(kept_name.size < 300 ? kept_name.size : 300))));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
     if (on_screen) reopen_on_path(app, film, page >= 0 ? (size_t)page : 0);
 }
@@ -638,8 +638,8 @@ void putin_step(app_state_t *app) {
             if (!rubraview_pal_fs_writer_close(&app->putin.writer)) { putin_fail(app, T("the new film could not be written whole")); return; }
             bool mapped = rubraview_pal_fs_map(putin_temp(app), &app->putin.made_map);
             bool begun = mapped && (app->putin.is_mp4
-                ? rubraview_mp4_check_begin(&app->putin.mp4_check, &app->putin.mp4_put, app->putin.made_map.data, app->putin.made_map.size)
-                : rubraview_mkv_check_begin(&app->putin.check, &app->putin.put, app->putin.made_map.data, app->putin.made_map.size));
+                ? rubraview_mp4_check_begin(&app->putin.mp4_check, &app->putin.mp4_put, rubraview_mem_view(app->putin.made_map.data, app->putin.made_map.size))
+                : rubraview_mkv_check_begin(&app->putin.check, &app->putin.put, rubraview_mem_view(app->putin.made_map.data, app->putin.made_map.size)));
             if (!begun) {
                 const char *why = app->putin.is_mp4 ? app->putin.mp4_check.why : app->putin.check.why;
                 putin_fail(app, why ? why : T("the new film could not be read back"));
@@ -665,7 +665,7 @@ void putin_step(app_state_t *app) {
         app->putin.percent = percent;
         app->putin.said_at = began;
         char line[80];
-        int n = snprintf(line, sizeof(line), "%s... %d %%", app->putin.phase == 1 ? T("writing the film with the subtitle in it") : T("checking the new film against the old"), percent);
+        int n = rubraview_fmt(line, sizeof(line), "{}... {} %", PROVEN_ARG(app->putin.phase == 1 ? T("writing the film with the subtitle in it") : T("checking the new film against the old")), PROVEN_ARG((int)percent));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         app->subs_dirty = true;
     }
@@ -682,7 +682,7 @@ static void putin_press(app_state_t *app) {
     const char *why = putin_refusal(app);
     if (why) {
         char line[200];
-        int n = snprintf(line, sizeof(line), T("cannot put the subtitle in: %s"), why);
+        int n = rubraview_fmt(line, sizeof(line), T("cannot put the subtitle in: {}"), PROVEN_ARG(why));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
         return;
     }
@@ -696,8 +696,8 @@ static void putin_press(app_state_t *app) {
     proven_u8str_view_t kept = rubraview_path_basename(rubraview_subtitle_backup_path(app->arena, film, 1));
     proven_u8str_view_t sub = rubraview_path_basename(app->subtitle.source_path);
     char line[600];
-    int n = snprintf(line, sizeof(line), T("put %.*s into the film? It is written again and checked; the film as it is stays as %.*s. Press again to go on"),
-                     (int)(sub.size < 200 ? sub.size : 200), sub.ptr, (int)(kept.size < 200 ? kept.size : 200), kept.ptr);
+    int n = rubraview_fmt(line, sizeof(line), T("put {} into the film? It is written again and checked; the film as it is stays as {}. Press again to go on"),
+                     PROVEN_ARG(rubraview_bytes_view(sub.ptr, (int)(sub.size < 200 ? sub.size : 200))), PROVEN_ARG(rubraview_bytes_view(kept.ptr, (int)(kept.size < 200 ? kept.size : 200))));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 });
     app->subs_dirty = true;
 }
@@ -763,7 +763,7 @@ void subs_show(app_state_t *app) {
     app->subs_for_count = 0;
     app->subs_amount_focus = false;
     app->subs_edit_row = app->subs_click_row = -1;
-    if (app->subs_amount_len == 0) { memcpy(app->subs_amount, "0.1", 3); app->subs_amount_len = 3; }
+    if (app->subs_amount_len == 0) { proven_sys_mem_copy(app->subs_amount, "0.1", 3); app->subs_amount_len = 3; }
     subs_layout(app);
 }
 
@@ -824,8 +824,8 @@ static void subs_move(app_state_t *app, int sign) {
     size_t moved = rubraview_subwin_shift(&app->subtitle, app->subs_rows, app->subs_chosen, app->subs_count,
                                           sign < 0 ? -amount : amount, app->subs_marks);
     char line[96];
-    int n = snprintf(line, sizeof(line), T("%zu subtitle%s %.*s s %s"), moved, moved == 1 ? "" : TC("plural", "s"),
-                     (int)app->subs_amount_len, app->subs_amount, sign < 0 ? "earlier" : "later");
+    int n = rubraview_fmt(line, sizeof(line), T("{} subtitle{} {} s {}"), PROVEN_ARG((size_t)moved), PROVEN_ARG(moved == 1 ? "" : TC("plural", "s")),
+                     PROVEN_ARG(rubraview_bytes_view(app->subs_amount, (int)app->subs_amount_len)), PROVEN_ARG(sign < 0 ? "earlier" : "later"));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     app->subs_dirty = true;
 }
@@ -877,7 +877,7 @@ static void subs_edit_end(app_state_t *app, bool keep) {
         return;
     }
     proven_u8str_view_t was = rubraview_subtitle_cue_typed(subs_arena(app, 256u << 10), &app->subtitle, cue);
-    if (typed.size == was.size && memcmp(typed.ptr, was.ptr, typed.size) == 0) return;
+    if (typed.size == was.size && proven_sys_mem_cmp(typed.ptr, was.ptr, typed.size) == 0) return;
     if (!rubraview_subtitle_cue_retype(subs_arena(app, 256u << 10), &app->subtitle, cue, typed)) {
         osd_say(app, TU8("a subtitle cannot be left with nothing to show"));
     }
@@ -891,8 +891,8 @@ static void subs_edit_begin_as(app_state_t *app, size_t row, bool times) {
     if (times) {   /* RV-115: the two times, to type over */
         const rubraview_subtitle_cue_t *c = &app->subtitle.cues[app->subs_rows[row]];
         char a[32], b[32];
-        proven_u8str_view_t ta = rubraview_subwin_time(a, sizeof(a), c->start_seconds), tb = rubraview_subwin_time(b, sizeof(b), c->end_seconds);
-        int n = snprintf(clock, sizeof(clock), "%.*s --> %.*s", (int)ta.size, ta.ptr, (int)tb.size, tb.ptr);
+        proven_u8str_view_t ta = rubraview_subwin_time(rubraview_mem_mut(a, sizeof(a)), c->start_seconds), tb = rubraview_subwin_time(rubraview_mem_mut(b, sizeof(b)), c->end_seconds);
+        int n = rubraview_fmt(clock, sizeof(clock), "{} --> {}", PROVEN_ARG(rubraview_bytes_view(ta.ptr, (int)ta.size)), PROVEN_ARG(rubraview_bytes_view(tb.ptr, (int)tb.size)));
         typed = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)clock, .size = n > 0 ? (size_t)n : 0 };
     }
     if (typed.size == 0) {
@@ -944,7 +944,7 @@ static void subs_remove(app_state_t *app) {
     if (gone == 0) { osd_say(app, TU8("click a row, or tick some, to take out")); return; }
     subs_rows_again(app, -1);
     char line[96];
-    int n = snprintf(line, sizeof(line), T("%zu taken out; Save writes it, and the file keeps them until then"), gone);
+    int n = rubraview_fmt(line, sizeof(line), T("{} taken out; Save writes it, and the file keeps them until then"), PROVEN_ARG((size_t)gone));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
@@ -974,14 +974,14 @@ static void subs_save(app_state_t *app) {
     proven_u8str_view_t next = rubraview_subtitle_patched(to, track, &why);
     if (next.size == 0) {
         char line[160];
-        int n = snprintf(line, sizeof(line), T("not saved: %s"), why ? why : T("the file could not be written again"));
+        int n = rubraview_fmt(line, sizeof(line), T("not saved: {}"), PROVEN_ARG(why ? why : T("the file could not be written again")));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         return;
     }
     /* The file must still be what was read, and read back the same in its own encoding. */
     proven_u8str_view_t disk = rubraview_pal_fs_read_file(to, track->source_path, SUBTITLE_MAX_BYTES);
     proven_u8str_view_t was = track->source_transcoded ? rubraview_pal_encode_codepage(to, track->source, 0) : track->source;
-    if (disk.size == 0 || was.size != disk.size || memcmp(was.ptr, disk.ptr, disk.size) != 0) {
+    if (disk.size == 0 || was.size != disk.size || proven_sys_mem_cmp(was.ptr, disk.ptr, disk.size) != 0) {
         osd_say(app, track->source_transcoded && was.size == 0
                          ? TU8("not saved: the file does not read back the same in its encoding")
                          : TU8("not saved: the file was changed on disk since it was read"));
@@ -1003,8 +1003,8 @@ static void subs_save(app_state_t *app) {
             proven_result_mem_mut_t res = proven_arena_alloc(to, next.size + 4);
             if (!proven_is_ok(res.err)) { osd_say(app, TU8("not saved: no memory")); return; }
             char *with_bom = (char*)(void*)res.value.ptr;
-            memcpy(with_bom, "\xEF\xBB\xBF", 3);   /* a mark players read as UTF-8 */
-            memcpy(with_bom + 3, next.ptr, next.size);
+            proven_sys_mem_copy(with_bom, "\xEF\xBB\xBF", 3);   /* a mark players read as UTF-8 */
+            proven_sys_mem_copy(with_bom + 3, next.ptr, next.size);
             bytes = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)with_bom, .size = next.size + 3 };
             now_utf8 = true;
         }
@@ -1031,7 +1031,7 @@ static void subs_save(app_state_t *app) {
     if (track->shown_language.size > 0) {
         proven_result_mem_mut_t res = proven_arena_alloc(to, track->shown_language.size + 1);
         if (proven_is_ok(res.err)) {
-            memcpy(res.value.ptr, track->shown_language.ptr, track->shown_language.size);
+            proven_sys_mem_copy(res.value.ptr, track->shown_language.ptr, track->shown_language.size);
             ((char*)(void*)res.value.ptr)[track->shown_language.size] = '\0';
             shown = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)(void*)res.value.ptr, .size = track->shown_language.size };
         } else {
@@ -1060,7 +1060,7 @@ static void subs_save(app_state_t *app) {
     app->subtitle_offset_seconds = 0.0;   /* written in: this film's remembered offset is spent */
     char line[400];
     proven_u8str_view_t kept_name = rubraview_path_basename(kept);
-    int n = snprintf(line, sizeof(line), T("saved; the file before is %.*s"), (int)(kept_name.size < 300 ? kept_name.size : 300), kept_name.ptr);
+    int n = rubraview_fmt(line, sizeof(line), T("saved; the file before is {}"), PROVEN_ARG(rubraview_bytes_view(kept_name.ptr, (int)(kept_name.size < 300 ? kept_name.size : 300))));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     app->subs_dirty = true;
 }
@@ -1102,11 +1102,11 @@ void draw_subs_window(app_state_t *app) {
     char head[400], cut[640];
     int hn;
     if (kind == SUBS_NONE) {
-        hn = snprintf(head, sizeof(head), "%s", app->media ? T("no subtitle is on") : T("no film is open"));
+        hn = rubraview_fmt(head, sizeof(head), "{}", PROVEN_ARG(app->media ? T("no subtitle is on") : T("no film is open")));
     } else {
         proven_u8str_view_t name = app->subtitle_name;
-        hn = snprintf(head, sizeof(head), T("%zu subtitle%s   %zu ticked   %.*s%s"), count, count == 1 ? "" : TC("plural", "s"), picked,
-                      (int)(name.size < 200 ? name.size : 200), name.ptr, kind == SUBS_TEXT && rubraview_subtitle_changed(&app->subtitle) ? T("   (changed, not saved)") : "");
+        hn = rubraview_fmt(head, sizeof(head), T("{} subtitle{}   {} ticked   {}{}"), PROVEN_ARG((size_t)count), PROVEN_ARG(count == 1 ? "" : TC("plural", "s")), PROVEN_ARG((size_t)picked),
+                      PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 200 ? name.size : 200))), PROVEN_ARG(kind == SUBS_TEXT && rubraview_subtitle_changed(&app->subtitle) ? T("   (changed, not saved)") : ""));
     }
     rubraview_pal_rect_t all = subs_part_rect(app, SUBS_PART_ALL);
     double head_x = pad;
@@ -1119,8 +1119,8 @@ void draw_subs_window(app_state_t *app) {
     bool takeout_shown = app->media && app->media_info.has_video && takeout.x > head_x + lw->row_height * 4.0;
     if (takeout_shown) {
         char label[32];
-        int ln = app->takeout.running ? snprintf(label, sizeof(label), T("Stop %d %%"), app->takeout.percent < 0 ? 0 : app->takeout.percent)
-                                      : snprintf(label, sizeof(label), T("Take out"));
+        int ln = app->takeout.running ? rubraview_fmt(label, sizeof(label), T("Stop {} %"), PROVEN_ARG((int)(app->takeout.percent < 0 ? 0 : app->takeout.percent)))
+                                      : rubraview_fmt(label, sizeof(label), T("Take out"));
         rubraview_pal_render_fill_rect(r, takeout, app->takeout.running ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(r, takeout, COLOR_BOX_BORDER, 1.0, 3.0);
         if (ln > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)label, (size_t)ln }, takeout, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
@@ -1131,8 +1131,8 @@ void draw_subs_window(app_state_t *app) {
         double now = rubraview_pal_time_now_seconds();
         bool armed = app->putin.armed_at > 0.0 && now - app->putin.armed_at < 6.0;
         char label[32];
-        int ln = app->putin.phase ? snprintf(label, sizeof(label), T("Stop %d %%"), app->putin.percent < 0 ? 0 : app->putin.percent)
-                                  : snprintf(label, sizeof(label), "%s", armed ? T("Sure? Put in") : T("Put in film"));
+        int ln = app->putin.phase ? rubraview_fmt(label, sizeof(label), T("Stop {} %"), PROVEN_ARG((int)(app->putin.percent < 0 ? 0 : app->putin.percent)))
+                                  : rubraview_fmt(label, sizeof(label), "{}", PROVEN_ARG(armed ? T("Sure? Put in") : T("Put in film")));
         rubraview_pal_render_fill_rect(r, putin, app->putin.phase || armed ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(r, putin, COLOR_BOX_BORDER, 1.0, 3.0);
         if (ln > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)label, (size_t)ln }, putin, font * 0.95, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
@@ -1155,7 +1155,7 @@ void draw_subs_window(app_state_t *app) {
         rubraview_pal_render_fill_rect(r, amount, 0xFF101010u, 2.0);
         rubraview_pal_render_stroke_rect(r, amount, app->subs_amount_focus ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, 1.0, 2.0);
         char typed[24];
-        int tn = snprintf(typed, sizeof(typed), "%.*s%s", (int)app->subs_amount_len, app->subs_amount, app->subs_amount_focus ? "|" : "");
+        int tn = rubraview_fmt(typed, sizeof(typed), "{}{}", PROVEN_ARG(rubraview_bytes_view(app->subs_amount, (int)app->subs_amount_len)), PROVEN_ARG(app->subs_amount_focus ? "|" : ""));
         if (tn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)typed, (size_t)tn }, amount, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         rubraview_pal_rect_t unit = { amount.x + amount.width + pad * 0.5, amount.y, lw->row_height * 0.8, amount.height };
         rubraview_pal_render_draw_text(r, PROVEN_LIT("s"), unit, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
@@ -1189,14 +1189,14 @@ void draw_subs_window(app_state_t *app) {
         char clock[32], line[1200];   /* a text being typed, the IME's part and the caret fit */
         double end = -1.0, start = subs_row_start(app, i, &end);
         rubraview_pal_rect_t start_box = { x, row.y, time_w, row.height };
-        rubraview_pal_render_draw_text(r, rubraview_subwin_time(clock, sizeof(clock), start), start_box, font * 0.9, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        rubraview_pal_render_draw_text(r, rubraview_subwin_time(rubraview_mem_mut(clock, sizeof(clock)), start), start_box, font * 0.9, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         x += time_w;
         if (end >= 0.0) {
             rubraview_pal_rect_t end_box = { x, row.y, time_w, row.height };
-            rubraview_pal_render_draw_text(r, rubraview_subwin_time(clock, sizeof(clock), end), end_box, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+            rubraview_pal_render_draw_text(r, rubraview_subwin_time(rubraview_mem_mut(clock, sizeof(clock)), end), end_box, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
         }
         x += time_w;
-        proven_u8str_view_t said = kind == SUBS_TEXT ? rubraview_subwin_line(line, sizeof(line), app->subtitle.cues[app->subs_rows[i]].text)
+        proven_u8str_view_t said = kind == SUBS_TEXT ? rubraview_subwin_line(rubraview_mem_mut(line, sizeof(line)), app->subtitle.cues[app->subs_rows[i]].text)
                                          : TU8("(picture)");
         rubraview_pal_rect_t text = { x, row.y, row.x + row.width - x - pad, row.height };
         if (kind == SUBS_TEXT && (app->subtitle.cues[app->subs_rows[i]].time_changed || app->subtitle.cues[app->subs_rows[i]].text_changed ||
@@ -1222,10 +1222,10 @@ void draw_subs_window(app_state_t *app) {
                 from = prev;
             }
             size_t n = 0;
-            memcpy(line + n, te->buf + from, caret - from); n += caret - from;
-            memcpy(line + n, app->subs_edit_composing, comp); n += comp;
+            proven_sys_mem_copy(line + n, te->buf + from, caret - from); n += caret - from;
+            proven_sys_mem_copy(line + n, app->subs_edit_composing, comp); n += comp;
             line[n++] = '|';
-            memcpy(line + n, te->buf + caret, te->len - caret); n += te->len - caret;
+            proven_sys_mem_copy(line + n, te->buf + caret, te->len - caret); n += te->len - caret;
             rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)line, n }, text.width, font), text, font,
                                            COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         } else
@@ -1346,7 +1346,7 @@ size_t subs_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_COMPOSITION:
                 if (app->subs_edit_row < 0) break;
                 app->subs_edit_composing_len = event.text.length < sizeof(app->subs_edit_composing) ? event.text.length : 0;
-                memcpy(app->subs_edit_composing, event.text.utf8, app->subs_edit_composing_len);
+                proven_sys_mem_copy(app->subs_edit_composing, event.text.utf8, app->subs_edit_composing_len);
                 app->subs_dirty = true;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_TEXT:
@@ -1359,7 +1359,7 @@ size_t subs_pump(app_state_t *app) {
                 if (!app->subs_amount_focus) break;
                 for (size_t i = 0; i < event.text.length; ++i) {     /* digits and one point; nothing else is a time */
                     char c = event.text.utf8[i];
-                    bool point = (c == '.' || c == ',') && !memchr(app->subs_amount, '.', app->subs_amount_len);
+                    bool point = (c == '.' || c == ',') && !rubraview_mem_chr(app->subs_amount, '.', app->subs_amount_len);
                     if (!((c >= '0' && c <= '9') || point) || app->subs_amount_len + 1 >= 8) continue;
                     app->subs_amount[app->subs_amount_len++] = point ? '.' : c;
                 }

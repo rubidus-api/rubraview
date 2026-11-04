@@ -70,24 +70,24 @@ bool     rubraview_ffmpeg_local_available(void);
 int      rubraview_ffmpeg_local_place(void);
 rubraview_ffmpeg_refusal_t rubraview_ffmpeg_local_refused(void);
 int      rubraview_ffmpeg_local_jxl_state(void);
-uint32_t rubraview_ffmpeg_local_image_encoders(char *names, size_t size);
+uint32_t rubraview_ffmpeg_local_image_encoders(proven_mem_mut_t names_view);
 rubraview_ffilter_state_t rubraview_ffilter_local_state(void);
 bool     rubraview_ffilter_local_list(proven_arena_t *arena, rubraview_ffilter_catalog_t *out);
 bool     rubraview_ffilter_local_run(const char *graph, const uint8_t *bgra, int32_t width, int32_t height,
-                                     uint8_t **out, int32_t *out_width, int32_t *out_height, char *said, size_t said_size);
+                                     uint8_t **out, int32_t *out_width, int32_t *out_height, proven_mem_mut_t said_view);
 
 /* The viewer's side of the one-shot uses (pal_media_host.c). */
 bool     rubraview_mhost_remote_available(void);
 int      rubraview_mhost_remote_place(void);
 rubraview_ffmpeg_refusal_t rubraview_mhost_remote_refused(void);
 int      rubraview_mhost_remote_jxl_state(void);
-uint32_t rubraview_mhost_remote_image_encoders(char *names, size_t size);
+uint32_t rubraview_mhost_remote_image_encoders(proven_mem_mut_t names_view);
 void     rubraview_mhost_remote_folders(proven_u8str_view_t imported, proven_u8str_view_t chosen);
 int64_t  rubraview_mhost_remote_fetch(proven_u8str_view_t address, uint8_t *out, size_t cap);
-bool     rubraview_mhost_remote_jxl_decode(const uint8_t *data, size_t size, int32_t max_side,
+bool     rubraview_mhost_remote_jxl_decode(proven_mem_view_t data_view, int32_t max_side,
                                            uint8_t *(*room)(void *context, int32_t width, int32_t height),
                                            void *context, int32_t *out_width, int32_t *out_height);
-bool     rubraview_mhost_remote_jxl_frames(const uint8_t *data, size_t size, int32_t max_side,
+bool     rubraview_mhost_remote_jxl_frames(proven_mem_view_t data_view, int32_t max_side,
                                            uint8_t *(*room)(void *context, int32_t width, int32_t height, double seconds),
                                            void *context);
 uint8_t *rubraview_mhost_remote_pictures_encode(int32_t width, int32_t height, size_t count,
@@ -99,7 +99,7 @@ uint8_t *rubraview_mhost_remote_image_encode(const rubraview_pixbuf_t *pixels, c
 rubraview_ffilter_state_t rubraview_mhost_remote_filter_state(void);
 bool     rubraview_mhost_remote_filter_list(proven_arena_t *arena, rubraview_ffilter_catalog_t *out);
 bool     rubraview_mhost_remote_filter_run(const char *graph, const uint8_t *bgra, int32_t width, int32_t height,
-                                           uint8_t **out, int32_t *out_width, int32_t *out_height, char *said, size_t said_size);
+                                           uint8_t **out, int32_t *out_width, int32_t *out_height, proven_mem_mut_t said_view);
 
 #ifdef __cplusplus
 }

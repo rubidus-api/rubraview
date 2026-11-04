@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/export.h"
 #include "rubraview/path.h"
 #include <string.h>
@@ -223,11 +224,13 @@ uint32_t rubraview_export_rows(rubraview_export_format_t format, proven_u8str_vi
     }
 }
 
-bool rubraview_jpeg_set_dpi(uint8_t *j, size_t len, double dpi) {
+bool rubraview_jpeg_set_dpi(proven_mem_mut_t j_view, double dpi) {
+    uint8_t *j = (uint8_t *)j_view.ptr;
+    size_t len = (size_t)j_view.size;
     if (!j || len < 20 || !(dpi >= 1.0 && dpi <= 65535.0)) return false;
     if (j[0] != 0xFF || j[1] != 0xD8 || j[2] != 0xFF || j[3] != 0xE0) return false;
     size_t seg = ((size_t)j[4] << 8) | j[5];
-    if (seg < 16 || 4 + seg > len || memcmp(j + 6, "JFIF\0", 5) != 0) return false;
+    if (seg < 16 || 4 + seg > len || proven_sys_mem_cmp(j + 6, "JFIF\0", 5) != 0) return false;
     unsigned d = (unsigned)(dpi + 0.5);
     j[13] = 1;                                          /* units: dots an inch */
     j[14] = (uint8_t)(d >> 8); j[15] = (uint8_t)d;      /* X density */

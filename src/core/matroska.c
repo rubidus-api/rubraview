@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/matroska.h"
 #include "rubraview/lang.h"
 #include "rubraview/number.h"
@@ -88,14 +89,14 @@ static double read_float(const rubraview_mkv_t *mkv, const elem_t *e) {
     if (e->size == 4) {
         uint32_t bits = ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
         float f;
-        memcpy(&f, &bits, sizeof(f));
+        proven_sys_mem_copy(&f, &bits, sizeof(f));
         return (double)f;
     }
     if (e->size == 8) {
         uint64_t bits = 0;
         for (int i = 0; i < 8; ++i) bits = (bits << 8) | p[i];
         double d;
-        memcpy(&d, &bits, sizeof(d));
+        proven_sys_mem_copy(&d, &bits, sizeof(d));
         return d;
     }
     return 0.0;
@@ -115,7 +116,7 @@ static bool is_top_level(uint32_t id) {
 }
 
 static bool text_is(proven_u8str_view_t s, const char *lit) {
-    return proven_u8str_view_eq(s, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)lit, .size = strlen(lit) });
+    return proven_u8str_view_eq(s, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)lit, .size = proven_cstr_len(lit) });
 }
 
 static rubraview_mkv_sub_t classify(const rubraview_mkv_track_t *t) {
@@ -174,7 +175,9 @@ static void read_track(rubraview_mkv_t *mkv, const elem_t *entry) {
     mkv->tracks[mkv->track_count++] = t;
 }
 
-bool rubraview_mkv_open(rubraview_mkv_t *mkv, const uint8_t *data, uint64_t size, const char **out_why) {
+bool rubraview_mkv_open(rubraview_mkv_t *mkv, proven_mem_view_t data_view, const char **out_why) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    uint64_t size = (uint64_t)data_view.size;
     const char *sink = NULL;
     if (!out_why) out_why = &sink;
     *out_why = NULL;
@@ -369,16 +372,18 @@ double rubraview_mkv_walk_share(const rubraview_mkv_t *mkv, const rubraview_mkv_
 typedef struct sink { char *out; size_t cap, need; } sink_t;
 
 static void put(sink_t *s, const char *bytes, size_t len) {
-    if (s->out && s->need <= s->cap && len <= s->cap - s->need) memcpy(s->out + s->need, bytes, len);
+    if (s->out && s->need <= s->cap && len <= s->cap - s->need) proven_sys_mem_copy(s->out + s->need, bytes, len);
     if (PROVEN_CKD_ADD(&s->need, s->need, len)) s->need = SIZE_MAX;
 }
 
-static void put_text(sink_t *s, const char *text) { put(s, text, strlen(text)); }
+static void put_text(sink_t *s, const char *text) { put(s, text, proven_cstr_len(text)); }
 
-static bool has_events(const uint8_t *data, size_t size) {
+static bool has_events(proven_mem_view_t data_view) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     static const char mark[] = "[Events]";
     for (size_t i = 0; i + sizeof(mark) - 1 <= size; ++i) {
-        if (memcmp(data + i, mark, sizeof(mark) - 1) == 0) return true;
+        if (proven_sys_mem_cmp(data + i, mark, sizeof(mark) - 1) == 0) return true;
     }
     return false;
 }
@@ -394,7 +399,7 @@ size_t rubraview_mkv_subtitle_head(const rubraview_mkv_track_t *track, char *out
     } else {
         put_text(&s, "[Script Info]\nScriptType: v4.00+\n\n");
     }
-    if (size == 0 || !has_events(track->private_data, size)) {
+    if (size == 0 || !has_events(rubraview_mem_view(track->private_data, size))) {
         put_text(&s, "\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n");
     }
     return s.need;
@@ -406,12 +411,12 @@ static void put_clock(sink_t *s, int64_t ns, bool substation) {
     int n;
     if (substation) {
         int64_t cs = (ns + 5000000) / 10000000;
-        n = snprintf(buf, sizeof(buf), "%lld:%02lld:%02lld.%02lld", (long long)(cs / 360000), (long long)(cs / 6000 % 60),
-                     (long long)(cs / 100 % 60), (long long)(cs % 100));
+        n = rubraview_fmt(buf, sizeof(buf), "{}:{:02}:{:02}.{:02}", PROVEN_ARG((long long)(cs / 360000)), PROVEN_ARG((long long)(cs / 6000 % 60)),
+                     PROVEN_ARG((long long)(cs / 100 % 60)), PROVEN_ARG((long long)(cs % 100)));
     } else {
         int64_t ms = (ns + 500000) / 1000000;
-        n = snprintf(buf, sizeof(buf), "%02lld:%02lld:%02lld,%03lld", (long long)(ms / 3600000), (long long)(ms / 60000 % 60),
-                     (long long)(ms / 1000 % 60), (long long)(ms % 1000));
+        n = rubraview_fmt(buf, sizeof(buf), "{:02}:{:02}:{:02},{:03}", PROVEN_ARG((long long)(ms / 3600000)), PROVEN_ARG((long long)(ms / 60000 % 60)),
+                     PROVEN_ARG((long long)(ms / 1000 % 60)), PROVEN_ARG((long long)(ms % 1000)));
     }
     if (n > 0) put(s, buf, (size_t)n < sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
 }
@@ -448,7 +453,7 @@ size_t rubraview_mkv_subtitle_cue(const rubraview_mkv_track_t *track, unsigned c
     }
 
     char number[24];
-    int n = snprintf(number, sizeof(number), "%u\n", counter);
+    int n = rubraview_fmt(number, sizeof(number), "{}\n", PROVEN_ARG((unsigned)counter));
     if (n > 0) put(&s, number, (size_t)n);
     put_clock(&s, block->start_ns, false);
     put_text(&s, " --> ");
@@ -488,15 +493,15 @@ size_t rubraview_mkv_subtitle_name(const rubraview_mkv_track_t *track, proven_u8
         if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-') language[n++] = c;
     }
     language[n] = '\0';
-    if (strcmp(language, "und") == 0) language[0] = '\0';
+    if (rubraview_cstr_cmp(language, "und") == 0) language[0] = '\0';
     char tail[64];
-    int t = ordinal > 0 ? snprintf(tail, sizeof(tail), "%s%s.%u%s", language[0] ? "." : "", language, ordinal + 1, ext)
-                        : snprintf(tail, sizeof(tail), "%s%s%s", language[0] ? "." : "", language, ext);
+    int t = ordinal > 0 ? rubraview_fmt(tail, sizeof(tail), "{}{}.{}{}", PROVEN_ARG(language[0] ? "." : ""), PROVEN_ARG(language), PROVEN_ARG((unsigned)(ordinal + 1)), PROVEN_ARG(ext))
+                        : rubraview_fmt(tail, sizeof(tail), "{}{}{}", PROVEN_ARG(language[0] ? "." : ""), PROVEN_ARG(language), PROVEN_ARG(ext));
     if (t <= 0 || (size_t)t >= sizeof(tail)) return 0;
     size_t total = 0;
     if (PROVEN_CKD_ADD(&total, stem, (size_t)t) || total >= cap) return 0;
-    memcpy(out, film_path.ptr, stem);
-    memcpy(out + stem, tail, (size_t)t);
+    proven_sys_mem_copy(out, film_path.ptr, stem);
+    proven_sys_mem_copy(out + stem, tail, (size_t)t);
     out[total] = '\0';
     return total;
 }
@@ -514,7 +519,9 @@ enum {
 /* A buffer on the heap that EBML is written into. */
 typedef struct wbuf { uint8_t *data; size_t len, cap; bool failed; } wbuf_t;
 
-static void wput(wbuf_t *b, const void *bytes, size_t n) {
+static void wput(wbuf_t *b, proven_mem_view_t bytes_view) {
+    const void *bytes = (const void *)bytes_view.ptr;
+    size_t n = (size_t)bytes_view.size;
     if (b->failed || n == 0) return;
     size_t want = 0;
     if (PROVEN_CKD_ADD(&want, b->len, n)) { b->failed = true; return; }
@@ -523,12 +530,12 @@ static void wput(wbuf_t *b, const void *bytes, size_t n) {
         while (cap < want) {
             if (PROVEN_CKD_MUL(&cap, cap, (size_t)2)) { b->failed = true; return; }
         }
-        uint8_t *data = realloc(b->data, cap);
+        uint8_t *data = rubraview_realloc(rubraview_mem_mut(b->data, cap));
         if (!data) { b->failed = true; return; }
         b->data = data;
         b->cap = cap;
     }
-    memcpy(b->data + b->len, bytes, n);
+    proven_sys_mem_copy(b->data + b->len, bytes, n);
     b->len += n;
 }
 
@@ -537,7 +544,7 @@ static unsigned id_width(uint32_t id) { return id > 0xFFFFFFu ? 4 : id > 0xFFFFu
 static void wid(wbuf_t *b, uint32_t id) {
     uint8_t bytes[4] = { (uint8_t)(id >> 24), (uint8_t)(id >> 16), (uint8_t)(id >> 8), (uint8_t)id };
     unsigned w = id_width(id);
-    wput(b, bytes + 4 - w, w);
+    wput(b, rubraview_mem_view(bytes + 4 - w, w));
 }
 
 /* The fewest bytes a size can be written in (all ones is kept for "unknown"). */
@@ -553,27 +560,29 @@ static void wsize(wbuf_t *b, uint64_t size, unsigned width) {
     uint8_t bytes[8];
     for (unsigned i = 0; i < width; ++i) bytes[i] = (uint8_t)(size >> (8 * (width - 1 - i)));
     bytes[0] |= (uint8_t)(0x80u >> (width - 1));
-    wput(b, bytes, width);
+    wput(b, rubraview_mem_view(bytes, width));
 }
 
-static void welem(wbuf_t *b, uint32_t id, const void *content, size_t n) {
+static void welem(wbuf_t *b, uint32_t id, proven_mem_view_t content_view) {
+    const void *content = (const void *)content_view.ptr;
+    size_t n = (size_t)content_view.size;
     wid(b, id);
     wsize(b, n, 0);
-    wput(b, content, n);
+    wput(b, rubraview_mem_view(content, n));
 }
 
 static void welem_uint(wbuf_t *b, uint32_t id, uint64_t value, unsigned width) {
     if (width == 0) { width = 1; while (width < 8 && (value >> (8 * width)) != 0) width++; }
     uint8_t bytes[8];
     for (unsigned i = 0; i < width; ++i) bytes[i] = (uint8_t)(value >> (8 * (width - 1 - i)));
-    welem(b, id, bytes, width);
+    welem(b, id, rubraview_mem_view(bytes, width));
 }
 
-static void wbuf_free(wbuf_t *b) { free(b->data); *b = (wbuf_t){0}; }
+static void wbuf_free(wbuf_t *b) { rubraview_free(b->data); *b = (wbuf_t){0}; }
 
 /* An element's whole bytes, header and all, as they stand in the film. */
 static void wraw(wbuf_t *b, const rubraview_mkv_t *mkv, uint64_t at, uint64_t next) {
-    if (next > at) wput(b, mkv->data + at, (size_t)(next - at));
+    if (next > at) wput(b, rubraview_mem_view(mkv->data + at, (size_t)(next - at)));
 }
 
 static int64_t to_ticks(const rubraview_mkv_t *mkv, int64_t ns) {
@@ -656,7 +665,7 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
         /* The header: everything through the `Format:` line of `[Events]`. */
         size_t events = SIZE_MAX;
         for (size_t i = 0; i + 8 <= src.size; ++i) {
-            if (memcmp(src.ptr + i, "[Events]", 8) == 0) { events = i; break; }
+            if (proven_sys_mem_cmp(src.ptr + i, "[Events]", 8) == 0) { events = i; break; }
         }
         if (events == SIZE_MAX) { *out_why = "the SubStation file has no [Events]"; return false; }
         size_t head_end = SIZE_MAX, at = events;
@@ -696,15 +705,15 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
             proven_u8str_view_t layer = proven_u8str_view_trim((proven_u8str_view_t){ rest.ptr, commas[0] });
             proven_u8str_view_t tail = { rest.ptr + commas[2], rest.size - commas[2] };   /* ",Style,...,Text" */
             char number[24];
-            int nn = snprintf(number, sizeof(number), "%zu,", order++);
+            int nn = rubraview_fmt(number, sizeof(number), "{},", PROVEN_ARG((size_t)(order++)));
             if (nn <= 0) continue;
             size_t size = (size_t)nn + layer.size + tail.size;
             proven_result_mem_mut_t t = proven_arena_alloc(arena, size + 1);
             if (!proven_is_ok(t.err)) { *out_why = N_("no memory"); return false; }
             uint8_t *text = t.value.ptr;
-            memcpy(text, number, (size_t)nn);
-            memcpy(text + nn, layer.ptr, layer.size);
-            memcpy(text + nn + layer.size, tail.ptr, tail.size);
+            proven_sys_mem_copy(text, number, (size_t)nn);
+            proven_sys_mem_copy(text + nn, layer.ptr, layer.size);
+            proven_sys_mem_copy(text + nn + layer.size, tail.ptr, tail.size);
             cues[n++] = (rubraview_mkv_put_cue_t){ .start_ns = start, .duration_ns = end > start ? end - start : 0,
                                                    .payload = text, .size = size };
         }
@@ -738,11 +747,11 @@ bool rubraview_mkv_put_track_from_subtitle(proven_arena_t *arena, const rubravie
 
 void rubraview_mkv_put_free(rubraview_mkv_put_t *put) {
     if (!put) return;
-    free(put->bytes);
-    free(put->pieces);
-    free(put->clusters);
-    free(put->sub_cluster);
-    free(put->sub_rel);
+    rubraview_free(put->bytes);
+    rubraview_free(put->pieces);
+    rubraview_free(put->clusters);
+    rubraview_free(put->sub_cluster);
+    rubraview_free(put->sub_rel);
     put->bytes = NULL;
     put->pieces = NULL;
     put->clusters = NULL;
@@ -805,14 +814,14 @@ static void write_tracks(wbuf_t *out, const rubraview_mkv_t *mkv, const elem_t *
     welem_uint(&entry, ID_TRACK_TYPE, 0x11, 1);
     welem_uint(&entry, ID_FLAG_LACING, 0, 1);
     welem_uint(&entry, ID_FLAG_DEFAULT, 0, 1);
-    welem(&entry, ID_CODEC_ID, put->track.codec, strlen(put->track.codec));
+    welem(&entry, ID_CODEC_ID, rubraview_mem_view(put->track.codec, proven_cstr_len(put->track.codec)));
     proven_u8str_view_t language = put->track.language.size > 0 ? put->track.language : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)"und", .size = 3 };
-    welem(&entry, ID_LANGUAGE, language.ptr, language.size);
-    if (put->track.name.size > 0) welem(&entry, ID_NAME, put->track.name.ptr, put->track.name.size);
-    if (put->track.private_data.size > 0) welem(&entry, ID_CODEC_PRIVATE, put->track.private_data.ptr, put->track.private_data.size);
-    if (!entry.failed) welem(&body, ID_TRACK_ENTRY, entry.data, entry.len);
+    welem(&entry, ID_LANGUAGE, rubraview_mem_view(language.ptr, language.size));
+    if (put->track.name.size > 0) welem(&entry, ID_NAME, rubraview_mem_view(put->track.name.ptr, put->track.name.size));
+    if (put->track.private_data.size > 0) welem(&entry, ID_CODEC_PRIVATE, rubraview_mem_view(put->track.private_data.ptr, put->track.private_data.size));
+    if (!entry.failed) welem(&body, ID_TRACK_ENTRY, rubraview_mem_view(entry.data, entry.len));
     if (entry.failed || body.failed) out->failed = true;
-    else welem(out, ID_TRACKS, body.data, body.len);
+    else welem(out, ID_TRACKS, rubraview_mem_view(body.data, body.len));
     wbuf_free(&body);
     wbuf_free(&entry);
 }
@@ -822,12 +831,12 @@ static void write_sub_group(wbuf_t *out, const rubraview_mkv_t *mkv, const rubra
     wbuf_t group = {0}, block = {0};
     wsize(&block, put->number, 0);                    /* the track, written as a size is */
     uint8_t time_and_flags[3] = { (uint8_t)((uint16_t)(int16_t)rel >> 8), (uint8_t)(uint16_t)(int16_t)rel, 0 };
-    wput(&block, time_and_flags, 3);
-    wput(&block, put->track.cues[i].payload, put->track.cues[i].size);
-    welem(&group, ID_BLOCK, block.data, block.len);
+    wput(&block, rubraview_mem_view(time_and_flags, 3));
+    wput(&block, rubraview_mem_view(put->track.cues[i].payload, put->track.cues[i].size));
+    welem(&group, ID_BLOCK, rubraview_mem_view(block.data, block.len));
     welem_uint(&group, ID_BLOCK_DURATION, (uint64_t)to_ticks(mkv, put->track.cues[i].duration_ns), 0);
     if (block.failed || group.failed) out->failed = true;
-    else welem(out, ID_BLOCK_GROUP, group.data, group.len);
+    else welem(out, ID_BLOCK_GROUP, rubraview_mem_view(group.data, group.len));
     wbuf_free(&group);
     wbuf_free(&block);
 }
@@ -844,8 +853,8 @@ static bool add_piece(rubraview_mkv_put_t *put, size_t *room, uint64_t from, uin
         if (PROVEN_CKD_MUL(&grown, grown, (size_t)2)) return false;
         rubraview_mkv_piece_t *pieces = rubraview_malloc_product(grown, sizeof(*pieces), 1);
         if (!pieces) return false;
-        if (put->piece_count) memcpy(pieces, put->pieces, put->piece_count * sizeof(*pieces));
-        free(put->pieces);
+        if (put->piece_count) proven_sys_mem_copy(pieces, put->pieces, put->piece_count * sizeof(*pieces));
+        rubraview_free(put->pieces);
         put->pieces = pieces;
         *room = grown;
     }
@@ -885,9 +894,9 @@ static void write_sub_point(wbuf_t *out, const rubraview_mkv_t *mkv, const rubra
     welem_uint(&pos, ID_CUE_RELATIVE_POSITION, put->sub_rel[i], 8);
     welem_uint(&pos, ID_CUE_DURATION, (uint64_t)to_ticks(mkv, put->track.cues[i].duration_ns), 0);
     welem_uint(&point, ID_CUE_TIME, (uint64_t)to_ticks(mkv, put->track.cues[i].start_ns), 0);
-    welem(&point, ID_CUE_TRACK_POSITIONS, pos.data, pos.len);
+    welem(&point, ID_CUE_TRACK_POSITIONS, rubraview_mem_view(pos.data, pos.len));
     if (pos.failed || point.failed) out->failed = true;
-    else welem(out, ID_CUE_POINT, point.data, point.len);
+    else welem(out, ID_CUE_POINT, rubraview_mem_view(point.data, point.len));
     wbuf_free(&point);
     wbuf_free(&pos);
 }
@@ -941,17 +950,17 @@ static void write_cues(wbuf_t *out, const rubraview_mkv_t *mkv, const elem_t *cu
                 else if (t.id == ID_CUE_RELATIVE_POSITION) { if (new_rel != UINT64_MAX) welem_uint(&tbody, ID_CUE_RELATIVE_POSITION, new_rel, 8); }
                 else if (t.id != ID_CUE_CODEC_STATE && t.id != ID_CRC32 && t.id != ID_VOID) wraw(&tbody, mkv, q, t.next);
             }
-            if (!tbody.failed) { welem(&pbody, ID_CUE_TRACK_POSITIONS, tbody.data, tbody.len); kept++; }
+            if (!tbody.failed) { welem(&pbody, ID_CUE_TRACK_POSITIONS, rubraview_mem_view(tbody.data, tbody.len)); kept++; }
             else pbody.failed = true;
             wbuf_free(&tbody);
         }
-        if (kept > 0 && !pbody.failed) welem(&body, ID_CUE_POINT, pbody.data, pbody.len);
+        if (kept > 0 && !pbody.failed) welem(&body, ID_CUE_POINT, rubraview_mem_view(pbody.data, pbody.len));
         if (pbody.failed) body.failed = true;
         wbuf_free(&pbody);
     }
     while (next_sub < put->track.count) write_sub_point(&body, mkv, put, next_sub++, new_body);
     if (body.failed) out->failed = true;
-    else if (body.len > 0) welem(out, ID_CUES, body.data, body.len);
+    else if (body.len > 0) welem(out, ID_CUES, rubraview_mem_view(body.data, body.len));
     wbuf_free(&body);
 }
 
@@ -1026,7 +1035,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
         wbuf_t s = {0};
         welem_uint(&s, ID_SEEK_ID, 0x1F43B675u, 4);
         welem_uint(&s, ID_SEEK_POSITION, 0, 8);
-        welem(&probe, ID_SEEK, s.data, s.len);
+        welem(&probe, ID_SEEK, rubraview_mem_view(s.data, s.len));
         wbuf_free(&s);
     }
     size_t seekhead_size = id_width(ID_SEEKHEAD) + size_width(probe.len) + probe.len;
@@ -1052,7 +1061,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
             put->sub_rel[next_sub] = one.len;
             write_sub_group(&one, mkv, put, next_sub, 0);
             uint64_t from = own.len;
-            welem(&own, ID_CLUSTER, one.data, one.len);
+            welem(&own, ID_CLUSTER, rubraview_mem_view(one.data, one.len));
             bool failed = one.failed;
             wbuf_free(&one);
             if (failed || own.failed || !add_piece(put, &room, from, own.len, true)) PUT_FAIL(N_("no memory"));
@@ -1076,7 +1085,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
             if (!add_piece(put, &room, own.len, own.len + 12, true)) PUT_FAIL(N_("no memory"));
             uint64_t header_at = own.len;
             uint8_t zeros[12] = {0};
-            wput(&own, zeros, 12);
+            wput(&own, rubraview_mem_view(zeros, 12));
             put->pieces[header].to = own.len;
             size_t sub = lo;
             uint64_t data_pos = pos + 12;
@@ -1112,7 +1121,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
             wid(&h, ID_CLUSTER);
             wsize(&h, size, 8);
             if (h.failed || h.len != 12) { wbuf_free(&h); PUT_FAIL(N_("no memory")); }
-            memcpy(own.data + header_at, h.data, 12);
+            proven_sys_mem_copy(own.data + header_at, h.data, 12);
             wbuf_free(&h);
             c->new_data_at = pos + 12;
             c->rebuilt = true;
@@ -1128,7 +1137,7 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
             put->sub_rel[next_sub] = one.len;
             write_sub_group(&one, mkv, put, next_sub, 0);
             uint64_t from = own.len;
-            welem(&own, ID_CLUSTER, one.data, one.len);
+            welem(&own, ID_CLUSTER, rubraview_mem_view(one.data, one.len));
             bool failed = one.failed;
             wbuf_free(&one);
             if (failed || own.failed || !add_piece(put, &room, from, own.len, true)) PUT_FAIL(N_("no memory"));
@@ -1155,17 +1164,17 @@ bool rubraview_mkv_put_plan(rubraview_mkv_put_t *put, const rubraview_mkv_t *mkv
         wbuf_t s = {0};
         welem_uint(&s, ID_SEEK_ID, seek[k].id, id_width(seek[k].id));
         welem_uint(&s, ID_SEEK_POSITION, seekhead_size + seek[k].at, 8);
-        welem(&sh, ID_SEEK, s.data, s.len);
+        welem(&sh, ID_SEEK, rubraview_mem_view(s.data, s.len));
         wbuf_free(&s);
     }
     wbuf_t s = {0};
     welem_uint(&s, ID_SEEK_ID, ID_CUES, 4);
     welem_uint(&s, ID_SEEK_POSITION, cues_at - new_body, 8);
-    welem(&sh, ID_SEEK, s.data, s.len);
+    welem(&sh, ID_SEEK, rubraview_mem_view(s.data, s.len));
     wbuf_free(&s);
-    welem(&own, ID_SEEKHEAD, sh.data, sh.len);
+    welem(&own, ID_SEEKHEAD, rubraview_mem_view(sh.data, sh.len));
     wbuf_free(&sh);
-    wput(&own, kept.data, kept.len);
+    wput(&own, rubraview_mem_view(kept.data, kept.len));
     /* The head must be exactly as long as the layout counted, or every place after it is wrong. */
     if (own.failed || own.len - head_from != head_size) PUT_FAIL(N_("the new film could not be laid out"));
     put->pieces[0] = (rubraview_mkv_piece_t){ .from = head_from, .to = own.len, .own = true };
@@ -1196,20 +1205,22 @@ int rubraview_mkv_put_step(rubraview_mkv_put_t *put, rubraview_mkv_emit_fn emit,
 
 static bool same_block(const rubraview_mkv_block_t *a, const rubraview_mkv_block_t *b) {
     return a->track == b->track && a->start_ns == b->start_ns && a->duration_ns == b->duration_ns && a->size == b->size &&
-           a->laced == b->laced && (a->size == 0 || memcmp(a->payload, b->payload, a->size) == 0);
+           a->laced == b->laced && (a->size == 0 || proven_sys_mem_cmp(a->payload, b->payload, a->size) == 0);
 }
 
-bool rubraview_mkv_check_begin(rubraview_mkv_check_t *check, const rubraview_mkv_put_t *put, const uint8_t *made, uint64_t made_size) {
+bool rubraview_mkv_check_begin(rubraview_mkv_check_t *check, const rubraview_mkv_put_t *put, proven_mem_view_t made_view) {
+    const uint8_t *made = (const uint8_t *)made_view.ptr;
+    uint64_t made_size = (uint64_t)made_view.size;
     if (!check || !put) return false;
     *check = (rubraview_mkv_check_t){0};
     const rubraview_mkv_t *old = put->mkv;
     if (made_size != put->total) { check->why = N_("the new film is not the size it was laid out to be"); return false; }
-    if (!rubraview_mkv_open(&check->made, made, made_size, &check->why)) return false;
+    if (!rubraview_mkv_open(&check->made, rubraview_mem_view(made, made_size), &check->why)) return false;
     if (check->made.track_count != old->track_count + 1) { check->why = N_("the new film's tracks are not the old ones and one more"); return false; }
     for (size_t i = 0; i < old->track_count; ++i) {
         const rubraview_mkv_track_t *a = &old->tracks[i], *b = &check->made.tracks[i];
         if (a->number != b->number || a->type != b->type || !proven_u8str_view_eq(a->codec, b->codec) ||
-            a->private_size != b->private_size || (a->private_size && memcmp(a->private_data, b->private_data, a->private_size) != 0)) {
+            a->private_size != b->private_size || (a->private_size && proven_sys_mem_cmp(a->private_data, b->private_data, a->private_size) != 0)) {
             check->why = N_("a track of the new film is not as it was");
             return false;
         }
@@ -1243,7 +1254,7 @@ int rubraview_mkv_check_step(rubraview_mkv_check_t *check, const rubraview_mkv_p
                 if (check->sub_blocks >= put->track.count) { check->why = N_("the new film holds more subtitles than were put in"); return -1; }
                 const rubraview_mkv_put_cue_t *cue = &put->track.cues[check->sub_blocks];
                 if (b.start_ns != to_ticks(old, cue->start_ns) * scale || b.duration_ns != to_ticks(old, cue->duration_ns) * scale ||
-                    b.size != cue->size || b.laced || memcmp(b.payload, cue->payload, cue->size) != 0) {
+                    b.size != cue->size || b.laced || proven_sys_mem_cmp(b.payload, cue->payload, cue->size) != 0) {
                     check->why = N_("a subtitle in the new film is not the one put in");
                     return -1;
                 }

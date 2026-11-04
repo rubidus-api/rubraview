@@ -33,7 +33,7 @@ rubraview_pixbuf_t rubraview_pixbuf_create(proven_arena_t *arena, int32_t width,
     }
 
     uint8_t *ptr = (uint8_t*)res.value.ptr;
-    memset(ptr, 0, (size_t)stride * (size_t)height);
+    proven_sys_mem_set(ptr, 0, (size_t)stride * (size_t)height);
 
     return (rubraview_pixbuf_t){
         .pixels = ptr,
@@ -66,7 +66,7 @@ void rubraview_pixbuf_clear(rubraview_pixbuf_t *pb, uint32_t color_hex) {
         uint8_t gray = (uint8_t)(color_hex & 0xFF);
         for (int32_t y = 0; y < pb->height; ++y) {
             uint8_t *row = pb->pixels + ((ptrdiff_t)y * pb->stride);
-            memset(row, gray, (size_t)pb->width);
+            proven_sys_mem_set(row, gray, (size_t)pb->width);
         }
     }
 }
@@ -84,7 +84,7 @@ rubraview_pixbuf_t rubraview_pixbuf_clone(proven_arena_t *arena, const rubraview
     for (int32_t y = 0; y < src->height; ++y) {
         const uint8_t *src_row = src->pixels + ((ptrdiff_t)y * src->stride);
         uint8_t *dst_row = dst.pixels + ((ptrdiff_t)y * dst.stride);
-        memcpy(dst_row, src_row, (size_t)row_bytes);
+        proven_sys_mem_copy(dst_row, src_row, (size_t)row_bytes);
     }
     return dst;
 }
@@ -136,7 +136,7 @@ rubraview_pixbuf_t rubraview_pixbuf_crop(proven_arena_t *arena, const rubraview_
     for (int32_t row = 0; row < h; ++row) {
         const uint8_t *src_row = src->pixels + ((ptrdiff_t)(y + row) * src->stride) + ((ptrdiff_t)x * bpp);
         uint8_t *dst_row = dst.pixels + ((ptrdiff_t)row * dst.stride);
-        memcpy(dst_row, src_row, (size_t)row_bytes);
+        proven_sys_mem_copy(dst_row, src_row, (size_t)row_bytes);
     }
     return dst;
 }

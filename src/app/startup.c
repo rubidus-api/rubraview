@@ -126,7 +126,7 @@ bool drain_one_pending_decode(app_state_t *app) {
     if (app->pending_decode_count == 0) return false;
     size_t index = app->pending_decode[0];
     app->pending_decode_count--;
-    memmove(app->pending_decode, app->pending_decode + 1,
+    proven_sys_mem_move(app->pending_decode, app->pending_decode + 1,
             app->pending_decode_count * sizeof(app->pending_decode[0]));
     ensure_page_loaded_how(app, (int32_t)index, false);
     return true;

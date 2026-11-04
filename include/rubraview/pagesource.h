@@ -92,7 +92,7 @@ rubraview_page_source_t rubraview_page_source_from_listing(proven_arena_t *arena
  * is what gets allocated. A ZIP ignores it.
  */
 rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena,
-                                                            const uint8_t *data, size_t size,
+                                                            proven_mem_view_t data_view,
                                                             proven_u8str_view_t archive_path,
                                                             proven_u8str_view_t extension_filter,
                                                             rubraview_codepage_t override_choice,
@@ -107,7 +107,7 @@ rubraview_page_source_t rubraview_page_source_from_archive(proven_arena_t *arena
  * is opened from the set's first volume.
  */
 rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena_t *arena,
-                                                                     const uint8_t *data, size_t size,
+                                                                     proven_mem_view_t data_view,
                                                                      proven_u8str_view_t archive_path,
                                                                      proven_u8str_view_t extension_filter,
                                                                      rubraview_codepage_t override_choice,

@@ -62,7 +62,7 @@ void rubraview_slideshow_set_interval(rubraview_slideshow_t *s, double seconds);
    by half seconds, from half a second up. The text is "3 s", "2.5 s". */
 double rubraview_slideshow_interval_cycle(double seconds);
 double rubraview_slideshow_interval_nudge(double base_seconds, int steps);
-int rubraview_slideshow_interval_text(char *buffer, size_t size, double seconds);
+int rubraview_slideshow_interval_text(proven_mem_mut_t buffer_view, double seconds);
 
 void rubraview_slideshow_pause(rubraview_slideshow_t *s);
 void rubraview_slideshow_resume(rubraview_slideshow_t *s);

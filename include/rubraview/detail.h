@@ -33,9 +33,11 @@ typedef struct rubraview_details {
     size_t count;
 } rubraview_details_t;
 
-void rubraview_details_heading(rubraview_details_t *d, const char *format, ...);
+void rubraview_details_heading_args(rubraview_details_t *d, const char *format, const proven_arg_t *fmt_args, size_t fmt_count);
+#define rubraview_details_heading(d, format, ...) rubraview_details_heading_args(d, format, RUBRAVIEW_FMT_ARGS(__VA_ARGS__))
 /* A line whose value comes out empty is not added. */
-void rubraview_details_add(rubraview_details_t *d, const char *label, const char *format, ...);
+void rubraview_details_add_args(rubraview_details_t *d, const char *label, const char *format, const proven_arg_t *fmt_args, size_t fmt_count);
+#define rubraview_details_add(d, label, format, ...) rubraview_details_add_args(d, label, format, RUBRAVIEW_FMT_ARGS(__VA_ARGS__))
 
 /* Formatters; each writes into `buf` and returns the length. */
 size_t rubraview_detail_bitrate(char *buf, size_t cap, double bits_per_second);   /* "128 kbit/s", "12.5 Mbit/s" */
@@ -57,7 +59,7 @@ size_t rubraview_detail_ratio(char *buf, size_t cap, double stored_bytes, double
  * uncompressed, when the file says (0 otherwise). Returns false when the
  * bytes are none of these.
  */
-bool rubraview_image_details(const uint8_t *bytes, size_t size, rubraview_details_t *out, uint32_t *out_raw_bits);
+bool rubraview_image_details(proven_mem_view_t bytes_view, rubraview_details_t *out, uint32_t *out_raw_bits);
 
 /*
  * D-98: the file is a picture that moves — a GIF with more than one
@@ -65,14 +67,14 @@ bool rubraview_image_details(const uint8_t *bytes, size_t size, rubraview_detail
  * before its picture data. Read from the bytes, cheaply: no picture is
  * decoded.
  */
-bool rubraview_image_is_animated(const uint8_t *bytes, size_t size);
+bool rubraview_image_is_animated(proven_mem_view_t bytes_view);
 
 /*
  * RV-110: the bytes begin as a JPEG XL file does — a bare codestream
  * (FF 0A) or the box container's twelve-byte signature. By the content,
  * not the name: this is what decides whether FFmpeg is asked for it.
  */
-bool rubraview_image_is_jxl(const uint8_t *bytes, size_t size);
+bool rubraview_image_is_jxl(proven_mem_view_t bytes_view);
 
 #ifdef __cplusplus
 }

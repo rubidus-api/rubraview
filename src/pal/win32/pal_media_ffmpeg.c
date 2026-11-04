@@ -1,5 +1,7 @@
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include <windows.h>
 #include <d3d11.h>
 #include <stdatomic.h>
@@ -271,9 +273,9 @@ static HMODULE load_one(const WCHAR *dir, const char *versioned, const char *pla
         WCHAR wide[MAX_PATH + 64];
         size_t at = 0;
         if (dir) {
-            at = wcslen(dir);
+            at = rubraview_wlen(dir);
             if (at == 0 || at >= MAX_PATH) return NULL;
-            memcpy(wide, dir, at * sizeof(WCHAR));
+            proven_sys_mem_copy(wide, dir, at * sizeof(WCHAR));
             wide[at++] = L'\\';
         }
         if (MultiByteToWideChar(CP_UTF8, 0, names[i], -1, wide + at, 64) <= 0) continue;
@@ -289,14 +291,14 @@ static HMODULE load_one(const WCHAR *dir, const char *versioned, const char *pla
 /* All five of the folder there before any of them is loaded: never half a
    set from here and the rest found elsewhere. */
 static bool folder_has_all(const WCHAR *dir) {
-    size_t n = wcslen(dir);
+    size_t n = rubraview_wlen(dir);
     if (n == 0 || n >= MAX_PATH) return false;
     for (int i = 0; i < FF_DLLS; i++) {
         bool found = false;
         const char *names[2] = { FF_VERSIONED[i], FF_PLAIN[i] };
         for (int k = 0; k < 2 && !found; k++) {
             WCHAR wide[MAX_PATH + 64];
-            memcpy(wide, dir, n * sizeof(WCHAR));
+            proven_sys_mem_copy(wide, dir, n * sizeof(WCHAR));
             wide[n] = L'\\';
             if (MultiByteToWideChar(CP_UTF8, 0, names[k], -1, wide + n + 1, 64) <= 0) continue;
             found = GetFileAttributesW(wide) != INVALID_FILE_ATTRIBUTES;
@@ -366,7 +368,7 @@ static bool ff_load_from(const WCHAR *dir) {
     if (whole && bind_all(m[4], m[3], m[0], m[2], m[1]) && versions_match()) return true;
     /* Not this place: nothing of it is kept, so the next one starts clean. */
     bool tried = g_ff.tried;
-    memset(&g_ff, 0, sizeof(g_ff));
+    proven_sys_mem_set(&g_ff, 0, sizeof(g_ff));
     g_ff.tried = tried;
     for (int i = FF_DLLS - 1; i >= 0; i--) if (m[i]) FreeLibrary(m[i]);
     return false;
@@ -395,9 +397,9 @@ static bool ff_load_once(void) {
 static bool ff_load(void) {
     if (atomic_load_explicit(&g_ff_ready, memory_order_acquire)) return true;
     AcquireSRWLockExclusive(&g_ff_lock);
-    if (!g_ff.ok && (!g_ff.tried || memcmp(g_ff_dirs, g_ff_tried_dirs, sizeof(g_ff_dirs)) != 0)) {
+    if (!g_ff.ok && (!g_ff.tried || proven_sys_mem_cmp(g_ff_dirs, g_ff_tried_dirs, sizeof(g_ff_dirs)) != 0)) {
         g_ff.tried = true;
-        memcpy(g_ff_tried_dirs, g_ff_dirs, sizeof(g_ff_dirs));
+        proven_sys_mem_copy(g_ff_tried_dirs, g_ff_dirs, sizeof(g_ff_dirs));
         if (ff_load_once()) atomic_store_explicit(&g_ff_ready, true, memory_order_release);
     }
     bool ok = g_ff.ok;
@@ -408,7 +410,7 @@ static bool ff_load(void) {
 static bool ff_available(void) { return ff_load(); }
 
 static void folder_wide(proven_u8str_view_t folder, WCHAR wide[MAX_PATH]) {
-    memset(wide, 0, MAX_PATH * sizeof(WCHAR));
+    proven_sys_mem_set(wide, 0, MAX_PATH * sizeof(WCHAR));
     int n = folder.size > 0 && folder.size < MAX_PATH
         ? MultiByteToWideChar(CP_UTF8, 0, (const char *)folder.ptr, (int)folder.size, wide, MAX_PATH - 1) : 0;
     wide[n > 0 ? n : 0] = L'\0';
@@ -421,7 +423,7 @@ void rubraview_pal_ffmpeg_set_folders(proven_u8str_view_t imported, proven_u8str
     folder_wide(imported, wide[0]);
     folder_wide(chosen, wide[1]);
     AcquireSRWLockExclusive(&g_ff_lock);
-    memcpy(g_ff_dirs, wide, sizeof(wide));
+    proven_sys_mem_copy(g_ff_dirs, wide, sizeof(wide));
     /* Told again, as after the folder was named or filled: none is
        loaded, so the next ask looks once more. */
     if (!g_ff.ok) g_ff.tried = false;
@@ -443,11 +445,11 @@ static rubraview_ffmpeg_refusal_t refusal_in(WCHAR *path, size_t n) {
     static const WCHAR pattern[] = L"avcodec*.dll";
     static const WCHAR ours[] = L"avcodec-" AV_STRINGIFY(LIBAVCODEC_VERSION_MAJOR) L".dll";
     rubraview_ffmpeg_refusal_t state = RUBRAVIEW_FFMPEG_NOT_REFUSED;
-    memcpy(path + n, pattern, sizeof(pattern));
+    proven_sys_mem_copy(path + n, pattern, sizeof(pattern));
     WIN32_FIND_DATAW found;
     HANDLE find = FindFirstFileW(path, &found);
     if (find != INVALID_HANDLE_VALUE) { state = RUBRAVIEW_FFMPEG_OTHER_VERSION; FindClose(find); }
-    memcpy(path + n, ours, sizeof(ours));
+    proven_sys_mem_copy(path + n, ours, sizeof(ours));
     /* This build's own avcodec is there: one of its four fellows is not, or would not load. */
     if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) state = RUBRAVIEW_FFMPEG_NOT_WHOLE;
     return state;
@@ -467,8 +469,8 @@ rubraview_ffmpeg_refusal_t rubraview_ffmpeg_local_refused(void) {
             d = n > 0 && n < MAX_PATH ? n : 0;
         } else {
             AcquireSRWLockShared(&g_ff_lock);
-            d = wcslen(g_ff_dirs[ORDER[k]]);
-            if (d > 0 && d < MAX_PATH - 1) { memcpy(path, g_ff_dirs[ORDER[k]], d * sizeof(WCHAR)); path[d++] = L'\\'; }
+            d = rubraview_wlen(g_ff_dirs[ORDER[k]]);
+            if (d > 0 && d < MAX_PATH - 1) { proven_sys_mem_copy(path, g_ff_dirs[ORDER[k]], d * sizeof(WCHAR)); path[d++] = L'\\'; }
             else d = 0;
             ReleaseSRWLockShared(&g_ff_lock);
         }
@@ -489,7 +491,7 @@ static int ff_bytes_read(void *opaque, uint8_t *buffer, int count) {
     size_t left = b->size - b->at;
     if (left == 0 || count <= 0) return AVERROR_EOF;
     size_t n = (size_t)count < left ? (size_t)count : left;
-    memcpy(buffer, b->data + b->at, n);
+    proven_sys_mem_copy(buffer, b->data + b->at, n);
     b->at += n;
     return (int)n;
 }
@@ -522,9 +524,11 @@ int rubraview_ffmpeg_local_jxl_state(void) {
    `all`: every picture of one that moves, each laid together by libjxl
    as it is to be seen, with the time it stays; `room` returning NULL
    ends the reading there. */
-static bool jxl_read(const uint8_t *data, size_t size, int32_t max_side, bool all,
+static bool jxl_read(proven_mem_view_t data_view, int32_t max_side, bool all,
                      uint8_t *(*room)(void *context, int32_t width, int32_t height, double seconds),
                      void *context, int32_t *out_width, int32_t *out_height) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     enum { IO_BYTES = 64 * 1024 };
     if (!data || size == 0 || !room || rubraview_ffmpeg_local_jxl_state() != 2) return false;
 
@@ -630,21 +634,25 @@ static uint8_t *jxl_one_room(void *context, int32_t width, int32_t height, doubl
     return one->room(one->context, width, height);
 }
 
-bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t max_side,
+bool rubraview_pal_ffmpeg_jxl_decode(proven_mem_view_t data_view, int32_t max_side,
                                      uint8_t *(*room)(void *context, int32_t width, int32_t height),
                                      void *context, int32_t *out_width, int32_t *out_height) {
-    if (rubraview_pal_ffmpeg_remote()) return rubraview_mhost_remote_jxl_decode(data, size, max_side, room, context, out_width, out_height);
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    if (rubraview_pal_ffmpeg_remote()) return rubraview_mhost_remote_jxl_decode(rubraview_mem_view(data, size), max_side, room, context, out_width, out_height);
     jxl_one_t one = { .room = room, .context = context };
     if (!room) return false;
-    return jxl_read(data, size, max_side, false, jxl_one_room, &one, out_width, out_height);
+    return jxl_read(rubraview_mem_view(data, size), max_side, false, jxl_one_room, &one, out_width, out_height);
 }
 
-bool rubraview_pal_ffmpeg_jxl_frames(const uint8_t *data, size_t size, int32_t max_side,
+bool rubraview_pal_ffmpeg_jxl_frames(proven_mem_view_t data_view, int32_t max_side,
                                      uint8_t *(*room)(void *context, int32_t width, int32_t height, double seconds),
                                      void *context) {
-    if (rubraview_pal_ffmpeg_remote()) return rubraview_mhost_remote_jxl_frames(data, size, max_side, room, context);
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    if (rubraview_pal_ffmpeg_remote()) return rubraview_mhost_remote_jxl_frames(rubraview_mem_view(data, size), max_side, room, context);
     int32_t width = 0, height = 0;
-    return jxl_read(data, size, max_side, true, room, context, &width, &height);
+    return jxl_read(rubraview_mem_view(data, size), max_side, true, room, context, &width, &height);
 }
 
 /* ---- decode thread ---- */
@@ -677,7 +685,7 @@ static int ff_cache_read(void *opaque, uint8_t *buf, int size) {
     ff_decode_t *d = (ff_decode_t *)opaque;
     uint32_t got = 0;
     if (size <= 0) return 0;
-    if (!rubraview_pal_filmcache_read(d->cache, d->cache_at, buf, (uint32_t)size, &got)) return AVERROR(EIO);
+    if (!rubraview_pal_filmcache_read(d->cache, d->cache_at, rubraview_mem_mut(buf, (uint32_t)size), &got)) return AVERROR(EIO);
     if (got == 0) return AVERROR_EOF;
     d->cache_at += got;
     return (int)got;
@@ -806,9 +814,9 @@ static bool ff_subtitle_is_text(enum AVCodecID id) {
 static proven_u8str_view_t ff_copy(char *buffer, size_t capacity, const char *text) {
     buffer[0] = '\0';
     if (!text || !text[0]) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 0 };
-    size_t len = strlen(text);
+    size_t len = proven_cstr_len(text);
     if (len >= capacity) len = capacity - 1;
-    memcpy(buffer, text, len);
+    proven_sys_mem_copy(buffer, text, len);
     buffer[len] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = len };
 }
@@ -862,8 +870,8 @@ static void ff_detail_tags(rubraview_details_t *d, const AVDictionary *tags) {
     while (tags && shown < 24 && (e = g_ff.av_dict_get(tags, "", e, AV_DICT_IGNORE_SUFFIX)) != NULL) {
         if (!e->key || !e->value || !e->value[0]) continue;
         char label[24];
-        snprintf(label, sizeof(label), "Tag: %.17s", e->key);
-        rubraview_details_add(d, label, "%s", e->value);
+        rubraview_fmt(label, sizeof(label), "Tag: {:.17}", PROVEN_ARG(e->key));
+        rubraview_details_add(d, label, "{}", PROVEN_ARG(e->value));
         shown++;
     }
 }
@@ -876,116 +884,116 @@ static void ff_detail_stream(ff_media_t *m, AVFormatContext *format, unsigned in
     bool video = par->codec_type == AVMEDIA_TYPE_VIDEO, audio = par->codec_type == AVMEDIA_TYPE_AUDIO;
     const char *kind = video ? "Picture" : audio ? "Sound" : par->codec_type == AVMEDIA_TYPE_SUBTITLE ? "Subtitle"
                      : par->codec_type == AVMEDIA_TYPE_ATTACHMENT ? "Attachment" : "Data";
-    rubraview_details_heading(d, "%s stream %u", kind, index);
+    rubraview_details_heading(d, "{} stream {}", PROVEN_ARG(kind), PROVEN_ARG((unsigned)index));
     const AVCodecDescriptor *desc = g_ff.avcodec_descriptor_get ? g_ff.avcodec_descriptor_get(par->codec_id) : NULL;
-    if (desc && desc->long_name) rubraview_details_add(d, "Codec", "%s (%s)", desc->long_name, g_ff.avcodec_get_name(par->codec_id));
-    else rubraview_details_add(d, "Codec", "%s", g_ff.avcodec_get_name(par->codec_id));
+    if (desc && desc->long_name) rubraview_details_add(d, "Codec", "{} ({})", PROVEN_ARG(desc->long_name), PROVEN_ARG(g_ff.avcodec_get_name(par->codec_id)));
+    else rubraview_details_add(d, "Codec", "{}", PROVEN_ARG(g_ff.avcodec_get_name(par->codec_id)));
     if (par->codec_tag) {
         uint32_t tag = par->codec_tag;
         char four[5] = { (char)(tag & 0xFF), (char)((tag >> 8) & 0xFF), (char)((tag >> 16) & 0xFF), (char)((tag >> 24) & 0xFF), 0 };
         bool printable = true;
         for (int i = 0; i < 4; ++i) if (four[i] < 0x20 || four[i] > 0x7E) printable = false;
-        if (printable) rubraview_details_add(d, "Codec tag", "%s", four);
-        else rubraview_details_add(d, "Codec tag", "0x%04X", (unsigned)tag);
+        if (printable) rubraview_details_add(d, "Codec tag", "{}", PROVEN_ARG(four));
+        else rubraview_details_add(d, "Codec tag", "0x{:04X}", PROVEN_ARG((unsigned)tag));
     }
     const char *profile = g_ff.avcodec_profile_name ? g_ff.avcodec_profile_name(par->codec_id, par->profile) : NULL;
-    if (profile && par->level > 0 && par->codec_id == AV_CODEC_ID_H264) rubraview_details_add(d, "Profile", "%s, level %d.%d", profile, par->level / 10, par->level % 10);
-    else if (profile && par->level > 0 && par->codec_id == AV_CODEC_ID_HEVC) rubraview_details_add(d, "Profile", "%s, level %d.%d", profile, par->level / 30, par->level % 30 / 3);
-    else if (profile && par->level > 0) rubraview_details_add(d, "Profile", "%s, level %d", profile, par->level);
-    else if (profile) rubraview_details_add(d, "Profile", "%s", profile);
+    if (profile && par->level > 0 && par->codec_id == AV_CODEC_ID_H264) rubraview_details_add(d, "Profile", "{}, level {}.{}", PROVEN_ARG(profile), PROVEN_ARG((int)(par->level / 10)), PROVEN_ARG((int)(par->level % 10)));
+    else if (profile && par->level > 0 && par->codec_id == AV_CODEC_ID_HEVC) rubraview_details_add(d, "Profile", "{}, level {}.{}", PROVEN_ARG(profile), PROVEN_ARG((int)(par->level / 30)), PROVEN_ARG((int)(par->level % 30 / 3)));
+    else if (profile && par->level > 0) rubraview_details_add(d, "Profile", "{}, level {}", PROVEN_ARG(profile), PROVEN_ARG((int)par->level));
+    else if (profile) rubraview_details_add(d, "Profile", "{}", PROVEN_ARG(profile));
     if (desc && (video || audio)) {
-        rubraview_details_add(d, "Kind of coding", "%s%s%s", (desc->props & AV_CODEC_PROP_LOSSLESS) && (desc->props & AV_CODEC_PROP_LOSSY) ? "lossy or lossless"
-                              : (desc->props & AV_CODEC_PROP_LOSSLESS) ? "lossless" : (desc->props & AV_CODEC_PROP_LOSSY) ? "lossy" : "",
-                              (desc->props & AV_CODEC_PROP_INTRA_ONLY) ? ", every frame on its own" : "",
-                              (desc->props & AV_CODEC_PROP_REORDER) ? ", frames reordered (B-frames allowed)" : "");
+        rubraview_details_add(d, "Kind of coding", "{}{}{}", PROVEN_ARG((desc->props & AV_CODEC_PROP_LOSSLESS) && (desc->props & AV_CODEC_PROP_LOSSY) ? "lossy or lossless"
+                              : (desc->props & AV_CODEC_PROP_LOSSLESS) ? "lossless" : (desc->props & AV_CODEC_PROP_LOSSY) ? "lossy" : ""),
+                              PROVEN_ARG((desc->props & AV_CODEC_PROP_INTRA_ONLY) ? ", every frame on its own" : ""),
+                              PROVEN_ARG((desc->props & AV_CODEC_PROP_REORDER) ? ", frames reordered (B-frames allowed)" : ""));
     }
     double seconds = stream->duration != AV_NOPTS_VALUE ? (double)stream->duration * av_q2d(stream->time_base)
                    : format->duration != AV_NOPTS_VALUE ? (double)format->duration / AV_TIME_BASE : 0.0;
     double fps = 0.0;
     if (video) {
-        rubraview_details_add(d, "Frame", "%d x %d", par->width, par->height);
+        rubraview_details_add(d, "Frame", "{} x {}", PROVEN_ARG((int)par->width), PROVEN_ARG((int)par->height));
         AVRational sar = par->sample_aspect_ratio.num ? par->sample_aspect_ratio : stream->sample_aspect_ratio;
         if (sar.num > 0 && sar.den > 0) {
             if (sar.num == sar.den) rubraview_details_add(d, "Pixel shape", "square (1:1)");
-            else rubraview_details_add(d, "Pixel shape", "%d:%d, shown as %.0f x %d", sar.num, sar.den,
-                                       (double)par->width * sar.num / sar.den, par->height);
+            else rubraview_details_add(d, "Pixel shape", "{}:{}, shown as {:.0} x {}", PROVEN_ARG((int)sar.num), PROVEN_ARG((int)sar.den),
+                                       PROVEN_ARG((double)par->width * sar.num / sar.den), PROVEN_ARG((int)par->height));
         }
         if (stream->avg_frame_rate.num > 0 && stream->avg_frame_rate.den > 0) {
             fps = av_q2d(stream->avg_frame_rate);
-            rubraview_details_add(d, "Frame rate", "%.3f a second (%d/%d)", fps, stream->avg_frame_rate.num, stream->avg_frame_rate.den);
+            rubraview_details_add(d, "Frame rate", "{:.3} a second ({}/{})", PROVEN_ARG((double)fps), PROVEN_ARG((int)stream->avg_frame_rate.num), PROVEN_ARG((int)stream->avg_frame_rate.den));
         }
         if (stream->r_frame_rate.num > 0 && stream->r_frame_rate.den > 0 && fabs(av_q2d(stream->r_frame_rate) - fps) > 0.01) {
-            rubraview_details_add(d, "Base frame rate", "%.3f a second (the rate varies)", av_q2d(stream->r_frame_rate));
+            rubraview_details_add(d, "Base frame rate", "{:.3} a second (the rate varies)", PROVEN_ARG((double)(av_q2d(stream->r_frame_rate))));
         }
-        if (stream->nb_frames > 0) rubraview_details_add(d, "Frames", "%lld", (long long)stream->nb_frames);
+        if (stream->nb_frames > 0) rubraview_details_add(d, "Frames", "{}", PROVEN_ARG((long long)stream->nb_frames));
         const char *pix = g_ff.av_get_pix_fmt_name ? g_ff.av_get_pix_fmt_name((enum AVPixelFormat)par->format) : NULL;
-        if (pix) rubraview_details_add(d, "Pixel format", "%s", pix);
-        if (par->bits_per_raw_sample > 0) rubraview_details_add(d, "Bit depth", "%d bits", par->bits_per_raw_sample);
+        if (pix) rubraview_details_add(d, "Pixel format", "{}", PROVEN_ARG(pix));
+        if (par->bits_per_raw_sample > 0) rubraview_details_add(d, "Bit depth", "{} bits", PROVEN_ARG((int)par->bits_per_raw_sample));
         static const char *const FIELD[6] = { "", "progressive", "interlaced, top field first", "interlaced, bottom field first",
                                               "interlaced, top coded first, bottom shown first", "interlaced, bottom coded first, top shown first" };
-        if (par->field_order > 0 && par->field_order < 6) rubraview_details_add(d, "Scan", "%s", FIELD[par->field_order]);
+        if (par->field_order > 0 && par->field_order < 6) rubraview_details_add(d, "Scan", "{}", PROVEN_ARG(FIELD[par->field_order]));
         const char *name = NULL;
         if (par->color_range != AVCOL_RANGE_UNSPECIFIED && g_ff.av_color_range_name && (name = g_ff.av_color_range_name(par->color_range)) != NULL) {
-            rubraview_details_add(d, "Colour range", "%s", par->color_range == AVCOL_RANGE_JPEG ? "full (0-255)" : par->color_range == AVCOL_RANGE_MPEG ? "limited (16-235)" : name);
+            rubraview_details_add(d, "Colour range", "{}", PROVEN_ARG(par->color_range == AVCOL_RANGE_JPEG ? "full (0-255)" : par->color_range == AVCOL_RANGE_MPEG ? "limited (16-235)" : name));
         }
         if (par->color_primaries != AVCOL_PRI_UNSPECIFIED && g_ff.av_color_primaries_name && (name = g_ff.av_color_primaries_name(par->color_primaries)) != NULL) {
-            rubraview_details_add(d, "Colour primaries", "%s", name);
+            rubraview_details_add(d, "Colour primaries", "{}", PROVEN_ARG(name));
         }
         if (par->color_trc != AVCOL_TRC_UNSPECIFIED && g_ff.av_color_transfer_name && (name = g_ff.av_color_transfer_name(par->color_trc)) != NULL) {
-            rubraview_details_add(d, "Transfer", "%s%s", name, par->color_trc == AVCOL_TRC_SMPTE2084 ? " (PQ, HDR10)" : par->color_trc == AVCOL_TRC_ARIB_STD_B67 ? " (HLG)" : "");
+            rubraview_details_add(d, "Transfer", "{}{}", PROVEN_ARG(name), PROVEN_ARG(par->color_trc == AVCOL_TRC_SMPTE2084 ? " (PQ, HDR10)" : par->color_trc == AVCOL_TRC_ARIB_STD_B67 ? " (HLG)" : ""));
         }
         if (par->color_space != AVCOL_SPC_UNSPECIFIED && g_ff.av_color_space_name && (name = g_ff.av_color_space_name(par->color_space)) != NULL) {
-            rubraview_details_add(d, "Colour matrix", "%s", name);
+            rubraview_details_add(d, "Colour matrix", "{}", PROVEN_ARG(name));
         }
         if (par->chroma_location != AVCHROMA_LOC_UNSPECIFIED && g_ff.av_chroma_location_name && (name = g_ff.av_chroma_location_name(par->chroma_location)) != NULL) {
-            rubraview_details_add(d, "Chroma siting", "%s", name);
+            rubraview_details_add(d, "Chroma siting", "{}", PROVEN_ARG(name));
         }
-        if (par->video_delay > 0) rubraview_details_add(d, "Reordering", "up to %d frame%s", par->video_delay, par->video_delay == 1 ? "" : "s");
+        if (par->video_delay > 0) rubraview_details_add(d, "Reordering", "up to {} frame{}", PROVEN_ARG((int)par->video_delay), PROVEN_ARG(par->video_delay == 1 ? "" : "s"));
     } else if (audio) {
-        rubraview_details_add(d, "Sample rate", "%d Hz", par->sample_rate);
+        rubraview_details_add(d, "Sample rate", "{} Hz", PROVEN_ARG((int)par->sample_rate));
         char layout[64] = "";
         if (g_ff.av_channel_layout_describe) g_ff.av_channel_layout_describe(&par->ch_layout, layout, sizeof(layout));
-        rubraview_details_add(d, "Channels", "%d%s%s", par->ch_layout.nb_channels, layout[0] ? ": " : "", layout);
+        rubraview_details_add(d, "Channels", "{}{}{}", PROVEN_ARG((int)par->ch_layout.nb_channels), PROVEN_ARG(layout[0] ? ": " : ""), PROVEN_ARG(layout));
         const char *fmt = g_ff.av_get_sample_fmt_name ? g_ff.av_get_sample_fmt_name((enum AVSampleFormat)par->format) : NULL;
-        if (fmt) rubraview_details_add(d, "Sample format", "%s", fmt);
-        if (par->bits_per_raw_sample > 0) rubraview_details_add(d, "Bit depth", "%d bits", par->bits_per_raw_sample);
-        else if (par->bits_per_coded_sample > 0) rubraview_details_add(d, "Bits a coded sample", "%d", par->bits_per_coded_sample);
-        if (par->frame_size > 0) rubraview_details_add(d, "Samples a frame", "%d", par->frame_size);
-        if (par->block_align > 0) rubraview_details_add(d, "Block", "%d bytes", par->block_align);
-        if (par->initial_padding > 0) rubraview_details_add(d, "Encoder delay", "%d samples", par->initial_padding);
+        if (fmt) rubraview_details_add(d, "Sample format", "{}", PROVEN_ARG(fmt));
+        if (par->bits_per_raw_sample > 0) rubraview_details_add(d, "Bit depth", "{} bits", PROVEN_ARG((int)par->bits_per_raw_sample));
+        else if (par->bits_per_coded_sample > 0) rubraview_details_add(d, "Bits a coded sample", "{}", PROVEN_ARG((int)par->bits_per_coded_sample));
+        if (par->frame_size > 0) rubraview_details_add(d, "Samples a frame", "{}", PROVEN_ARG((int)par->frame_size));
+        if (par->block_align > 0) rubraview_details_add(d, "Block", "{} bytes", PROVEN_ARG((int)par->block_align));
+        if (par->initial_padding > 0) rubraview_details_add(d, "Encoder delay", "{} samples", PROVEN_ARG((int)par->initial_padding));
     }
     if (par->bit_rate > 0) {
         rubraview_detail_bitrate(b, sizeof(b), (double)par->bit_rate);
-        rubraview_details_add(d, "Bit rate", "%s", b);
+        rubraview_details_add(d, "Bit rate", "{}", PROVEN_ARG(b));
         if (video && par->width > 0 && par->height > 0 && fps > 0.0) {
             double per_pixel = (double)par->bit_rate / ((double)par->width * par->height * fps);
-            rubraview_details_add(d, "Compression", "%.3f bits a pixel, 1 : %.0f of 8-bit 4:2:0", per_pixel, 12.0 / per_pixel);
+            rubraview_details_add(d, "Compression", "{:.3} bits a pixel, 1 : {:.0} of 8-bit 4:2:0", PROVEN_ARG((double)per_pixel), PROVEN_ARG((double)(12.0 / per_pixel)));
         } else if (audio && par->sample_rate > 0 && par->ch_layout.nb_channels > 0) {
             double pcm = (double)par->sample_rate * par->ch_layout.nb_channels * 16.0;
-            rubraview_details_add(d, "Compression", "1 : %.1f of 16-bit PCM (%.0f %%)", pcm / (double)par->bit_rate, (double)par->bit_rate * 100.0 / pcm);
+            rubraview_details_add(d, "Compression", "1 : {:.1} of 16-bit PCM ({:.0} %)", PROVEN_ARG((double)(pcm / (double)par->bit_rate)), PROVEN_ARG((double)par->bit_rate * 100.0 / pcm));
         }
-        if (seconds > 0.0) rubraview_details_add(d, "Stream size", "about %.1f MB", (double)par->bit_rate / 8.0 * seconds / 1048576.0);
+        if (seconds > 0.0) rubraview_details_add(d, "Stream size", "about {:.1} MB", PROVEN_ARG((double)par->bit_rate / 8.0 * seconds / 1048576.0));
     }
-    if (seconds > 0.0) rubraview_details_add(d, "Length", "%.3f s", seconds);
+    if (seconds > 0.0) rubraview_details_add(d, "Length", "{:.3} s", PROVEN_ARG((double)seconds));
     if (stream->start_time != AV_NOPTS_VALUE && stream->start_time != 0) {
-        rubraview_details_add(d, "Starts at", "%.3f s", (double)stream->start_time * av_q2d(stream->time_base));
+        rubraview_details_add(d, "Starts at", "{:.3} s", PROVEN_ARG((double)stream->start_time * av_q2d(stream->time_base)));
     }
-    if (par->extradata_size > 0) rubraview_details_add(d, "Codec setup", "%d bytes", par->extradata_size);
+    if (par->extradata_size > 0) rubraview_details_add(d, "Codec setup", "{} bytes", PROVEN_ARG((int)par->extradata_size));
     if (stream->disposition) {
-        rubraview_details_add(d, "Marked", "%s%s%s%s%s", (stream->disposition & AV_DISPOSITION_DEFAULT) ? "default " : "",
-                              (stream->disposition & AV_DISPOSITION_FORCED) ? "forced " : "",
-                              (stream->disposition & AV_DISPOSITION_ATTACHED_PIC) ? "cover-picture " : "",
-                              (stream->disposition & AV_DISPOSITION_HEARING_IMPAIRED) ? "for-the-hard-of-hearing " : "",
-                              (stream->disposition & AV_DISPOSITION_COMMENT) ? "commentary " : "");
+        rubraview_details_add(d, "Marked", "{}{}{}{}{}", PROVEN_ARG((stream->disposition & AV_DISPOSITION_DEFAULT) ? "default " : ""),
+                              PROVEN_ARG((stream->disposition & AV_DISPOSITION_FORCED) ? "forced " : ""),
+                              PROVEN_ARG((stream->disposition & AV_DISPOSITION_ATTACHED_PIC) ? "cover-picture " : ""),
+                              PROVEN_ARG((stream->disposition & AV_DISPOSITION_HEARING_IMPAIRED) ? "for-the-hard-of-hearing " : ""),
+                              PROVEN_ARG((stream->disposition & AV_DISPOSITION_COMMENT) ? "commentary " : ""));
     }
-    if (video || audio) rubraview_details_add(d, "Played", "%s", (int)index == m->video_stream || (int)index == m->audio_stream ? "yes" : "no");
+    if (video || audio) rubraview_details_add(d, "Played", "{}", PROVEN_ARG((int)index == m->video_stream || (int)index == m->audio_stream ? "yes" : "no"));
     /* D-95 says what a played stream is decoded as; this backend did not (D-117). */
     if (video && (int)index == m->video_stream) {
-        rubraview_details_add(d, "Decoded as", "%d x %d, 32-bit BGRA", par->width, par->height);
+        rubraview_details_add(d, "Decoded as", "{} x {}, 32-bit BGRA", PROVEN_ARG((int)par->width), PROVEN_ARG((int)par->height));
     }
     if (audio && (int)index == m->audio_stream && par->sample_rate > 0) {
-        rubraview_details_add(d, "Decoded as", "%d Hz, %d channel%s, 32-bit float", par->sample_rate,
-                              par->ch_layout.nb_channels, par->ch_layout.nb_channels == 1 ? "" : "s");
+        rubraview_details_add(d, "Decoded as", "{} Hz, {} channel{}, 32-bit float", PROVEN_ARG((int)par->sample_rate),
+                              PROVEN_ARG((int)par->ch_layout.nb_channels), PROVEN_ARG(par->ch_layout.nb_channels == 1 ? "" : "s"));
     }
     ff_detail_tags(d, stream->metadata);
 }
@@ -995,18 +1003,18 @@ static void ff_collect_details(ff_media_t *m, AVFormatContext *format) {
     char b[136];
     rubraview_details_heading(d, "Container");
     if (format->iformat) {
-        rubraview_details_add(d, "Format", "%s (%s)", format->iformat->long_name ? format->iformat->long_name : "", format->iformat->name);
+        rubraview_details_add(d, "Format", "{} ({})", PROVEN_ARG(format->iformat->long_name ? format->iformat->long_name : ""), PROVEN_ARG(format->iformat->name));
     }
     if (format->bit_rate > 0) {
         rubraview_detail_bitrate(b, sizeof(b), (double)format->bit_rate);
-        rubraview_details_add(d, "Bit rate", "%s (everything together)", b);
+        rubraview_details_add(d, "Bit rate", "{} (everything together)", PROVEN_ARG(b));
     }
     if (format->start_time != AV_NOPTS_VALUE && format->start_time != 0) {
-        rubraview_details_add(d, "Starts at", "%.3f s", (double)format->start_time / AV_TIME_BASE);
+        rubraview_details_add(d, "Starts at", "{:.3} s", PROVEN_ARG((double)format->start_time / AV_TIME_BASE));
     }
-    rubraview_details_add(d, "Streams", "%u", format->nb_streams);
-    if (format->nb_chapters) rubraview_details_add(d, "Chapters", "%u", format->nb_chapters);
-    if (format->nb_programs > 1) rubraview_details_add(d, "Programmes", "%u", format->nb_programs);
+    rubraview_details_add(d, "Streams", "{}", PROVEN_ARG((unsigned)format->nb_streams));
+    if (format->nb_chapters) rubraview_details_add(d, "Chapters", "{}", PROVEN_ARG((unsigned)format->nb_chapters));
+    if (format->nb_programs > 1) rubraview_details_add(d, "Programmes", "{}", PROVEN_ARG((unsigned)format->nb_programs));
     ff_detail_tags(d, format->metadata);
     for (unsigned i = 0; i < format->nb_streams && i < 24; ++i) ff_detail_stream(m, format, i);
 }
@@ -1030,7 +1038,7 @@ static bool open_station(ff_media_t *m, ff_decode_t *d) {
     if (!g_ff.avformat_alloc_context || !g_ff.av_dict_set || !g_ff.av_dict_free) return false;
     if (g_ff.avformat_network_init && !atomic_flag_test_and_set(&network_ready)) g_ff.avformat_network_init();
     char urls[2][RUBRAVIEW_STREAM_URL_MAX];
-    size_t n = rubraview_stream_ffmpeg_urls((proven_u8str_view_t){ .ptr = (const proven_byte_t *)m->path, .size = strlen(m->path) }, urls);
+    size_t n = rubraview_stream_ffmpeg_urls((proven_u8str_view_t){ .ptr = (const proven_byte_t *)m->path, .size = proven_cstr_len(m->path) }, urls);
     m->open_deadline_ms = GetTickCount64() + STATION_OPEN_MS;
     for (size_t i = 0; i < n && !d->format && !ff_interrupt(m); ++i) {
         AVFormatContext *format = g_ff.avformat_alloc_context();
@@ -1064,7 +1072,7 @@ int64_t rubraview_pal_ffmpeg_fetch(proven_u8str_view_t address, uint8_t *out, si
     if (!out || cap == 0 || !ff_load() || !g_ff.avio_open2 || !g_ff.avio_read || !g_ff.avio_closep || !g_ff.av_dict_set ||
         !g_ff.av_dict_free) return -1;
     char urls[2][RUBRAVIEW_STREAM_URL_MAX];
-    if (rubraview_stream_ffmpeg_urls(address, urls) != 1 || strncmp(urls[0], "http", 4) != 0) return -1;   /* http and https only */
+    if (rubraview_stream_ffmpeg_urls(address, urls) != 1 || rubraview_cstr_cmp_n(urls[0], rubraview_bytes_view("http", 4)) != 0) return -1;   /* http and https only */
     if (g_ff.avformat_network_init && !atomic_flag_test_and_set(&network_ready)) g_ff.avformat_network_init();
     fetch_clock_t clock = { GetTickCount64() + STATION_OPEN_MS };
     AVIOInterruptCB cb = { .callback = fetch_interrupt, .opaque = &clock };
@@ -1192,7 +1200,7 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         if (!m->audio) {
             /* No device, or a sound we cannot decode: the picture plays alone. */
             m->audio_stream = -1;
-            free(m->pcm_storage);
+            rubraview_free(m->pcm_storage);
             m->pcm_storage = NULL;
         }
     }
@@ -1226,27 +1234,27 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         in->hardware_decode = m->hw_attached;
         if (m->hw_attached) {   /* RV-149 */
             in->decode_threads = 0;
-            snprintf(in->path_decoder, sizeof(in->path_decoder), "%s", N_("FFmpeg's decoder on the graphics card (D3D11VA)"));
-            snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("the card's video processor (Direct3D 11), to BGRA"));
-            snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("a shared texture (keyed mutex), copied on the card into the page's"));
+            rubraview_fmt(in->path_decoder, sizeof(in->path_decoder), "{}", PROVEN_ARG(N_("FFmpeg's decoder on the graphics card (D3D11VA)")));
+            rubraview_fmt(in->path_colours, sizeof(in->path_colours), "{}", PROVEN_ARG(N_("the card's video processor (Direct3D 11), to BGRA")));
+            rubraview_fmt(in->path_handover, sizeof(in->path_handover), "{}", PROVEN_ARG(N_("a shared texture (keyed mutex), copied on the card into the page's")));
         } else {
             in->decode_threads = d->video->thread_count > 0 ? d->video->thread_count : -1;
-            snprintf(in->path_decoder, sizeof(in->path_decoder), "%s", N_("FFmpeg's decoder on the processor"));
-            snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("swscale on the processor, bilinear, to BGRA"));
-            snprintf(in->path_handover, sizeof(in->path_handover), "%s", N_("pixels written into the page's texture, a picture at a time"));
-            snprintf(in->path_why_software, sizeof(in->path_why_software), "%s", m->hw_why ? m->hw_why : "");
+            rubraview_fmt(in->path_decoder, sizeof(in->path_decoder), "{}", PROVEN_ARG(N_("FFmpeg's decoder on the processor")));
+            rubraview_fmt(in->path_colours, sizeof(in->path_colours), "{}", PROVEN_ARG(N_("swscale on the processor, bilinear, to BGRA")));
+            rubraview_fmt(in->path_handover, sizeof(in->path_handover), "{}", PROVEN_ARG(N_("pixels written into the page's texture, a picture at a time")));
+            rubraview_fmt(in->path_why_software, sizeof(in->path_why_software), "{}", PROVEN_ARG(m->hw_why ? m->hw_why : ""));
         }
         in->hdr_transfer = (int32_t)m->tone.transfer;
-        snprintf(in->path_hdr_why, sizeof(in->path_hdr_why), "%s", m->hdr_why ? m->hdr_why : "");
+        rubraview_fmt(in->path_hdr_why, sizeof(in->path_hdr_why), "{}", PROVEN_ARG(m->hdr_why ? m->hdr_why : ""));
         if (m->hdr_pass) {   /* RV-150 */
             in->hdr_tone_mapped = true;
             in->hdr_output = m->tone.screen_peak_nits > 0.0;   /* RV-153 */
-            snprintf(in->path_colours, sizeof(in->path_colours), "%s", N_("our shader on the graphics card (Direct3D 11): BT.2390 tone mapping, BT.2020 to sRGB"));
-            snprintf(in->path_handover, sizeof(in->path_handover), "%s",
-                     m->hw_attached ? N_("the card's picture (P010) copied on the card for the shader; a shared texture (keyed mutex), copied on the card into the page's")   /* RV-151 */
+            rubraview_fmt(in->path_colours, sizeof(in->path_colours), "{}", PROVEN_ARG(N_("our shader on the graphics card (Direct3D 11): BT.2390 tone mapping, BT.2020 to sRGB")));
+            rubraview_fmt(in->path_handover, sizeof(in->path_handover), "{}",
+                     PROVEN_ARG(m->hw_attached ? N_("the card's picture (P010) copied on the card for the shader; a shared texture (keyed mutex), copied on the card into the page's")   /* RV-151 */
                      : m->tone_test_p010 == 1 ? "RUBRAVIEW_HDR_P010: the planes packed as P010 into a texture array, then as the card's"
                      : m->tone_test_p010 == 2 ? "RUBRAVIEW_HDR_P010: the planes packed as P010 in memory, then as the card's brought back"
-                     : N_("the planes uploaded as they are; a shared texture (keyed mutex), copied on the card into the page's"));
+                     : N_("the planes uploaded as they are; a shared texture (keyed mutex), copied on the card into the page's")));
         }
     }
     return true;
@@ -1293,7 +1301,9 @@ static const AVCodec *ff_av1_encoder(bool needs_aom) {
     return NULL;
 }
 
-uint32_t rubraview_ffmpeg_local_image_encoders(char *names, size_t size) {
+uint32_t rubraview_ffmpeg_local_image_encoders(proven_mem_mut_t names_view) {
+    char *names = (char *)names_view.ptr;
+    size_t size = (size_t)names_view.size;
     if (names && size) names[0] = '\0';
     if (!ff_available() || !ff_encode_api()) return 0;
     uint32_t found = 0;
@@ -1303,7 +1313,7 @@ uint32_t rubraview_ffmpeg_local_image_encoders(char *names, size_t size) {
     if (g_ff.avcodec_find_encoder_by_name("libjxl_anim")) found |= RUBRAVIEW_FFMPEG_WRITES_JXL_ANIM;
     if (av1 && ff_mux_api() && g_ff.av_guess_format("avif", NULL, NULL)) found |= RUBRAVIEW_FFMPEG_WRITES_AVIF;
     if ((found & RUBRAVIEW_FFMPEG_WRITES_AVIF) && g_ff.avcodec_find_encoder_by_name("libaom-av1")) found |= RUBRAVIEW_FFMPEG_WRITES_AVIF_ALPHA;
-    if (names && size) snprintf(names, size, "%s%s%s", jxl ? "libjxl" : "", jxl && av1 ? ", " : "", av1 ? av1->name : "");
+    if (names && size) rubraview_fmt(names, size, "{}{}{}", PROVEN_ARG(jxl ? "libjxl" : ""), PROVEN_ARG(jxl && av1 ? ", " : ""), PROVEN_ARG(av1 ? av1->name : ""));
     return found;
 }
 
@@ -1329,7 +1339,7 @@ static bool ff_fill_frame(AVFrame *frame, const uint8_t *bgra, int32_t width, in
         int stride[4] = { width * 4, 0, 0, 0 };
         ok = g_ff.sws_scale(*sws, src, stride, 0, height, frame->data, frame->linesize) == height;
     }
-    free(flat);
+    rubraview_free(flat);
     return ok;
 }
 
@@ -1367,7 +1377,7 @@ static AVCodecContext *ff_still_codec(const AVCodec *encoder, int32_t width, int
             codec->color_trc = AVCOL_TRC_IEC61966_2_1;
         }
         if (global_header) codec->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-        snprintf(value, sizeof(value), "%d", (int)rubraview_export_av1_crf(how->quality));
+        rubraview_fmt(value, sizeof(value), "{}", PROVEN_ARG((int)rubraview_export_av1_crf(how->quality)));
         g_ff.av_opt_set(codec, "crf", value, AV_OPT_SEARCH_CHILDREN);
         if (how->moving) g_ff.av_opt_set(codec, "g", "120", AV_OPT_SEARCH_CHILDREN);
         else g_ff.av_opt_set(codec, "still-picture", "1", AV_OPT_SEARCH_CHILDREN);   /* libaom */
@@ -1376,7 +1386,7 @@ static AVCodecContext *ff_still_codec(const AVCodec *encoder, int32_t width, int
         g_ff.av_opt_set(codec, "preset", "8", AV_OPT_SEARCH_CHILDREN);          /* SVT-AV1 */
         g_ff.av_opt_set(codec, "speed", "6", AV_OPT_SEARCH_CHILDREN);           /* rav1e */
     } else {
-        snprintf(value, sizeof(value), "%.3f", rubraview_export_jxl_distance(how->quality));
+        rubraview_fmt(value, sizeof(value), "{:.3}", PROVEN_ARG((double)(rubraview_export_jxl_distance(how->quality))));
         g_ff.av_opt_set(codec, "distance", value, AV_OPT_SEARCH_CHILDREN);
         g_ff.av_opt_set(codec, "effort", "7", AV_OPT_SEARCH_CHILDREN);
     }
@@ -1407,8 +1417,8 @@ static bool ff_drain(AVCodecContext *codec, AVPacket *packet, AVFormatContext *m
             packet->stream_index = stream;
             ok = g_ff.av_write_frame(mux, packet) >= 0;
         } else {
-            uint8_t *grown = (uint8_t*)realloc(*bytes, *size + (size_t)packet->size);
-            if (grown) { memcpy(grown + *size, packet->data, (size_t)packet->size); *bytes = grown; *size += (size_t)packet->size; }
+            uint8_t *grown = (uint8_t*)rubraview_realloc(rubraview_mem_mut(*bytes, *size + (size_t)packet->size));
+            if (grown) { proven_sys_mem_copy(grown + *size, packet->data, (size_t)packet->size); *bytes = grown; *size += (size_t)packet->size; }
             ok = grown != NULL;
         }
         g_ff.av_packet_unref(packet);
@@ -1435,24 +1445,24 @@ uint8_t *rubraview_pal_ffmpeg_pictures_encode(int32_t width, int32_t height, siz
     bool alpha = false;
     double seconds = 0.0;
     for (size_t i = 0; i < count && !alpha; ++i) {
-        if (!picture(context, i, bgra, &seconds)) { free(bgra); *why = N_("a picture of it could not be read"); return NULL; }
+        if (!picture(context, i, bgra, &seconds)) { rubraview_free(bgra); *why = N_("a picture of it could not be read"); return NULL; }
         for (size_t k = 3; k < frame_bytes; k += 4) if (bgra[k] != 255) { alpha = true; break; }
     }
     bool ten = how->avif && how->bits == 10;
     const AVCodec *encoder = how->avif ? ff_av1_encoder(alpha || how->chroma444)
                            : g_ff.avcodec_find_encoder_by_name(count > 1 ? "libjxl_anim" : "libjxl");
     if (!encoder) {
-        free(bgra);
+        rubraview_free(bgra);
         *why = how->avif ? N_("this FFmpeg has no AV1 encoder (libaom, SVT-AV1 or rav1e)")
              : count > 1 ? N_("this FFmpeg cannot write a moving JPEG XL (libjxl_anim)") : N_("this FFmpeg has no JPEG XL encoder (libjxl)");
         return NULL;
     }
-    bool aom = strcmp(encoder->name, "libaom-av1") == 0;
+    bool aom = rubraview_cstr_cmp(encoder->name, "libaom-av1") == 0;
     bool alpha_plane = how->avif && alpha && aom;      /* AVIF's transparency: libaom's grey second picture */
     bool flatten = how->avif && alpha && !aom;         /* else laid over white */
-    bool chroma444 = how->avif && how->chroma444 && strcmp(encoder->name, "libsvtav1") != 0;
+    bool chroma444 = how->avif && how->chroma444 && rubraview_cstr_cmp(encoder->name, "libsvtav1") != 0;
     const AVOutputFormat *muxer = how->avif ? g_ff.av_guess_format("avif", NULL, NULL) : NULL;
-    if (how->avif && !muxer) { free(bgra); *why = N_("this FFmpeg cannot write AVIF files"); return NULL; }
+    if (how->avif && !muxer) { rubraview_free(bgra); *why = N_("this FFmpeg cannot write AVIF files"); return NULL; }
     enum AVPixelFormat format = how->avif ? (chroma444 ? (ten ? AV_PIX_FMT_YUV444P10LE : AV_PIX_FMT_YUV444P)
                                                        : (ten ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P))
                               : alpha ? AV_PIX_FMT_RGBA : AV_PIX_FMT_RGB24;
@@ -1488,8 +1498,8 @@ uint8_t *rubraview_pal_ffmpeg_pictures_encode(int32_t width, int32_t height, siz
     }
     int64_t at = 0;
     bool fed = true;
-    starts = (int64_t*)calloc(count, sizeof(int64_t));
-    lengths = (int64_t*)calloc(count, sizeof(int64_t));
+    starts = (int64_t*)rubraview_alloc_zero(count, sizeof(int64_t));
+    lengths = (int64_t*)rubraview_alloc_zero(count, sizeof(int64_t));
     times = (ff_times_t){ .at = starts, .ms = lengths, .count = starts && lengths ? count : 0 };
     for (size_t i = 0; i < count && fed; ++i) {
         if (frame) g_ff.av_frame_free(&frame);
@@ -1523,11 +1533,11 @@ uint8_t *rubraview_pal_ffmpeg_pictures_encode(int32_t width, int32_t height, siz
         uint8_t *buffer = NULL;
         int length = g_ff.avio_close_dyn_buf(mux->pb, &buffer);
         mux->pb = NULL;
-        free(bytes);
+        rubraview_free(bytes);
         bytes = NULL;
         size = 0;
-        if (written && buffer && length > 0 && (bytes = (uint8_t*)malloc((size_t)length)) != NULL) {
-            memcpy(bytes, buffer, (size_t)length);
+        if (written && buffer && length > 0 && (bytes = (uint8_t*)rubraview_alloc((size_t)length)) != NULL) {
+            proven_sys_mem_copy(bytes, buffer, (size_t)length);
             size = (size_t)length;
         }
         if (buffer) g_ff.av_free(buffer);
@@ -1539,15 +1549,15 @@ done:
         g_ff.avformat_free_context(mux);
     }
     if (sws) g_ff.sws_freeContext(sws);
-    free(starts);
-    free(lengths);
+    rubraview_free(starts);
+    rubraview_free(lengths);
     if (packet) g_ff.av_packet_free(&packet);
     if (frame) g_ff.av_frame_free(&frame);
     if (aframe) g_ff.av_frame_free(&aframe);
     if (colour) g_ff.avcodec_free_context(&colour);
     if (grey) g_ff.avcodec_free_context(&grey);
-    free(bgra);
-    if (!ok) { free(bytes); return NULL; }
+    rubraview_free(bgra);
+    if (!ok) { rubraview_free(bytes); return NULL; }
     *why = NULL;
     *out_size = size;
     return bytes;
@@ -1564,7 +1574,7 @@ static bool ff_one_picture(void *context, size_t index, uint8_t *bgra, double *s
     for (int32_t y = 0; y < px->height; ++y) {
         const uint8_t *in = px->pixels + (size_t)y * (size_t)px->stride;
         uint8_t *out = bgra + (size_t)y * (size_t)px->width * 4u;
-        if (!rgba) { memcpy(out, in, (size_t)px->width * 4u); continue; }
+        if (!rgba) { proven_sys_mem_copy(out, in, (size_t)px->width * 4u); continue; }
         for (int32_t x = 0; x < px->width; ++x) {
             out[x * 4] = in[x * 4 + 2]; out[x * 4 + 1] = in[x * 4 + 1]; out[x * 4 + 2] = in[x * 4]; out[x * 4 + 3] = in[x * 4 + 3];
         }
@@ -1690,7 +1700,9 @@ static bool ff_tone_format(int format, int *bits, int *shift_x, int *shift_y) {
 }
 
 /* MaxCLL and the mastering display's brightest, from side data of either kind; 0 where absent. */
-static void ff_light_levels(int type, const uint8_t *data, size_t size, double *max_cll, double *mastering) {
+static void ff_light_levels(int type, proven_mem_view_t data_view, double *max_cll, double *mastering) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!data) return;
     if (type == 0 && size >= sizeof(AVContentLightMetadata)) {
         const AVContentLightMetadata *c = (const AVContentLightMetadata*)(const void*)data;
@@ -1722,8 +1734,8 @@ static void ff_tone_setup(ff_media_t *m, const AVCodecParameters *par) {
     double max_cll = 0.0, mastering = 0.0;
     for (int i = 0; i < par->nb_coded_side_data; ++i) {
         const AVPacketSideData *sd = &par->coded_side_data[i];
-        if (sd->type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL) ff_light_levels(0, sd->data, sd->size, &max_cll, &mastering);
-        if (sd->type == AV_PKT_DATA_MASTERING_DISPLAY_METADATA) ff_light_levels(1, sd->data, sd->size, &max_cll, &mastering);
+        if (sd->type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL) ff_light_levels(0, rubraview_mem_view(sd->data, sd->size), &max_cll, &mastering);
+        if (sd->type == AV_PKT_DATA_MASTERING_DISPLAY_METADATA) ff_light_levels(1, rubraview_mem_view(sd->data, sd->size), &max_cll, &mastering);
     }
     m->tone.peak_nits = m->tone.transfer == RUBRAVIEW_HDR_HLG ? 1000.0 : rubraview_hdr_peak(max_cll, mastering);
     m->tone_peak_read = max_cll > 0.0 || mastering > 0.0;
@@ -1752,8 +1764,8 @@ static bool ff_tone_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
         double max_cll = 0.0, mastering = 0.0;
         for (int i = 0; i < f->nb_side_data; ++i) {
             const AVFrameSideData *sd = f->side_data[i];
-            if (sd->type == AV_FRAME_DATA_CONTENT_LIGHT_LEVEL) ff_light_levels(0, sd->data, sd->size, &max_cll, &mastering);
-            if (sd->type == AV_FRAME_DATA_MASTERING_DISPLAY_METADATA) ff_light_levels(1, sd->data, sd->size, &max_cll, &mastering);
+            if (sd->type == AV_FRAME_DATA_CONTENT_LIGHT_LEVEL) ff_light_levels(0, rubraview_mem_view(sd->data, sd->size), &max_cll, &mastering);
+            if (sd->type == AV_FRAME_DATA_MASTERING_DISPLAY_METADATA) ff_light_levels(1, rubraview_mem_view(sd->data, sd->size), &max_cll, &mastering);
         }
         m->tone.peak_nits = rubraview_hdr_peak(max_cll, mastering);
         atomic_store_explicit(&m->tone_peak, m->tone.peak_nits, memory_order_release);
@@ -2003,7 +2015,7 @@ static void store_audio(ff_media_t *m, ff_decode_t *d, double pts, double *skip_
             Sleep(2);
         }
     }
-    free(converted);
+    rubraview_free(converted);
 }
 
 /* One packet through its decoder, and what comes out to the slots or the ring. */
@@ -2061,7 +2073,7 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
                 size_t n = rubraview_stream_icy_title(proven_u8str_view_from_cstr((const char *)packet), title, sizeof(title));
                 if (n > 0) {
                     AcquireSRWLockExclusive(&m->icy_lock);
-                    memcpy(m->icy_title, title, n + 1);
+                    proven_sys_mem_copy(m->icy_title, title, n + 1);
                     ReleaseSRWLockExclusive(&m->icy_lock);
                 }
             }
@@ -2084,14 +2096,14 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
                     AcquireSRWLockExclusive(&m->audio_lock);
                     rubraview_pal_audio_close(m->audio);
                     m->audio = NULL;
-                    free(m->pcm_storage);
+                    rubraview_free(m->pcm_storage);
                     size_t capacity = (size_t)m->audio_rate * m->audio_channels * PCM_RING_SECONDS;
                     m->pcm_storage = (float*)rubraview_malloc_product(capacity, sizeof(float), 1);
                     if (m->pcm_storage && rubraview_pcm_ring_init(&m->pcm, m->pcm_storage, capacity)) {
                         m->audio = rubraview_pal_audio_open(m->audio_rate, m->audio_channels, &m->pcm);
                     }
                     if (!m->audio) {
-                        free(m->pcm_storage);
+                        rubraview_free(m->pcm_storage);
                         m->pcm_storage = NULL;
                         m->audio_stream = -1;
                     } else {
@@ -2199,15 +2211,15 @@ static void ff_close(void *handle) {
     }
     if (m->opened) CloseHandle(m->opened);
     rubraview_pal_audio_close(m->audio);
-    free(m->pcm_storage);
+    rubraview_free(m->pcm_storage);
     for (int i = 0; i < SLOT_COUNT; ++i) {
-        if (!m->pixels_shared) free(m->slots[i].pixels);
+        if (!m->pixels_shared) rubraview_free(m->slots[i].pixels);
         if (m->slots[i].mutex) IDXGIKeyedMutex_Release(m->slots[i].mutex);
         if (m->slots[i].texture) ID3D11Texture2D_Release(m->slots[i].texture);
     }
     if (m->gpu.device) IUnknown_Release((IUnknown*)m->gpu.device);
     if (m->gpu.shader_device) IUnknown_Release((IUnknown*)m->gpu.shader_device);
-    free(m);
+    rubraview_free(m);
 }
 
 static void *ff_open_with(proven_u8str_view_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
@@ -2215,7 +2227,7 @@ static void *ff_open_with(proven_u8str_view_t path, rubraview_media_failure_t *o
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
     if (!ff_load() || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
 
-    ff_media_t *m = (ff_media_t*)calloc(1, sizeof(*m));
+    ff_media_t *m = (ff_media_t*)rubraview_alloc_zero(1, sizeof(*m));
     if (m) {
         InitializeSRWLock(&m->audio_lock);
         InitializeSRWLock(&m->icy_lock);   /* RV-158 */
@@ -2226,7 +2238,7 @@ static void *ff_open_with(proven_u8str_view_t path, rubraview_media_failure_t *o
     if (gpu) m->gpu = *gpu;
     if (m->gpu.device) IUnknown_AddRef((IUnknown*)m->gpu.device);
     if (m->gpu.shader_device) IUnknown_AddRef((IUnknown*)m->gpu.shader_device);   /* RV-150, the same way */
-    memcpy(m->path, path.ptr, path.size);   /* FFmpeg takes UTF-8 paths on Windows */
+    proven_sys_mem_copy(m->path, path.ptr, path.size);   /* FFmpeg takes UTF-8 paths on Windows */
     m->path[path.size] = '\0';
     m->station = rubraview_stream_is_address(path);
     m->video_stream = -1;
@@ -2270,7 +2282,7 @@ static bool ff_stream_title(void *handle, char *out, size_t cap) {
     ff_media_t *m = (ff_media_t*)handle;
     if (!m || !m->station || !out || cap == 0) return false;
     AcquireSRWLockShared(&m->icy_lock);
-    snprintf(out, cap, "%s", m->icy_title);
+    rubraview_fmt(out, cap, "{}", PROVEN_ARG(m->icy_title));
     ReleaseSRWLockShared(&m->icy_lock);
     return out[0] != '\0';
 }
@@ -2389,13 +2401,15 @@ static size_t ff_timecode(char *out, size_t capacity, double seconds) {
     int ms = total_ms % 1000, total_s = total_ms / 1000;
     int sec = total_s % 60, total_m = total_s / 60;
     int min = total_m % 60, hour = total_m / 60;
-    int written = snprintf(out, capacity, "%02d:%02d:%02d,%03d", hour, min, sec, ms);
+    int written = rubraview_fmt(out, capacity, "{:02}:{:02}:{:02},{:03}", PROVEN_ARG((int)hour), PROVEN_ARG((int)min), PROVEN_ARG((int)sec), PROVEN_ARG((int)ms));
     return written > 0 ? (size_t)written : 0;
 }
 
 /* The text inside one packet, whatever wrapping its format uses. */
-static void ff_subtitle_payload(enum AVCodecID id, const uint8_t *data, int size,
+static void ff_subtitle_payload(enum AVCodecID id, proven_mem_view_t data_view,
                                 const uint8_t **out_text, int *out_len) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    int size = (int)data_view.size;
     *out_text = data;
     *out_len = size;
     if (size <= 0) { *out_len = 0; return; }
@@ -2463,7 +2477,7 @@ static proven_u8str_view_t ff_read_subtitle_stream(void *handle, proven_arena_t 
             ? (double)packet->duration * av_q2d(stream->time_base) : SUBTITLE_MAX_CUE_SECONDS;
         const uint8_t *text = NULL;
         int text_len = 0;
-        ff_subtitle_payload(stream->codecpar->codec_id, packet->data, packet->size, &text, &text_len);
+        ff_subtitle_payload(stream->codecpar->codec_id, rubraview_mem_view(packet->data, packet->size), &text, &text_len);
 
         char from[32], to[32];
         size_t from_len = ff_timecode(from, sizeof(from), start);
@@ -2472,8 +2486,8 @@ static proven_u8str_view_t ff_read_subtitle_stream(void *handle, proven_arena_t 
            must hold no blank line of its own or the parser would read
            one cue as two. */
         if (text_len > 0 && used + (size_t)text_len + 64 < SUBTITLE_BLOB_MAX) {
-            used += (size_t)snprintf(blob + used, SUBTITLE_BLOB_MAX - used, "%d\n%.*s --> %.*s\n",
-                                     ++number, (int)from_len, from, (int)to_len, to);
+            used += (size_t)rubraview_fmt(blob + used, SUBTITLE_BLOB_MAX - used, "{}\n{} --> {}\n",
+                                     PROVEN_ARG((int)(++number)), PROVEN_ARG(rubraview_bytes_view(from, (int)from_len)), PROVEN_ARG(rubraview_bytes_view(to, (int)to_len)));
             for (int i = 0; i < text_len; ++i) {
                 char c = (char)text[i];
                 if (c == '\r') continue;
@@ -2551,8 +2565,10 @@ int rubraview_pal_ffmpeg_jxl_state(void) {
     return rubraview_pal_ffmpeg_remote() ? rubraview_mhost_remote_jxl_state() : rubraview_ffmpeg_local_jxl_state();
 }
 
-uint32_t rubraview_pal_ffmpeg_image_encoders(char *names, size_t size) {
-    return rubraview_pal_ffmpeg_remote() ? rubraview_mhost_remote_image_encoders(names, size) : rubraview_ffmpeg_local_image_encoders(names, size);
+uint32_t rubraview_pal_ffmpeg_image_encoders(proven_mem_mut_t names_view) {
+    char *names = (char *)names_view.ptr;
+    size_t size = (size_t)names_view.size;
+    return rubraview_pal_ffmpeg_remote() ? rubraview_mhost_remote_image_encoders(rubraview_mem_mut(names, size)) : rubraview_ffmpeg_local_image_encoders(rubraview_mem_mut(names, size));
 }
 
 void *rubraview_ffmpeg_host_open(proven_u8str_view_t path, const rubraview_media_gpu_t *gpu,

@@ -1,5 +1,7 @@
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include <stdarg.h>
 #include <limits.h>
 #include <stdint.h>
@@ -45,7 +47,9 @@ static bool refused_for_test(int32_t w, int32_t h) {
     static long long limit = 0;
     if (state < 0) {
         const wchar_t *v = _wgetenv(L"RUBRAVIEW_REFUSE_BITMAP_PIXELS");
-        limit = v ? _wtoi64(v) : 0;
+        char narrow[24] = { 0 };   /* RV-220: digits only; read as proven reads them */
+        for (size_t i = 0; v && v[i] && i + 1 < sizeof narrow; ++i) narrow[i] = v[i] < 128 ? (char)v[i] : '?';
+        limit = v ? (long long)rubraview_parse_long(narrow, NULL, 10) : 0;
         state = limit > 0 ? 1 : 0;
     }
     return state == 1 && (long long)w * (long long)h > limit;
@@ -454,7 +458,7 @@ static HGLOBAL tiff_finish(HGLOBAL memory, bool ok, int32_t width, int32_t heigh
     if (ok) {
         uint32_t ifd = 8u + (uint32_t)pixel_bytes;
         uint32_t bits_at = ifd + 2u + TAGS * 12u + 4u;
-        memcpy(tiff, "II*\0", 4);
+        proven_sys_mem_copy(tiff, "II*\0", 4);
         tiff_u32(tiff + 4, ifd);
         uint8_t *p = tiff + ifd;
         tiff_u16(p, TAGS); p += 2;
@@ -493,10 +497,12 @@ static IWICBitmapDecoder *tiff_decoder(IWICImagingFactory *factory, HGLOBAL memo
     return SUCCEEDED(hr) ? decoder : NULL;
 }
 
-static HGLOBAL tiff_from_avif(const uint8_t *data, size_t size) {
+static HGLOBAL tiff_from_avif(proven_mem_view_t data_view) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     int32_t width = 0, height = 0;
     size_t frames = 0;
-    rubraview_avif_t *avif = rubraview_avif_open(data, size, AVIF_MAX_SIDE, &width, &height, &frames);
+    rubraview_avif_t *avif = rubraview_avif_open(rubraview_mem_view(data, size), AVIF_MAX_SIDE, &width, &height, &frames);
     if (!avif) return NULL;
 
     uint32_t orientation = (uint32_t)rubraview_avif_orientation(avif);
@@ -511,8 +517,10 @@ static HGLOBAL tiff_from_avif(const uint8_t *data, size_t size) {
     return tiff_finish(memory, ok, width, height, orientation);
 }
 
-static IWICBitmapDecoder *decoder_from_avif(IWICImagingFactory *factory, const uint8_t *data, size_t size) {
-    return tiff_decoder(factory, tiff_from_avif(data, size));
+static IWICBitmapDecoder *decoder_from_avif(IWICImagingFactory *factory, proven_mem_view_t data_view) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    return tiff_decoder(factory, tiff_from_avif(rubraview_mem_view(data, size)));
 }
 
 /* RV-110: a JPEG XL that Windows has no codec for is read by the FFmpeg
@@ -525,36 +533,44 @@ static uint8_t *jxl_room(void *context, int32_t width, int32_t height) {
     return tiff_room(width, height, memory);
 }
 
-static HGLOBAL tiff_from_jxl(const uint8_t *data, size_t size) {
-    if (!rubraview_image_is_jxl(data, size)) return NULL;
+static HGLOBAL tiff_from_jxl(proven_mem_view_t data_view) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    if (!rubraview_image_is_jxl(rubraview_mem_view(data, size))) return NULL;
     HGLOBAL memory = NULL;
     int32_t width = 0, height = 0;
-    bool ok = rubraview_pal_ffmpeg_jxl_decode(data, size, AVIF_MAX_SIDE, jxl_room, &memory, &width, &height);
+    bool ok = rubraview_pal_ffmpeg_jxl_decode(rubraview_mem_view(data, size), AVIF_MAX_SIDE, jxl_room, &memory, &width, &height);
     return tiff_finish(memory, ok, width, height, 1);
 }
 
-static IWICBitmapDecoder *decoder_from_jxl(IWICImagingFactory *factory, const uint8_t *data, size_t size) {
-    return tiff_decoder(factory, tiff_from_jxl(data, size));
+static IWICBitmapDecoder *decoder_from_jxl(IWICImagingFactory *factory, proven_mem_view_t data_view) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    return tiff_decoder(factory, tiff_from_jxl(rubraview_mem_view(data, size)));
 }
 
 /* RV-110: Windows' TIFF codec does not read BigTIFF. One under 4 GB is
    written out with an ordinary TIFF's directories (bigtiff.h) and read
    by that same codec: its strips, compressed as they are, stay put. */
-static HGLOBAL tiff_from_bigtiff(const uint8_t *data, size_t size) {
-    size_t extra = rubraview_bigtiff_classic_extra(data, size);
+static HGLOBAL tiff_from_bigtiff(proven_mem_view_t data_view) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    size_t extra = rubraview_bigtiff_classic_extra(rubraview_mem_view(data, size));
     if (extra == 0 || (uint64_t)size + extra > 0x7F000000u) return NULL;
     HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, size + extra);
     uint8_t *out = memory ? (uint8_t*)GlobalLock(memory) : NULL;
-    bool ok = out && rubraview_bigtiff_to_classic(data, size, out, size + extra);
+    bool ok = out && rubraview_bigtiff_to_classic(rubraview_mem_view(data, size), rubraview_mem_mut(out, size + extra));
     if (out) GlobalUnlock(memory);
     if (!ok) { if (memory) GlobalFree(memory); return NULL; }
     return memory;
 }
 
 /* What Windows has no codec for and is not an AVIF: a JPEG XL, a BigTIFF. */
-static IWICBitmapDecoder *decoder_from_other(IWICImagingFactory *factory, const uint8_t *data, size_t size) {
-    if (rubraview_bigtiff_is(data, size)) return tiff_decoder(factory, tiff_from_bigtiff(data, size));
-    return decoder_from_jxl(factory, data, size);
+static IWICBitmapDecoder *decoder_from_other(IWICImagingFactory *factory, proven_mem_view_t data_view) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    if (rubraview_bigtiff_is(rubraview_mem_view(data, size))) return tiff_decoder(factory, tiff_from_bigtiff(rubraview_mem_view(data, size)));
+    return decoder_from_jxl(factory, rubraview_mem_view(data, size));
 }
 
 static IWICBitmapDecoder *decoder_for_path(proven_u8str_view_t path) {
@@ -562,7 +578,7 @@ static IWICBitmapDecoder *decoder_for_path(proven_u8str_view_t path) {
     if (!factory || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
 
     char narrow[MAX_PATH * 4];
-    memcpy(narrow, path.ptr, path.size);
+    proven_sys_mem_copy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
 
     WCHAR wide[MAX_PATH * 2];
@@ -610,8 +626,8 @@ static IWICBitmapDecoder *decoder_for_path(proven_u8str_view_t path) {
     bool avif = false;
     const uint8_t *again = (const uint8_t*)GlobalLock(memory);
     if (again) {
-        avif = rubraview_avif_is(again, size);
-        if (avif && avif_own_first()) decoder = decoder_from_avif(factory, again, size);
+        avif = rubraview_avif_is(rubraview_mem_view(again, size));
+        if (avif && avif_own_first()) decoder = decoder_from_avif(factory, rubraview_mem_view(again, size));
         GlobalUnlock(memory);
     }
     if (!decoder &&
@@ -621,8 +637,8 @@ static IWICBitmapDecoder *decoder_for_path(proven_u8str_view_t path) {
         decoder = NULL;
         again = (const uint8_t*)GlobalLock(memory);
         if (again) {
-            decoder = avif ? (avif_own_first() ? NULL : decoder_from_avif(factory, again, size))
-                           : decoder_from_other(factory, again, size);
+            decoder = avif ? (avif_own_first() ? NULL : decoder_from_avif(factory, rubraview_mem_view(again, size)))
+                           : decoder_from_other(factory, rubraview_mem_view(again, size));
             GlobalUnlock(memory);
         }
     }
@@ -633,8 +649,10 @@ static IWICBitmapDecoder *decoder_for_path(proven_u8str_view_t path) {
 /* Opens a decoder over bytes already in memory — the path an archive
    page takes, since it has no filename to give WIC. The stream must
    outlive the decoder, so the caller is handed both. */
-IWICBitmapDecoder *rubraview_wic_decoder_for_bytes(IWICImagingFactory *factory, const uint8_t *data, size_t size,
+IWICBitmapDecoder *rubraview_wic_decoder_for_bytes(IWICImagingFactory *factory, proven_mem_view_t data_view,
                                                    IWICStream **out_stream) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     *out_stream = NULL;
     if (!factory || !data || size == 0 || size > UINT32_MAX) return NULL;
 
@@ -646,24 +664,26 @@ IWICBitmapDecoder *rubraview_wic_decoder_for_bytes(IWICImagingFactory *factory, 
     }
 
     IWICBitmapDecoder *decoder = NULL;
-    bool avif = rubraview_avif_is(data, size);
+    bool avif = rubraview_avif_is(rubraview_mem_view(data, size));
     /* RV-110: as for a path. A decoder of ours owns what it reads: no stream to hand back. */
-    if (avif && avif_own_first() && (decoder = decoder_from_avif(factory, data, size)) != NULL) {
+    if (avif && avif_own_first() && (decoder = decoder_from_avif(factory, rubraview_mem_view(data, size))) != NULL) {
         IWICStream_Release(stream);
         return decoder;
     }
     if (FAILED(IWICImagingFactory_CreateDecoderFromStream(factory, (IStream*)stream, NULL,
                                                           WICDecodeMetadataCacheOnDemand, &decoder)) || !decoder) {
         IWICStream_Release(stream);
-        if (avif) return avif_own_first() ? NULL : decoder_from_avif(factory, data, size);
-        return decoder_from_other(factory, data, size);
+        if (avif) return avif_own_first() ? NULL : decoder_from_avif(factory, rubraview_mem_view(data, size));
+        return decoder_from_other(factory, rubraview_mem_view(data, size));
     }
     *out_stream = stream;
     return decoder;
 }
 
-static IWICBitmapDecoder *decoder_for_memory(const uint8_t *data, size_t size, IWICStream **out_stream) {
-    return rubraview_wic_decoder_for_bytes(wic_factory(), data, size, out_stream);
+static IWICBitmapDecoder *decoder_for_memory(proven_mem_view_t data_view, IWICStream **out_stream) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    return rubraview_wic_decoder_for_bytes(wic_factory(), rubraview_mem_view(data, size), out_stream);
 }
 
 /* RV-110: the tiles read a picture band by band, and a decoder of ours
@@ -672,14 +692,16 @@ static IWICBitmapDecoder *decoder_for_memory(const uint8_t *data, size_t size, I
    that; a BigTIFF likewise, as the ordinary TIFF it is read as. NULL when
    the bytes are not ours to read, or Windows reads them itself (as the
    page then did). */
-uint8_t *rubraview_wic_own_tiff(IWICImagingFactory *factory, const uint8_t *data, size_t size,
+uint8_t *rubraview_wic_own_tiff(IWICImagingFactory *factory, proven_mem_view_t data_view,
                                 size_t *out_size, void **out_owner) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     *out_size = 0;
     *out_owner = NULL;
     if (!factory || !data || size == 0 || size > UINT32_MAX) return NULL;
-    bool avif = rubraview_avif_is(data, size);
-    bool bigtiff = rubraview_bigtiff_is(data, size);
-    if (!avif && !bigtiff && !rubraview_image_is_jxl(data, size)) return NULL;
+    bool avif = rubraview_avif_is(rubraview_mem_view(data, size));
+    bool bigtiff = rubraview_bigtiff_is(rubraview_mem_view(data, size));
+    if (!avif && !bigtiff && !rubraview_image_is_jxl(rubraview_mem_view(data, size))) return NULL;
     if (!(avif && avif_own_first())) {
         IWICStream *stream = NULL;
         IWICBitmapDecoder *windows = NULL;
@@ -691,7 +713,7 @@ uint8_t *rubraview_wic_own_tiff(IWICImagingFactory *factory, const uint8_t *data
         if (stream) IWICStream_Release(stream);
         if (reads) return NULL;
     }
-    HGLOBAL memory = avif ? tiff_from_avif(data, size) : bigtiff ? tiff_from_bigtiff(data, size) : tiff_from_jxl(data, size);
+    HGLOBAL memory = avif ? tiff_from_avif(rubraview_mem_view(data, size)) : bigtiff ? tiff_from_bigtiff(rubraview_mem_view(data, size)) : tiff_from_jxl(rubraview_mem_view(data, size));
     uint8_t *tiff = memory ? (uint8_t*)GlobalLock(memory) : NULL;
     if (!tiff) { if (memory) GlobalFree(memory); return NULL; }
     *out_size = GlobalSize(memory);
@@ -706,11 +728,13 @@ void rubraview_wic_own_tiff_free(void *owner) {
 }
 
 /* One entry point for both: a path when there is one, bytes otherwise. */
-static IWICBitmapDecoder *decoder_for_source(proven_u8str_view_t path, const uint8_t *data, size_t size,
+static IWICBitmapDecoder *decoder_for_source(proven_u8str_view_t path, proven_mem_view_t data_view,
                                              IWICStream **out_stream) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     *out_stream = NULL;
     if (path.size > 0) return decoder_for_path(path);
-    return decoder_for_memory(data, size, out_stream);
+    return decoder_for_memory(rubraview_mem_view(data, size), out_stream);
 }
 
 /* §3.20.1: GIF stores a frame's delay in hundredths of a second under
@@ -738,10 +762,12 @@ static double frame_delay_seconds(IWICBitmapDecoder *decoder, UINT frame_index) 
 }
 
 size_t rubraview_pal_image_frame_info(proven_u8str_view_t path,
-                                      const uint8_t *data, size_t size,
+                                      proven_mem_view_t data_view,
                                       rubraview_frame_t *out_frames, size_t cap) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     IWICStream *stream = NULL;
-    IWICBitmapDecoder *decoder = decoder_for_source(path, data, size, &stream);
+    IWICBitmapDecoder *decoder = decoder_for_source(path, rubraview_mem_view(data, size), &stream);
     if (!decoder) {
         if (stream) IWICStream_Release(stream);
         return 0;
@@ -777,15 +803,17 @@ size_t rubraview_pal_image_frame_info(proven_u8str_view_t path,
 
 rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_t *renderer,
                                                              proven_u8str_view_t path,
-                                                             const uint8_t *data, size_t size,
+                                                             proven_mem_view_t data_view,
                                                              size_t frame_index,
                                                              bool apply_exif_orientation,
                                                              double *out_delay_seconds) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     rubraview_image_load_result_t result = { .texture = NULL, .width = 0, .height = 0, .exif_orientation = 1, .ok = false };
     if (out_delay_seconds) *out_delay_seconds = 0.0;
 
     IWICStream *stream = NULL;
-    IWICBitmapDecoder *decoder = decoder_for_source(path, data, size, &stream);
+    IWICBitmapDecoder *decoder = decoder_for_source(path, rubraview_mem_view(data, size), &stream);
     if (!decoder || !renderer) {
         if (decoder) IWICBitmapDecoder_Release(decoder);
         if (stream) IWICStream_Release(stream);
@@ -844,13 +872,13 @@ static uint8_t *anim_jxl_room(void *context, int32_t width, int32_t height, doub
     }
     if ((reader->jxl_count & (reader->jxl_count + 1)) == 0) {       /* 0, 1, 3, 7: room for twice as many */
         size_t room = (reader->jxl_count + 1) * 2;
-        uint8_t **more = (uint8_t**)realloc(reader->jxl, room * sizeof(uint8_t*));
-        rubraview_frame_t *frames = more ? (rubraview_frame_t*)realloc(reader->frames, room * sizeof(rubraview_frame_t)) : NULL;
+        uint8_t **more = (uint8_t**)rubraview_realloc(rubraview_mem_mut(reader->jxl, room * sizeof(uint8_t*)));
+        rubraview_frame_t *frames = more ? (rubraview_frame_t*)rubraview_realloc(rubraview_mem_mut(reader->frames, room * sizeof(rubraview_frame_t))) : NULL;
         if (more) reader->jxl = more;
         if (frames) reader->frames = frames;
         if (!more || !frames) return NULL;
     }
-    uint8_t *pixels = (uint8_t*)malloc(bytes);
+    uint8_t *pixels = (uint8_t*)rubraview_alloc(bytes);
     if (!pixels) return NULL;
     reader->frames[reader->jxl_count] = (rubraview_frame_t){ .delay_seconds = anim_delay(seconds), .width = width, .height = height,
                                                              .disposal = RUBRAVIEW_FRAME_KEEP, .replaces = true };
@@ -892,7 +920,7 @@ static uint8_t *file_read_whole(proven_u8str_view_t path, size_t *out_size) {
     *out_size = 0;
     if (path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
     char narrow[MAX_PATH * 4];
-    memcpy(narrow, path.ptr, path.size);
+    proven_sys_mem_copy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
     WCHAR wide[MAX_PATH * 2];
     if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return NULL;
@@ -907,7 +935,7 @@ static uint8_t *file_read_whole(proven_u8str_view_t path, size_t *out_size) {
         return NULL;
     }
     DWORD size = (DWORD)file_size.QuadPart;
-    uint8_t *bytes = (uint8_t*)malloc(size);
+    uint8_t *bytes = (uint8_t*)rubraview_alloc(size);
     DWORD total = 0;
     while (bytes && total < size) {
         DWORD got = 0;
@@ -915,7 +943,7 @@ static uint8_t *file_read_whole(proven_u8str_view_t path, size_t *out_size) {
         total += got;
     }
     CloseHandle(file);
-    if (!bytes || total != size) { free(bytes); return NULL; }
+    if (!bytes || total != size) { rubraview_free(bytes); return NULL; }
     *out_size = size;
     return bytes;
 }
@@ -930,20 +958,20 @@ void rubraview_pal_anim_close(rubraview_anim_reader_t *reader) {
     if (reader->stream) IWICStream_Release(reader->stream);
     rubraview_apng_free(&reader->apng);
     rubraview_avif_close(reader->avif);
-    for (size_t i = 0; i < reader->jxl_count; ++i) free(reader->jxl[i]);
-    free(reader->jxl);
-    free(reader->png);
-    free(reader->frames);
-    free(reader->owned);
-    free(reader);
+    for (size_t i = 0; i < reader->jxl_count; ++i) rubraview_free(reader->jxl[i]);
+    rubraview_free(reader->jxl);
+    rubraview_free(reader->png);
+    rubraview_free(reader->frames);
+    rubraview_free(reader->owned);
+    rubraview_free(reader);
 }
 
 /* D-84: the frames of an APNG, from the file's own chunks. */
 static bool anim_open_apng(rubraview_anim_reader_t *reader, size_t size, size_t *out_count,
                            uint32_t *canvas_w, uint32_t *canvas_h) {
-    if (!rubraview_apng_parse(reader->owned, size, &reader->apng) || reader->apng.frame_count <= 1) return false;
+    if (!rubraview_apng_parse(rubraview_mem_view(reader->owned, size), &reader->apng) || reader->apng.frame_count <= 1) return false;
     size_t count = reader->apng.frame_count;
-    reader->frames = (rubraview_frame_t*)calloc(count, sizeof(rubraview_frame_t));
+    reader->frames = (rubraview_frame_t*)rubraview_alloc_zero(count, sizeof(rubraview_frame_t));
     if (!reader->frames) return false;
     for (size_t i = 0; i < count; ++i) {
         const rubraview_apng_frame_t *in = &reader->apng.frames[i];
@@ -963,32 +991,34 @@ static bool anim_open_apng(rubraview_anim_reader_t *reader, size_t size, size_t 
     return true;
 }
 
-rubraview_anim_reader_t *rubraview_pal_anim_open(proven_u8str_view_t path, const uint8_t *data, size_t size,
+rubraview_anim_reader_t *rubraview_pal_anim_open(proven_u8str_view_t path, proven_mem_view_t data_view,
                                                  const rubraview_frame_t **out_frames, size_t *out_count,
                                                  int32_t *out_canvas_width, int32_t *out_canvas_height) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!out_frames || !out_count || !out_canvas_width || !out_canvas_height) return NULL;
     *out_frames = NULL;
     *out_count = 0;
     *out_canvas_width = *out_canvas_height = 0;
 
-    rubraview_anim_reader_t *reader = (rubraview_anim_reader_t*)calloc(1, sizeof(*reader));
+    rubraview_anim_reader_t *reader = (rubraview_anim_reader_t*)rubraview_alloc_zero(1, sizeof(*reader));
     if (!reader) return NULL;
     /* The reader reads the bytes for as long as it lives, so it has its own. */
     if (path.size > 0) {
         reader->owned = file_read_whole(path, &size);
     } else if (data && size > 0) {
-        reader->owned = (uint8_t*)malloc(size);
-        if (reader->owned) memcpy(reader->owned, data, size);
+        reader->owned = (uint8_t*)rubraview_alloc(size);
+        if (reader->owned) proven_sys_mem_copy(reader->owned, data, size);
     }
     if (!reader->owned) { rubraview_pal_anim_close(reader); return NULL; }
 
     uint32_t canvas_w = 0, canvas_h = 0;
     size_t described = 0;
-    if (rubraview_avif_is(reader->owned, size)) {
+    if (rubraview_avif_is(rubraview_mem_view(reader->owned, size))) {
         int32_t w = 0, h = 0;
         size_t count = 0;
-        reader->avif = rubraview_avif_open(reader->owned, size, AVIF_MAX_SIDE, &w, &h, &count);
-        reader->frames = reader->avif && count > 1 ? (rubraview_frame_t*)calloc(count, sizeof(rubraview_frame_t)) : NULL;
+        reader->avif = rubraview_avif_open(rubraview_mem_view(reader->owned, size), AVIF_MAX_SIDE, &w, &h, &count);
+        reader->frames = reader->avif && count > 1 ? (rubraview_frame_t*)rubraview_alloc_zero(count, sizeof(rubraview_frame_t)) : NULL;
         if (!reader->frames) { rubraview_pal_anim_close(reader); return NULL; }
         /* The times are in the container: no picture is decoded to learn them. */
         for (size_t i = 0; i < count; ++i) {
@@ -999,9 +1029,9 @@ rubraview_anim_reader_t *rubraview_pal_anim_open(proven_u8str_view_t path, const
         described = count;
         canvas_w = (uint32_t)w;
         canvas_h = (uint32_t)h;
-    } else if (rubraview_image_is_jxl(reader->owned, size)) {
+    } else if (rubraview_image_is_jxl(rubraview_mem_view(reader->owned, size))) {
         /* Windows' codec, where there is one, shows its first picture only. */
-        if (!rubraview_pal_ffmpeg_jxl_frames(reader->owned, size, AVIF_MAX_SIDE, anim_jxl_room, reader) ||
+        if (!rubraview_pal_ffmpeg_jxl_frames(rubraview_mem_view(reader->owned, size), AVIF_MAX_SIDE, anim_jxl_room, reader) ||
             reader->jxl_count <= 1) {
             rubraview_pal_anim_close(reader);
             return NULL;
@@ -1009,14 +1039,14 @@ rubraview_anim_reader_t *rubraview_pal_anim_open(proven_u8str_view_t path, const
         described = reader->jxl_count;
         canvas_w = (uint32_t)reader->jxl_w;
         canvas_h = (uint32_t)reader->jxl_h;
-    } else if (rubraview_apng_is_png(reader->owned, size)) {
+    } else if (rubraview_apng_is_png(rubraview_mem_view(reader->owned, size))) {
         /* Windows' PNG codec shows an APNG as its one still picture. */
         if (!anim_open_apng(reader, size, &described, &canvas_w, &canvas_h)) {
             rubraview_pal_anim_close(reader);
             return NULL;
         }
     } else {
-        reader->decoder = decoder_for_memory(reader->owned, size, &reader->stream);
+        reader->decoder = decoder_for_memory(rubraview_mem_view(reader->owned, size), &reader->stream);
         GUID container;
         UINT count = 0;
         if (!reader->decoder ||
@@ -1031,7 +1061,7 @@ rubraview_anim_reader_t *rubraview_pal_anim_open(proven_u8str_view_t path, const
             rubraview_pal_anim_close(reader);
             return NULL;
         }
-        reader->frames = (rubraview_frame_t*)calloc(count, sizeof(rubraview_frame_t));
+        reader->frames = (rubraview_frame_t*)rubraview_alloc_zero(count, sizeof(rubraview_frame_t));
         if (!reader->frames) { rubraview_pal_anim_close(reader); return NULL; }
 
         /* A GIF says the whole picture's size apart from its frames'. */
@@ -1135,14 +1165,14 @@ bool rubraview_pal_anim_read(rubraview_anim_reader_t *reader, size_t index, uint
         size_t need = rubraview_apng_frame_png_size(&reader->apng, index);
         if (need == 0) return false;
         if (need > reader->png_cap) {
-            uint8_t *more = (uint8_t*)realloc(reader->png, need);
+            uint8_t *more = (uint8_t*)rubraview_realloc(rubraview_mem_mut(reader->png, need));
             if (!more) return false;
             reader->png = more;
             reader->png_cap = need;
         }
         if (rubraview_apng_frame_png(&reader->apng, index, reader->png, reader->png_cap) != need) return false;
         IWICStream *stream = NULL;
-        IWICBitmapDecoder *decoder = decoder_for_memory(reader->png, need, &stream);
+        IWICBitmapDecoder *decoder = decoder_for_memory(rubraview_mem_view(reader->png, need), &stream);
         bool ok = false;
         if (decoder) {
             IWICBitmapFrameDecode *frame = NULL;
@@ -1180,9 +1210,10 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture(rubraview_rendere
 }
 
 rubraview_image_load_result_t rubraview_pal_image_load_texture_from_memory(rubraview_renderer_t *renderer,
-                                                                           const uint8_t *data,
-                                                                           size_t size,
+                                                                           proven_mem_view_t data_view,
                                                                            bool apply_exif_orientation) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     rubraview_image_load_result_t result = { .texture = NULL, .width = 0, .height = 0, .exif_orientation = 1, .ok = false };
 
     IWICImagingFactory *factory = wic_factory();
@@ -1193,7 +1224,7 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture_from_memory(rubra
        returning. This is the path CBZ pages take in M4 — and, RV-110, an
        AVIF or a JPEG XL in an archive is read as one in a folder is. */
     IWICStream *stream = NULL;
-    IWICBitmapDecoder *decoder = decoder_for_memory(data, size, &stream);
+    IWICBitmapDecoder *decoder = decoder_for_memory(rubraview_mem_view(data, size), &stream);
     if (!decoder) return result;
 
     result = finish_decode(renderer, decoder, apply_exif_orientation);
@@ -1208,14 +1239,16 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture_from_memory(rubra
    workbench has to: its commit layer runs the core engine on a real
    buffer, not on a GPU texture. */
 static rubraview_pixbuf_t read_pixels_within(proven_arena_t *arena, proven_u8str_view_t path,
-                                             const uint8_t *data, size_t size,
+                                             proven_mem_view_t data_view,
                                              bool apply_exif_orientation, int32_t max_w, int32_t max_h) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     rubraview_pixbuf_t empty = {0};
     IWICImagingFactory *factory = wic_factory();
     if (!factory || !arena) return empty;
 
     IWICStream *stream = NULL;
-    IWICBitmapDecoder *decoder = decoder_for_source(path, data, size, &stream);
+    IWICBitmapDecoder *decoder = decoder_for_source(path, rubraview_mem_view(data, size), &stream);
     if (!decoder) { if (stream) IWICStream_Release(stream); return empty; }
 
     IWICBitmapFrameDecode *frame = NULL;
@@ -1342,17 +1375,19 @@ static bool frame_has_profile(IWICImagingFactory *factory, IWICBitmapFrameDecode
     return found;
 }
 
-bool rubraview_pal_image_describe(proven_u8str_view_t path, const uint8_t *data, size_t size, rubraview_image_desc_t *out) {
+bool rubraview_pal_image_describe(proven_u8str_view_t path, proven_mem_view_t data_view, rubraview_image_desc_t *out) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!out) return false;
-    memset(out, 0, sizeof(*out));
+    proven_sys_mem_set(out, 0, sizeof(*out));
     IWICImagingFactory *factory = wic_factory();
     IWICStream *stream = NULL;
-    IWICBitmapDecoder *decoder = factory ? decoder_for_source(path, data, size, &stream) : NULL;
+    IWICBitmapDecoder *decoder = factory ? decoder_for_source(path, rubraview_mem_view(data, size), &stream) : NULL;
     if (!decoder) { if (stream) IWICStream_Release(stream); return false; }
 
     GUID container = {0};
     if (SUCCEEDED(IWICBitmapDecoder_GetContainerFormat(decoder, &container))) {
-        snprintf(out->format, sizeof(out->format), "%s", container_name(&container));
+        rubraview_fmt(out->format, sizeof(out->format), "{}", PROVEN_ARG(container_name(&container)));
     }
     UINT frames = 0;
     (void)IWICBitmapDecoder_GetFrameCount(decoder, &frames);
@@ -1382,8 +1417,8 @@ bool rubraview_pal_image_describe(proven_u8str_view_t path, const uint8_t *data,
             /* D-117: a palette picture has one channel too (a GIF read "8-bit grey"). */
             bool indexed = IsEqualGUID(&format, &GUID_WICPixelFormat8bppIndexed) || IsEqualGUID(&format, &GUID_WICPixelFormat4bppIndexed) ||
                            IsEqualGUID(&format, &GUID_WICPixelFormat2bppIndexed) || IsEqualGUID(&format, &GUID_WICPixelFormat1bppIndexed);
-            if (bpp > 0 && (indexed || (bpp <= 8 && channels != 1))) snprintf(out->pixels, sizeof(out->pixels), "%u-bit indexed colour", bpp);
-            else if (bpp > 0) snprintf(out->pixels, sizeof(out->pixels), "%u-bit %s", bpp, kind);
+            if (bpp > 0 && (indexed || (bpp <= 8 && channels != 1))) rubraview_fmt(out->pixels, sizeof(out->pixels), "{}-bit indexed colour", PROVEN_ARG((unsigned)bpp));
+            else if (bpp > 0) rubraview_fmt(out->pixels, sizeof(out->pixels), "{}-bit {}", PROVEN_ARG((unsigned)bpp), PROVEN_ARG(kind));
         }
         if (info) IWICPixelFormatInfo_Release(info);
         if (component) IWICComponentInfo_Release(component);
@@ -1411,23 +1446,29 @@ bool rubraview_pal_image_size(proven_u8str_view_t path, int32_t *out_width, int3
 
 rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
                                                    proven_u8str_view_t path,
-                                                   const uint8_t *data, size_t size,
+                                                   proven_mem_view_t data_view,
                                                    bool apply_exif_orientation) {
-    return read_pixels_within(arena, path, data, size, apply_exif_orientation, 0, 0);
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    return read_pixels_within(arena, path, rubraview_mem_view(data, size), apply_exif_orientation, 0, 0);
 }
 
 rubraview_pixbuf_t rubraview_pal_image_read_pixels_within(proven_arena_t *arena,
                                                           proven_u8str_view_t path,
-                                                          const uint8_t *data, size_t size,
+                                                          proven_mem_view_t data_view,
                                                           bool apply_exif_orientation,
                                                           int32_t max_width, int32_t max_height) {
-    return read_pixels_within(arena, path, data, size, apply_exif_orientation, max_width, max_height);
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    return read_pixels_within(arena, path, rubraview_mem_view(data, size), apply_exif_orientation, max_width, max_height);
 }
 
-bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, const uint8_t *data, size_t size,
+bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, proven_mem_view_t data_view,
                                 bool apply_exif_orientation,
                                 int32_t x, int32_t y, int32_t w, int32_t h,
                                 int32_t out_w, int32_t out_h, uint8_t *dst, uint32_t stride) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!factory || !data || size == 0 || size > UINT32_MAX || !dst || x < 0 || y < 0 ||
         w <= 0 || h <= 0 || out_w <= 0 || out_h <= 0 ||
         (uint64_t)stride < (uint64_t)out_w * 4u || (uint64_t)stride * (uint64_t)out_h > (uint64_t)UINT_MAX) {
@@ -1444,7 +1485,7 @@ bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, const uint8_t *data
     IWICFormatConverter *converter = NULL;
     uint8_t *piece = NULL;   /* a turned picture's tile, as stored, before it is turned */
 
-    decoder = rubraview_wic_decoder_for_bytes(factory, data, size, &stream);
+    decoder = rubraview_wic_decoder_for_bytes(factory, rubraview_mem_view(data, size), &stream);
     if (!decoder || FAILED(IWICBitmapDecoder_GetFrame(decoder, 0, &frame)) || !frame) goto done;
 
     IWICBitmapSource *source = (IWICBitmapSource*)frame;
@@ -1508,7 +1549,7 @@ bool rubraview_wic_region_pbgra(IWICImagingFactory *factory, const uint8_t *data
     }
 
 done:
-    free(piece);
+    rubraview_free(piece);
     if (converter) IWICFormatConverter_Release(converter);
     if (scaler) IWICBitmapScaler_Release(scaler);
     if (clipper) IWICBitmapClipper_Release(clipper);
@@ -1537,7 +1578,7 @@ static IWICStream *writable_stream(IWICImagingFactory *factory, proven_u8str_vie
     if (!factory || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
 
     char narrow[MAX_PATH * 4];
-    memcpy(narrow, path.ptr, path.size);
+    proven_sys_mem_copy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
 
     WCHAR wide[MAX_PATH * 2];
@@ -1783,19 +1824,19 @@ static bool save_frames(proven_u8str_view_t path, const rubraview_pixbuf_t *pixe
 static void jpeg_rewrite(proven_u8str_view_t path, const rubraview_export_options_t *options) {
     rubraview_fs_entry_t entry;
     size_t room = 64u * 1024u * 1024u;
-    void *memory = malloc(room);
+    void *memory = rubraview_alloc(room);
     if (!memory) return;
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = room });
     if (rubraview_pal_fs_stat(&arena, path, &entry) && entry.size_bytes > 0 && entry.size_bytes < room / 4u) {
         proven_u8str_view_t bytes = rubraview_pal_fs_read_file(&arena, path, (size_t)entry.size_bytes);
         if (bytes.size > 0) {
-            rubraview_jpegtran_result_t made = rubraview_jpegtran_rewrite(&arena, (const uint8_t*)bytes.ptr, bytes.size,
+            rubraview_jpegtran_result_t made = rubraview_jpegtran_rewrite(&arena, rubraview_mem_view((const uint8_t*)bytes.ptr, bytes.size),
                                                                           options->jpeg_progressive, options->jpeg_optimise,
                                                                           options->jpeg_restart_rows, true);
             if (made.err == RUBRAVIEW_JPEGTRAN_OK && made.data.size > 0) (void)rubraview_pal_fs_write_file(path, made.data);
         }
     }
-    free(memory);
+    rubraview_free(memory);
 }
 
 /* RV-109: Windows has no WebP encoder; the vendored libwebp writes it. */
@@ -1812,7 +1853,9 @@ static rubraview_webp_options_t webp_options_from(const rubraview_export_options
     };
 }
 
-static bool webp_bytes_to_file(proven_u8str_view_t path, uint8_t *bytes, size_t len) {
+static bool webp_bytes_to_file(proven_u8str_view_t path, proven_mem_mut_t bytes_view) {
+    uint8_t *bytes = (uint8_t *)bytes_view.ptr;
+    size_t len = (size_t)bytes_view.size;
     bool written = rubraview_pal_fs_write_file(path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)bytes, .size = len });
     rubraview_webp_free(bytes);
     return written;
@@ -1826,7 +1869,7 @@ static bool save_webp(proven_u8str_view_t path, const rubraview_pixbuf_t *pixels
     uint8_t *bytes = NULL;
     size_t len = 0;
     if (!rubraview_webp_write(pixels->pixels, pixels->width, pixels->height, pixels->stride, &webp, &bytes, &len)) return false;
-    return webp_bytes_to_file(path, bytes, len);
+    return webp_bytes_to_file(path, rubraview_mem_mut(bytes, len));
 }
 
 static bool anim_webp_read(void *ctx, size_t index, uint8_t *dst, size_t stride) {
@@ -1863,21 +1906,23 @@ static bool anim_ffmpeg_picture(void *context, size_t index, uint8_t *bgra, doub
 
 static _Thread_local const char *g_anim_why;
 
-int rubraview_pal_image_save_animation_ffmpeg(proven_u8str_view_t out_path, proven_u8str_view_t source_path, const uint8_t *data, size_t size,
+int rubraview_pal_image_save_animation_ffmpeg(proven_u8str_view_t out_path, proven_u8str_view_t source_path, proven_mem_view_t data_view,
                                               const rubraview_export_options_t *options, bool avif) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     g_save_why = NULL;
     if (!options) return -1;
     const rubraview_frame_t *frames = NULL;
     size_t count = 0;
     int32_t width = 0, height = 0;
-    rubraview_anim_reader_t *reader = rubraview_pal_anim_open(source_path, data, size, &frames, &count, &width, &height);
+    rubraview_anim_reader_t *reader = rubraview_pal_anim_open(source_path, rubraview_mem_view(data, size), &frames, &count, &width, &height);
     if (!reader) return 0;
     if (count <= 1 || width <= 0 || height <= 0) { rubraview_pal_anim_close(reader); return 0; }
     /* JPEG XL that moves needs libjxl_anim: without it the first picture is written, as a still one */
-    if (!avif && !(rubraview_pal_ffmpeg_image_encoders(NULL, 0) & RUBRAVIEW_FFMPEG_WRITES_JXL_ANIM)) { rubraview_pal_anim_close(reader); return 0; }
+    if (!avif && !(rubraview_pal_ffmpeg_image_encoders(rubraview_mem_mut(NULL, 0)) & RUBRAVIEW_FFMPEG_WRITES_JXL_ANIM)) { rubraview_pal_anim_close(reader); return 0; }
     int result = -1;
     anim_ffmpeg_t a = { .reader = reader, .frames = frames, .bytes = (size_t)width * (size_t)height * 4u };
-    uint8_t *buffers = (uint8_t*)calloc(3, a.bytes);
+    uint8_t *buffers = (uint8_t*)rubraview_alloc_zero(3, a.bytes);
     if (buffers) {
         rubraview_frame_canvas_init(&a.canvas, frames, count, width, height, buffers, buffers + a.bytes, buffers + a.bytes * 2u);
         rubraview_ffmpeg_still_t how = ffmpeg_how(options, avif);
@@ -1885,29 +1930,31 @@ int rubraview_pal_image_save_animation_ffmpeg(proven_u8str_view_t out_path, prov
         uint8_t *bytes = rubraview_pal_ffmpeg_pictures_encode(width, height, count, anim_ffmpeg_picture, &a, &how, &len, &g_anim_why);
         if (bytes) {
             if (rubraview_pal_fs_write_file(out_path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)bytes, .size = len })) result = 1;
-            free(bytes);
+            rubraview_free(bytes);
         }
         g_save_why = g_anim_why;
     }
-    free(buffers);
+    rubraview_free(buffers);
     rubraview_pal_anim_close(reader);
     return result;
 }
 
 int rubraview_pal_image_save_animation_webp(proven_u8str_view_t out_path, proven_u8str_view_t source_path,
-                                            const uint8_t *data, size_t size,
+                                            proven_mem_view_t data_view,
                                             const rubraview_export_options_t *options) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!options) return -1;
     const rubraview_frame_t *frames = NULL;
     size_t count = 0;
     int32_t width = 0, height = 0;
-    rubraview_anim_reader_t *reader = rubraview_pal_anim_open(source_path, data, size, &frames, &count, &width, &height);
+    rubraview_anim_reader_t *reader = rubraview_pal_anim_open(source_path, rubraview_mem_view(data, size), &frames, &count, &width, &height);
     if (!reader) return 0;
     if (count <= 1 || width <= 0 || height <= 0) { rubraview_pal_anim_close(reader); return 0; }
 
     int result = -1;
     size_t bytes = (size_t)width * (size_t)height * 4u;
-    uint8_t *buffers = (uint8_t*)calloc(3, bytes);
+    uint8_t *buffers = (uint8_t*)rubraview_alloc_zero(3, bytes);
     rubraview_webp_options_t webp = webp_options_from(options);
     webp.premultiplied = true;   /* what the reader gives */
     rubraview_webp_anim_t *anim = buffers ? rubraview_webp_anim_begin(width, height, 0, &webp) : NULL;
@@ -1922,9 +1969,9 @@ int rubraview_pal_image_save_animation_webp(proven_u8str_view_t out_path, proven
         uint8_t *out = NULL;
         size_t len = 0;
         if (!ok) rubraview_webp_anim_abort(anim);
-        else if (rubraview_webp_anim_end(anim, &out, &len) && webp_bytes_to_file(out_path, out, len)) result = 1;
+        else if (rubraview_webp_anim_end(anim, &out, &len) && webp_bytes_to_file(out_path, rubraview_mem_mut(out, len))) result = 1;
     }
-    free(buffers);
+    rubraview_free(buffers);
     rubraview_pal_anim_close(reader);
     return result;
 }
@@ -1974,7 +2021,7 @@ static bool save_by_ffmpeg(proven_u8str_view_t path, const rubraview_pixbuf_t *p
     uint8_t *bytes = rubraview_pal_ffmpeg_image_encode(pixels, &how, &size, &g_save_why);
     if (!bytes) return false;
     bool written = rubraview_pal_fs_write_file(path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)bytes, .size = size });
-    free(bytes);
+    rubraview_free(bytes);
     if (!written) g_save_why = NULL;
     return written;
 }
@@ -2021,18 +2068,20 @@ bool rubraview_pal_image_save_ico(proven_u8str_view_t path,
 /* ---- telling the reader why an image did not appear ---- */
 
 /* Appends to a fixed buffer, never past its end. */
-static void diag_add(char *buffer, size_t size, size_t *used, const char *fmt, ...) {
+static void diag_add_args(proven_mem_mut_t buffer_view, size_t *used, const char *fmt, const proven_arg_t *fmt_args, size_t fmt_count) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t size = (size_t)buffer_view.size;
     if (*used + 1 >= size) return;
-    va_list args;
-    va_start(args, fmt);
-    int n = vsnprintf(buffer + *used, size - *used, fmt, args);
-    va_end(args);
+    int n = rubraview_fmt_length(proven_fmt_to_internal(buffer + *used, size - *used, fmt, fmt_args, fmt_count));
     if (n > 0) *used += (size_t)n;
     if (*used >= size) *used = size - 1;
 }
+#define diag_add(buffer, size, used, fmt, ...) diag_add_args(rubraview_mem_mut(buffer, size), used, fmt, RUBRAVIEW_FMT_ARGS(__VA_ARGS__))
 
 proven_u8str_view_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, proven_u8str_view_t path,
-                                     char *buffer, size_t buffer_size) {
+                                     proven_mem_mut_t buffer_view) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     proven_u8str_view_t empty = PROVEN_LIT("");
     if (!buffer || buffer_size < 128) return empty;
 
@@ -2040,72 +2089,72 @@ proven_u8str_view_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer,
     buffer[0] = '\0';
 
     IWICImagingFactory *factory = wic_factory();
-    diag_add(buffer, buffer_size, &used, "WIC factory: %s\r\n", factory ? "ok" : "FAILED");
+    diag_add(buffer, buffer_size, &used, "WIC factory: {}\r\n", PROVEN_ARG(factory ? "ok" : "FAILED"));
     if (!factory) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = used };
 
     ID2D1RenderTarget *rt = rubraview_d2d_render_target(renderer);
-    diag_add(buffer, buffer_size, &used, "render target: %s\r\n", rt ? "ok" : "FAILED (no renderer)");
+    diag_add(buffer, buffer_size, &used, "render target: {}\r\n", PROVEN_ARG(rt ? "ok" : "FAILED (no renderer)"));
     if (!rt) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = used };
 
     IWICBitmapDecoder *decoder = decoder_for_path(path);
-    diag_add(buffer, buffer_size, &used, "opening the file: %s\r\n",
-             decoder ? "ok" : "FAILED (no codec for this format, or the path is wrong)");
+    diag_add(buffer, buffer_size, &used, "opening the file: {}\r\n",
+             PROVEN_ARG(decoder ? "ok" : "FAILED (no codec for this format, or the path is wrong)"));
     if (!decoder) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = used };
 
     UINT frame_count = 0;
     IWICBitmapDecoder_GetFrameCount(decoder, &frame_count);
-    diag_add(buffer, buffer_size, &used, "frames in the file: %u\r\n", frame_count);
+    diag_add(buffer, buffer_size, &used, "frames in the file: {}\r\n", PROVEN_ARG((unsigned)frame_count));
 
     IWICBitmapFrameDecode *frame = NULL;
     HRESULT hr = IWICBitmapDecoder_GetFrame(decoder, 0, &frame);
-    diag_add(buffer, buffer_size, &used, "getting frame 0: %s (0x%08lX)\r\n",
-             SUCCEEDED(hr) ? "ok" : "FAILED", (unsigned long)hr);
+    diag_add(buffer, buffer_size, &used, "getting frame 0: {} (0x{:08X})\r\n",
+             PROVEN_ARG(SUCCEEDED(hr) ? "ok" : "FAILED"), PROVEN_ARG((unsigned long)hr));
     if (FAILED(hr) || !frame) { IWICBitmapDecoder_Release(decoder); return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = used }; }
 
     UINT w = 0, h = 0;
     IWICBitmapFrameDecode_GetSize(frame, &w, &h);
-    diag_add(buffer, buffer_size, &used, "size: %ux%u\r\n", w, h);
+    diag_add(buffer, buffer_size, &used, "size: {}x{}\r\n", PROVEN_ARG((unsigned)w), PROVEN_ARG((unsigned)h));
 
     int32_t orientation = read_orientation(frame);
-    diag_add(buffer, buffer_size, &used, "EXIF orientation: %d\r\n", orientation);
+    diag_add(buffer, buffer_size, &used, "EXIF orientation: {}\r\n", PROVEN_ARG((int)orientation));
 
     UINT contexts = 0;
     IWICBitmapFrameDecode_GetColorContexts(frame, 0, NULL, &contexts);
-    diag_add(buffer, buffer_size, &used, "embedded colour profiles: %u\r\n", contexts);
+    diag_add(buffer, buffer_size, &used, "embedded colour profiles: {}\r\n", PROVEN_ARG((unsigned)contexts));
 
     /* Each stage separately, so a failure names itself rather than
        disappearing into a single "could not load". */
     IWICBitmapSource *source = (IWICBitmapSource*)frame;
     IWICColorTransform *transform = NULL;
     IWICBitmapSource *managed = apply_color_management(factory, frame, source, &transform);
-    diag_add(buffer, buffer_size, &used, "colour management: %s\r\n",
-             transform ? "applied" : (contexts > 0 ? "skipped (could not build a transform)" : "not needed"));
+    diag_add(buffer, buffer_size, &used, "colour management: {}\r\n",
+             PROVEN_ARG(transform ? "applied" : (contexts > 0 ? "skipped (could not build a transform)" : "not needed")));
     source = managed;
 
     IWICFormatConverter *converter = NULL;
     hr = IWICImagingFactory_CreateFormatConverter(factory, &converter);
-    diag_add(buffer, buffer_size, &used, "creating the converter: %s (0x%08lX)\r\n",
-             SUCCEEDED(hr) ? "ok" : "FAILED", (unsigned long)hr);
+    diag_add(buffer, buffer_size, &used, "creating the converter: {} (0x{:08X})\r\n",
+             PROVEN_ARG(SUCCEEDED(hr) ? "ok" : "FAILED"), PROVEN_ARG((unsigned long)hr));
 
     if (SUCCEEDED(hr) && converter) {
         hr = IWICFormatConverter_Initialize(converter, source, &GUID_WICPixelFormat32bppPBGRA,
                                             WICBitmapDitherTypeNone, NULL, 0.0,
                                             WICBitmapPaletteTypeMedianCut);
-        diag_add(buffer, buffer_size, &used, "converting to 32bppPBGRA: %s (0x%08lX)\r\n",
-                 SUCCEEDED(hr) ? "ok" : "FAILED", (unsigned long)hr);
+        diag_add(buffer, buffer_size, &used, "converting to 32bppPBGRA: {} (0x{:08X})\r\n",
+                 PROVEN_ARG(SUCCEEDED(hr) ? "ok" : "FAILED"), PROVEN_ARG((unsigned long)hr));
 
         if (SUCCEEDED(hr)) {
             ID2D1Bitmap *bitmap = NULL;
             hr = ID2D1RenderTarget_CreateBitmapFromWicBitmap(rt, (IWICBitmapSource*)converter, NULL, &bitmap);
-            diag_add(buffer, buffer_size, &used, "uploading to the GPU: %s (0x%08lX)\r\n",
-                     SUCCEEDED(hr) ? "ok" : "FAILED", (unsigned long)hr);
+            diag_add(buffer, buffer_size, &used, "uploading to the GPU: {} (0x{:08X})\r\n",
+                     PROVEN_ARG(SUCCEEDED(hr) ? "ok" : "FAILED"), PROVEN_ARG((unsigned long)hr));
             if (SUCCEEDED(hr) && bitmap) {
                 /* Three ways of asking the same question. They should
                    agree; when they do not, the one that disagrees is
                    the bug, and printing all three says which. */
                 UINT cw = 0, ch = 0;
                 IWICFormatConverter_GetSize(converter, &cw, &ch);
-                diag_add(buffer, buffer_size, &used, "size from WIC converter: %ux%u\r\n", cw, ch);
+                diag_add(buffer, buffer_size, &used, "size from WIC converter: {}x{}\r\n", PROVEN_ARG((unsigned)cw), PROVEN_ARG((unsigned)ch));
 
                 /* RV-164: the method takes a hidden pointer to its result,
                    whatever the C header says; called by value it wrote
@@ -2114,10 +2163,10 @@ proven_u8str_view_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer,
                 D2D1_SIZE_U by_pointer = {0};
                 ((pixel_size_fn)(void (*)(void))bitmap->lpVtbl->GetPixelSize)(bitmap, &by_pointer);
                 diag_add(buffer, buffer_size, &used,
-                         "size from D2D GetPixelSize (its result by pointer): %ux%u%s\r\n",
-                         by_pointer.width, by_pointer.height,
-                         (by_pointer.width == cw && by_pointer.height == ch)
-                           ? "" : "   <-- DISAGREES, this call's ABI is wrong here");
+                         "size from D2D GetPixelSize (its result by pointer): {}x{}{}\r\n",
+                         PROVEN_ARG((unsigned)by_pointer.width), PROVEN_ARG((unsigned)by_pointer.height),
+                         PROVEN_ARG((by_pointer.width == cw && by_pointer.height == ch)
+                           ? "" : "   <-- DISAGREES, this call's ABI is wrong here"));
 
                 ID2D1Bitmap_Release(bitmap);
             } else if (hr == (HRESULT)D2DERR_UNSUPPORTED_PIXEL_FORMAT) {
@@ -2158,7 +2207,7 @@ static rubraview_pixbuf_t text_mask_in(proven_arena_t *arena, proven_u8str_view_
     if (font.size > 0) {
         int fn = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)font.ptr, (int)font.size, face, LF_FACESIZE - 1);
         face[fn > 0 ? fn : 0] = 0;
-        if (fn <= 0) wcscpy(face, L"Segoe UI");
+        if (fn <= 0) rubraview_wcopy_a(face, L"Segoe UI");
     }
     HDC dc = CreateCompatibleDC(NULL);
     if (!dc) return none;
@@ -2179,7 +2228,7 @@ static rubraview_pixbuf_t text_mask_in(proven_arena_t *arena, proven_u8str_view_
         HBITMAP bmp = CreateDIBSection(dc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
         if (bmp && bits) {
             HGDIOBJ old_bmp = SelectObject(dc, bmp);
-            memset(bits, 0, (size_t)w * (size_t)h * 4u);
+            proven_sys_mem_set(bits, 0, (size_t)w * (size_t)h * 4u);
             SetBkMode(dc, TRANSPARENT);
             SetTextColor(dc, RGB(255, 255, 255));
             RECT dr = { 1, 1, w - 1, h - 1 };

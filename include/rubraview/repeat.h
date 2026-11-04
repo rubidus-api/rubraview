@@ -52,7 +52,7 @@ typedef struct rubraview_shuffle {
 } rubraview_shuffle_t;
 
 /** Start over with no page played; `seed` 0 picks a fixed seed. */
-void rubraview_shuffle_reset(rubraview_shuffle_t *sh, uint8_t *played, size_t count, uint64_t seed);
+void rubraview_shuffle_reset(rubraview_shuffle_t *sh, proven_mem_mut_t played_view, uint64_t seed);
 
 /** Page `index` is playing: flagged for this round and remembered as the last. */
 void rubraview_shuffle_mark(rubraview_shuffle_t *sh, size_t index);

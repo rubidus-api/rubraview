@@ -84,7 +84,7 @@ bool rubraview_jpegtran_is_exact(rubraview_jpegtran_op_t op,
  * not copied across.
  */
 rubraview_jpegtran_result_t rubraview_jpegtran_apply(proven_arena_t *arena,
-                                                     const uint8_t *data, size_t size,
+                                                     proven_mem_view_t data_view,
                                                      rubraview_jpegtran_op_t op,
                                                      rubraview_jpegtran_edge_t edge_policy,
                                                      bool privacy_clean);
@@ -94,7 +94,7 @@ rubraview_jpegtran_result_t rubraview_jpegtran_apply(proven_arena_t *arena,
  * and IPTC segments removed and every DCT coefficient untouched.
  */
 rubraview_jpegtran_result_t rubraview_jpegtran_strip_metadata(proven_arena_t *arena,
-                                                              const uint8_t *data, size_t size);
+                                                              proven_mem_view_t data_view);
 
 /**
  * RV-108 (RFC-0001 §3.10): the same JPEG as a progressive one — every
@@ -102,7 +102,7 @@ rubraview_jpegtran_result_t rubraview_jpegtran_strip_metadata(proven_arena_t *ar
  * reader shows the whole picture coarsely first. Lossless.
  */
 rubraview_jpegtran_result_t rubraview_jpegtran_progressive(proven_arena_t *arena,
-                                                           const uint8_t *data, size_t size);
+                                                           proven_mem_view_t data_view);
 
 /**
  * RV-140: the same JPEG written again, its coefficients as they are and every
@@ -110,11 +110,11 @@ rubraview_jpegtran_result_t rubraview_jpegtran_progressive(proven_arena_t *arena
  * a restart marker every `restart_rows` rows of blocks (0: none). Lossless.
  * `keep_markers` false leaves EXIF, XMP, IPTC and the rest out (privacy clean, 1.17.0).
  */
-rubraview_jpegtran_result_t rubraview_jpegtran_rewrite(proven_arena_t *arena, const uint8_t *data, size_t size,
+rubraview_jpegtran_result_t rubraview_jpegtran_rewrite(proven_arena_t *arena, proven_mem_view_t data_view,
                                                        bool progressive, bool optimise, int32_t restart_rows, bool keep_markers);
 
 /** Read a JPEG's size and MCU geometry without decoding it. */
-bool rubraview_jpegtran_probe(const uint8_t *data, size_t size,
+bool rubraview_jpegtran_probe(proven_mem_view_t data_view,
                               int32_t *out_width, int32_t *out_height,
                               int32_t *out_mcu_width, int32_t *out_mcu_height);
 

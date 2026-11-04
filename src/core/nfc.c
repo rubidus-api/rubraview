@@ -63,7 +63,7 @@ proven_u8str_view_t rubraview_nfc_fold(proven_arena_t *arena, proven_u8str_view_
     size_t i = 0;
     while (i < utf8_in.size) {
         size_t consumed = 1;
-        uint32_t cp = rubraview_utf8_decode((const uint8_t*)utf8_in.ptr + i, utf8_in.size - i, &consumed);
+        uint32_t cp = rubraview_utf8_decode(rubraview_mem_view((const uint8_t*)utf8_in.ptr + i, utf8_in.size - i), &consumed);
         if (cp == RUBRAVIEW_UTF8_INVALID) {
             decoded[decoded_count++] = 0xFFFD; /* replacement character */
         } else {

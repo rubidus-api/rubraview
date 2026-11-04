@@ -1,6 +1,8 @@
 #ifdef _WIN32
 #define _CRT_RAND_S
 #define COBJMACROS
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include <windows.h>
 #include <d3d11.h>
 #include <d3d11_4.h>
@@ -70,7 +72,7 @@ static _Atomic uint32_t g_folders_serial = 1;
 
 static void copy_view(char *dst, size_t cap, proven_u8str_view_t v) {
     size_t n = v.size < cap - 1 ? v.size : cap - 1;
-    if (n) memcpy(dst, v.ptr, n);
+    if (n) proven_sys_mem_copy(dst, v.ptr, n);
     dst[n] = '\0';
 }
 
@@ -80,9 +82,9 @@ void rubraview_mhost_remote_folders(proven_u8str_view_t imported, proven_u8str_v
     copy_view(a, sizeof a, imported);
     copy_view(b, sizeof b, chosen);
     AcquireSRWLockExclusive(&g_folders_lock);
-    if (strcmp(a, g_imported) != 0 || strcmp(b, g_chosen) != 0) {
-        memcpy(g_imported, a, sizeof a);
-        memcpy(g_chosen, b, sizeof b);
+    if (rubraview_cstr_cmp(a, g_imported) != 0 || rubraview_cstr_cmp(b, g_chosen) != 0) {
+        proven_sys_mem_copy(g_imported, a, sizeof a);
+        proven_sys_mem_copy(g_chosen, b, sizeof b);
         atomic_fetch_add(&g_folders_serial, 1);   /* the service child is made again at its next use */
     }
     ReleaseSRWLockExclusive(&g_folders_lock);
@@ -109,7 +111,7 @@ static void audio_write(rubraview_mhost_audio_t *a) {   /* under g_audio_lock */
     a->eq_preset = (int32_t)g_audio.chain.eq_preset;
     a->eq_custom = g_audio.chain.eq_custom;
     a->night_mode = g_audio.chain.night_mode;
-    memcpy(a->eq_gains_db, g_audio.chain.eq_gains_db, sizeof a->eq_gains_db);
+    proven_sys_mem_copy(a->eq_gains_db, g_audio.chain.eq_gains_db, sizeof a->eq_gains_db);
     a->gain = g_audio.chain.gain;
     atomic_fetch_add_explicit(&a->serial, 1, memory_order_release);
 }
@@ -156,7 +158,7 @@ static void fresh_name(char out[RUBRAVIEW_MHOST_NAME]) {
     for (int i = 0; i < 16; i += 4) {
         unsigned int v = 0;
         if (rand_s(&v) != 0) { LARGE_INTEGER t; QueryPerformanceCounter(&t); v = (unsigned int)t.QuadPart ^ (unsigned int)(uintptr_t)&v; }
-        memcpy(r + i, &v, 4);
+        proven_sys_mem_copy(r + i, &v, 4);
     }
     rubraview_mhost_map_name(out, GetCurrentProcessId(), r);
 }
@@ -183,10 +185,12 @@ static bool map_make(mh_map_t *m, uint64_t bytes, char name[RUBRAVIEW_MHOST_NAME
 }
 
 /* A mapping the other side named: only a name of our form, only as large as it said and no more is used. */
-static bool map_open(mh_map_t *m, const char *name, uint64_t bytes, bool write) {
+static bool map_open(mh_map_t *m, proven_u8str_view_t name_view, bool write) {
+    const char *name = (const char *)name_view.ptr;
+    uint64_t bytes = (uint64_t)name_view.size;
     *m = (mh_map_t){ 0 };
     char copy[RUBRAVIEW_MHOST_NAME];
-    memcpy(copy, name, sizeof copy);
+    proven_sys_mem_copy(copy, name, sizeof copy);
     if (!rubraview_mhost_map_name_ok(copy, sizeof copy) || bytes == 0 || bytes > RUBRAVIEW_MHOST_MAP_MAX) return false;
     DWORD access = write ? FILE_MAP_ALL_ACCESS : FILE_MAP_READ;
     m->handle = OpenFileMappingA(access, FALSE, copy);
@@ -218,7 +222,7 @@ static double now_seconds(void) {
 static void child_kill(mh_child_t *c, const char *why) {
     if (c->job) TerminateJobObject(c->job, 5);
     else if (c->process) TerminateProcess(c->process, 5);
-    if (!c->dead && why) snprintf(g_why, sizeof g_why, "%s", why);
+    if (!c->dead && why) rubraview_fmt(g_why, sizeof g_why, "{}", PROVEN_ARG(why));
     c->dead = true;
 }
 
@@ -319,8 +323,8 @@ static bool child_start(mh_child_t *c, rubraview_mhost_mode_t mode, const rubrav
     rubraview_mhost_block_t *b = c->block;
     rubraview_mhost_init(b, mode);
     AcquireSRWLockShared(&g_folders_lock);
-    memcpy(b->ffmpeg_imported, g_imported, sizeof b->ffmpeg_imported);
-    memcpy(b->ffmpeg_chosen, g_chosen, sizeof b->ffmpeg_chosen);
+    proven_sys_mem_copy(b->ffmpeg_imported, g_imported, sizeof b->ffmpeg_imported);
+    proven_sys_mem_copy(b->ffmpeg_chosen, g_chosen, sizeof b->ffmpeg_chosen);
     ReleaseSRWLockShared(&g_folders_lock);
     if (gpu) {
         b->gpu_mode = gpu->mode;
@@ -339,20 +343,20 @@ static bool child_start(mh_child_t *c, rubraview_mhost_mode_t mode, const rubrav
         char fault[32];
         DWORD n = GetEnvironmentVariableA("RUBRAVIEW_MEDIA_FAULT", fault, sizeof fault);
         if (n > 0 && n < sizeof fault) {
-            if (strncmp(fault, "crash:", 6) == 0) { b->fault_kind = 1; b->fault_after = atoi(fault + 6); }
-            else if (strncmp(fault, "hang:", 5) == 0) { b->fault_kind = 2; b->fault_after = atoi(fault + 5); }
+            if (rubraview_cstr_cmp_n(fault, rubraview_bytes_view("crash:", 6)) == 0) { b->fault_kind = 1; b->fault_after = (int)rubraview_parse_long(fault + 6, NULL, 10); }
+            else if (rubraview_cstr_cmp_n(fault, rubraview_bytes_view("hang:", 5)) == 0) { b->fault_kind = 2; b->fault_after = (int)rubraview_parse_long(fault + 5, NULL, 10); }
         }
     }
 
     WCHAR exe[MAX_PATH], line[MAX_PATH + 128];
     if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) { child_free(c); return false; }
-    _snwprintf(line, sizeof line / sizeof line[0], L"\"%ls\" --media-host %llu %llu %llu", exe,
-               (unsigned long long)(uintptr_t)c->mapping, (unsigned long long)(uintptr_t)c->request,
-               (unsigned long long)(uintptr_t)c->reply);
+    rubraview_wfmt(line, sizeof line / sizeof line[0], "\"{}\" --media-host {} {} {}", PROVEN_ARG(rubraview_wide_view(exe)),
+               PROVEN_ARG((unsigned long long)((unsigned long long)(uintptr_t)c->mapping)), PROVEN_ARG((unsigned long long)((unsigned long long)(uintptr_t)c->request)),
+               PROVEN_ARG((unsigned long long)((unsigned long long)(uintptr_t)c->reply)));
     SIZE_T attr_size = 0;
     InitializeProcThreadAttributeList(NULL, 1, 0, &attr_size);
-    LPPROC_THREAD_ATTRIBUTE_LIST attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(attr_size);
-    if (!attrs || !InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size)) { free(attrs); child_free(c); return false; }
+    LPPROC_THREAD_ATTRIBUTE_LIST attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)rubraview_alloc(attr_size);
+    if (!attrs || !InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size)) { rubraview_free(attrs); child_free(c); return false; }
     HANDLE inherit[3] = { c->mapping, c->request, c->reply };   /* these and nothing else of ours */
     UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof inherit, NULL, NULL);
     STARTUPINFOEXW si = { .StartupInfo = { .cb = sizeof(STARTUPINFOEXW) }, .lpAttributeList = attrs };
@@ -364,7 +368,7 @@ static bool child_start(mh_child_t *c, rubraview_mhost_mode_t mode, const rubrav
     BOOL started = CreateProcessW(exe, line, NULL, NULL, TRUE, CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
                                   NULL, NULL, &si.StartupInfo, &pi);
     DeleteProcThreadAttributeList(attrs);
-    free(attrs);
+    rubraview_free(attrs);
     if (!started) { child_free(c); return false; }
     if (c->job) AssignProcessToJobObject(c->job, pi.hProcess);
     ResumeThread(pi.hThread);
@@ -377,7 +381,7 @@ static bool child_start(mh_child_t *c, rubraview_mhost_mode_t mode, const rubrav
 
 static bool child_alive(mh_child_t *c) {
     if (!c->process || c->dead) return false;
-    if (WaitForSingleObject(c->process, 0) == WAIT_OBJECT_0) { c->dead = true; snprintf(g_why, sizeof g_why, "%s", N_("FFmpeg stopped: it crashed")); return false; }
+    if (WaitForSingleObject(c->process, 0) == WAIT_OBJECT_0) { c->dead = true; rubraview_fmt(g_why, sizeof g_why, "{}", PROVEN_ARG(N_("FFmpeg stopped: it crashed"))); return false; }
     return true;
 }
 
@@ -394,13 +398,13 @@ static int32_t child_call(mh_child_t *c, uint32_t kind, DWORD wait_ms) {
         if (spent >= wait_ms) { child_kill(c, N_("FFmpeg did not answer in time; it was ended")); return RUBRAVIEW_MHOST_FAILED; }
         HANDLE both[2] = { c->reply, c->process };
         DWORD r = WaitForMultipleObjects(2, both, FALSE, (DWORD)(wait_ms - spent));
-        if (r == WAIT_OBJECT_0 + 1) { c->dead = true; snprintf(g_why, sizeof g_why, "%s", N_("FFmpeg stopped: it crashed")); return RUBRAVIEW_MHOST_FAILED; }
+        if (r == WAIT_OBJECT_0 + 1) { c->dead = true; rubraview_fmt(g_why, sizeof g_why, "{}", PROVEN_ARG(N_("FFmpeg stopped: it crashed"))); return RUBRAVIEW_MHOST_FAILED; }
         if (r != WAIT_OBJECT_0) continue;
         if (atomic_load_explicit(&b->reply_serial, memory_order_acquire) != serial) continue;   /* an older one's */
         int32_t status = b->reply_status;
         if (status != RUBRAVIEW_MHOST_OK && status != RUBRAVIEW_MHOST_NEED_PICTURE) {
             char said[256];
-            memcpy(said, b->reply_why, sizeof said);
+            proven_sys_mem_copy(said, b->reply_why, sizeof said);
             rubraview_mhost_text_take(g_why, sizeof g_why, said, sizeof said);
             return RUBRAVIEW_MHOST_FAILED;
         }
@@ -411,9 +415,9 @@ static int32_t child_call(mh_child_t *c, uint32_t kind, DWORD wait_ms) {
 /* The reply's mapping, opened when its name and size are in order. */
 static bool reply_map(mh_child_t *c, uint64_t limit, mh_map_t *m) {
     char name[RUBRAVIEW_MHOST_NAME];
-    memcpy(name, c->block->reply_map, sizeof name);
+    proven_sys_mem_copy(name, c->block->reply_map, sizeof name);
     uint64_t bytes = c->block->reply_map_bytes;
-    return rubraview_mhost_size_ok(bytes, limit) && map_open(m, name, bytes, false);
+    return rubraview_mhost_size_ok(bytes, limit) && map_open(m, rubraview_bytes_view(name, bytes), false);
 }
 
 /* ======================================================================================== */
@@ -447,7 +451,7 @@ static void plays_remove(mh_play_t *p) {
     AcquireSRWLockExclusive(&g_audio_lock);
     for (size_t i = 0; i < g_play_count; ++i) {
         if (g_plays[i] != p) continue;
-        memmove(&g_plays[i], &g_plays[i + 1], (g_play_count - i - 1) * sizeof g_plays[0]);
+        proven_sys_mem_move(&g_plays[i], &g_plays[i + 1], (g_play_count - i - 1) * sizeof g_plays[0]);
         g_play_count--;
         break;
     }
@@ -524,8 +528,8 @@ static bool pool_take(mh_child_t *out, const rubraview_media_gpu_t *gpu) {
     atomic_store(&b->wanted.gain_millionths, 1000000);
     atomic_store(&b->wanted.audio_stream, -1);
     atomic_store(&b->wanted.audio_serial, 0);
-    memset(b->slots, 0, sizeof b->slots);
-    memset(b->frame_map, 0, sizeof b->frame_map);
+    proven_sys_mem_set(b->slots, 0, sizeof b->slots);
+    proven_sys_mem_set(b->frame_map, 0, sizeof b->frame_map);
     b->frame_bytes = 0;
     b->open_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
     AcquireSRWLockShared(&g_audio_lock);
@@ -556,7 +560,7 @@ static void remote_close(void *handle) {
     map_close(&p->frames);
     if (p->stopped) child_free(&p->child); else pool_give(&p->child);
     if (p->device) ID3D11Device_Release(p->device);
-    free(p);
+    rubraview_free(p);
 }
 
 static bool remote_available(void) { return rubraview_mhost_remote_available(); }
@@ -569,39 +573,39 @@ static void open_refused(mh_child_t *c, const char *what) {
         if (used > RUBRAVIEW_MHOST_LOG) used = RUBRAVIEW_MHOST_LOG;
         size_t from = used > sizeof log - 1 ? used - (sizeof log - 1) : 0;
         char raw[sizeof log];
-        memcpy(raw, c->block->log + from, used - from);
+        proven_sys_mem_copy(raw, c->block->log + from, used - from);
         raw[used - from] = 0;
         for (size_t i = 0; raw[i]; ++i) if (raw[i] == '\n') raw[i] = ' ';
         rubraview_mhost_text_take(log, sizeof log, raw, sizeof raw);
     }
-    snprintf(g_open_why, sizeof g_open_why, "%s%s%s%s%s", what, g_why[0] ? " (" : "", g_why, g_why[0] ? ")" : "", log[0] ? " — " : "");
-    if (log[0]) strncat(g_open_why, log, sizeof g_open_why - strlen(g_open_why) - 1);
+    rubraview_fmt(g_open_why, sizeof g_open_why, "{}{}{}{}{}", PROVEN_ARG(what), PROVEN_ARG(g_why[0] ? " (" : ""), PROVEN_ARG(g_why), PROVEN_ARG(g_why[0] ? ")" : ""), PROVEN_ARG(log[0] ? " — " : ""));
+    if (log[0]) rubraview_cstr_append(g_open_why, sizeof g_open_why, log);
 }
 
 static void *remote_open(proven_u8str_view_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
                          const rubraview_media_gpu_t *gpu) {
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
     g_open_why[0] = g_why[0] = '\0';
-    if (path.size == 0 || path.size >= RUBRAVIEW_MHOST_INLINE - 1) { snprintf(g_open_why, sizeof g_open_why, "its name is too long"); return NULL; }
-    if (!rubraview_mhost_remote_available()) { snprintf(g_open_why, sizeof g_open_why, "the service process found no FFmpeg"); return NULL; }
-    mh_play_t *p = (mh_play_t *)calloc(1, sizeof(*p));
+    if (path.size == 0 || path.size >= RUBRAVIEW_MHOST_INLINE - 1) { rubraview_fmt(g_open_why, sizeof g_open_why, "its name is too long"); return NULL; }
+    if (!rubraview_mhost_remote_available()) { rubraview_fmt(g_open_why, sizeof g_open_why, "the service process found no FFmpeg"); return NULL; }
+    mh_play_t *p = (mh_play_t *)rubraview_alloc_zero(1, sizeof(*p));
     if (!p) return NULL;
     if (!pool_take(&p->child, gpu) && !child_start(&p->child, RUBRAVIEW_MHOST_PLAYBACK, gpu)) {
-        free(p);
-        snprintf(g_open_why, sizeof g_open_why, "the process could not be started");
+        rubraview_free(p);
+        rubraview_fmt(g_open_why, sizeof g_open_why, "the process could not be started");
         return NULL;
     }
     rubraview_mhost_block_t *b = p->child.block;
-    memcpy(b->inline_data, path.ptr, path.size);
+    proven_sys_mem_copy(b->inline_data, path.ptr, path.size);
     b->inline_data[path.size] = 0;
     b->request_inline_bytes = path.size;
     char folder[1024];   /* RV-216: the cache's settings, for the child to read through the same copies */
     uint64_t limit = 0;
     bool ahead = false;
     rubraview_pal_filmcache_settings(folder, sizeof folder, &limit, &ahead);
-    size_t folder_n = strlen(folder);
+    size_t folder_n = proven_cstr_len(folder);
     if (path.size + 1 + folder_n > RUBRAVIEW_MHOST_INLINE - 1) folder_n = 0;
-    memcpy(b->inline_data + path.size + 1, folder, folder_n);
+    proven_sys_mem_copy(b->inline_data + path.size + 1, folder, folder_n);
     b->request_args[0] = (int64_t)folder_n;
     b->request_args[1] = (int64_t)(limit > (uint64_t)INT64_MAX ? (uint64_t)INT64_MAX : limit);
     b->request_args[2] = ahead ? 1 : 0;
@@ -616,8 +620,8 @@ static void *remote_open(proven_u8str_view_t path, rubraview_media_failure_t *ou
         remote_close(p);
         return NULL;
     }
-    if (p->opened.info.has_video && !map_open(&p->frames, p->opened.frame_map, p->opened.frame_bytes * RUBRAVIEW_MHOST_SLOTS, false)) {
-        snprintf(g_open_why, sizeof g_open_why, "its pictures' memory could not be opened (%lu)", (unsigned long)GetLastError());
+    if (p->opened.info.has_video && !map_open(&p->frames, rubraview_bytes_view(p->opened.frame_map, p->opened.frame_bytes * RUBRAVIEW_MHOST_SLOTS), false)) {
+        rubraview_fmt(g_open_why, sizeof g_open_why, "its pictures' memory could not be opened ({})", PROVEN_ARG((unsigned long)GetLastError()));
         remote_close(p);
         return NULL;
     }
@@ -763,7 +767,7 @@ static bool remote_stream_title(void *handle, char *out, size_t cap) {
     mh_play_t *p = (mh_play_t *)handle;
     rubraview_mhost_seen_t seen;
     if (!p || !p->opened.info.live || !out || cap == 0 || !remote_seen(p, &seen) || !seen.icy_title[0]) return false;
-    snprintf(out, cap, "%s", seen.icy_title);
+    rubraview_fmt(out, cap, "{}", PROVEN_ARG(seen.icy_title));
     return true;
 }
 
@@ -813,7 +817,7 @@ static proven_u8str_view_t remote_read_subtitle_stream(void *handle, proven_aren
     proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)m.bytes + 1);
     proven_u8str_view_t text = empty;
     if (proven_is_ok(res.err)) {
-        memcpy(res.value.ptr, m.view, (size_t)m.bytes);
+        proven_sys_mem_copy(res.value.ptr, m.view, (size_t)m.bytes);
         res.value.ptr[m.bytes] = 0;
         text = (proven_u8str_view_t){ .ptr = res.value.ptr, .size = (size_t)m.bytes };
     }
@@ -873,7 +877,7 @@ static bool service_ready(void) {
     uint32_t folders = atomic_load(&g_folders_serial);
     if (g_service.process && (!child_alive(&g_service) || g_service_folders != folders)) child_free(&g_service);
     if (!g_service.process) {
-        if (!child_start(&g_service, RUBRAVIEW_MHOST_SERVICE, NULL)) { snprintf(g_why, sizeof g_why, "%s", N_("FFmpeg could not be started")); return false; }
+        if (!child_start(&g_service, RUBRAVIEW_MHOST_SERVICE, NULL)) { rubraview_fmt(g_why, sizeof g_why, "{}", PROVEN_ARG(N_("FFmpeg could not be started"))); return false; }
         g_service_folders = folders;
     }
     return true;
@@ -893,7 +897,7 @@ static mh_probe_t probe(void) {
         if (service_ready() && child_call(&g_service, RUBRAVIEW_MHOST_REQ_PROBE, PROBE_WAIT_MS) == RUBRAVIEW_MHOST_OK) {
             const int64_t *a = g_service.block->reply_args;
             int64_t v[6];
-            memcpy(v, a, sizeof v);
+            proven_sys_mem_copy(v, a, sizeof v);
             if (v[0] >= 0 && v[0] <= 1 && v[1] >= RUBRAVIEW_FFMPEG_NOT_REFUSED && v[1] <= RUBRAVIEW_FFMPEG_NOT_WHOLE &&
                 v[2] >= 0 && v[2] <= 3 && v[3] >= 0 && v[3] <= 2 && v[4] >= 0 && v[4] <= 15 && v[5] >= 0 && v[5] <= RUBRAVIEW_FFILTER_READY) {
                 got.available = v[0] == 1;
@@ -903,7 +907,7 @@ static mh_probe_t probe(void) {
                 got.encoders = (uint32_t)v[4];
                 got.ffilter = (int32_t)v[5];
                 char said[256];
-                memcpy(said, g_service.block->inline_data, sizeof said - 1);
+                proven_sys_mem_copy(said, g_service.block->inline_data, sizeof said - 1);
                 said[sizeof said - 1] = 0;
                 rubraview_mhost_text_take(got.names, sizeof got.names, said, sizeof said);
             }
@@ -923,24 +927,28 @@ rubraview_ffmpeg_refusal_t rubraview_mhost_remote_refused(void) { return (rubrav
 int rubraview_mhost_remote_jxl_state(void) { return probe().jxl; }
 rubraview_ffilter_state_t rubraview_mhost_remote_filter_state(void) { return (rubraview_ffilter_state_t)probe().ffilter; }
 
-uint32_t rubraview_mhost_remote_image_encoders(char *names, size_t size) {
+uint32_t rubraview_mhost_remote_image_encoders(proven_mem_mut_t names_view) {
+    char *names = (char *)names_view.ptr;
+    size_t size = (size_t)names_view.size;
     mh_probe_t p = probe();
-    if (names && size) snprintf(names, size, "%s", p.names);
+    if (names && size) rubraview_fmt(names, size, "{}", PROVEN_ARG(p.names));
     return p.encoders;
 }
 
 /* A request whose payload goes in a mapping of ours. */
-static bool service_payload(mh_map_t *m, const void *data, size_t size) {
+static bool service_payload(mh_map_t *m, proven_mem_view_t data_view) {
+    const void *data = (const void *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     char name[RUBRAVIEW_MHOST_NAME];
     if (!map_make(m, size, name)) return false;
-    if (data) memcpy(m->view, data, size);
-    memcpy(g_service.block->request_map, name, sizeof name);
+    if (data) proven_sys_mem_copy(m->view, data, size);
+    proven_sys_mem_copy(g_service.block->request_map, name, sizeof name);
     g_service.block->request_map_bytes = size;
     return true;
 }
 
 static void service_no_payload(void) {
-    memset(g_service.block->request_map, 0, sizeof g_service.block->request_map);
+    proven_sys_mem_set(g_service.block->request_map, 0, sizeof g_service.block->request_map);
     g_service.block->request_map_bytes = 0;
 }
 
@@ -950,14 +958,14 @@ int64_t rubraview_mhost_remote_fetch(proven_u8str_view_t address, uint8_t *out, 
     AcquireSRWLockExclusive(&g_service_lock);
     if (service_ready()) {
         rubraview_mhost_block_t *b = g_service.block;
-        memcpy(b->inline_data, address.ptr, address.size);
+        proven_sys_mem_copy(b->inline_data, address.ptr, address.size);
         b->inline_data[address.size] = 0;
         b->request_inline_bytes = address.size;
         b->request_args[0] = (int64_t)cap;
         service_no_payload();
         mh_map_t m;
         if (child_call(&g_service, RUBRAVIEW_MHOST_REQ_FETCH, SMALL_WAIT_MS * 2) == RUBRAVIEW_MHOST_OK && reply_map(&g_service, cap, &m)) {
-            memcpy(out, m.view, (size_t)m.bytes);
+            proven_sys_mem_copy(out, m.view, (size_t)m.bytes);
             got = (int64_t)m.bytes;
             map_close(&m);
         }
@@ -966,14 +974,16 @@ int64_t rubraview_mhost_remote_fetch(proven_u8str_view_t address, uint8_t *out, 
     return got;
 }
 
-bool rubraview_mhost_remote_jxl_decode(const uint8_t *data, size_t size, int32_t max_side,
+bool rubraview_mhost_remote_jxl_decode(proven_mem_view_t data_view, int32_t max_side,
                                        uint8_t *(*room)(void *context, int32_t width, int32_t height),
                                        void *context, int32_t *out_width, int32_t *out_height) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!data || size == 0 || !room || size > (size_t)1 << 30) return false;
     bool ok = false;
     AcquireSRWLockExclusive(&g_service_lock);
     mh_map_t in = { 0 };
-    if (service_ready() && service_payload(&in, data, size)) {
+    if (service_ready() && service_payload(&in, rubraview_mem_view(data, size))) {
         rubraview_mhost_block_t *b = g_service.block;
         b->request_args[0] = max_side;
         mh_map_t m;
@@ -984,7 +994,7 @@ bool rubraview_mhost_remote_jxl_decode(const uint8_t *data, size_t size, int32_t
                 if (m.bytes == (uint64_t)w * (uint64_t)h * 4u) {
                     uint8_t *dst = room(context, (int32_t)w, (int32_t)h);
                     if (dst) {
-                        memcpy(dst, m.view, (size_t)m.bytes);
+                        proven_sys_mem_copy(dst, m.view, (size_t)m.bytes);
                         if (out_width) *out_width = (int32_t)w;
                         if (out_height) *out_height = (int32_t)h;
                         ok = true;
@@ -999,24 +1009,26 @@ bool rubraview_mhost_remote_jxl_decode(const uint8_t *data, size_t size, int32_t
     return ok;
 }
 
-bool rubraview_mhost_remote_jxl_frames(const uint8_t *data, size_t size, int32_t max_side,
+bool rubraview_mhost_remote_jxl_frames(proven_mem_view_t data_view, int32_t max_side,
                                        uint8_t *(*room)(void *context, int32_t width, int32_t height, double seconds),
                                        void *context) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     if (!data || size == 0 || !room || size > (size_t)1 << 30) return false;
     uint32_t given = 0;
     AcquireSRWLockExclusive(&g_service_lock);
     mh_map_t in = { 0 };
-    if (service_ready() && service_payload(&in, data, size)) {
+    if (service_ready() && service_payload(&in, rubraview_mem_view(data, size))) {
         g_service.block->request_args[0] = max_side;
         mh_map_t m;
         if (child_call(&g_service, RUBRAVIEW_MHOST_REQ_JXL_FRAMES, JOB_WAIT_MS) == RUBRAVIEW_MHOST_OK && reply_map(&g_service, REPLY_MAX, &m)) {
-            uint32_t count = rubraview_mhost_frame_count(m.view, (size_t)m.bytes);
+            uint32_t count = rubraview_mhost_frame_count(rubraview_mem_view(m.view, (size_t)m.bytes));
             for (uint32_t i = 0; i < count; ++i) {
                 rubraview_mhost_frame_ref_t f;
-                if (!rubraview_mhost_frame_at(m.view, (size_t)m.bytes, i, max_side, &f)) break;
+                if (!rubraview_mhost_frame_at(rubraview_mem_view(m.view, (size_t)m.bytes), i, max_side, &f)) break;
                 uint8_t *dst = room(context, f.width, f.height, f.seconds);
                 if (!dst) break;
-                memcpy(dst, m.view + f.offset, (size_t)f.width * (size_t)f.height * 4u);
+                proven_sys_mem_copy(dst, m.view + f.offset, (size_t)f.width * (size_t)f.height * 4u);
                 given++;
             }
             map_close(&m);
@@ -1040,8 +1052,8 @@ static uint8_t *service_bytes(size_t *out_size) {
     mh_map_t m;
     uint8_t *bytes = NULL;
     if (reply_map(&g_service, REPLY_MAX, &m)) {
-        bytes = (uint8_t *)malloc((size_t)m.bytes);
-        if (bytes) { memcpy(bytes, m.view, (size_t)m.bytes); *out_size = (size_t)m.bytes; }
+        bytes = (uint8_t *)rubraview_alloc((size_t)m.bytes);
+        if (bytes) { proven_sys_mem_copy(bytes, m.view, (size_t)m.bytes); *out_size = (size_t)m.bytes; }
         map_close(&m);
     }
     return bytes;
@@ -1059,15 +1071,15 @@ uint8_t *rubraview_mhost_remote_image_encode(const rubraview_pixbuf_t *px, const
     uint8_t *result = NULL;
     AcquireSRWLockExclusive(&g_service_lock);
     mh_map_t in = { 0 };
-    if (service_ready() && service_payload(&in, NULL, bytes)) {
-        for (int32_t y = 0; y < px->height; ++y) memcpy(in.view + (size_t)y * row, px->pixels + (size_t)y * (size_t)px->stride, row);
+    if (service_ready() && service_payload(&in, rubraview_mem_view(NULL, bytes))) {
+        for (int32_t y = 0; y < px->height; ++y) proven_sys_mem_copy(in.view + (size_t)y * row, px->pixels + (size_t)y * (size_t)px->stride, row);
         int64_t *a = g_service.block->request_args;
         a[0] = px->width; a[1] = px->height; a[2] = px->format == RUBRAVIEW_PIXFMT_RGBA8;
         still_args(a, how);
         if (child_call(&g_service, RUBRAVIEW_MHOST_REQ_IMAGE_ENCODE, JOB_WAIT_MS) == RUBRAVIEW_MHOST_OK) result = service_bytes(out_size);
-        if (result) *why = NULL; else { snprintf(g_service_why, sizeof g_service_why, "%s", g_why); *why = g_service_why; }
+        if (result) *why = NULL; else { rubraview_fmt(g_service_why, sizeof g_service_why, "{}", PROVEN_ARG(g_why)); *why = g_service_why; }
     } else {
-        snprintf(g_service_why, sizeof g_service_why, "%s", g_why);
+        rubraview_fmt(g_service_why, sizeof g_service_why, "{}", PROVEN_ARG(g_why));
         *why = g_service_why;
     }
     map_close(&in);
@@ -1089,7 +1101,7 @@ uint8_t *rubraview_mhost_remote_pictures_encode(int32_t width, int32_t height, s
     uint8_t *result = NULL;
     AcquireSRWLockExclusive(&g_service_lock);
     mh_map_t frame = { 0 };
-    if (service_ready() && service_payload(&frame, NULL, bytes)) {
+    if (service_ready() && service_payload(&frame, rubraview_mem_view(NULL, bytes))) {
         rubraview_mhost_block_t *b = g_service.block;
         int64_t *a = b->request_args;
         a[0] = width; a[1] = height; a[2] = (int64_t)count;
@@ -1104,9 +1116,9 @@ uint8_t *rubraview_mhost_remote_pictures_encode(int32_t width, int32_t height, s
             status = child_call(&g_service, RUBRAVIEW_MHOST_REQ_PICTURE_GIVEN, JOB_WAIT_MS);
         }
         if (status == RUBRAVIEW_MHOST_OK) result = service_bytes(out_size);
-        if (result) *why = NULL; else { snprintf(g_service_why, sizeof g_service_why, "%s", g_why); *why = g_service_why; }
+        if (result) *why = NULL; else { rubraview_fmt(g_service_why, sizeof g_service_why, "{}", PROVEN_ARG(g_why)); *why = g_service_why; }
     } else {
-        snprintf(g_service_why, sizeof g_service_why, "%s", g_why);
+        rubraview_fmt(g_service_why, sizeof g_service_why, "{}", PROVEN_ARG(g_why));
         *why = g_service_why;
     }
     map_close(&frame);
@@ -1123,7 +1135,7 @@ bool rubraview_mhost_remote_filter_list(proven_arena_t *arena, rubraview_ffilter
         mh_map_t m;
         if (child_call(&g_service, RUBRAVIEW_MHOST_REQ_FILTER_LIST, SMALL_WAIT_MS * 3) == RUBRAVIEW_MHOST_OK &&
             reply_map(&g_service, (uint64_t)64 << 20, &m)) {
-            ok = rubraview_mhost_catalog_unpack(arena, m.view, (size_t)m.bytes, out);
+            ok = rubraview_mhost_catalog_unpack(arena, rubraview_mem_view(m.view, (size_t)m.bytes), out);
             map_close(&m);
         }
     }
@@ -1132,20 +1144,22 @@ bool rubraview_mhost_remote_filter_list(proven_arena_t *arena, rubraview_ffilter
 }
 
 bool rubraview_mhost_remote_filter_run(const char *graph, const uint8_t *bgra, int32_t width, int32_t height,
-                                       uint8_t **out, int32_t *out_width, int32_t *out_height, char *said, size_t said_size) {
+                                       uint8_t **out, int32_t *out_width, int32_t *out_height, proven_mem_mut_t said_view) {
+    char *said = (char *)said_view.ptr;
+    size_t said_size = (size_t)said_view.size;
     *out = NULL;
     *out_width = *out_height = 0;
     if (said && said_size) said[0] = '\0';
-    size_t glen = graph ? strlen(graph) : 0;
+    size_t glen = graph ? proven_cstr_len(graph) : 0;
     if (!graph || glen == 0 || glen >= RUBRAVIEW_MHOST_INLINE - 1 || !bgra || width <= 0 || height <= 0 ||
         width > RUBRAVIEW_MHOST_MAX_SIDE || height > RUBRAVIEW_MHOST_MAX_SIDE) return false;
     size_t bytes = (size_t)width * (size_t)height * 4u;
     bool ok = false;
     AcquireSRWLockExclusive(&g_service_lock);
     mh_map_t in = { 0 };
-    if (service_ready() && service_payload(&in, bgra, bytes)) {
+    if (service_ready() && service_payload(&in, rubraview_mem_view(bgra, bytes))) {
         rubraview_mhost_block_t *b = g_service.block;
-        memcpy(b->inline_data, graph, glen + 1);
+        proven_sys_mem_copy(b->inline_data, graph, glen + 1);
         b->request_inline_bytes = glen;
         b->request_args[0] = width;
         b->request_args[1] = height;
@@ -1153,8 +1167,8 @@ bool rubraview_mhost_remote_filter_run(const char *graph, const uint8_t *bgra, i
         if (child_call(&g_service, RUBRAVIEW_MHOST_REQ_FILTER_RUN, JOB_WAIT_MS) == RUBRAVIEW_MHOST_OK) {
             int64_t w = b->reply_args[0], h = b->reply_args[1];
             if (w > 0 && h > 0 && w <= RUBRAVIEW_MHOST_MAX_SIDE && h <= RUBRAVIEW_MHOST_MAX_SIDE && reply_map(&g_service, REPLY_MAX, &m)) {
-                if (m.bytes == (uint64_t)w * (uint64_t)h * 4u && (*out = (uint8_t *)malloc((size_t)m.bytes)) != NULL) {
-                    memcpy(*out, m.view, (size_t)m.bytes);
+                if (m.bytes == (uint64_t)w * (uint64_t)h * 4u && (*out = (uint8_t *)rubraview_alloc((size_t)m.bytes)) != NULL) {
+                    proven_sys_mem_copy(*out, m.view, (size_t)m.bytes);
                     *out_width = (int32_t)w;
                     *out_height = (int32_t)h;
                     ok = true;
@@ -1162,9 +1176,9 @@ bool rubraview_mhost_remote_filter_run(const char *graph, const uint8_t *bgra, i
                 map_close(&m);
             }
         }
-        if (!ok && said && said_size) snprintf(said, said_size, "%s", g_why);
+        if (!ok && said && said_size) rubraview_fmt(said, said_size, "{}", PROVEN_ARG(g_why));
     } else if (said && said_size) {
-        snprintf(said, said_size, "%s", g_why);
+        rubraview_fmt(said, said_size, "{}", PROVEN_ARG(g_why));
     }
     map_close(&in);
     ReleaseSRWLockExclusive(&g_service_lock);
@@ -1182,7 +1196,7 @@ static mh_map_t g_child_frames;        /* the four pictures */
 static LONG WINAPI child_crash(EXCEPTION_POINTERS *e) {
     if (g_child_block) {
         char line[96];
-        snprintf(line, sizeof line, "crashed: exception 0x%08lx", e && e->ExceptionRecord ? (unsigned long)e->ExceptionRecord->ExceptionCode : 0ul);
+        rubraview_fmt(line, sizeof line, "crashed: exception 0x{:08x}", PROVEN_ARG((unsigned long)(e && e->ExceptionRecord ? (unsigned long)e->ExceptionRecord->ExceptionCode : 0ul)));
         rubraview_mhost_log(g_child_block, line);
     }
     TerminateProcess(GetCurrentProcess(), 3);
@@ -1198,7 +1212,7 @@ static uint8_t *child_reply_room(uint64_t bytes) {
     map_close(&g_child_reply_map);
     char name[RUBRAVIEW_MHOST_NAME];
     if (!map_make(&g_child_reply_map, bytes, name)) return NULL;
-    memcpy(g_child_block->reply_map, name, sizeof name);
+    proven_sys_mem_copy(g_child_block->reply_map, name, sizeof name);
     g_child_block->reply_map_bytes = bytes;
     return g_child_reply_map.view;
 }
@@ -1208,7 +1222,7 @@ static uint8_t *child_frames_room(void *context, size_t bytes_each) {
     map_close(&g_child_frames);   /* the film before's (RV-177) */
     char name[RUBRAVIEW_MHOST_NAME];
     if (!map_make(&g_child_frames, (uint64_t)bytes_each * RUBRAVIEW_MHOST_SLOTS, name)) return NULL;
-    memcpy(g_child_block->frame_map, name, sizeof name);
+    proven_sys_mem_copy(g_child_block->frame_map, name, sizeof name);
     g_child_block->frame_bytes = bytes_each;
     return g_child_frames.view;
 }
@@ -1295,24 +1309,24 @@ static int32_t child_open(child_play_t *cp) {
 static int32_t child_subtitle(child_play_t *cp) {
     if (!cp->media) return RUBRAVIEW_MHOST_FAILED;
     size_t cap = RUBRAVIEW_MHOST_SUBTITLE_MAX + (1u << 20);
-    void *mem = malloc(cap);
+    void *mem = rubraview_alloc(cap);
     if (!mem) return RUBRAVIEW_MHOST_FAILED;
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t *)mem, .size = cap });
     proven_u8str_view_t text = rubraview_media_backend_ffmpeg()->read_subtitle_stream(cp->media, &arena, (int32_t)g_child_block->request_args[0]);
     int32_t status = RUBRAVIEW_MHOST_FAILED;
     if (text.size > 0 && text.size <= RUBRAVIEW_MHOST_SUBTITLE_MAX) {
         uint8_t *dst = child_reply_room(text.size);
-        if (dst) { memcpy(dst, text.ptr, text.size); status = RUBRAVIEW_MHOST_OK; }
+        if (dst) { proven_sys_mem_copy(dst, text.ptr, text.size); status = RUBRAVIEW_MHOST_OK; }
     }
-    free(mem);
+    rubraview_free(mem);
     return status;
 }
 
 /* The request's payload, opened by the name the viewer gave. */
 static bool child_payload(mh_map_t *m, bool write) {
     char name[RUBRAVIEW_MHOST_NAME];
-    memcpy(name, g_child_block->request_map, sizeof name);
-    return map_open(m, name, g_child_block->request_map_bytes, write);
+    proven_sys_mem_copy(name, g_child_block->request_map, sizeof name);
+    return map_open(m, rubraview_bytes_view(name, g_child_block->request_map_bytes), write);
 }
 
 static uint8_t *child_jxl_room(void *context, int32_t width, int32_t height) {
@@ -1332,7 +1346,7 @@ static uint8_t *child_frames_add(void *context, int32_t width, int32_t height, d
     if (f->used + bytes > f->cap) {
         size_t cap = f->cap ? f->cap : bytes * 4;
         while (cap < f->used + bytes) cap *= 2;
-        uint8_t *grown = (uint8_t *)realloc(f->data, cap);
+        uint8_t *grown = (uint8_t *)rubraview_realloc(rubraview_mem_mut(f->data, cap));
         if (!grown) return NULL;
         f->data = grown;
         f->cap = cap;
@@ -1344,27 +1358,29 @@ static uint8_t *child_frames_add(void *context, int32_t width, int32_t height, d
     return at;
 }
 
-static int32_t child_jxl_frames(const uint8_t *data, size_t size, int32_t max_side) {
-    child_frames_t *f = (child_frames_t *)calloc(1, sizeof(*f));
+static int32_t child_jxl_frames(proven_mem_view_t data_view, int32_t max_side) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    child_frames_t *f = (child_frames_t *)rubraview_alloc_zero(1, sizeof(*f));
     if (!f) return RUBRAVIEW_MHOST_FAILED;
     int32_t status = RUBRAVIEW_MHOST_FAILED;
-    if (rubraview_pal_ffmpeg_jxl_frames(data, size, max_side, child_frames_add, f) && f->count) {
+    if (rubraview_pal_ffmpeg_jxl_frames(rubraview_mem_view(data, size), max_side, child_frames_add, f) && f->count) {
         size_t head = rubraview_mhost_frames_head(f->count);
         uint8_t *dst = child_reply_room(head + f->used);
         if (dst) {
-            memcpy(dst, &f->count, 4);
+            proven_sys_mem_copy(dst, &f->count, 4);
             for (uint32_t i = 0; i < f->count; ++i) {
                 uint8_t *e = dst + 4 + (size_t)i * 24u;
                 uint64_t at = head + f->refs[i].offset;
-                memcpy(e, &f->refs[i].width, 4); memcpy(e + 4, &f->refs[i].height, 4);
-                memcpy(e + 8, &f->refs[i].seconds, 8); memcpy(e + 16, &at, 8);
+                proven_sys_mem_copy(e, &f->refs[i].width, 4); proven_sys_mem_copy(e + 4, &f->refs[i].height, 4);
+                proven_sys_mem_copy(e + 8, &f->refs[i].seconds, 8); proven_sys_mem_copy(e + 16, &at, 8);
             }
-            memcpy(dst + head, f->data, f->used);
+            proven_sys_mem_copy(dst + head, f->data, f->used);
             status = RUBRAVIEW_MHOST_OK;
         }
     }
-    free(f->data);
-    free(f);
+    rubraview_free(f->data);
+    rubraview_free(f);
     return status;
 }
 
@@ -1393,7 +1409,7 @@ static bool child_picture(void *context, size_t index, uint8_t *bgra, double *se
         if (serial == cp->serial) continue;
         cp->serial = serial;
         if (b->request_kind != RUBRAVIEW_MHOST_REQ_PICTURE_GIVEN || b->request_args[0] != 1) { cp->broken = true; return false; }
-        memcpy(bgra, cp->frame.view, cp->bytes);
+        proven_sys_mem_copy(bgra, cp->frame.view, cp->bytes);
         *seconds = b->request_real[0];
         atomic_store_explicit(&b->heartbeat, atomic_load(&b->heartbeat) + 1, memory_order_release);
         return true;
@@ -1410,7 +1426,7 @@ static int32_t child_service(uint32_t kind, uint32_t *serial) {
             b->reply_args[1] = rubraview_ffmpeg_local_refused();
             b->reply_args[2] = rubraview_ffmpeg_local_place();
             b->reply_args[3] = rubraview_ffmpeg_local_jxl_state();
-            b->reply_args[4] = rubraview_ffmpeg_local_image_encoders(names, sizeof names);
+            b->reply_args[4] = rubraview_ffmpeg_local_image_encoders(rubraview_mem_mut(names, sizeof names));
             b->reply_args[5] = rubraview_ffilter_local_state();
             rubraview_mhost_text_put((char *)b->inline_data, sizeof names, names);
             return RUBRAVIEW_MHOST_OK;
@@ -1418,11 +1434,11 @@ static int32_t child_service(uint32_t kind, uint32_t *serial) {
         case RUBRAVIEW_MHOST_REQ_FETCH: {
             size_t n = b->request_inline_bytes < RUBRAVIEW_MHOST_INLINE - 1 ? (size_t)b->request_inline_bytes : 0;
             size_t cap = a[0] > 0 && a[0] <= (64 << 20) ? (size_t)a[0] : 0;
-            uint8_t *buf = cap ? (uint8_t *)malloc(cap) : NULL;
+            uint8_t *buf = cap ? (uint8_t *)rubraview_alloc(cap) : NULL;
             int64_t got = buf ? rubraview_pal_ffmpeg_fetch((proven_u8str_view_t){ b->inline_data, n }, buf, cap) : -1;
             int32_t status = RUBRAVIEW_MHOST_FAILED;
-            if (got > 0) { uint8_t *dst = child_reply_room((uint64_t)got); if (dst) { memcpy(dst, buf, (size_t)got); status = RUBRAVIEW_MHOST_OK; } }
-            free(buf);
+            if (got > 0) { uint8_t *dst = child_reply_room((uint64_t)got); if (dst) { proven_sys_mem_copy(dst, buf, (size_t)got); status = RUBRAVIEW_MHOST_OK; } }
+            rubraview_free(buf);
             return status;
         }
         case RUBRAVIEW_MHOST_REQ_JXL_DECODE:
@@ -1432,10 +1448,10 @@ static int32_t child_service(uint32_t kind, uint32_t *serial) {
             int32_t status;
             if (kind == RUBRAVIEW_MHOST_REQ_JXL_DECODE) {
                 int32_t w = 0, h = 0;
-                status = rubraview_pal_ffmpeg_jxl_decode(in.view, (size_t)in.bytes, (int32_t)a[0], child_jxl_room, NULL, &w, &h)
+                status = rubraview_pal_ffmpeg_jxl_decode(rubraview_mem_view(in.view, (size_t)in.bytes), (int32_t)a[0], child_jxl_room, NULL, &w, &h)
                        ? RUBRAVIEW_MHOST_OK : RUBRAVIEW_MHOST_FAILED;
             } else {
-                status = child_jxl_frames(in.view, (size_t)in.bytes, (int32_t)a[0]);
+                status = child_jxl_frames(rubraview_mem_view(in.view, (size_t)in.bytes), (int32_t)a[0]);
             }
             map_close(&in);
             return status;
@@ -1455,7 +1471,7 @@ static int32_t child_service(uint32_t kind, uint32_t *serial) {
             uint8_t *bytes = rubraview_pal_ffmpeg_image_encode(&px, &how, &size, &why);
             map_close(&in);
             int32_t status = RUBRAVIEW_MHOST_FAILED;
-            if (bytes) { uint8_t *dst = child_reply_room(size); if (dst) { memcpy(dst, bytes, size); status = RUBRAVIEW_MHOST_OK; } free(bytes); }
+            if (bytes) { uint8_t *dst = child_reply_room(size); if (dst) { proven_sys_mem_copy(dst, bytes, size); status = RUBRAVIEW_MHOST_OK; } rubraview_free(bytes); }
             else child_say(why);
             return status;
         }
@@ -1472,13 +1488,13 @@ static int32_t child_service(uint32_t kind, uint32_t *serial) {
             map_close(&cp.frame);
             *serial = cp.serial;   /* the answer goes to the last request */
             int32_t status = RUBRAVIEW_MHOST_FAILED;
-            if (bytes) { uint8_t *dst = child_reply_room(size); if (dst) { memcpy(dst, bytes, size); status = RUBRAVIEW_MHOST_OK; } free(bytes); }
+            if (bytes) { uint8_t *dst = child_reply_room(size); if (dst) { proven_sys_mem_copy(dst, bytes, size); status = RUBRAVIEW_MHOST_OK; } rubraview_free(bytes); }
             else child_say(why);
             return status;
         }
         case RUBRAVIEW_MHOST_REQ_FILTER_LIST: {
             size_t cap = (size_t)48 << 20;
-            void *mem = malloc(cap);
+            void *mem = rubraview_alloc(cap);
             if (!mem) return RUBRAVIEW_MHOST_FAILED;
             proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t *)mem, .size = cap });
             rubraview_ffilter_catalog_t catalog;
@@ -1488,7 +1504,7 @@ static int32_t child_service(uint32_t kind, uint32_t *serial) {
                 uint8_t *dst = need ? child_reply_room(need) : NULL;
                 if (dst && rubraview_mhost_catalog_pack(&catalog, dst, need) == need) status = RUBRAVIEW_MHOST_OK;
             }
-            free(mem);
+            rubraview_free(mem);
             return status;
         }
         case RUBRAVIEW_MHOST_REQ_FILTER_RUN: {
@@ -1499,21 +1515,21 @@ static int32_t child_service(uint32_t kind, uint32_t *serial) {
             }
             char graph[RUBRAVIEW_MHOST_INLINE];
             size_t n = b->request_inline_bytes < sizeof graph - 1 ? (size_t)b->request_inline_bytes : sizeof graph - 1;
-            memcpy(graph, b->inline_data, n);
+            proven_sys_mem_copy(graph, b->inline_data, n);
             graph[n] = '\0';
             uint8_t *out = NULL;
             int32_t ow = 0, oh = 0;
             char said[256] = { 0 };
-            bool ok = rubraview_ffilter_local_run(graph, in.view, (int32_t)a[0], (int32_t)a[1], &out, &ow, &oh, said, sizeof said);
+            bool ok = rubraview_ffilter_local_run(graph, in.view, (int32_t)a[0], (int32_t)a[1], &out, &ow, &oh, rubraview_mem_mut(said, sizeof said));
             map_close(&in);
             int32_t status = RUBRAVIEW_MHOST_FAILED;
             if (ok && out) {
                 uint8_t *dst = child_reply_room((uint64_t)ow * (uint64_t)oh * 4u);
-                if (dst) { memcpy(dst, out, (size_t)ow * (size_t)oh * 4u); b->reply_args[0] = ow; b->reply_args[1] = oh; status = RUBRAVIEW_MHOST_OK; }
+                if (dst) { proven_sys_mem_copy(dst, out, (size_t)ow * (size_t)oh * 4u); b->reply_args[0] = ow; b->reply_args[1] = oh; status = RUBRAVIEW_MHOST_OK; }
             } else {
                 child_say(said);
             }
-            free(out);
+            rubraview_free(out);
             return status;
         }
         default:
@@ -1536,8 +1552,8 @@ int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *re
     char imported[RUBRAVIEW_MHOST_PATH], chosen[RUBRAVIEW_MHOST_PATH];
     rubraview_mhost_text_put(imported, sizeof imported, b->ffmpeg_imported);
     rubraview_mhost_text_put(chosen, sizeof chosen, b->ffmpeg_chosen);
-    rubraview_pal_ffmpeg_set_folders((proven_u8str_view_t){ (const proven_byte_t *)imported, strlen(imported) },
-                                     (proven_u8str_view_t){ (const proven_byte_t *)chosen, strlen(chosen) });
+    rubraview_pal_ffmpeg_set_folders((proven_u8str_view_t){ (const proven_byte_t *)imported, proven_cstr_len(imported) },
+                                     (proven_u8str_view_t){ (const proven_byte_t *)chosen, proven_cstr_len(chosen) });
     bool playback = b->mode == RUBRAVIEW_MHOST_PLAYBACK;
     child_play_t cp = { 0 };
     uint32_t handled = 0, audio_applied = 0, tap_tick = 0;

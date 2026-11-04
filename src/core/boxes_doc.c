@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/boxes_doc.h"
 #include "rubraview/lang.h"
 #include <string.h>
@@ -116,7 +117,7 @@ static bool parse_line(box_parser_t *p, proven_u8str_view_t line) {
         if (!next_token(p, &rest, &second, &q2) || q2 || !action_name_ok(second)) return box_fail(p, "`toolbox` needs a profile name");
         if (p->doc->profile_count >= RUBRAVIEW_BOXES_MAX_PROFILES) return box_fail(p, "too many toolbox profiles");
         for (size_t i = 0; i < p->doc->profile_count; ++i) {
-            if (p->doc->profiles[i].name.size == second.size && memcmp(p->doc->profiles[i].name.ptr, second.ptr, second.size) == 0) {
+            if (p->doc->profiles[i].name.size == second.size && proven_sys_mem_cmp(p->doc->profiles[i].name.ptr, second.ptr, second.size) == 0) {
                 return box_fail(p, "this toolbox profile is already defined");
             }
         }
@@ -183,7 +184,7 @@ static bool parse_line(box_parser_t *p, proven_u8str_view_t line) {
 
 bool rubraview_boxes_doc_parse(proven_u8str_view_t text, rubraview_boxes_doc_t *out) {
     if (!out) return false;
-    memset(out, 0, sizeof(*out));
+    proven_sys_mem_set(out, 0, sizeof(*out));
     box_parser_t p = { .doc = out, .line = 0, .profile = -1, .open_menu = -1, .context = -1 };
     size_t start = 0;
     for (size_t i = 0; i <= text.size; ++i) {
@@ -217,7 +218,7 @@ const rubraview_boxes_doc_t *rubraview_boxes_document(void) {
 const rubraview_toolbox_profile_t *rubraview_boxes_profile(const rubraview_boxes_doc_t *doc, proven_u8str_view_t name) {
     if (!doc) return NULL;
     for (size_t i = 0; i < doc->profile_count; ++i) {
-        if (doc->profiles[i].name.size == name.size && memcmp(doc->profiles[i].name.ptr, name.ptr, name.size) == 0) {
+        if (doc->profiles[i].name.size == name.size && proven_sys_mem_cmp(doc->profiles[i].name.ptr, name.ptr, name.size) == 0) {
             return &doc->profiles[i];
         }
     }
@@ -227,7 +228,7 @@ const rubraview_toolbox_profile_t *rubraview_boxes_profile(const rubraview_boxes
 const rubraview_toolbox_profile_t *rubraview_boxes_context(const rubraview_boxes_doc_t *doc, proven_u8str_view_t name) {
     if (!doc) return NULL;
     for (size_t i = 0; i < doc->context_count; ++i) {
-        if (doc->contexts[i].name.size == name.size && memcmp(doc->contexts[i].name.ptr, name.ptr, name.size) == 0) {
+        if (doc->contexts[i].name.size == name.size && proven_sys_mem_cmp(doc->contexts[i].name.ptr, name.ptr, name.size) == 0) {
             return &doc->contexts[i];
         }
     }

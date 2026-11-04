@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/webp_write.h"
 
 #include "src/webp/encode.h"
@@ -103,18 +104,18 @@ struct rubraview_webp_anim {
 rubraview_webp_anim_t *rubraview_webp_anim_begin(int32_t width, int32_t height, int32_t loop_count,
                                                  const rubraview_webp_options_t *options) {
     if (!size_fits(width, height, width * 4)) return NULL;
-    rubraview_webp_anim_t *anim = (rubraview_webp_anim_t*)calloc(1, sizeof(*anim));
+    rubraview_webp_anim_t *anim = (rubraview_webp_anim_t*)rubraview_alloc_zero(1, sizeof(*anim));
     if (!anim) return NULL;
     WebPAnimEncoderOptions encoder_options;
     if (!config_for(options, &anim->config) || !WebPAnimEncoderOptionsInit(&encoder_options)) {
-        free(anim);
+        rubraview_free(anim);
         return NULL;
     }
     encoder_options.anim_params.loop_count = loop_count > 0 ? loop_count : 0;
     encoder_options.allow_mixed = 0;
     anim->encoder = WebPAnimEncoderNew(width, height, &encoder_options);
     if (!anim->encoder) {
-        free(anim);
+        rubraview_free(anim);
         return NULL;
     }
     anim->width = width;
@@ -157,14 +158,14 @@ bool rubraview_webp_anim_end(rubraview_webp_anim_t *anim, uint8_t **out_bytes, s
         WebPDataClear(&data);
     }
     WebPAnimEncoderDelete(anim->encoder);
-    free(anim);
+    rubraview_free(anim);
     return ok;
 }
 
 void rubraview_webp_anim_abort(rubraview_webp_anim_t *anim) {
     if (!anim) return;
     WebPAnimEncoderDelete(anim->encoder);
-    free(anim);
+    rubraview_free(anim);
 }
 
 void rubraview_webp_free(uint8_t *bytes) {

@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/fontspec.h"
 #include <stdio.h>
 #include <string.h>
@@ -65,8 +66,8 @@ proven_u8str_view_t rubraview_font_spec_format(char *buf, size_t cap, proven_u8s
     family = proven_u8str_view_trim(family);
     int32_t w = WEIGHTS[nearest(weight)].weight;
     int n = family.size == 0 ? 0
-          : snprintf(buf, cap, "%.*s%s%s%s", (int)family.size, family.ptr,
-                     w != 400 ? ", " : "", w != 400 ? rubraview_font_weight_name(w) : "", italic ? ", Italic" : "");
+          : rubraview_fmt(buf, cap, "{}{}{}{}", PROVEN_ARG(rubraview_bytes_view(family.ptr, (int)family.size)),
+                     PROVEN_ARG(w != 400 ? ", " : ""), PROVEN_ARG(w != 400 ? rubraview_font_weight_name(w) : ""), PROVEN_ARG(italic ? ", Italic" : ""));
     if (n < 0 || (size_t)n >= cap) n = 0;
     buf[n] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = (size_t)n };

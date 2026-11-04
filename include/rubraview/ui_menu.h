@@ -74,7 +74,7 @@ void rubraview_menu_reset(rubraview_menu_state_t *state);
  * §3.6.2: the breadcrumb, e.g. "Menu > Adjust > Tone Curves", written
  * into `buffer` and returned as a slice. Always NUL-terminated.
  */
-proven_u8str_view_t rubraview_menu_breadcrumb(const rubraview_menu_state_t *state, char *buffer, size_t buffer_size);
+proven_u8str_view_t rubraview_menu_breadcrumb(const rubraview_menu_state_t *state, proven_mem_mut_t buffer_view);
 
 #ifdef __cplusplus
 }

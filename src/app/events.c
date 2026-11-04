@@ -655,7 +655,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                     double pct = rubraview_settings_get(&app->settings, PROVEN_LIT("display"), PROVEN_LIT("name_scale")) + (event->mouse.wheel_delta > 0 ? 10.0 : -10.0);
                     rubraview_settings_set(&app->settings, PROVEN_LIT("display"), PROVEN_LIT("name_scale"), pct);
                     char line[48];
-                    int n = snprintf(line, sizeof(line), T("names and messages %d%%"), (int)lround(name_scale(app) * 100.0));
+                    int n = rubraview_fmt(line, sizeof(line), T("names and messages {}%"), PROVEN_ARG((int)lround(name_scale(app) * 100.0)));
                     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
                     break;
                 }

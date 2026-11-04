@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/path.h"
 #include "rubraview/number.h"
 #include <string.h>
@@ -96,13 +97,13 @@ proven_u8str_view_t rubraview_path_with_ext(proven_arena_t *arena, proven_u8str_
 
     proven_u8str_view_t ext = rubraview_path_ext(path);
     proven_size_t keep = path.size - ext.size;          /* the path without its extension */
-    proven_size_t add = (proven_size_t)strlen(new_ext);
+    proven_size_t add = (proven_size_t)proven_cstr_len(new_ext);
 
     proven_result_mem_mut_t res = proven_arena_alloc(arena, keep + add + 1);
     if (!proven_is_ok(res.err)) return empty;
     char *dst = (char*)res.value.ptr;
-    memcpy(dst, path.ptr, keep);
-    memcpy(dst + keep, new_ext, add);
+    proven_sys_mem_copy(dst, path.ptr, keep);
+    proven_sys_mem_copy(dst + keep, new_ext, add);
     dst[keep + add] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)dst, .size = keep + add };
 }
@@ -122,12 +123,12 @@ proven_u8str_view_t rubraview_path_join(proven_arena_t *arena, proven_u8str_view
     }
 
     char *dst = (char*)res.value.ptr;
-    memcpy(dst, dir.ptr, dir.size);
+    proven_sys_mem_copy(dst, dir.ptr, dir.size);
     proven_size_t offset = dir.size;
     if (needs_sep) {
         dst[offset++] = '/';
     }
-    memcpy(dst + offset, filename.ptr, filename.size);
+    proven_sys_mem_copy(dst + offset, filename.ptr, filename.size);
     offset += filename.size;
     dst[offset] = '\0'; /* Guaranteed null terminator */
 
@@ -150,7 +151,9 @@ bool rubraview_path_same(proven_u8str_view_t a, proven_u8str_view_t b) {
     return true;
 }
 
-static bool reserved_device_name(const char *name, size_t len) {
+static bool reserved_device_name(proven_u8str_view_t name_view) {
+    const char *name = (const char *)name_view.ptr;
+    size_t len = (size_t)name_view.size;
     /* The part before the first dot is what Windows compares. */
     size_t stem = 0;
     while (stem < len && name[stem] != '.') stem++;
@@ -162,8 +165,8 @@ static bool reserved_device_name(const char *name, size_t len) {
             up[i] = (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c;
         }
         if (stem == 3) {
-            for (size_t i = 0; i < 4; ++i) if (memcmp(up, NAMES[i], 3) == 0) return true;
-        } else if ((memcmp(up, "COM", 3) == 0 || memcmp(up, "LPT", 3) == 0) && up[3] >= '1' && up[3] <= '9') {
+            for (size_t i = 0; i < 4; ++i) if (proven_sys_mem_cmp(up, NAMES[i], 3) == 0) return true;
+        } else if ((proven_sys_mem_cmp(up, "COM", 3) == 0 || proven_sys_mem_cmp(up, "LPT", 3) == 0) && up[3] >= '1' && up[3] <= '9') {
             return true;
         }
     }
@@ -190,15 +193,15 @@ proven_u8str_view_t rubraview_path_safe_name(char *buf, size_t cap, proven_u8str
 
     size_t at = 0;
     if (n - lead == 0) {
-        memcpy(buf, "dropped", 7);
+        proven_sys_mem_copy(buf, "dropped", 7);
         at = 7;
     } else {
-        if (reserved_device_name(clean + lead, n - lead)) buf[at++] = '_';
+        if (reserved_device_name(rubraview_bytes_view(clean + lead, n - lead))) buf[at++] = '_';
         size_t room = cap - 1 - at;
         size_t len = n - lead;
         const char *src = clean + lead;
         if (len <= room) {
-            memcpy(buf + at, src, len);
+            proven_sys_mem_copy(buf + at, src, len);
             at += len;
         } else {
             /* Too long: keep the extension (up to 16 bytes) and cut the stem,
@@ -210,9 +213,9 @@ proven_u8str_view_t rubraview_path_safe_name(char *buf, size_t cap, proven_u8str
             if (ext >= room) ext = 0;
             size_t stem = room - ext;
             while (stem > 0 && ((unsigned char)src[stem] & 0xC0) == 0x80) stem--;
-            memcpy(buf + at, src, stem);
+            proven_sys_mem_copy(buf + at, src, stem);
             at += stem;
-            memcpy(buf + at, src + len - ext, ext);
+            proven_sys_mem_copy(buf + at, src + len - ext, ext);
             at += ext;
         }
     }
@@ -266,7 +269,7 @@ proven_u8str_view_t rubraview_path_relative(proven_arena_t *arena, proven_u8str_
     proven_size_t n = 0;
     for (proven_size_t i = 0; i < ups; ++i) { dst[n++] = '.'; dst[n++] = '.'; dst[n++] = '/'; }
     for (proven_size_t i = common; i < pn; ++i) {
-        memcpy(dst + n, ps[i].ptr, ps[i].size);
+        proven_sys_mem_copy(dst + n, ps[i].ptr, ps[i].size);
         n += ps[i].size;
         if (i + 1 < pn) dst[n++] = '/';
     }
@@ -276,8 +279,8 @@ proven_u8str_view_t rubraview_path_relative(proven_arena_t *arena, proven_u8str_
 
 bool rubraview_path_state_temp(proven_u8str_view_t name, proven_u8str_view_t base, uint32_t *out_pid) {
     if (!name.ptr || !base.ptr || base.size == 0 || name.size < base.size + 8) return false;
-    if (memcmp(name.ptr, base.ptr, base.size) != 0 || name.ptr[base.size] != '.') return false;
-    if (memcmp(name.ptr + name.size - 4, ".tmp", 4) != 0) return false;
+    if (proven_sys_mem_cmp(name.ptr, base.ptr, base.size) != 0 || name.ptr[base.size] != '.') return false;
+    if (proven_sys_mem_cmp(name.ptr + name.size - 4, ".tmp", 4) != 0) return false;
     size_t at = base.size + 1, end = name.size - 4;
     int64_t pid = 0;
     size_t digits = 0;

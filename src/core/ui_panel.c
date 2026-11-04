@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/ui_panel.h"
 #include <string.h>
 #include <math.h>
@@ -23,7 +24,7 @@ rubraview_panel_t rubraview_panel_create(proven_u8str_view_t title, double dpi_s
 static rubraview_panel_row_t *push_row(rubraview_panel_t *panel) {
     if (!panel || panel->row_count >= RUBRAVIEW_PANEL_MAX_ROWS) return NULL;
     rubraview_panel_row_t *row = &panel->rows[panel->row_count++];
-    memset(row, 0, sizeof(*row));
+    proven_sys_mem_set(row, 0, sizeof(*row));
     row->enabled = true;
     return row;
 }

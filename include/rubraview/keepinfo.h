@@ -52,7 +52,7 @@ typedef struct rubraview_details_src {
 } rubraview_details_src_t;
 
 /** What `bytes` (a picture's file) carries. False, `any` false, when nothing. */
-bool rubraview_details_read(proven_arena_t *arena, const uint8_t *bytes, size_t size, rubraview_details_src_t *out);
+bool rubraview_details_read(proven_arena_t *arena, proven_mem_view_t bytes_view, rubraview_details_src_t *out);
 
 typedef struct rubraview_details_put {
     proven_u8str_view_t file;        /* the file with what could go in; the file as given when nothing could */

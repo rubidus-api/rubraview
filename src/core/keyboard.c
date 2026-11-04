@@ -2,6 +2,7 @@
  * RV-217: the keyboard drawn in Settings › Keys and the kinds of binding on each key (see keyboard.h).
  * The caps are a US ANSI keyboard's, a key unit wide each unless said; the gaps are the keyboard's own.
  */
+#include "rubraview/core.h"
 #include "rubraview/keyboard.h"
 
 #include <string.h>
@@ -71,7 +72,7 @@ void rubraview_keyboard_extent(double *width, double *height) {
 }
 
 static bool same_name(proven_u8str_view_t a, const char *b) {
-    size_t n = strlen(b);
+    size_t n = proven_cstr_len(b);
     if (a.size != n) return false;
     for (size_t i = 0; i < n; ++i) {
         unsigned char x = a.ptr[i], y = (unsigned char)b[i];
@@ -96,7 +97,7 @@ uint32_t rubraview_keyboard_marks(const rubraview_keymap_t *keymap, proven_u8str
     if (!keymap || key_name.size == 0) return 0;
     char name[32];
     if (key_name.size >= sizeof name) return 0;
-    memcpy(name, key_name.ptr, key_name.size);
+    proven_sys_mem_copy(name, key_name.ptr, key_name.size);
     name[key_name.size] = '\0';
     for (size_t i = 0; i < keymap->count; ++i)
         for (size_t c = 0; c < keymap->bindings[i].combo_count; ++c)

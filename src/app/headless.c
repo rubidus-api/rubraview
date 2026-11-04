@@ -38,28 +38,14 @@ static HANDLE console_handle(bool input) {
     return named == INVALID_HANDLE_VALUE ? NULL : named;
 }
 
+/* RV-220 (D-275, owner: "출력 함수들도 proven c lib 쪽으로"): the line goes out through proven's sysio, which writes a
+   console in UTF-16 and a pipe or a file as UTF-8 (the em dash and a Korean filename right in both, as by hand before);
+   the console found or opened above is made the standard output it writes to. */
 void console_line(const char *text) {
     HANDLE out = console_handle(false);
     if (!out) return;
-
-    /* A console takes UTF-16: writing UTF-8 bytes into one leaves them to
-       be read as the code page of the day, which turned an em dash into
-       "??" (and would do worse to a Korean filename). A pipe or a file
-       gets the UTF-8 bytes, which is what a redirect wants. */
-    DWORD mode = 0;
-    DWORD written = 0;
-    if (GetConsoleMode(out, &mode)) {
-        WCHAR wide[1024];
-        int count = MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, 1022);
-        if (count > 1) {
-            wide[count - 1] = L'\r';
-            wide[count] = L'\n';
-            WriteConsoleW(out, wide, (DWORD)(count + 1), &written, NULL);
-            return;
-        }
-    }
-    WriteFile(out, text, (DWORD)strlen(text), &written, NULL);
-    WriteFile(out, "\r\n", 2, &written, NULL);
+    if (GetStdHandle(STD_OUTPUT_HANDLE) != out) SetStdHandle(STD_OUTPUT_HANDLE, out);
+    proven_print("{}\r\n", PROVEN_ARG(text ? text : ""));
 }
 
 /* Defined with run_batch below (D-86); --subfolders reads them. */
@@ -116,7 +102,7 @@ static int32_t resize_target(const rubraview_batch_resize_params_t *r,
    count of failures says nothing about which or why. */
 static void batch_say(proven_u8str_view_t path, const char *why) {
     char line[600];
-    int n = snprintf(line, sizeof(line), "rubraview: %.*s: %s", (int)(path.size < 500 ? path.size : 500), path.ptr, why);
+    int n = rubraview_fmt(line, sizeof(line), "rubraview: {}: {}", PROVEN_ARG(rubraview_bytes_view(path.ptr, (int)(path.size < 500 ? path.size : 500))), PROVEN_ARG(why));
     if (n > 0) console_line(line);
 }
 
@@ -146,7 +132,7 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
                          const rubraview_batch_resize_params_t *resize, const rubraview_batch_color_params_t *color,
                          const rubraview_batch_extra_params_t *extra,
                          rubraview_export_options_t options, rubraview_export_format_t source_format) {
-    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(arena, input->path, NULL, 0,
+    rubraview_pixbuf_t pixels = rubraview_pal_image_read_pixels(arena, input->path, rubraview_mem_view(NULL, 0),
                                                                 orient && orient->use_exif_auto_orient);
     if (!rubraview_pixbuf_is_valid(&pixels)) { batch_say(input->path, "could not be read"); return false; }
 
@@ -186,7 +172,7 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
             rubraview_pixbuf_t done = rubraview_edit_step_apply(arena, &steps.steps[i], &pixels, 1.0);
             if (!rubraview_pixbuf_is_valid(&done)) {
                 char said[700];
-                snprintf(said, sizeof(said), "Edit's step %u did not run: %s", (unsigned)(i + 1), g_plugin_why ? g_plugin_why : "out of memory");
+                rubraview_fmt(said, sizeof(said), "Edit's step {} did not run: {}", PROVEN_ARG((unsigned)(i + 1)), PROVEN_ARG(g_plugin_why ? g_plugin_why : "out of memory"));
                 batch_say(input->path, said);
                 return false;
             }
@@ -243,12 +229,12 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
         }
         if (extra->plugin[0]) {   /* RFC-0007: a plug-in, named on the command line */
             rubraview_edit_step_t step = { .kind = RUBRAVIEW_STEP_PLUGIN, .plugin_param_count = extra->plugin_param_count };
-            snprintf(step.plugin, sizeof(step.plugin), "%s", extra->plugin);
-            memcpy(step.plugin_params, extra->plugin_params, sizeof(step.plugin_params));
+            rubraview_fmt(step.plugin, sizeof(step.plugin), "{}", PROVEN_ARG(extra->plugin));
+            proven_sys_mem_copy(step.plugin_params, extra->plugin_params, sizeof(step.plugin_params));
             rubraview_pixbuf_t done = plugin_runner(NULL, arena, &step, &pixels);
             if (!rubraview_pixbuf_is_valid(&done)) {
                 char said[400];
-                snprintf(said, sizeof(said), "the plug-in did not run: %s", g_plugin_why ? g_plugin_why : "?");
+                rubraview_fmt(said, sizeof(said), "the plug-in did not run: {}", PROVEN_ARG(g_plugin_why ? g_plugin_why : "?"));
                 batch_say(input->path, said);
                 return false;
             }
@@ -256,11 +242,11 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
         }
         if (extra->gmic.size > 0) {   /* RFC-0009 C: a G'MIC command, by gmic.exe */
             rubraview_edit_step_t step = { .kind = RUBRAVIEW_STEP_GMIC };
-            memcpy(step.command, extra->gmic.ptr, extra->gmic.size < sizeof(step.command) ? extra->gmic.size : sizeof(step.command) - 1);
+            proven_sys_mem_copy(step.command, extra->gmic.ptr, extra->gmic.size < sizeof(step.command) ? extra->gmic.size : sizeof(step.command) - 1);
             rubraview_pixbuf_t done = plugin_runner(NULL, arena, &step, &pixels);
             if (!rubraview_pixbuf_is_valid(&done)) {
                 char said[700];
-                snprintf(said, sizeof(said), "G'MIC did not run: %s", g_plugin_why ? g_plugin_why : "?");
+                rubraview_fmt(said, sizeof(said), "G'MIC did not run: {}", PROVEN_ARG(g_plugin_why ? g_plugin_why : "?"));
                 batch_say(input->path, said);
                 return false;
             }
@@ -268,11 +254,11 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
         }
         if (extra->ffmpeg_filter.size > 0) {   /* RFC-0009 D: an FFmpeg filter graph, by avfilter */
             rubraview_edit_step_t step = { .kind = RUBRAVIEW_STEP_FFMPEG };
-            memcpy(step.command, extra->ffmpeg_filter.ptr, extra->ffmpeg_filter.size < sizeof(step.command) ? extra->ffmpeg_filter.size : sizeof(step.command) - 1);
+            proven_sys_mem_copy(step.command, extra->ffmpeg_filter.ptr, extra->ffmpeg_filter.size < sizeof(step.command) ? extra->ffmpeg_filter.size : sizeof(step.command) - 1);
             rubraview_pixbuf_t done = plugin_runner(NULL, arena, &step, &pixels);
             if (!rubraview_pixbuf_is_valid(&done)) {
                 char said[700];
-                snprintf(said, sizeof(said), "the FFmpeg filter did not run: %s", g_plugin_why ? g_plugin_why : "?");
+                rubraview_fmt(said, sizeof(said), "the FFmpeg filter did not run: {}", PROVEN_ARG(g_plugin_why ? g_plugin_why : "?"));
                 batch_say(input->path, said);
                 return false;
             }
@@ -292,10 +278,10 @@ static bool batch_pixels(proven_arena_t *arena, batch_ctx_t *bc, const rubraview
             if (!bc->mark_tried) {   /* read once, into memory of its own that outlives every file's */
                 bc->mark_tried = true;
                 size_t room = 64u << 20;
-                bc->mark_memory = malloc(room);
+                bc->mark_memory = rubraview_alloc(room);
                 if (bc->mark_memory) {
                     proven_arena_t ma = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)bc->mark_memory, .size = room });
-                    bc->mark = rubraview_pal_image_read_pixels_within(&ma, extra->watermark, NULL, 0, true, 2048, 2048);
+                    bc->mark = rubraview_pal_image_read_pixels_within(&ma, extra->watermark, rubraview_mem_view(NULL, 0), true, 2048, 2048);
                 }
                 if (!rubraview_pixbuf_is_valid(&bc->mark)) batch_say(extra->watermark, "the watermark could not be read");
             }
@@ -362,8 +348,8 @@ static bool batch_name_sized(proven_arena_t *arena, batch_ctx_t *bc, proven_u8st
     int32_t w = 0, h = 0;
     if (!rubraview_pal_image_size(*out_path, &w, &h)) return batch_sizing_fails(*out_path, "its size could not be read for its name: not kept");
     char ws[16], hs[16];
-    snprintf(ws, sizeof(ws), "%d", (int)w);
-    snprintf(hs, sizeof(hs), "%d", (int)h);
+    rubraview_fmt(ws, sizeof(ws), "{}", PROVEN_ARG((int)w));
+    rubraview_fmt(hs, sizeof(hs), "{}", PROVEN_ARG((int)h));
     proven_u8str_view_t name = rubraview_batch_replace_all(arena, pattern, PROVEN_LIT("{w}"), cstr(ws));
     name = rubraview_batch_replace_all(arena, name, PROVEN_LIT("{h}"), cstr(hs));
     proven_u8str_view_t target = rubraview_path_join(arena, out_dir, name);
@@ -394,9 +380,9 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
             proven_result_mem_mut_t res = proven_arena_alloc(arena, n + 1);
             if (proven_is_ok(res.err)) {
                 char *p = (char*)res.value.ptr;
-                memcpy(p, stem.ptr, stem.size);
+                proven_sys_mem_copy(p, stem.ptr, stem.size);
                 p[stem.size] = '.';
-                memcpy(p + stem.size + 1, want.ptr, want.size);
+                proven_sys_mem_copy(p + stem.size + 1, want.ptr, want.size);
                 p[n] = '\0';
                 output_name = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)p, .size = n };
             }
@@ -407,7 +393,7 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
         proven_u8str_view_t here = rubraview_path_dirname(input->path);
         for (size_t r = 0; r < g_launch_count; ++r) {
             proven_u8str_view_t root = g_launch_paths[r];
-            if (here.size > root.size + 1 && memcmp(here.ptr, root.ptr, root.size) == 0 && (here.ptr[root.size] == '\\' || here.ptr[root.size] == '/')) {
+            if (here.size > root.size + 1 && proven_sys_mem_cmp(here.ptr, root.ptr, root.size) == 0 && (here.ptr[root.size] == '\\' || here.ptr[root.size] == '/')) {
                 out_dir = rubraview_path_join(arena, out_dir, (proven_u8str_view_t){ .ptr = here.ptr + root.size + 1, .size = here.size - root.size - 1 });
                 if (out_dir.size == 0 || (!rubraview_pal_fs_make_dirs(out_dir) && !rubraview_pal_fs_exists(out_dir))) {
                     batch_say(input->path, "its folder under the output could not be made");
@@ -423,10 +409,10 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
         sized_name = output_name;
         char temp[64];
         proven_u8str_view_t ext = rubraview_path_ext(output_name);
-        int n = snprintf(temp, sizeof(temp), "rubraview-sizing-%lld%.*s", (long long)bc->counter, (int)(ext.size < 16 ? ext.size : 16), (const char *)ext.ptr);
+        int n = rubraview_fmt(temp, sizeof(temp), "rubraview-sizing-{}{}", PROVEN_ARG((long long)bc->counter), PROVEN_ARG(rubraview_bytes_view((const char *)ext.ptr, (int)(ext.size < 16 ? ext.size : 16))));
         proven_result_mem_mut_t m = n > 0 ? proven_arena_alloc(arena, (size_t)n + 1) : (proven_result_mem_mut_t){ .err = PROVEN_ERR_NOMEM };
         if (!proven_is_ok(m.err)) return false;
-        memcpy(m.value.ptr, temp, (size_t)n + 1);
+        proven_sys_mem_copy(m.value.ptr, temp, (size_t)n + 1);
         output_name = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)m.value.ptr, .size = (size_t)n };
     }
     proven_u8str_view_t out_path = rubraview_path_join(arena, out_dir, output_name);
@@ -470,11 +456,11 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
             proven_u8str_view_t bytes = rubraview_pal_fs_read_file(arena, input->path, MAX_ARCHIVE_BYTES);
             if (bytes.size > 0) {
                 rubraview_jpegtran_result_t turned = rubraview_jpegtran_apply(
-                    arena, (const uint8_t*)bytes.ptr, bytes.size, op,
+                    arena, rubraview_mem_view((const uint8_t*)bytes.ptr, bytes.size), op,
                     RUBRAVIEW_JPEGTRAN_KEEP_EDGE, options.privacy_clean);
                 /* RV-134: a DPI asked for goes into the JFIF block; a file without one is written the other way */
                 bool dpi_ok = options.dpi <= 0.0 || (turned.err == RUBRAVIEW_JPEGTRAN_OK &&
-                              rubraview_jpeg_set_dpi((uint8_t*)(uintptr_t)turned.data.ptr, turned.data.size, options.dpi));
+                              rubraview_jpeg_set_dpi(rubraview_mem_mut((uint8_t*)(uintptr_t)turned.data.ptr, turned.data.size), options.dpi));
                 if (turned.err == RUBRAVIEW_JPEGTRAN_OK && dpi_ok) {
                     if (rubraview_pal_fs_write_file(out_path, turned.data)) {
                         if (sized_name.size > 0 && !batch_name_sized(arena, bc, out_dir, sized_name, &out_path)) return bc->cli->exists == 1;
@@ -523,7 +509,7 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
         if (resize && resize->linear && need != SIZE_MAX) need += (size_t)tw * (size_t)sh * 16u + (size_t)tw * (size_t)th * 4u;
         size_t room = arena->backing.size > arena->offset ? (size_t)(arena->backing.size - arena->offset) : 0;
         if (need > room) {
-            own = need == SIZE_MAX ? NULL : malloc(need);
+            own = need == SIZE_MAX ? NULL : rubraview_alloc(need);
             if (!own) { batch_say(input->path, "not enough memory for a picture this large"); return false; }
             own_arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)own, .size = need });
             arena = &own_arena;
@@ -532,9 +518,9 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
     /* RV-109: an animation that is only changed to WebP keeps moving. */
     rubraview_export_format_t to = options.format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE ? source_format : options.format;
     bool plain = !orient && !resize && !color && !extra && !g_batch_has_steps;
-    int moved = to == RUBRAVIEW_EXPORT_WEBP && plain ? rubraview_pal_image_save_animation_webp(out_path, input->path, NULL, 0, &options)
+    int moved = to == RUBRAVIEW_EXPORT_WEBP && plain ? rubraview_pal_image_save_animation_webp(out_path, input->path, rubraview_mem_view(NULL, 0), &options)
               : (to == RUBRAVIEW_EXPORT_AVIF || to == RUBRAVIEW_EXPORT_JXL) && plain   /* 1.31.0: AVIF and JPEG XL too */
-                ? rubraview_pal_image_save_animation_ffmpeg(out_path, input->path, NULL, 0, &options, to == RUBRAVIEW_EXPORT_AVIF) : 0;
+                ? rubraview_pal_image_save_animation_ffmpeg(out_path, input->path, rubraview_mem_view(NULL, 0), &options, to == RUBRAVIEW_EXPORT_AVIF) : 0;
     bool ok = false;
     if (moved > 0) {
         ok = true;
@@ -551,7 +537,7 @@ static bool batch_process(proven_arena_t *arena, const rubraview_batch_job_t *jo
         else if (bc->details_format != RUBRAVIEW_EXPORT_SAME_AS_SOURCE) batch_details(input->path, out_path, bc->details_format, &options);   /* RV-199 */
     }
     if (ok) batch_keep_date(arena, bc, input->path, out_path);
-    free(own);
+    rubraview_free(own);
     return ok;
 }
 
@@ -674,13 +660,13 @@ static proven_u8str_view_t batch_list_file(app_state_t *app) {
     char *text = (char*)(void*)res.value.ptr;
     size_t at = 0;
     for (size_t i = 0; i < app->batch_list_count; ++i) {
-        memcpy(text + at, app->batch_list[i].ptr, app->batch_list[i].size);
+        proven_sys_mem_copy(text + at, app->batch_list[i].ptr, app->batch_list[i].size);
         at += app->batch_list[i].size;
         text[at++] = '\n';
     }
     char *name = text + total;
-    int name_len = snprintf(name, (size_t)written + 64, "%srubraview-batch-%lu-%lu.txt", dir,
-                            (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount());
+    int name_len = rubraview_fmt(name, (size_t)written + 64, "{}rubraview-batch-{}-{}.txt", PROVEN_ARG(dir),
+                            PROVEN_ARG((unsigned long)GetCurrentProcessId()), PROVEN_ARG((unsigned long)GetTickCount()));
     if (name_len <= 0) return none;
     proven_u8str_view_t path = { .ptr = (const proven_byte_t *)name, .size = (size_t)name_len };
     return rubraview_pal_fs_write_file(path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = total }) ? path : none;
@@ -710,11 +696,11 @@ static void batch_start(app_state_t *app) {
     bool any_step = false;
     for (size_t i = 0; i < tk.n; ++i) {
         const char *k = tk.v[i];
-        if (strncmp(k, "--name=", 7) && strncmp(k, "--start=", 8) && strncmp(k, "--replace=", 10) && strncmp(k, "--exists=", 9) &&
-            strncmp(k, "--out=", 6) && strcmp(k, "--keep-dates") && strcmp(k, "--recursive") && strcmp(k, "--subfolders") &&
-            strncmp(k, "--n-step=", 9) && strncmp(k, "--case=", 7) && strcmp(k, "--no-spaces")) any_step = true;   /* RV-194: names only */
+        if (rubraview_cstr_cmp_n(k, rubraview_bytes_view("--name=", 7)) && rubraview_cstr_cmp_n(k, rubraview_bytes_view("--start=", 8)) && rubraview_cstr_cmp_n(k, rubraview_bytes_view("--replace=", 10)) && rubraview_cstr_cmp_n(k, rubraview_bytes_view("--exists=", 9)) &&
+            rubraview_cstr_cmp_n(k, rubraview_bytes_view("--out=", 6)) && rubraview_cstr_cmp(k, "--keep-dates") && rubraview_cstr_cmp(k, "--recursive") && rubraview_cstr_cmp(k, "--subfolders") &&
+            rubraview_cstr_cmp_n(k, rubraview_bytes_view("--n-step=", 9)) && rubraview_cstr_cmp_n(k, rubraview_bytes_view("--case=", 7)) && rubraview_cstr_cmp(k, "--no-spaces")) any_step = true;   /* RV-194: names only */
     }
-    bool renaming = (app->batch.name[0] && strcmp(app->batch.name, "{name}.{ext}") != 0) || app->batch.replace[0][0] ||
+    bool renaming = (app->batch.name[0] && rubraview_cstr_cmp(app->batch.name, "{name}.{ext}") != 0) || app->batch.replace[0][0] ||
                     app->batch.name_case != 0 || app->batch.no_spaces;
     if (!any_step && !renaming) {
         osd_say(app, TU8("nothing to do: choose a size, a step, a format, or new names"));
@@ -748,10 +734,10 @@ static void batch_start(app_state_t *app) {
     append_arg(line, sizeof(line), &pos, exe);
     append_arg_cstr(line, sizeof(line), &pos, "--batch");
     append_arg_cstr(line, sizeof(line), &pos, "--pause");
-    for (size_t i = 0; i < tk.n; ++i) if (strncmp(tk.v[i], "--out=", 6) != 0) append_arg_cstr(line, sizeof(line), &pos, tk.v[i]);
+    for (size_t i = 0; i < tk.n; ++i) if (rubraview_cstr_cmp_n(tk.v[i], rubraview_bytes_view("--out=", 6)) != 0) append_arg_cstr(line, sizeof(line), &pos, tk.v[i]);
     {
         char out_arg[1100];
-        int n = snprintf(out_arg, sizeof(out_arg), "--out=%.*s", (int)out_dir.size, out_dir.ptr);
+        int n = rubraview_fmt(out_arg, sizeof(out_arg), "--out={}", PROVEN_ARG(rubraview_bytes_view(out_dir.ptr, (int)out_dir.size)));
         if (n > 0 && (size_t)n < sizeof(out_arg)) append_arg_cstr(line, sizeof(line), &pos, out_arg);
     }
     if (on_list) {
@@ -761,7 +747,7 @@ static void batch_start(app_state_t *app) {
             return;
         }
         char list_arg[1100];
-        int n = snprintf(list_arg, sizeof(list_arg), "--paths-from=%.*s", (int)list.size, list.ptr);
+        int n = rubraview_fmt(list_arg, sizeof(list_arg), "--paths-from={}", PROVEN_ARG(rubraview_bytes_view(list.ptr, (int)list.size)));
         append_arg_cstr(line, sizeof(line), &pos, "--paths-temp");
         if (n > 0) append_arg(line, sizeof(line), &pos, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)list_arg, .size = (size_t)n });
     } else {
@@ -857,13 +843,13 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
     }
     /* RV-194: {taken} in the names: each file's date, read before the run (its EXIF, else its file's time) */
     bool dated = false;
-    for (size_t k = 0; k + 6 <= cli->job.naming_pattern.size && !dated; ++k) dated = memcmp(cli->job.naming_pattern.ptr + k, "{taken", 6) == 0;
+    for (size_t k = 0; k + 6 <= cli->job.naming_pattern.size && !dated; ++k) dated = proven_sys_mem_cmp(cli->job.naming_pattern.ptr + k, "{taken", 6) == 0;
     if (dated) {
-        void *mem = malloc(80u << 20);
+        void *mem = rubraview_alloc(80u << 20);
         if (mem) {
             proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t *)mem, .size = 80u << 20 });
             for (size_t i = 0; i < count; ++i) { proven_arena_reset(&scratch); inputs[i].taken = batch_taken_of(&scratch, inputs[i].path); }
-            free(mem);
+            rubraview_free(mem);
         }
     }
 
@@ -874,7 +860,7 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
         const char *why = NULL;
         if (text.size == 0 || !rubraview_edit_steps_parse(arena, text, &g_batch_steps, &why)) {
             char line[700];
-            snprintf(line, sizeof(line), "rubraview: --steps: %s", text.size == 0 ? "the file could not be read" : why ? why : "not a file of Edit's steps");
+            rubraview_fmt(line, sizeof(line), "rubraview: --steps: {}", PROVEN_ARG(text.size == 0 ? "the file could not be read" : why ? why : "not a file of Edit's steps"));
             console_line(line);
             return 1;
         }
@@ -882,9 +868,9 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
         for (size_t i = 0; i < g_batch_steps.cursor; ++i) {
             const rubraview_edit_step_t *st = &g_batch_steps.steps[i];
             char line[1200];
-            if (st->kind == RUBRAVIEW_STEP_PLUGIN) { steps_plugin = true; snprintf(line, sizeof(line), "rubraview: step %u runs the plug-in %s", (unsigned)(i + 1), st->plugin); console_line(line); }
-            if (st->kind == RUBRAVIEW_STEP_GMIC) { steps_gmic = true; snprintf(line, sizeof(line), "rubraview: step %u runs G'MIC: %s", (unsigned)(i + 1), st->command); console_line(line); }
-            if (st->kind == RUBRAVIEW_STEP_FFMPEG) { snprintf(line, sizeof(line), "rubraview: step %u runs the FFmpeg filter %s", (unsigned)(i + 1), st->command); console_line(line); }
+            if (st->kind == RUBRAVIEW_STEP_PLUGIN) { steps_plugin = true; rubraview_fmt(line, sizeof(line), "rubraview: step {} runs the plug-in {}", PROVEN_ARG((unsigned)(i + 1)), PROVEN_ARG(st->plugin)); console_line(line); }
+            if (st->kind == RUBRAVIEW_STEP_GMIC) { steps_gmic = true; rubraview_fmt(line, sizeof(line), "rubraview: step {} runs G'MIC: {}", PROVEN_ARG((unsigned)(i + 1)), PROVEN_ARG(st->command)); console_line(line); }
+            if (st->kind == RUBRAVIEW_STEP_FFMPEG) { rubraview_fmt(line, sizeof(line), "rubraview: step {} runs the FFmpeg filter {}", PROVEN_ARG((unsigned)(i + 1)), PROVEN_ARG(st->command)); console_line(line); }
         }
         rubraview_edit_set_plugin_runner(plugin_runner, NULL);
     }
@@ -895,7 +881,7 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
         if (a->kind != RUBRAVIEW_BATCH_EXTRA || !a->params.extra.plugin[0]) continue;
         char folder[520] = "";
         if (a->params.extra.plugin_folder.size > 0 && a->params.extra.plugin_folder.size < sizeof(folder))
-            memcpy(folder, a->params.extra.plugin_folder.ptr, a->params.extra.plugin_folder.size);
+            proven_sys_mem_copy(folder, a->params.extra.plugin_folder.ptr, a->params.extra.plugin_folder.size);
         else (void)rubraview_pal_plugins_default_folder(folder, sizeof(folder), false);
         plugins_look(cstr(folder));
         steps_plugin = false;   /* looked in already */
@@ -906,7 +892,7 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
         for (size_t i = 0; i < cli->job.action_count && i < RUBRAVIEW_BATCH_MAX_ACTIONS; ++i) {
             const rubraview_batch_action_t *a = &cli->job.actions[i];
             if (a->kind == RUBRAVIEW_BATCH_EXTRA && a->params.extra.plugin_folder.size > 0 && a->params.extra.plugin_folder.size < sizeof(folder))
-                memcpy(folder, a->params.extra.plugin_folder.ptr, a->params.extra.plugin_folder.size);
+                proven_sys_mem_copy(folder, a->params.extra.plugin_folder.ptr, a->params.extra.plugin_folder.size);
         }
         if (!folder[0]) (void)rubraview_pal_plugins_default_folder(folder, sizeof(folder), false);
         plugins_look(cstr(folder));
@@ -917,7 +903,7 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
         if (a->kind != RUBRAVIEW_BATCH_EXTRA || (a->params.extra.gmic.size == 0 && !(steps_gmic && a->params.extra.gmic_exe.size > 0))) continue;
         if (a->params.extra.gmic_exe.size > 0) {
             proven_u8str_view_t exe = rubraview_pal_gmic_find(arena, a->params.extra.gmic_exe);
-            snprintf(g_gmic_exe, sizeof(g_gmic_exe), "%.*s", (int)exe.size, (const char *)exe.ptr);
+            rubraview_fmt(g_gmic_exe, sizeof(g_gmic_exe), "{}", PROVEN_ARG(rubraview_bytes_view((const char *)exe.ptr, (int)exe.size)));
         }
         if (!g_gmic_exe[0]) {
             console_line("rubraview: --gmic needs --gmic-exe=<gmic.exe or its folder>, and it was not found there");
@@ -939,7 +925,7 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
 
     /* §3.11: one arena for the work, reset between files, so a run over
        ten thousand files uses what one file needs. */
-    void *work_memory = malloc(BATCH_WORK_ARENA_BYTES);
+    void *work_memory = rubraview_alloc(BATCH_WORK_ARENA_BYTES);
     if (!work_memory) {
         console_line("rubraview: out of memory");
         return 1;
@@ -961,8 +947,8 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
                                                           PROVEN_LIT(""), batch_process, &ctx, NULL, 0);
     rubraview_pal_gpu_resample_stop();
     if (ctx.jobs) { proven_job_system_close(ctx.jobs); proven_job_system_destroy(ctx.jobs); }
-    free(ctx.mark_memory);
-    free(work_memory);
+    rubraview_free(ctx.mark_memory);
+    rubraview_free(work_memory);
 
     char line[160];
     size_t pos = 0;

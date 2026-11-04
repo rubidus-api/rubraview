@@ -1,4 +1,5 @@
 /* Language packs (RV-114, D-149): see rubraview/lang.h. */
+#include "rubraview/core.h"
 #include "rubraview/lang.h"
 
 #include <stdlib.h>
@@ -6,7 +7,11 @@
 
 static const rubraview_lang_t *g_current;
 
-static uint32_t hash_key(const char *context, size_t context_len, const char *english, size_t english_len) {
+static uint32_t hash_key(proven_u8str_view_t context_view, proven_u8str_view_t english_view) {
+    const char *context = (const char *)context_view.ptr;
+    size_t context_len = (size_t)context_view.size;
+    const char *english = (const char *)english_view.ptr;
+    size_t english_len = (size_t)english_view.size;
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < context_len; i++) { h ^= (uint8_t)context[i]; h *= 16777619u; }
     h ^= 0x1Fu; h *= 16777619u;            /* between the context and the English */
@@ -14,49 +19,66 @@ static uint32_t hash_key(const char *context, size_t context_len, const char *en
     return h ? h : 1u;                     /* 0 marks an empty slot */
 }
 
-/* ---- conversions ---- */
+/* ---- placeholders ---- */
 
-/* The next printf conversion at or after *at, as [start, end); false when none. */
-static bool next_conversion(proven_u8str_view_t s, size_t *at, size_t *start, size_t *end) {
-    size_t i = *at;
-    while (i < s.size) {
-        if (s.ptr[i] != '%') { i++; continue; }
-        if (i + 1 < s.size && s.ptr[i + 1] == '%') { i += 2; continue; }
-        size_t j = i + 1;
-        while (j < s.size && strchr("-+ #0'", s.ptr[j])) j++;
-        while (j < s.size && ((s.ptr[j] >= '0' && s.ptr[j] <= '9') || s.ptr[j] == '*')) j++;
-        if (j < s.size && s.ptr[j] == '.') {
-            j++;
-            while (j < s.size && ((s.ptr[j] >= '0' && s.ptr[j] <= '9') || s.ptr[j] == '*')) j++;
+/* RV-220 (D-275): formats are proven's: `{}` takes the next argument, `{N}` the N-th, `{:spec}` / `{N:spec}` how;
+   `{{` and `}}` are braces. A format's placeholders as (argument, spec) pairs, sorted; false when its braces do not
+   pair, or there are more than `cap`. */
+typedef struct placeholder { uint32_t arg; proven_u8str_view_t spec; } placeholder_t;
+
+static int placeholder_order(const placeholder_t *a, const placeholder_t *b) {
+    if (a->arg != b->arg) return a->arg < b->arg ? -1 : 1;
+    return proven_u8str_view_cmp(a->spec, b->spec);
+}
+
+static bool placeholders(proven_u8str_view_t s, placeholder_t *out, size_t cap, size_t *count) {
+    size_t n = 0;
+    uint32_t next = 0;
+    for (size_t i = 0; i < s.size; ++i) {
+        proven_byte_t c = s.ptr[i];
+        if (c == '}') {
+            if (i + 1 < s.size && s.ptr[i + 1] == '}') { i++; continue; }
+            return false;   /* a lone closing brace */
         }
-        while (j < s.size && strchr("hljztL", s.ptr[j])) j++;
-        /* Only a real conversion counts: "40 % opaque" or "(0%)" is text. */
-        if (j >= s.size || !strchr("diouxXeEfFgGaAcspn", s.ptr[j])) { i++; continue; }
-        j++;                               /* the conversion letter */
-        *start = i; *end = j; *at = j;
-        return true;
+        if (c != '{') continue;
+        if (i + 1 < s.size && s.ptr[i + 1] == '{') { i++; continue; }
+        size_t j = i + 1;
+        uint32_t arg = 0;
+        bool numbered = false;
+        while (j < s.size && s.ptr[j] >= '0' && s.ptr[j] <= '9') { arg = arg * 10u + (uint32_t)(s.ptr[j] - '0'); numbered = true; j++; }
+        size_t spec_at = j;
+        if (j < s.size && s.ptr[j] == ':') while (j < s.size && s.ptr[j] != '}') j++;
+        if (j >= s.size || s.ptr[j] != '}') return false;
+        if (n >= cap) return false;
+        out[n++] = (placeholder_t){ .arg = numbered ? arg : next, .spec = proven_u8str_view_slice(s, spec_at, j - spec_at) };
+        if (!numbered) next++;
+        i = j;
     }
-    *at = i;
-    return false;
+    for (size_t a = 1; a < n; ++a)   /* insertion sort: a handful */
+        for (size_t b = a; b > 0 && placeholder_order(&out[b], &out[b - 1]) < 0; --b) {
+            placeholder_t t = out[b]; out[b] = out[b - 1]; out[b - 1] = t;
+        }
+    *count = n;
+    return true;
 }
 
 bool rubraview_lang_same_conversions(proven_u8str_view_t english, proven_u8str_view_t translation) {
-    size_t ea = 0, ta = 0, es, ee, ts, te;
-    for (;;) {
-        bool e = next_conversion(english, &ea, &es, &ee);
-        bool t = next_conversion(translation, &ta, &ts, &te);
-        if (e != t) return false;
-        if (!e) return true;
-        if (ee - es != te - ts || memcmp(english.ptr + es, translation.ptr + ts, ee - es) != 0) return false;
-    }
+    placeholder_t e[16], t[16];
+    size_t en = 0, tn = 0;
+    if (!placeholders(english, e, 16, &en)) return true;   /* no format: a text such as "{parent}" is shown as it is */
+    if (!placeholders(translation, t, 16, &tn) || en != tn) return false;
+    for (size_t i = 0; i < en; ++i) if (placeholder_order(&e[i], &t[i]) != 0) return false;
+    return true;
 }
 
 /* ---- reading ---- */
 
-static char *store_put(rubraview_lang_t *lang, const char *s, size_t n) {
+static char *store_put(rubraview_lang_t *lang, proven_u8str_view_t s_view) {
+    const char *s = (const char *)s_view.ptr;
+    size_t n = (size_t)s_view.size;
     if (lang->store_used + n + 1 > lang->store_size) return NULL;
     char *dst = lang->store + lang->store_used;
-    memcpy(dst, s, n);
+    proven_sys_mem_copy(dst, s, n);
     dst[n] = '\0';
     lang->store_used += n + 1;
     return dst;
@@ -110,22 +132,22 @@ static bool read_word(const char **p, const char *end, char *out, size_t cap, si
 
 static bool insert(rubraview_lang_t *lang, const char *ctx, size_t ctx_len, const char *en, size_t en_len,
                    const char *text, size_t text_len) {
-    uint32_t h = hash_key(ctx, ctx_len, en, en_len);
+    uint32_t h = hash_key(rubraview_bytes_view(ctx, ctx_len), rubraview_bytes_view(en, en_len));
     size_t mask = lang->slot_count - 1;
     for (size_t i = h & mask;; i = (i + 1) & mask) {
         rubraview_lang_entry_t *e = &lang->slots[i];
         if (e->hash == 0) {
-            const char *c = ctx_len ? store_put(lang, ctx, ctx_len) : "";
-            const char *k = store_put(lang, en, en_len);
-            const char *t = store_put(lang, text, text_len);
+            const char *c = ctx_len ? store_put(lang, rubraview_bytes_view(ctx, ctx_len)) : "";
+            const char *k = store_put(lang, rubraview_bytes_view(en, en_len));
+            const char *t = store_put(lang, rubraview_bytes_view(text, text_len));
             if (!c || !k || !t) return false;
             e->hash = h; e->context = c; e->english = k; e->text = t; e->text_len = text_len;
             lang->count++;
             return true;
         }
-        if (e->hash == h && strlen(e->context) == ctx_len && memcmp(e->context, ctx, ctx_len) == 0 &&
-            strlen(e->english) == en_len && memcmp(e->english, en, en_len) == 0) {
-            const char *t = store_put(lang, text, text_len);   /* a later line wins */
+        if (e->hash == h && proven_cstr_len(e->context) == ctx_len && proven_sys_mem_cmp(e->context, ctx, ctx_len) == 0 &&
+            proven_cstr_len(e->english) == en_len && proven_sys_mem_cmp(e->english, en, en_len) == 0) {
+            const char *t = store_put(lang, rubraview_bytes_view(text, text_len));   /* a later line wins */
             if (!t) return false;
             e->text = t; e->text_len = text_len;
             return true;
@@ -136,16 +158,16 @@ static bool insert(rubraview_lang_t *lang, const char *ctx, size_t ctx_len, cons
 void rubraview_lang_free(rubraview_lang_t *lang) {
     if (!lang) return;
     if (g_current == lang) g_current = NULL;
-    free(lang->slots);
-    free(lang->store);
-    memset(lang, 0, sizeof(*lang));
+    rubraview_free(lang->slots);
+    rubraview_free(lang->store);
+    proven_sys_mem_set(lang, 0, sizeof(*lang));
 }
 
 bool rubraview_lang_load(rubraview_lang_t *lang, proven_u8str_view_t text, rubraview_lang_stats_t *stats) {
     rubraview_lang_stats_t local;
     if (!stats) stats = &local;
-    memset(stats, 0, sizeof(*stats));
-    memset(lang, 0, sizeof(*lang));
+    proven_sys_mem_set(stats, 0, sizeof(*stats));
+    proven_sys_mem_set(lang, 0, sizeof(*lang));
     if (text.size > RUBRAVIEW_LANG_MAX_FILE) return false;
 
     size_t lines = 1;
@@ -153,20 +175,20 @@ bool rubraview_lang_load(rubraview_lang_t *lang, proven_u8str_view_t text, rubra
     size_t want = lines < RUBRAVIEW_LANG_MAX_ENTRIES ? lines : RUBRAVIEW_LANG_MAX_ENTRIES;
     lang->slot_count = 64;
     while (lang->slot_count < want * 2) lang->slot_count <<= 1;
-    lang->slots = (rubraview_lang_entry_t*)calloc(lang->slot_count, sizeof(*lang->slots));
+    lang->slots = (rubraview_lang_entry_t*)rubraview_alloc_zero(lang->slot_count, sizeof(*lang->slots));
     /* Every string is at most as long as its quoted form, plus a NUL each. */
     lang->store_size = text.size + lines * 3 + 16;
-    lang->store = (char*)malloc(lang->store_size);
+    lang->store = (char*)rubraview_alloc(lang->store_size);
     if (!lang->slots || !lang->store) { rubraview_lang_free(lang); return false; }
 
-    char *a = (char*)malloc(RUBRAVIEW_LANG_MAX_TEXT), *b = (char*)malloc(RUBRAVIEW_LANG_MAX_TEXT);
+    char *a = (char*)rubraview_alloc(RUBRAVIEW_LANG_MAX_TEXT), *b = (char*)rubraview_alloc(RUBRAVIEW_LANG_MAX_TEXT);
     char ctx[64];
-    if (!a || !b) { free(a); free(b); rubraview_lang_free(lang); return false; }
+    if (!a || !b) { rubraview_free(a); rubraview_free(b); rubraview_lang_free(lang); return false; }
 
     const char *p = (const char *)text.ptr, *end = (const char *)text.ptr + text.size;
     if (end - p >= 3 && (uint8_t)p[0] == 0xEF && (uint8_t)p[1] == 0xBB && (uint8_t)p[2] == 0xBF) p += 3;
     while (p < end) {
-        const char *eol = memchr(p, '\n', (size_t)(end - p));
+        const char *eol = rubraview_mem_chr(p, '\n', (size_t)(end - p));
         const char *line_end = eol ? eol : end;
         const char *q = p;
         p = eol ? eol + 1 : end;
@@ -187,10 +209,10 @@ bool rubraview_lang_load(rubraview_lang_t *lang, proven_u8str_view_t text, rubra
                 ok = read_quoted(&q, le, b, RUBRAVIEW_LANG_MAX_TEXT, &b_len);
                 skip_spaces(&q, le);
                 if (ok && q == le) {
-                    if (ctx_len == 8 && memcmp(ctx, "language", 8) == 0 && b_len < sizeof(lang->code)) {
-                        memcpy(lang->code, b, b_len); lang->code[b_len] = '\0';
-                    } else if (ctx_len == 4 && memcmp(ctx, "name", 4) == 0 && b_len < sizeof(lang->name)) {
-                        memcpy(lang->name, b, b_len); lang->name[b_len] = '\0';
+                    if (ctx_len == 8 && proven_sys_mem_cmp(ctx, "language", 8) == 0 && b_len < sizeof(lang->code)) {
+                        proven_sys_mem_copy(lang->code, b, b_len); lang->code[b_len] = '\0';
+                    } else if (ctx_len == 4 && proven_sys_mem_cmp(ctx, "name", 4) == 0 && b_len < sizeof(lang->name)) {
+                        proven_sys_mem_copy(lang->name, b, b_len); lang->name[b_len] = '\0';
                     }
                     continue;
                 }
@@ -208,22 +230,24 @@ bool rubraview_lang_load(rubraview_lang_t *lang, proven_u8str_view_t text, rubra
         if (lang->count >= RUBRAVIEW_LANG_MAX_ENTRIES) { stats->too_many++; continue; }
         if (!insert(lang, ctx, ctx_len, a, a_len, b, b_len)) { stats->too_many++; continue; }
     }
-    free(a); free(b);
+    rubraview_free(a); rubraview_free(b);
     stats->entries = lang->count;
     return true;
 }
 
 const rubraview_lang_entry_t *rubraview_lang_find(const rubraview_lang_t *lang, const char *context,
-                                                  const char *english, size_t english_len) {
+                                                  proven_u8str_view_t english_view) {
+    const char *english = (const char *)english_view.ptr;
+    size_t english_len = (size_t)english_view.size;
     if (!lang || !lang->slots || lang->count == 0 || !english) return NULL;
-    size_t ctx_len = context ? strlen(context) : 0;
+    size_t ctx_len = context ? proven_cstr_len(context) : 0;
     if (!context) context = "";
-    uint32_t h = hash_key(context, ctx_len, english, english_len);
+    uint32_t h = hash_key(rubraview_bytes_view(context, ctx_len), rubraview_bytes_view(english, english_len));
     size_t mask = lang->slot_count - 1;
     for (size_t i = h & mask;; i = (i + 1) & mask) {
         const rubraview_lang_entry_t *e = &lang->slots[i];
         if (e->hash == 0) return NULL;
-        if (e->hash == h && strcmp(e->context, context) == 0 && strncmp(e->english, english, english_len) == 0 &&
+        if (e->hash == h && rubraview_cstr_cmp(e->context, context) == 0 && rubraview_cstr_cmp_n(e->english, rubraview_bytes_view(english, english_len)) == 0 &&
             e->english[english_len] == '\0') {
             return e;
         }
@@ -237,21 +261,21 @@ const rubraview_lang_t *rubraview_lang_current(void) { return g_current; }
 
 const char *rubraview_tr(const char *english) {
     if (!g_current || !english) return english;
-    const rubraview_lang_entry_t *e = rubraview_lang_find(g_current, NULL, english, strlen(english));
+    const rubraview_lang_entry_t *e = rubraview_lang_find(g_current, NULL, rubraview_bytes_view(english, proven_cstr_len(english)));
     return e ? e->text : english;
 }
 
 const char *rubraview_tr_ctx(const char *context, const char *english) {
     if (!g_current || !english) return english;
-    const rubraview_lang_entry_t *e = rubraview_lang_find(g_current, context, english, strlen(english));
-    if (!e && context && *context) e = rubraview_lang_find(g_current, NULL, english, strlen(english));
+    const rubraview_lang_entry_t *e = rubraview_lang_find(g_current, context, rubraview_bytes_view(english, proven_cstr_len(english)));
+    if (!e && context && *context) e = rubraview_lang_find(g_current, NULL, rubraview_bytes_view(english, proven_cstr_len(english)));
     return e ? e->text : english;
 }
 
 proven_u8str_view_t rubraview_tr_ctx_u8(const char *context, proven_u8str_view_t english) {
     if (!g_current || english.size == 0) return english;
-    const rubraview_lang_entry_t *e = rubraview_lang_find(g_current, context, (const char *)english.ptr, english.size);
-    if (!e && context && *context) e = rubraview_lang_find(g_current, NULL, (const char *)english.ptr, english.size);
+    const rubraview_lang_entry_t *e = rubraview_lang_find(g_current, context, rubraview_bytes_view((const char *)english.ptr, english.size));
+    if (!e && context && *context) e = rubraview_lang_find(g_current, NULL, rubraview_bytes_view((const char *)english.ptr, english.size));
     return e ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)e->text, .size = e->text_len } : english;
 }
 
@@ -317,7 +341,7 @@ size_t rubraview_text_fit(proven_u8str_view_t text, size_t columns) {
 
 /* ---- choosing a pack ---- */
 
-static bool tag_eq(const char *a, size_t n, const char *b);
+static bool tag_eq(proven_u8str_view_t a_view, const char *b);
 
 const char *rubraview_lang_native_name(const char *code) {
     static const struct { const char *code, *name; } NAMES[] = {
@@ -330,32 +354,34 @@ const char *rubraview_lang_native_name(const char *code) {
     };
     if (!code) return NULL;
     for (size_t i = 0; i < sizeof(NAMES) / sizeof(NAMES[0]); i++) {
-        if (tag_eq(code, strlen(code), NAMES[i].code)) return NAMES[i].name;
+        if (tag_eq(rubraview_bytes_view(code, proven_cstr_len(code)), NAMES[i].code)) return NAMES[i].name;
     }
     return NULL;
 }
 
-static bool tag_eq(const char *a, size_t n, const char *b) {
+static bool tag_eq(proven_u8str_view_t a_view, const char *b) {
+    const char *a = (const char *)a_view.ptr;
+    size_t n = (size_t)a_view.size;
     return proven_u8str_view_eq_ascii_ci(proven_u8str_view_from_bytes(a, n), proven_u8str_view_from_cstr(b));
 }
 
 const char *rubraview_lang_pick(const char *tag, const char *const *available, size_t count) {
     if (!tag || !*tag || !available) return NULL;
-    size_t len = strlen(tag);
-    for (size_t i = 0; i < count; i++) if (tag_eq(tag, len, available[i])) return available[i];
+    size_t len = proven_cstr_len(tag);
+    for (size_t i = 0; i < count; i++) if (tag_eq(rubraview_bytes_view(tag, len), available[i])) return available[i];
     size_t lang_len = strcspn(tag, "-_");
     /* Chinese by script, or by region when Windows names none. */
-    if (tag_eq(tag, lang_len, "zh")) {
+    if (tag_eq(rubraview_bytes_view(tag, lang_len), "zh")) {
         const char *script = NULL;
-        if (strstr(tag, "Hant") || strstr(tag, "hant") || strstr(tag, "-TW") || strstr(tag, "-HK") || strstr(tag, "-MO") ||
-            strstr(tag, "_TW") || strstr(tag, "_HK") || strstr(tag, "_MO")) {
+        if (rubraview_cstr_str(tag, "Hant") || rubraview_cstr_str(tag, "hant") || rubraview_cstr_str(tag, "-TW") || rubraview_cstr_str(tag, "-HK") || rubraview_cstr_str(tag, "-MO") ||
+            rubraview_cstr_str(tag, "_TW") || rubraview_cstr_str(tag, "_HK") || rubraview_cstr_str(tag, "_MO")) {
             script = "zh-Hant";
         } else {
             script = "zh-Hans";
         }
-        for (size_t i = 0; i < count; i++) if (tag_eq(script, strlen(script), available[i])) return available[i];
+        for (size_t i = 0; i < count; i++) if (tag_eq(rubraview_bytes_view(script, proven_cstr_len(script)), available[i])) return available[i];
         return NULL;
     }
-    for (size_t i = 0; i < count; i++) if (tag_eq(tag, lang_len, available[i])) return available[i];
+    for (size_t i = 0; i < count; i++) if (tag_eq(rubraview_bytes_view(tag, lang_len), available[i])) return available[i];
     return NULL;
 }

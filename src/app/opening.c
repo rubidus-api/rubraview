@@ -154,7 +154,7 @@ void layout_load(app_state_t *app) {
         double v = ini_number(&doc, PROVEN_LIT("settings_window"), cstr(FRAME_KEYS[i]), 0.0);
         frame[i] = (v > -100000.0 && v < 100000.0) ? (int32_t)v : 0;
     }
-    if (frame[2] >= 200 && frame[3] >= 150) memcpy(app->settings_frame, frame, sizeof(frame));
+    if (frame[2] >= 200 && frame[3] >= 150) proven_sys_mem_copy(app->settings_frame, frame, sizeof(frame));
 
     /* RV-207: the folder the open-file screen was left in, if it is still there */
     const proven_u8str_view_t *last = ini_text(&doc, PROVEN_LIT("picker"), PROVEN_LIT("last_dir"));
@@ -257,7 +257,7 @@ void recent_sync(app_state_t *app, proven_u8str_view_t opened, bool clear) {
     if (opened.size > 0) rubraview_recent_add(ra, &all, opened, (int64_t)time(NULL), RECENT_KEPT);   /* copied into its home below */
     (void)rubraview_history_drop_within(&all.list, dirs, dir_count);
     proven_u8str_view_t after = rubraview_recent_serialize(ra, &all);
-    bool same = after.size == before.size && (after.size == 0 || memcmp(after.ptr, before.ptr, after.size) == 0);
+    bool same = after.size == before.size && (after.size == 0 || proven_sys_mem_cmp(after.ptr, before.ptr, after.size) == 0);
     if (!same && (before.size > 0 || all.list.count > 0 || all.cleared > 0)) {
         (void)rubraview_pal_fs_write_file_atomic(app->recent_path, after);
     }
@@ -354,14 +354,16 @@ void archive_names_reread(app_state_t *app, rubraview_codepage_t codepage) {
     char line[512];
     proven_u8str_view_t label = rubraview_codepage_label(codepage);
     proven_u8str_view_t name = page_count(app) > 0 ? app->source.pages[start].name : PROVEN_LIT("");
-    int n = snprintf(line, sizeof(line), T("names read as %.*s:  %.*s"), (int)label.size, label.ptr,
-                     (int)(name.size < 300 ? name.size : 300), name.ptr);
+    int n = rubraview_fmt(line, sizeof(line), T("names read as {}:  {}"), PROVEN_ARG(rubraview_bytes_view(label.ptr, (int)label.size)),
+                     PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 300 ? name.size : 300))));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)(n < (int)sizeof(line) ? n : (int)sizeof(line) - 1) });
 }
 
 /* ---- a RAR's password (owner, 2026-10-01) ---- */
 
-void secure_wipe(void *p, size_t n) {
+void secure_wipe(proven_mem_mut_t p_view) {
+    void *p = (void *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     volatile unsigned char *v = (volatile unsigned char*)p;
     while (n--) *v++ = 0;
 }
@@ -369,18 +371,18 @@ void secure_wipe(void *p, size_t n) {
 void password_remember(app_state_t *app, proven_u8str_view_t password) {
     if (password.size == 0 || password.size >= sizeof(app->passwords[0])) return;
     for (size_t i = 0; i < app->password_count; ++i) {
-        if (app->password_lens[i] == password.size && memcmp(app->passwords[i], password.ptr, password.size) == 0) return;
+        if (app->password_lens[i] == password.size && proven_sys_mem_cmp(app->passwords[i], password.ptr, password.size) == 0) return;
     }
     size_t slot = app->password_count < 8 ? app->password_count++ : 7;   /* full: the newest takes the last place */
-    secure_wipe(app->passwords[slot], sizeof(app->passwords[slot]));
-    memcpy(app->passwords[slot], password.ptr, password.size);
+    secure_wipe(rubraview_mem_mut(app->passwords[slot], sizeof(app->passwords[slot])));
+    proven_sys_mem_copy(app->passwords[slot], password.ptr, password.size);
     app->password_lens[slot] = password.size;
 }
 
 /* The box, empty, over a locked archive; `wrong` when the last one typed was not it. */
 void password_ask(app_state_t *app, proven_u8str_view_t archive_path, bool wrong) {
     if (archive_path.size >= sizeof(app->password_for)) return;
-    memcpy(app->password_for, archive_path.ptr, archive_path.size);
+    proven_sys_mem_copy(app->password_for, archive_path.ptr, archive_path.size);
     app->password_for_len = archive_path.size;
     if (app->rename_active) rename_end(app);
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
@@ -399,22 +401,22 @@ void password_commit(app_state_t *app) {
     char typed[sizeof(app->rename_buffer)];
     proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
     size_t n = text.size < sizeof(typed) ? text.size : sizeof(typed) - 1;
-    memcpy(typed, text.ptr, n);
+    proven_sys_mem_copy(typed, text.ptr, n);
     char path[sizeof(app->password_for)];
-    memcpy(path, app->password_for, app->password_for_len);
+    proven_sys_mem_copy(path, app->password_for, app->password_for_len);
     size_t path_len = app->password_for_len;
     rename_end(app);                                      /* wipes the box */
     if (archwork_password_box(app, true, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)typed, .size = n })) {   /* RV-207 */
-        secure_wipe(typed, sizeof(typed));
+        secure_wipe(rubraview_mem_mut(typed, sizeof(typed)));
         return;
     }
-    if (n == 0) { secure_wipe(typed, sizeof(typed)); return; }
+    if (n == 0) { secure_wipe(rubraview_mem_mut(typed, sizeof(typed))); return; }
     app->open_password = typed;
     app->open_password_len = n;
     open_path(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)path, .size = path_len });
     app->open_password = NULL;
     app->open_password_len = 0;
-    secure_wipe(typed, sizeof(typed));
+    secure_wipe(rubraview_mem_mut(typed, sizeof(typed)));
 }
 
 bool open_archive(app_state_t *app, proven_u8str_view_t archive_path) {
@@ -437,7 +439,7 @@ bool open_archive(app_state_t *app, proven_u8str_view_t archive_path) {
     proven_u8str_view_t given = proven_u8str_view_from_bytes(app->open_password ? app->open_password : "", app->open_password ? app->open_password_len : 0);
     rubraview_codepage_t names = app->names_codepage >= 0 ? (rubraview_codepage_t)app->names_codepage : app->archive_codepage;
     app->source = rubraview_page_source_from_archive_password(app->arena,
-                                                              (const uint8_t*)bytes.ptr, bytes.size,
+                                                              rubraview_mem_view((const uint8_t*)bytes.ptr, bytes.size),
                                                               archive_path, kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER),
                                                               names, MAX_PAGE_BYTES,
                                                               PAGE_CACHE_BUDGET, given);
@@ -446,7 +448,7 @@ bool open_archive(app_state_t *app, proven_u8str_view_t archive_path) {
     for (size_t i = 0; app->source.needs_password && given.size == 0 && i < app->password_count; ++i) {
         rubraview_page_source_close(&app->source);
         app->source = rubraview_page_source_from_archive_password(app->arena,
-                                                                  (const uint8_t*)bytes.ptr, bytes.size,
+                                                                  rubraview_mem_view((const uint8_t*)bytes.ptr, bytes.size),
                                                                   archive_path, kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER),
                                                                   names, MAX_PAGE_BYTES, PAGE_CACHE_BUDGET,
                                                                   (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->passwords[i], .size = app->password_lens[i] });
@@ -496,7 +498,7 @@ static void folder_gather(app_state_t *app, proven_u8str_view_t root, proven_u8s
         }
         if (out->count == out->cap) {
             size_t cap = out->cap ? out->cap * 2 : 256;
-            rubraview_fs_entry_t *grown = (rubraview_fs_entry_t*)realloc(out->entries, cap * sizeof(*grown));
+            rubraview_fs_entry_t *grown = (rubraview_fs_entry_t*)rubraview_realloc(rubraview_mem_mut(out->entries, cap * sizeof(*grown)));
             if (!grown) return;
             out->entries = grown;
             out->cap = cap;
@@ -530,7 +532,7 @@ static bool open_folder_keeping(app_state_t *app, proven_u8str_view_t dir, prove
     bool deep = g_cli_subfolders || rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("subfolders")) > 0.5;
     folder_files_t all = {0};
     folder_gather(app, dir, dir, 0, deep, &all);
-    if (all.count == 0) { free(all.entries); return false; }
+    if (all.count == 0) { rubraview_free(all.entries); return false; }
 
     /* The filters; when they leave nothing, the folder as it is — and a word about it. */
     size_t kept = 0;
@@ -545,10 +547,10 @@ static bool open_folder_keeping(app_state_t *app, proven_u8str_view_t dir, prove
         if (kept > 0 && pass == 1) osd_say(app, TU8("nothing here passes Settings > Files > Show: everything is shown"));
     }
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, kept ? kept : 1, sizeof(rubraview_fs_entry_t));
-    if (kept == 0 || !proven_is_ok(res.err)) { free(all.entries); return false; }
+    if (kept == 0 || !proven_is_ok(res.err)) { rubraview_free(all.entries); return false; }
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
-    memcpy(entries, all.entries, kept * sizeof(*entries));
-    free(all.entries);
+    proven_sys_mem_copy(entries, all.entries, kept * sizeof(*entries));
+    rubraview_free(all.entries);
 
     app->archive_bytes = PROVEN_LIT("");
     bool ascending = true;
@@ -594,12 +596,12 @@ char *list_text_decode(proven_u8str_view_t raw, size_t *len) {
     size_t bom = 0;
     char tag[96];
     const char *lang = rubraview_pal_process_ui_language(tag, sizeof(tag)) ? rubraview_lang_pick(tag, LANG_PACKS, 5) : NULL;
-    rubraview_textenc_t enc = rubraview_textenc_guess((const uint8_t*)raw.ptr, raw.size, lang, &bom);
+    rubraview_textenc_t enc = rubraview_textenc_guess(rubraview_mem_view((const uint8_t*)raw.ptr, raw.size), lang, &bom);
     *len = 0;
     if (enc == RUBRAVIEW_TEXTENC_UTF8) return NULL;
     if (enc == RUBRAVIEW_TEXTENC_UTF16LE || enc == RUBRAVIEW_TEXTENC_UTF16BE)
-        return rubraview_textenc_utf16_to_utf8((const uint8_t*)raw.ptr + bom, raw.size - bom, enc == RUBRAVIEW_TEXTENC_UTF16BE, len);
-    return rubraview_pal_text_decode((const uint8_t*)raw.ptr + bom, raw.size - bom, rubraview_textenc_codepage(enc), len);
+        return rubraview_textenc_utf16_to_utf8(rubraview_mem_view((const uint8_t*)raw.ptr + bom, raw.size - bom), enc == RUBRAVIEW_TEXTENC_UTF16BE, len);
+    return rubraview_pal_text_decode(rubraview_mem_view((const uint8_t*)raw.ptr + bom, raw.size - bom), rubraview_textenc_codepage(enc), len);
 }
 
 static proven_u8str_view_t playlist_text_utf8(app_state_t *app, proven_u8str_view_t raw) {
@@ -607,7 +609,7 @@ static proven_u8str_view_t playlist_text_utf8(app_state_t *app, proven_u8str_vie
     char *text = list_text_decode(raw, &len);
     if (!text) return raw;
     proven_u8str_view_t kept = app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = len });
-    free(text);
+    rubraview_free(text);
     return kept;
 }
 
@@ -644,10 +646,10 @@ void open_playlist(app_state_t *app, proven_u8str_view_t path) {
     }
     if (n == 0) { osd_say(app, TU8("none of the playlist's files is there")); return; }
     char line[128];
-    if (stations > 0 && missing > 0) snprintf(line, sizeof(line), T("playlist: %zu files and stations (%zu stations), %zu not found"), n, stations, missing);
-    else if (stations > 0) snprintf(line, sizeof(line), T("playlist: %zu files and stations (%zu stations)"), n, stations);
-    else if (missing > 0) snprintf(line, sizeof(line), T("playlist: %zu files, %zu not found"), n, missing);
-    else snprintf(line, sizeof(line), T("playlist: %zu files"), n);
+    if (stations > 0 && missing > 0) rubraview_fmt(line, sizeof(line), T("playlist: {} files and stations ({} stations), {} not found"), PROVEN_ARG((size_t)n), PROVEN_ARG((size_t)stations), PROVEN_ARG((size_t)missing));
+    else if (stations > 0) rubraview_fmt(line, sizeof(line), T("playlist: {} files and stations ({} stations)"), PROVEN_ARG((size_t)n), PROVEN_ARG((size_t)stations));
+    else if (missing > 0) rubraview_fmt(line, sizeof(line), T("playlist: {} files, {} not found"), PROVEN_ARG((size_t)n), PROVEN_ARG((size_t)missing));
+    else rubraview_fmt(line, sizeof(line), T("playlist: {} files"), PROVEN_ARG((size_t)n));
     open_set_ordered(app, entries, n, cstr(line), true, PROVEN_LIT(""));
     if (page_count(app) > 0) {
         if (stations > 0) app->source_dir = dir;   /* a station has no folder: the list's own is where Rename and the rest look */
@@ -665,7 +667,7 @@ void finish_open(app_state_t *app, size_t start_page) {
         return;
     }
     app->pages = (app_page_t*)(void*)res.value.ptr;
-    memset(app->pages, 0, page_count(app) * sizeof(app_page_t));
+    proven_sys_mem_set(app->pages, 0, page_count(app) * sizeof(app_page_t));
     app->layout_exempt = -1;       /* D-98: it named a page of the old source */
     app->pending_decode_count = 0; /* those indices named the old source's pages */
 
@@ -689,7 +691,7 @@ void finish_open(app_state_t *app, size_t start_page) {
             rubraview_arena_alloc_array(app->arena, page_count(app), sizeof(rubraview_page_info_t));
         if (proven_is_ok(infos_res.err)) {
             rubraview_page_info_t *infos = (rubraview_page_info_t*)(void*)infos_res.value.ptr;
-            memset(infos, 0, page_count(app) * sizeof(rubraview_page_info_t));
+            proven_sys_mem_set(infos, 0, page_count(app) * sizeof(rubraview_page_info_t));
             rubraview_comicinfo_apply(&info, &app->layout_opts, infos, page_count(app));
             app->comic_page_flags = infos;
             rebuild_layout(app);
@@ -801,7 +803,7 @@ void open_path(app_state_t *app, proven_u8str_view_t path) {
     if (app->open_wanted_entry && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER && app->open_wanted_archive &&
         rubraview_path_same(app->source.archive_path, proven_u8str_view_from_cstr(app->open_wanted_archive))) {
         const char *want = app->open_wanted_entry;
-        size_t wn = strlen(want);
+        size_t wn = proven_cstr_len(want);
         for (size_t i = 0; i < app->source.page_count; ++i) {
             proven_u8str_view_t name = app->source.pages[i].name;
             bool same = name.size == wn;
@@ -813,8 +815,8 @@ void open_path(app_state_t *app, proven_u8str_view_t path) {
             break;
         }
     }
-    free(app->open_wanted_archive);
-    free(app->open_wanted_entry);
+    rubraview_free(app->open_wanted_archive);
+    rubraview_free(app->open_wanted_entry);
     app->open_wanted_archive = app->open_wanted_entry = NULL;
     /* --page=N (a restart asks for the page it was on): that page of a book, and no offer to resume; a folder's file is named itself. */
     if (app->launch_page > 0) {
@@ -864,7 +866,7 @@ bool open_sibling_folder(app_state_t *app, bool forward) {
         if (!forward && app->layout.count > 1) go_to_spread(app, app->layout.count - 1);
         char line[400];
         proven_u8str_view_t name = rubraview_path_basename(beside[i]);
-        int m = snprintf(line, sizeof(line), forward ? T("next folder: %.*s") : T("previous folder: %.*s"), (int)(name.size < 300 ? name.size : 300), name.ptr);
+        int m = rubraview_fmt(line, sizeof(line), forward ? T("next folder: {}") : T("previous folder: {}"), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 300 ? name.size : 300))));
         if (m > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)m < sizeof(line) ? (size_t)m : sizeof(line) - 1 });
         return true;
     }

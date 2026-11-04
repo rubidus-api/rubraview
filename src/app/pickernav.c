@@ -22,7 +22,7 @@ void arena_refill(app_state_t *app) {
 static proven_arena_t *picker_next_arena(app_state_t *app) {
     int side = app->picker_side ^ 1;
     if (!app->picker_arena_mem[side]) {
-        app->picker_arena_mem[side] = malloc(PICKER_ARENA_BYTES);
+        app->picker_arena_mem[side] = rubraview_alloc(PICKER_ARENA_BYTES);
         if (!app->picker_arena_mem[side]) return app->arena;   /* no room: the old way */
         app->picker_arenas[side] = proven_arena_create((proven_mem_mut_t){
             .ptr = (proven_byte_t*)app->picker_arena_mem[side], .size = PICKER_ARENA_BYTES });
@@ -41,7 +41,7 @@ proven_u8str_view_t app_keep(app_state_t *app, proven_u8str_view_t text) {
     if (app->mem && !rubraview_region_ensure(&app->mem->persist, text.size + 1)) { app->mem->full = true; return PROVEN_LIT(""); }
     proven_result_mem_mut_t res = proven_arena_alloc(app->arena, text.size + 1);
     if (!proven_is_ok(res.err)) { if (app->mem) app->mem->full = true; return PROVEN_LIT(""); }
-    memcpy(res.value.ptr, text.ptr, text.size);
+    proven_sys_mem_copy(res.value.ptr, text.ptr, text.size);
     res.value.ptr[text.size] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = text.size };
 }
@@ -71,11 +71,11 @@ static void picker_apply_sort(app_state_t *app) {
     bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
     size_t n = app->picker_listing.count;
     if (choice <= 0 || n < 2 || rubraview_picker_is_places(app->picker_dir)) return;   /* as the folder has it */
-    size_t *order = (size_t*)malloc(n * sizeof(size_t));
-    rubraview_picker_media_t *media = (rubraview_picker_media_t*)calloc(n, sizeof(rubraview_picker_media_t));
-    rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)malloc(n * sizeof(rubraview_fs_entry_t));
-    struct picker_thumb *thumbs = (struct picker_thumb*)malloc(n * sizeof(struct picker_thumb));
-    bool *picked = (bool*)malloc(n * sizeof(bool));
+    size_t *order = (size_t*)rubraview_alloc(n * sizeof(size_t));
+    rubraview_picker_media_t *media = (rubraview_picker_media_t*)rubraview_alloc_zero(n, sizeof(rubraview_picker_media_t));
+    rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)rubraview_alloc(n * sizeof(rubraview_fs_entry_t));
+    struct picker_thumb *thumbs = (struct picker_thumb*)rubraview_alloc(n * sizeof(struct picker_thumb));
+    bool *picked = (bool*)rubraview_alloc(n * sizeof(bool));
     if (order && media && entries && thumbs && picked) {
         bool have_thumbs = app->picker_thumbs && app->picker_thumb_count == n;
         for (size_t i = 0; i < n && have_thumbs; ++i) media[i] = app->picker_thumbs[i].media;
@@ -97,22 +97,22 @@ static void picker_apply_sort(app_state_t *app) {
             picked[i] = app->picker_selected ? app->picker_selected[order[i]] : false;
             if (order[i] == focus) app->picker.focus = i;
         }
-        memcpy((void*)app->picker_listing.entries, entries, n * sizeof(rubraview_fs_entry_t));
-        if (have_thumbs) memcpy(app->picker_thumbs, thumbs, n * sizeof(struct picker_thumb));
-        if (app->picker_selected) memcpy(app->picker_selected, picked, n * sizeof(bool));
+        proven_sys_mem_copy((void*)app->picker_listing.entries, entries, n * sizeof(rubraview_fs_entry_t));
+        if (have_thumbs) proven_sys_mem_copy(app->picker_thumbs, thumbs, n * sizeof(struct picker_thumb));
+        if (app->picker_selected) proven_sys_mem_copy(app->picker_selected, picked, n * sizeof(bool));
         if (app->picker_in_book && app->picker_page_of) {
             /* a page's place in the book goes with its entry; `..` stays first */
             size_t skip = app->picker_page_skip;
-            size_t *pages = (size_t*)malloc(n * sizeof(size_t));
+            size_t *pages = (size_t*)rubraview_alloc(n * sizeof(size_t));
             if (pages) {
                 for (size_t i = skip; i < n; ++i) pages[i] = order[i] >= skip ? app->picker_page_of[order[i] - skip] : RUBRAVIEW_PICKER_NOT_A_PAGE;
                 for (size_t i = skip; i < n; ++i) app->picker_page_of[i - skip] = pages[i];
-                free(pages);
+                rubraview_free(pages);
             }
         }
         app->picker.range_anchor = RUBRAVIEW_PICKER_NO_ANCHOR;
     }
-    free(order); free(media); free(entries); free(thumbs); free(picked);
+    rubraview_free(order); rubraview_free(media); rubraview_free(entries); rubraview_free(thumbs); rubraview_free(picked);
 }
 
 /* A column's name pressed: by it, rising; pressed again, falling. Kept in Settings › Files. */
@@ -129,7 +129,7 @@ size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out);
 /* The order kept, made again over the whole folder (and filtered again): RV-210, after the facts were read ahead. */
 void picker_resort(app_state_t *app) {
     char kept[sizeof(app->picker_filter)];
-    memcpy(kept, app->picker_filter, sizeof(kept));
+    proven_sys_mem_copy(kept, app->picker_filter, sizeof(kept));
     if (kept[0]) picker_filter_set(app, PROVEN_LIT(""));   /* 1.22.0: the whole folder sorted, then filtered again */
     picker_apply_sort(app);
     if (kept[0]) picker_filter_set(app, cstr(kept));
@@ -147,8 +147,8 @@ void picker_sort_set(app_state_t *app, int key, bool desc) {
     settings_write_if_changed(app, false);
     picker_resort(app);
     char line[64];
-    int n = snprintf(line, sizeof(line), T("by %s, %s"), rubraview_picker_sort_name((rubraview_picker_sort_key_t)key),
-                     desc ? "falling" : "rising");
+    int n = rubraview_fmt(line, sizeof(line), T("by {}, {}"), PROVEN_ARG(rubraview_picker_sort_name((rubraview_picker_sort_key_t)key)),
+                     PROVEN_ARG(desc ? "falling" : "rising"));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
@@ -164,12 +164,12 @@ void picker_sort_by(app_state_t *app, int key) {
 
 static void picker_hist_push(app_state_t *app, bool forward, proven_u8str_view_t dir) {
     if (dir.size == 0 || dir.size >= PICKER_HIST_PATH) return;
-    if (!app->picker_hist) app->picker_hist = calloc(2 * PICKER_HIST, PICKER_HIST_PATH);
+    if (!app->picker_hist) app->picker_hist = rubraview_alloc_zero(2 * PICKER_HIST, PICKER_HIST_PATH);
     if (!app->picker_hist) return;
     char (*stack)[PICKER_HIST_PATH] = app->picker_hist + (forward ? PICKER_HIST : 0);
     int32_t *n = forward ? &app->picker_fwd_n : &app->picker_back_n;
-    if (*n == PICKER_HIST) { memmove(stack[0], stack[1], (PICKER_HIST - 1) * PICKER_HIST_PATH); --*n; }   /* the oldest goes */
-    memcpy(stack[*n], dir.ptr, dir.size);
+    if (*n == PICKER_HIST) { proven_sys_mem_move(stack[0], stack[1], (PICKER_HIST - 1) * PICKER_HIST_PATH); --*n; }   /* the oldest goes */
+    proven_sys_mem_copy(stack[*n], dir.ptr, dir.size);
     stack[*n][dir.size] = '\0';
     ++*n;
 }
@@ -185,7 +185,7 @@ void picker_history_go(app_state_t *app, bool forward) {
     int32_t *from = forward ? &app->picker_fwd_n : &app->picker_back_n;
     if (*from <= 0 || !app->picker_hist) { osd_say(app, forward ? TU8("nothing to go forward to") : TU8("nothing to go back to")); return; }
     char target[PICKER_HIST_PATH];
-    snprintf(target, sizeof(target), "%s", app->picker_hist[(forward ? PICKER_HIST : 0) + --*from]);
+    rubraview_fmt(target, sizeof(target), "{}", PROVEN_ARG(app->picker_hist[(forward ? PICKER_HIST : 0) + --*from]));
     picker_hist_push(app, !forward, app->picker_dir);
     picker_navigate_to(app, cstr(target), true);
     app->picker.focus = 0;
@@ -206,8 +206,8 @@ bool picker_in_archive(const app_state_t *app) {
 }
 
 void picker_leave_archive(app_state_t *app) {
-    if (app->picker_arc_index) { rubraview_archive_index_free(app->picker_arc_index); free(app->picker_arc_index); }
-    free(app->picker_arc_path);
+    if (app->picker_arc_index) { rubraview_archive_index_free(app->picker_arc_index); rubraview_free(app->picker_arc_index); }
+    rubraview_free(app->picker_arc_path);
     app->picker_arc_index = NULL;
     app->picker_arc_path = NULL;
 }
@@ -226,8 +226,8 @@ static proven_u8str_view_t arena_text(proven_arena_t *pa, const char *a, size_t 
     proven_result_mem_mut_t res = proven_arena_alloc(pa, an + bn + 1);
     if (!proven_is_ok(res.err)) return PROVEN_LIT("");
     char *s = (char *)(void *)res.value.ptr;
-    if (an) memcpy(s, a, an);
-    if (bn) memcpy(s + an, b, bn);
+    if (an) proven_sys_mem_copy(s, a, an);
+    if (bn) proven_sys_mem_copy(s + an, b, bn);
     s[an + bn] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = an + bn };
 }
@@ -237,7 +237,7 @@ static rubraview_fs_listing_t archive_listing(app_state_t *app, proven_arena_t *
     const rubraview_archive_index_t *ix = app->picker_arc_index;
     char inner[RUBRAVIEW_ARCHIVE_PATH];
     if (!ix || ix->count == 0 || !picker_archive_rel(app, dir, inner, sizeof inner)) return listing;
-    rubraview_archive_child_t *kids = malloc(ix->count * sizeof *kids);
+    rubraview_archive_child_t *kids = rubraview_alloc(ix->count * sizeof *kids);
     if (!kids) return listing;
     size_t n = rubraview_archive_index_level(ix, proven_u8str_view_from_cstr(inner), kids, ix->count);
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(pa, n ? n : 1, sizeof(rubraview_fs_entry_t));
@@ -255,7 +255,7 @@ static rubraview_fs_listing_t archive_listing(app_state_t *app, proven_arena_t *
         listing.entries = e;
         listing.count = n;
     }
-    free(kids);
+    rubraview_free(kids);
     return listing;
 }
 
@@ -286,9 +286,9 @@ int picker_index_read(app_state_t *app, const char *path, rubraview_codepage_t c
     rubraview_archive_result_t r = rubraview_archive_index_read(path, codepage, NULL, ix);
     for (size_t k = app->password_count; r == RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED && k > 0; --k) {
         char pw[513];
-        snprintf(pw, sizeof pw, "%.*s", (int)app->password_lens[k - 1], app->passwords[k - 1]);
+        rubraview_fmt(pw, sizeof pw, "{}", PROVEN_ARG(rubraview_bytes_view(app->passwords[k - 1], (int)app->password_lens[k - 1])));
         r = rubraview_archive_index_read(path, codepage, pw, ix);
-        secure_wipe(pw, sizeof pw);
+        secure_wipe(rubraview_mem_mut(pw, sizeof pw));
     }
     return r;
 }
@@ -300,15 +300,15 @@ static void book_listing_whole(app_state_t *app, proven_arena_t *pa, rubraview_a
     proven_u8str_view_t archive = rubraview_page_source_first_volume(&app->source);
     char path[RUBRAVIEW_ARCHIVE_PATH], rel[RUBRAVIEW_ARCHIVE_PATH];
     if (archive.size == 0 || archive.size >= sizeof path || inner.size >= sizeof rel) return;
-    memcpy(path, archive.ptr, archive.size);
+    proven_sys_mem_copy(path, archive.ptr, archive.size);
     path[archive.size] = '\0';
     for (size_t i = 0; i < inner.size; ++i) rel[i] = inner.ptr[i] == '\\' ? '/' : (char)inner.ptr[i];
     rel[inner.size] = '\0';
-    rubraview_archive_index_t *ix = calloc(1, sizeof *ix);
+    rubraview_archive_index_t *ix = rubraview_alloc_zero(1, sizeof *ix);
     if (!ix) return;
     rubraview_codepage_t cp = app->names_codepage >= 0 ? (rubraview_codepage_t)app->names_codepage : app->archive_codepage;
-    if (picker_index_read(app, path, cp, ix) != RUBRAVIEW_ARCHIVE_DONE) { free(ix); return; }
-    rubraview_archive_child_t *kids = ix->count ? malloc(ix->count * sizeof *kids) : NULL;
+    if (picker_index_read(app, path, cp, ix) != RUBRAVIEW_ARCHIVE_DONE) { rubraview_free(ix); return; }
+    rubraview_archive_child_t *kids = ix->count ? rubraview_alloc(ix->count * sizeof *kids) : NULL;
     size_t n = kids ? rubraview_archive_index_level(ix, proven_u8str_view_from_cstr(rel), kids, ix->count) : 0;
     size_t have = level->listing.count;
     proven_result_mem_mut_t er = rubraview_arena_alloc_array(pa, have + n + 1, sizeof(rubraview_fs_entry_t));
@@ -317,8 +317,8 @@ static void book_listing_whole(app_state_t *app, proven_arena_t *pa, rubraview_a
         rubraview_fs_entry_t *e = (rubraview_fs_entry_t *)(void *)er.value.ptr;
         size_t *page_of = (size_t *)(void *)pr.value.ptr;
         if (have) {
-            memcpy(e, level->listing.entries, have * sizeof *e);
-            memcpy(page_of, level->page_of, have * sizeof *page_of);
+            proven_sys_mem_copy(e, level->listing.entries, have * sizeof *e);
+            proven_sys_mem_copy(page_of, level->page_of, have * sizeof *page_of);
         }
         size_t count = have;
         for (size_t i = 0; i < n; ++i) {
@@ -335,16 +335,16 @@ static void book_listing_whole(app_state_t *app, proven_arena_t *pa, rubraview_a
         level->listing = (rubraview_fs_listing_t){ .entries = e, .count = count };
         level->page_of = page_of;
     }
-    free(kids);
+    rubraview_free(kids);
     rubraview_archive_index_free(ix);
-    free(ix);
+    rubraview_free(ix);
 }
 
 static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool from_history) {
     /* Where it was, kept before the listing's memory turns over; another folder goes on the way back. */
     char was[PICKER_HIST_PATH];
     size_t was_len = app->picker_dir.size < sizeof(was) ? app->picker_dir.size : 0;
-    if (was_len) memcpy(was, app->picker_dir.ptr, was_len);
+    if (was_len) proven_sys_mem_copy(was, app->picker_dir.ptr, was_len);
     if (!from_history && app->picker_open && was_len && !rubraview_path_same((proven_u8str_view_t){ .ptr = (const proven_byte_t *)was, .size = was_len }, dir)) {
         picker_hist_push(app, false, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)was, .size = was_len });
         app->picker_fwd_n = 0;
@@ -389,7 +389,7 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
                 all[i] = (rubraview_fs_entry_t){ .name = rubraview_favorites_title(&app->favorites, i),
                                                  .path = app->favorites.paths[i], .is_directory = folder };
             }
-            if (listing.count) memcpy(all + app->favorites.count, listing.entries, listing.count * sizeof(rubraview_fs_entry_t));
+            if (listing.count) proven_sys_mem_copy(all + app->favorites.count, listing.entries, listing.count * sizeof(rubraview_fs_entry_t));
             listing.entries = all;
             listing.count += app->favorites.count;
         }
@@ -466,7 +466,7 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
                 .path = parent,
                 .is_directory = true,
             };
-            memcpy(with_up + 1, listing.entries, listing.count * sizeof(rubraview_fs_entry_t));
+            proven_sys_mem_copy(with_up + 1, listing.entries, listing.count * sizeof(rubraview_fs_entry_t));
             listing.entries = with_up;
             listing.count += 1;
             app->picker_page_skip = 1;
@@ -480,13 +480,13 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
 
     proven_result_mem_mut_t sel_res = rubraview_arena_alloc_array(pa, listing.count, sizeof(bool));
     app->picker_selected = proven_is_ok(sel_res.err) ? (bool*)(void*)sel_res.value.ptr : NULL;
-    if (app->picker_selected) memset(app->picker_selected, 0, listing.count * sizeof(bool));
+    if (app->picker_selected) proven_sys_mem_set(app->picker_selected, 0, listing.count * sizeof(bool));
 
     rubraview_picker_mode_t mode = app->picker.mode;   /* the mode outlives the folder */
     picker_thumbs_free(app);
     app->picker_generation++;
     if (app->thumbs) rubraview_pal_thumbs_generation(app->thumbs, app->picker_generation);
-    app->picker_thumbs = (struct picker_thumb *)calloc(listing.count ? listing.count : 1, sizeof(*app->picker_thumbs));
+    app->picker_thumbs = (struct picker_thumb *)rubraview_alloc_zero(listing.count ? listing.count : 1, sizeof(*app->picker_thumbs));
     app->picker_thumb_count = app->picker_thumbs ? listing.count : 0;
     app->picker_dir = dir;
     if (pa != app->arena) app->picker_side ^= 1;   /* the new listing is the one shown */
@@ -586,7 +586,7 @@ void picker_make_playlist(app_state_t *app) {
     char name[32];
     proven_u8str_view_t target = PROVEN_LIT("");
     for (int number = 1; number <= 9999; ++number) {
-        int written = snprintf(name, sizeof(name), "Playlist%04d.m3u8", number);
+        int written = rubraview_fmt(name, sizeof(name), "Playlist{:04}.m3u8", PROVEN_ARG((int)number));
         if (written <= 0) return;
         proven_u8str_view_t candidate = rubraview_path_join(app->arena, app->picker_dir,
                                                 (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = (size_t)written });
@@ -597,7 +597,7 @@ void picker_make_playlist(app_state_t *app) {
     if (!rubraview_pal_fs_write_file(target, text)) { osd_say(app, TU8("could not write the playlist")); return; }
 
     char line[96];
-    int written = snprintf(line, sizeof(line), T("%zu file(s) in %s"), n, name);
+    int written = rubraview_fmt(line, sizeof(line), T("{} file(s) in {}"), PROVEN_ARG((size_t)n), PROVEN_ARG(name));
     open_set_from_entries(app, entries, n, written > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written }
                                                        : TU8("playlist opened"));
 }
@@ -640,7 +640,7 @@ void picker_recycle(app_state_t *app) {
     if (!rubraview_confirm_armed(&app->picker_confirm, PICKER_BTN_RECYCLE, now)) {
         rubraview_confirm_press(&app->picker_confirm, PICKER_BTN_RECYCLE, now);
         char line[96];
-        int written = snprintf(line, sizeof(line), T("press Recycle again to bin %zu file(s)"), n);
+        int written = rubraview_fmt(line, sizeof(line), T("press Recycle again to bin {} file(s)"), PROVEN_ARG((size_t)n));
         if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
         return;
     }
@@ -659,7 +659,7 @@ void picker_recycle(app_state_t *app) {
         done++;
     }
     char line[96];
-    int written = snprintf(line, sizeof(line), T("%zu file(s) in the recycle bin"), done);
+    int written = rubraview_fmt(line, sizeof(line), T("{} file(s) in the recycle bin"), PROVEN_ARG((size_t)done));
     if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
     picker_navigate(app, app->picker_dir);
 }
@@ -685,7 +685,7 @@ void picker_clip_put(app_state_t *app, bool moving) {
     for (size_t i = 0; i < n; ++i) paths[i] = entries[i].path;
     if (!rubraview_pal_clipboard_set_files(app->window, paths, n, moving)) { osd_say(app, TU8("the clipboard would not take it")); return; }
     char line[128];
-    int written = snprintf(line, sizeof(line), moving ? T("%zu to move: Ctrl+V in another folder") : T("%zu to copy: Ctrl+V where they go"), n);
+    int written = rubraview_fmt(line, sizeof(line), moving ? T("{} to move: Ctrl+V in another folder") : T("{} to copy: Ctrl+V where they go"), PROVEN_ARG((size_t)n));
     if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
 }
 
@@ -698,15 +698,15 @@ void picker_clip_paste(app_state_t *app) {
         return;
     }
     enum { CLIP_BYTES = 1u << 20 };
-    char *buf = (char*)malloc(CLIP_BYTES);
+    char *buf = (char*)rubraview_alloc(CLIP_BYTES);
     if (!buf) return;
     bool moving = false;
     size_t count = rubraview_pal_clipboard_get_files(app->window, buf, CLIP_BYTES, &moving);
-    if (count == 0) { free(buf); osd_say(app, TU8("no files on the clipboard: Ctrl+C or Ctrl+X them first")); return; }
+    if (count == 0) { rubraview_free(buf); osd_say(app, TU8("no files on the clipboard: Ctrl+C or Ctrl+X them first")); return; }
     size_t done = 0, skipped = 0, failed = 0;
     uint32_t batch = ++app->undo_batch;
     const char *at = buf;
-    for (size_t i = 0; i < count; ++i, at += strlen(at) + 1) {
+    for (size_t i = 0; i < count; ++i, at += proven_cstr_len(at) + 1) {
         proven_u8str_view_t source = proven_u8str_view_from_cstr(at);
         rubraview_fs_entry_t entry;
         if (!rubraview_pal_fs_stat(app->arena, source, &entry)) { failed++; continue; }   /* gone since it was copied */
@@ -735,12 +735,12 @@ void picker_clip_paste(app_state_t *app) {
         });
         done++;
     }
-    free(buf);
+    rubraview_free(buf);
     if (moving && done > 0 && failed == 0) rubraview_pal_clipboard_clear(app->window);   /* as Explorer: a cut is pasted once */
     char line[160];
-    int written = failed > 0 ? snprintf(line, sizeof(line), T("%zu pasted, %zu could not be"), done, failed)
-                : skipped > 0 && done == 0 ? snprintf(line, sizeof(line), "%s", T("already here, or a folder into itself: nothing pasted"))
-                : snprintf(line, sizeof(line), moving ? T("%zu moved here") : T("%zu copied here"), done);
+    int written = failed > 0 ? rubraview_fmt(line, sizeof(line), T("{} pasted, {} could not be"), PROVEN_ARG((size_t)done), PROVEN_ARG((size_t)failed))
+                : skipped > 0 && done == 0 ? rubraview_fmt(line, sizeof(line), "{}", PROVEN_ARG(T("already here, or a folder into itself: nothing pasted")))
+                : rubraview_fmt(line, sizeof(line), moving ? T("{} moved here") : T("{} copied here"), PROVEN_ARG((size_t)done));
     if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
     if (done > 0) picker_navigate(app, dir);
 }
@@ -770,8 +770,8 @@ void picker_curate_to(app_state_t *app, proven_u8str_view_t target_dir, bool mov
         done++;
     }
     char line[128];
-    int written = snprintf(line, sizeof(line), T("%zu file(s) %s %.*s"), done, moving ? T("moved to") : T("copied to"),
-                           (int)target_dir.size, target_dir.ptr);
+    int written = rubraview_fmt(line, sizeof(line), T("{} file(s) {} {}"), PROVEN_ARG((size_t)done), PROVEN_ARG(moving ? T("moved to") : T("copied to")),
+                           PROVEN_ARG(rubraview_bytes_view(target_dir.ptr, (int)target_dir.size)));
     if (written > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)written });
     if (moving) picker_navigate(app, app->picker_dir);
 }

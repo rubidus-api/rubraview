@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/favorites.h"
 #include "rubraview/ini.h"
 #include "rubraview/path.h"
@@ -34,11 +35,11 @@ proven_u8str_view_t rubraview_favorites_serialize(proven_arena_t *arena, const r
     rubraview_ini_doc_t doc = {0};
     for (size_t i = 0; i < favorites->count; ++i) {
         char name[32];
-        int n = snprintf(name, sizeof(name), "favorite-%zu", i + 1);
+        int n = rubraview_fmt(name, sizeof(name), "favorite-{}", PROVEN_ARG((size_t)(i + 1)));
         if (n <= 0) continue;
         proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)n + 1);
         if (!proven_is_ok(res.err)) break;
-        memcpy(res.value.ptr, name, (size_t)n + 1);
+        proven_sys_mem_copy(res.value.ptr, name, (size_t)n + 1);
         proven_u8str_view_t section = { .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = (size_t)n };
         rubraview_ini_set_string(arena, &doc, section, PROVEN_LIT("path"), favorites->paths[i]);
         if (favorites->names[i].size > 0) rubraview_ini_set_string(arena, &doc, section, PROVEN_LIT("name"), favorites->names[i]);
@@ -59,8 +60,8 @@ bool rubraview_favorites_toggle(proven_arena_t *arena, rubraview_favorites_t *fa
     if (!favorites || path.size == 0 || proven_u8str_view_starts_with(path, PROVEN_LIT("::"))) return false;
     for (size_t i = 0; i < favorites->count; ++i) {
         if (!rubraview_path_same(favorites->paths[i], path)) continue;
-        memmove(&favorites->paths[i], &favorites->paths[i + 1], (favorites->count - i - 1) * sizeof(favorites->paths[0]));
-        memmove(&favorites->names[i], &favorites->names[i + 1], (favorites->count - i - 1) * sizeof(favorites->names[0]));
+        proven_sys_mem_move(&favorites->paths[i], &favorites->paths[i + 1], (favorites->count - i - 1) * sizeof(favorites->paths[0]));
+        proven_sys_mem_move(&favorites->names[i], &favorites->names[i + 1], (favorites->count - i - 1) * sizeof(favorites->names[0]));
         favorites->count--;
         return false;
     }
@@ -97,11 +98,11 @@ bool rubraview_favorites_move(rubraview_favorites_t *favorites, size_t from, siz
     if (!favorites || from >= favorites->count || to >= favorites->count) return false;
     proven_u8str_view_t path = favorites->paths[from], name = favorites->names[from];
     if (from < to) {
-        memmove(&favorites->paths[from], &favorites->paths[from + 1], (to - from) * sizeof(path));
-        memmove(&favorites->names[from], &favorites->names[from + 1], (to - from) * sizeof(name));
+        proven_sys_mem_move(&favorites->paths[from], &favorites->paths[from + 1], (to - from) * sizeof(path));
+        proven_sys_mem_move(&favorites->names[from], &favorites->names[from + 1], (to - from) * sizeof(name));
     } else if (from > to) {
-        memmove(&favorites->paths[to + 1], &favorites->paths[to], (from - to) * sizeof(path));
-        memmove(&favorites->names[to + 1], &favorites->names[to], (from - to) * sizeof(name));
+        proven_sys_mem_move(&favorites->paths[to + 1], &favorites->paths[to], (from - to) * sizeof(path));
+        proven_sys_mem_move(&favorites->names[to + 1], &favorites->names[to], (from - to) * sizeof(name));
     }
     favorites->paths[to] = path;
     favorites->names[to] = name;

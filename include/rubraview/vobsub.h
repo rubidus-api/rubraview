@@ -71,7 +71,7 @@ rubraview_vobsub_track_t rubraview_vobsub_index(proven_arena_t *arena, proven_u8
  * read — a scratched disc costs the lines it damaged, not the film.
  */
 bool rubraview_vobsub_decode(const rubraview_vobsub_track_t *track, size_t index,
-                             const uint8_t *sub_bytes, size_t sub_size,
+                             proven_mem_view_t sub_bytes_view,
                              uint8_t *pixels, rubraview_vobsub_cue_t *out_cue);
 
 /**

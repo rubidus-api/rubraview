@@ -47,7 +47,7 @@ const char *rubraview_archive_result_text(rubraview_archive_result_t result);   
 
 /* A name as one folder or file of a Windows path: characters Windows refuses made '_', ending dots and blanks
    dropped, a device name (CON, NUL, COM1 ...) given a leading '_'. Into `out` (`cap` > 0); its length. */
-size_t rubraview_archive_safe_part(const char *part, size_t len, char *out, size_t cap);
+size_t rubraview_archive_safe_part(proven_u8str_view_t part_view, char *out, size_t cap);
 
 /* The archive's name without its extension(s), for the folder it is written out to: "book.zip" "book",
    "book.part1.rar" "book", "book.7z.001" "book". */

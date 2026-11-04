@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/color.h"
 #include <string.h>
 #include <math.h>
@@ -115,10 +116,10 @@ void rubraview_histogram_compute(const rubraview_pixbuf_t *pb,
                           uint32_t hist_lum[256]) {
     if (!rubraview_pixbuf_is_valid(pb)) return;
 
-    if (hist_r) memset(hist_r, 0, 256 * sizeof(uint32_t));
-    if (hist_g) memset(hist_g, 0, 256 * sizeof(uint32_t));
-    if (hist_b) memset(hist_b, 0, 256 * sizeof(uint32_t));
-    if (hist_lum) memset(hist_lum, 0, 256 * sizeof(uint32_t));
+    if (hist_r) proven_sys_mem_set(hist_r, 0, 256 * sizeof(uint32_t));
+    if (hist_g) proven_sys_mem_set(hist_g, 0, 256 * sizeof(uint32_t));
+    if (hist_b) proven_sys_mem_set(hist_b, 0, 256 * sizeof(uint32_t));
+    if (hist_lum) proven_sys_mem_set(hist_lum, 0, 256 * sizeof(uint32_t));
 
     bool is_bgra = (pb->format == RUBRAVIEW_PIXFMT_BGRA8);
     bool is_gray = (pb->format == RUBRAVIEW_PIXFMT_GRAY8);

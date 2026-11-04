@@ -13,7 +13,7 @@ void strip_cells_free(app_state_t *app) {
     for (size_t i = 0; i < app->strip_cell_count; ++i) {
         if (app->strip_cells[i].texture) rubraview_pal_texture_destroy(app->strip_cells[i].texture);
     }
-    free(app->strip_cells);
+    rubraview_free(app->strip_cells);
     app->strip_cells = NULL;
     app->strip_cell_count = 0;
 }
@@ -24,7 +24,7 @@ void strip_cells_reset(app_state_t *app) {
     app->strip_generation++;
     if (app->strip_thumbs) rubraview_pal_thumbs_generation(app->strip_thumbs, app->strip_generation);
     size_t n = page_count(app);
-    app->strip_cells = n ? (struct picker_thumb*)calloc(n, sizeof(*app->strip_cells)) : NULL;
+    app->strip_cells = n ? (struct picker_thumb*)rubraview_alloc_zero(n, sizeof(*app->strip_cells)) : NULL;
     app->strip_cell_count = app->strip_cells ? n : 0;
 }
 
@@ -99,7 +99,7 @@ void strip_step(app_state_t *app, double dt) {
             t->state = texture ? 1 : 2;
             app->strip_arrived = true;
         }
-        free(done.bgra);
+        rubraview_free(done.bgra);
     }
     /* The ones in view, nearest the page last so they are made first; a list row's, pointed at, last of all. */
     rubraview_virtual_range_t visible = shown > 0.0 ? rubraview_filmstrip_visible(&app->filmstrip) : (rubraview_virtual_range_t){0};
@@ -120,10 +120,10 @@ void strip_step(app_state_t *app, double dt) {
         book_reads++;
         void *mem = NULL;
         rubraview_page_bytes_t pb = page_read_owned(&app->source, &app->source_lock, index, &mem);
-        uint8_t *copy = pb.ok && pb.data.size > 0 ? (uint8_t*)malloc(pb.data.size) : NULL;
-        if (copy) memcpy(copy, pb.data.ptr, pb.data.size);
-        free(mem);
-        t->state = copy && rubraview_pal_thumbs_request_bytes(app->strip_thumbs, app->strip_generation, index, 1.0, copy, pb.data.size) ? 3 : 2;
+        uint8_t *copy = pb.ok && pb.data.size > 0 ? (uint8_t*)rubraview_alloc(pb.data.size) : NULL;
+        if (copy) proven_sys_mem_copy(copy, pb.data.ptr, pb.data.size);
+        rubraview_free(mem);
+        t->state = copy && rubraview_pal_thumbs_request_bytes(app->strip_thumbs, app->strip_generation, index, 1.0, rubraview_mem_mut(copy, pb.data.size)) ? 3 : 2;
     }
 }
 

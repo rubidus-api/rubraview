@@ -48,7 +48,7 @@ typedef struct rubraview_text_view {
  * Build the view of `source` (UTF-8, "\n" line ends: rubraview_text_clean's).
  * False when out of memory; `out` is then empty. Free with _free.
  */
-bool rubraview_text_view_build(rubraview_text_view_t *out, const char *source, size_t len,
+bool rubraview_text_view_build(rubraview_text_view_t *out, proven_u8str_view_t source_view,
                                rubraview_text_breaks_t breaks, bool trim_lead);
 /**
  * RV-123: the same, and with `headings` a short line (30 columns at most)
@@ -56,7 +56,7 @@ bool rubraview_text_view_build(rubraview_text_view_t *out, const char *source, s
  * (any break, in a file that never has more) is a paragraph of its own in
  * PARAGRAPHS: "제2장" is not joined to the text after it.
  */
-bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *source, size_t len,
+bool rubraview_text_view_build_ex(rubraview_text_view_t *out, proven_u8str_view_t source_view,
                                   rubraview_text_breaks_t breaks, bool trim_lead, bool headings);
 void rubraview_text_view_free(rubraview_text_view_t *view);
 
@@ -66,7 +66,7 @@ size_t rubraview_text_view_para_at(const rubraview_text_view_t *view, size_t off
 size_t rubraview_text_view_para_of_source(const rubraview_text_view_t *view, size_t source);
 
 /** Whether a line ends a sentence (its last mark is . ! ? 。 a closing quote or the like). */
-bool rubraview_text_ends_sentence(const char *line, size_t len);
+bool rubraview_text_ends_sentence(proven_u8str_view_t line_view);
 
 /**
  * Find `needle` in the view's text from `from` on (or, `backward`, before
@@ -79,7 +79,7 @@ bool rubraview_text_find(const rubraview_text_view_t *view, proven_u8str_view_t 
 size_t rubraview_text_count(const rubraview_text_view_t *view, proven_u8str_view_t needle, size_t at, size_t *which);
 
 /** One code point at `*i` of `s`, `*i` moved past it; U+FFFD for a bad byte. */
-uint32_t rubraview_text_next_cp(const char *s, size_t len, size_t *i);
+uint32_t rubraview_text_next_cp(proven_u8str_view_t s_view, size_t *i);
 
 #ifdef __cplusplus
 }

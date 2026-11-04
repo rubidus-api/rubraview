@@ -57,9 +57,9 @@ static bool hex_colour(proven_u8str_view_t text, uint32_t *out) {
 uint32_t text_colour(app_state_t *app, const char *key, uint32_t fallback) {
     uint32_t c = 0;
     /* spelled out: check-settings.py finds reads by their literal keys */
-    proven_u8str_view_t v = strcmp(key, "color_text") == 0 ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("color_text"))
-              : strcmp(key, "color_back") == 0 ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("color_back"))
-              : strcmp(key, "color_link") == 0 ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("color_link"))
+    proven_u8str_view_t v = rubraview_cstr_cmp(key, "color_text") == 0 ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("color_text"))
+              : rubraview_cstr_cmp(key, "color_back") == 0 ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("color_back"))
+              : rubraview_cstr_cmp(key, "color_link") == 0 ? rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("color_link"))
                                                : rubraview_settings_get_text(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("color_mark"));
     return hex_colour(v, &c) ? c : fallback;
 }
@@ -103,7 +103,7 @@ static double text_guess_height(app_state_t *app, const text_page_t *t, size_t i
     if (!text_wraps(app) || t->lay_width < px) return line + gap;
     double cells = 0.0;
     for (size_t j = p->start; j < p->start + p->len;) {
-        uint32_t cp = rubraview_text_next_cp(t->view.text, p->start + p->len, &j);
+        uint32_t cp = rubraview_text_next_cp(rubraview_bytes_view(t->view.text, p->start + p->len), &j);
         cells += rubraview_codepoint_is_wide(cp) ? 2.0 : 1.0;
     }
     double lines = ceil(cells * px * 0.5 / t->lay_width);
@@ -168,7 +168,7 @@ static void text_remember(app_state_t *app) {
     rubraview_history_record(app->arena, &app->history, app_keep(app, t->key), (int32_t)source, (int32_t)t->source_len, (int64_t)time(NULL));
     if (t->enc_by_hand) {
         char key[1100];
-        int n = snprintf(key, sizeof(key), "%.*s|encoding", (int)t->key.size, t->key.ptr);
+        int n = rubraview_fmt(key, sizeof(key), "{}|encoding", PROVEN_ARG(rubraview_bytes_view(t->key.ptr, (int)t->key.size)));
         if (n > 0 && (size_t)n < sizeof(key)) {
             rubraview_history_record(app->arena, &app->history, app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)key, .size = (size_t)n }),
                                      (int32_t)t->enc, 0, (int64_t)time(NULL));
@@ -182,13 +182,13 @@ void text_close(app_state_t *app) {
     text_remember(app);
     text_free_blocks(t);
     rubraview_text_view_free(&t->view);
-    free(t->blocks);
-    free(t->carry);
-    free(t->heights);
-    free(t->tops);
-    free(t->source);
-    free((void *)t->key.ptr);
-    free(t);
+    rubraview_free(t->blocks);
+    rubraview_free(t->carry);
+    rubraview_free(t->heights);
+    rubraview_free(t->tops);
+    rubraview_free(t->source);
+    rubraview_free((void *)t->key.ptr);
+    rubraview_free(t);
     app->text = NULL;
     if (app->rename_active && app->rename_is_find) rename_end(app);
 }
@@ -198,21 +198,21 @@ bool text_rebuild(app_state_t *app) {
     text_page_t *t = app->text;
     size_t source = t->view.count ? t->view.paras[t->anchor].source : 0;
     text_free_blocks(t);
-    free(t->blocks); free(t->heights); free(t->tops); free(t->carry);
+    rubraview_free(t->blocks); rubraview_free(t->heights); rubraview_free(t->tops); rubraview_free(t->carry);
     t->blocks = NULL; t->heights = NULL; t->tops = NULL; t->carry = NULL;
     rubraview_text_view_free(&t->view);
     int breaks = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("breaks")));
     bool trim = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("trim_lead")) > 0.5;
     if (breaks < 0 || breaks >= RUBRAVIEW_TEXT_BREAKS_COUNT) breaks = 0;
     bool headings = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("headings")) > 0.5;
-    if (!rubraview_text_view_build_ex(&t->view, t->source, t->source_len, (rubraview_text_breaks_t)breaks, trim, headings)) return false;
+    if (!rubraview_text_view_build_ex(&t->view, rubraview_bytes_view(t->source, t->source_len), (rubraview_text_breaks_t)breaks, trim, headings)) return false;
     t->built_breaks = breaks;
     t->built_trim = trim;
     t->built_headings = headings;
-    t->blocks = (rubraview_text_block_t **)calloc(t->view.count, sizeof(*t->blocks));
-    t->heights = (double *)calloc(t->view.count, sizeof(double));
-    t->tops = (double *)calloc(t->view.count, sizeof(double));
-    t->carry = (size_t *)malloc(t->view.count * sizeof(size_t));
+    t->blocks = (rubraview_text_block_t **)rubraview_alloc_zero(t->view.count, sizeof(*t->blocks));
+    t->heights = (double *)rubraview_alloc_zero(t->view.count, sizeof(double));
+    t->tops = (double *)rubraview_alloc_zero(t->view.count, sizeof(double));
+    t->carry = (size_t *)rubraview_alloc(t->view.count * sizeof(size_t));
     if (!t->blocks || !t->heights || !t->tops || !t->carry) return false;
     for (size_t i = 0; i < t->view.count; ++i) t->carry[i] = TEXT_CARRY_UNKNOWN;
     t->lay_width = 0.0;   /* laid out again on the next frame */
@@ -226,23 +226,25 @@ bool text_rebuild(app_state_t *app) {
 }
 
 /* §2: the bytes read in an encoding, made ready to show. */
-static bool text_decode(text_page_t *t, const uint8_t *bytes, size_t size, rubraview_textenc_t enc, size_t bom) {
+static bool text_decode(text_page_t *t, proven_mem_view_t bytes_view, rubraview_textenc_t enc, size_t bom) {
+    const uint8_t *bytes = (const uint8_t *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
     char *raw = NULL;
     size_t raw_len = 0;
     bytes += bom; size -= bom;
     if (enc == RUBRAVIEW_TEXTENC_UTF8) {
-        raw = (char *)malloc(size + 1);
-        if (raw) { memcpy(raw, bytes, size); raw[size] = '\0'; raw_len = size; }
+        raw = (char *)rubraview_alloc(size + 1);
+        if (raw) { proven_sys_mem_copy(raw, bytes, size); raw[size] = '\0'; raw_len = size; }
     } else if (enc == RUBRAVIEW_TEXTENC_UTF16LE || enc == RUBRAVIEW_TEXTENC_UTF16BE) {
-        raw = rubraview_textenc_utf16_to_utf8(bytes, size, enc == RUBRAVIEW_TEXTENC_UTF16BE, &raw_len);
+        raw = rubraview_textenc_utf16_to_utf8(rubraview_mem_view(bytes, size), enc == RUBRAVIEW_TEXTENC_UTF16BE, &raw_len);
     } else {
-        raw = rubraview_pal_text_decode(bytes, size, rubraview_textenc_codepage(enc), &raw_len);
+        raw = rubraview_pal_text_decode(rubraview_mem_view(bytes, size), rubraview_textenc_codepage(enc), &raw_len);
     }
     if (!raw) return false;
-    char *clean = rubraview_text_clean(raw, raw_len, &t->source_len);
-    free(raw);
+    char *clean = rubraview_text_clean(rubraview_bytes_view(raw, raw_len), &t->source_len);
+    rubraview_free(raw);
     if (!clean) return false;
-    free(t->source);
+    rubraview_free(t->source);
     t->source = clean;
     t->enc = enc;
     return true;
@@ -263,43 +265,43 @@ bool text_with_bytes(app_state_t *app, int32_t index, rubraview_textenc_t want, 
         size = (size_t)map.size;
     } else {
         rubraview_page_bytes_t b = page_read_owned(&app->source, &app->source_lock, (size_t)index, &mem);
-        if (!b.ok) { free(mem); return false; }
+        if (!b.ok) { rubraview_free(mem); return false; }
         bytes = (const uint8_t *)b.data.ptr;
         size = b.data.size;
     }
     size_t bom = 0;
     char tag[96];
     const char *lang = rubraview_pal_process_ui_language(tag, sizeof(tag)) ? rubraview_lang_pick(tag, LANG_PACKS, 5) : NULL;
-    rubraview_textenc_t guessed = rubraview_textenc_guess(bytes, size, lang, &bom);
+    rubraview_textenc_t guessed = rubraview_textenc_guess(rubraview_mem_view(bytes, size), lang, &bom);
     rubraview_textenc_t enc = want != RUBRAVIEW_TEXTENC_AUTO ? want : guessed;
     if (want != RUBRAVIEW_TEXTENC_AUTO && enc != guessed) bom = 0;
     /* A .nfo's art is drawn in DOS's box characters. */
     if (want == RUBRAVIEW_TEXTENC_AUTO && enc == RUBRAVIEW_TEXTENC_CP1252 && rubraview_path_has_ext(path.size ? path : app->source.pages[index].name, ".nfo")) {
         enc = RUBRAVIEW_TEXTENC_CP437;
     }
-    bool ok = text_decode(t, bytes, size, enc, bom);
+    bool ok = text_decode(t, rubraview_mem_view(bytes, size), enc, bom);
     if (map.data) rubraview_pal_fs_unmap(&map);
-    free(mem);
+    rubraview_free(mem);
     t->enc_by_hand = by_hand;
     return ok;
 }
 
 static void text_open(app_state_t *app, int32_t index) {
-    text_page_t *t = (text_page_t *)calloc(1, sizeof(*t));
+    text_page_t *t = (text_page_t *)rubraview_alloc_zero(1, sizeof(*t));
     if (!t) return;
     app->text = t;
     t->page = index;
     proven_u8str_view_t path = app->source.pages[index].path.size > 0 ? app->source.pages[index].path : app->source.pages[index].name;
     proven_u8str_view_t key = app->source.archive_path.size > 0 && app->source.pages[index].path.size == 0
         ? rubraview_path_join(app->arena, app->source.archive_path, app->source.pages[index].name) : path;
-    char *k = (char *)malloc(key.size + 1);
-    if (k) { memcpy(k, key.ptr, key.size); k[key.size] = '\0'; t->key = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)k, .size = key.size }; }
+    char *k = (char *)rubraview_alloc(key.size + 1);
+    if (k) { proven_sys_mem_copy(k, key.ptr, key.size); k[key.size] = '\0'; t->key = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)k, .size = key.size }; }
 
     /* An encoding chosen by hand for this file, else the setting's, else the guess. */
     rubraview_textenc_t want = RUBRAVIEW_TEXTENC_AUTO;
     bool by_hand = false;
     char hk[1100];
-    int hn = snprintf(hk, sizeof(hk), "%.*s|encoding", (int)key.size, key.ptr);
+    int hn = rubraview_fmt(hk, sizeof(hk), "{}|encoding", PROVEN_ARG(rubraview_bytes_view(key.ptr, (int)key.size)));
     const rubraview_history_entry_t *chosen = hn > 0 && (size_t)hn < sizeof(hk)
         ? rubraview_history_find(&app->history, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)hk, .size = (size_t)hn }) : NULL;
     if (chosen && chosen->page > 0 && chosen->page < RUBRAVIEW_TEXTENC_COUNT) { want = (rubraview_textenc_t)chosen->page; by_hand = true; }
@@ -329,7 +331,7 @@ void text_prepare(app_state_t *app) {
         /* The same page of the same set: a new set may have a text page at the same place. */
         proven_u8str_view_t path = app->source.pages[index].path.size > 0 ? app->source.pages[index].path : app->source.pages[index].name;
         size_t n = path.size;
-        if (app->text->key.size >= n && memcmp(app->text->key.ptr + app->text->key.size - n, path.ptr, n) == 0) return;
+        if (app->text->key.size >= n && proven_sys_mem_cmp(app->text->key.ptr + app->text->key.size - n, path.ptr, n) == 0) return;
     }
     text_close(app);
     if (index >= 0 && (size_t)index < page_count(app)) {

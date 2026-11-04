@@ -34,7 +34,7 @@ bool rubraview_pal_ffilter_list(proven_arena_t *arena, rubraview_ffilter_catalog
  * any size, BGRA, malloc'd into `*out`. On failure `said` holds FFmpeg's message (or why), NUL-terminated.
  */
 bool rubraview_pal_ffilter_run(const char *graph, const uint8_t *bgra, int32_t width, int32_t height,
-                               uint8_t **out, int32_t *out_width, int32_t *out_height, char *said, size_t said_size);
+                               uint8_t **out, int32_t *out_width, int32_t *out_height, proven_mem_mut_t said_view);
 
 #ifdef __cplusplus
 }

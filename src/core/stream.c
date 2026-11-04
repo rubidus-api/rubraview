@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/stream.h"
 #include <stdio.h>
 #include <string.h>
@@ -7,8 +8,8 @@ static const char *const SCHEMES[] = { "http", "https", "mms", "mmsh", "mmst" };
 /* The scheme's length when `text` starts with one of ours and `://`; 0 otherwise. */
 static size_t scheme_len(proven_u8str_view_t text) {
     for (size_t s = 0; s < sizeof(SCHEMES) / sizeof(SCHEMES[0]); ++s) {
-        size_t n = strlen(SCHEMES[s]);
-        if (text.size < n + 3 || memcmp(text.ptr + n, "://", 3) != 0) continue;
+        size_t n = proven_cstr_len(SCHEMES[s]);
+        if (text.size < n + 3 || proven_sys_mem_cmp(text.ptr + n, "://", 3) != 0) continue;
         if (proven_u8str_view_starts_with_ascii_ci(text, proven_u8str_view_from_cstr(SCHEMES[s]))) return n;
     }
     return 0;
@@ -32,12 +33,12 @@ size_t rubraview_stream_ffmpeg_urls(proven_u8str_view_t address, char out[2][RUB
     size_t n = scheme_len(address);
     proven_u8str_view_t rest = { .ptr = address.ptr + n, .size = address.size - n };   /* "://host/..." */
     if (n == 3) {   /* mms: the two FFmpeg has, HTTP first */
-        int a = snprintf(out[0], RUBRAVIEW_STREAM_URL_MAX, "mmsh%.*s", (int)rest.size, rest.ptr);
-        int b = snprintf(out[1], RUBRAVIEW_STREAM_URL_MAX, "mmst%.*s", (int)rest.size, rest.ptr);
+        int a = rubraview_fmt(out[0], RUBRAVIEW_STREAM_URL_MAX, "mmsh{}", PROVEN_ARG(rubraview_bytes_view(rest.ptr, (int)rest.size)));
+        int b = rubraview_fmt(out[1], RUBRAVIEW_STREAM_URL_MAX, "mmst{}", PROVEN_ARG(rubraview_bytes_view(rest.ptr, (int)rest.size)));
         if (a <= 0 || (size_t)a >= RUBRAVIEW_STREAM_URL_MAX || b <= 0 || (size_t)b >= RUBRAVIEW_STREAM_URL_MAX) return 0;
         return 2;
     }
-    memcpy(out[0], address.ptr, address.size);
+    proven_sys_mem_copy(out[0], address.ptr, address.size);
     out[0][address.size] = '\0';
     for (size_t i = 0; i < n; ++i) out[0][i] = rubraview_ascii_lower(out[0][i]);
     return 1;
@@ -70,7 +71,7 @@ bool rubraview_stream_is_list_address(proven_u8str_view_t address) {
     proven_u8str_view_t path = { .ptr = address.ptr, .size = end };
     static const char *const LISTS[] = { ".pls", ".m3u", ".asx", ".wax", ".wvx" };
     for (size_t k = 0; k < sizeof(LISTS) / sizeof(LISTS[0]); ++k) {
-        size_t n = strlen(LISTS[k]);
+        size_t n = proven_cstr_len(LISTS[k]);
         if (path.size > n && proven_u8str_view_eq_ascii_ci((proven_u8str_view_t){ .ptr = path.ptr + path.size - n, .size = n },
                                                            proven_u8str_view_from_cstr(LISTS[k])))
             return true;
@@ -79,8 +80,8 @@ bool rubraview_stream_is_list_address(proven_u8str_view_t address) {
 }
 
 static size_t find_from(proven_u8str_view_t s, size_t from, const char *what) {
-    size_t n = strlen(what);
-    for (size_t i = from; i + n <= s.size; ++i) if (memcmp(s.ptr + i, what, n) == 0) return i;
+    size_t n = proven_cstr_len(what);
+    for (size_t i = from; i + n <= s.size; ++i) if (proven_sys_mem_cmp(s.ptr + i, what, n) == 0) return i;
     return SIZE_MAX;
 }
 
@@ -109,13 +110,13 @@ size_t rubraview_stream_icy_title(proven_u8str_view_t packet, char *out, size_t 
         proven_byte_t ch[4];
         size_t k = 1;
         if (!utf8 && c >= 0x80) k = proven_utf8_encode_one(c, ch);   /* Latin-1 */
-        else if (utf8 && c >= 0x80) { proven_utf8_char_t d = proven_utf8_decode_next(v, i); k = d.len; memcpy(ch, v.ptr + i, k); i += k - 1; }
+        else if (utf8 && c >= 0x80) { proven_utf8_char_t d = proven_utf8_decode_next(v, i); k = d.len; proven_sys_mem_copy(ch, v.ptr + i, k); i += k - 1; }
         else ch[0] = c;
         size_t need = k + (space && n > 0 ? 1 : 0);
         if (n + need >= cap) break;
         if (space && n > 0) out[n++] = ' ';
         space = false;
-        memcpy(out + n, ch, k);
+        proven_sys_mem_copy(out + n, ch, k);
         n += k;
     }
     out[n] = '\0';

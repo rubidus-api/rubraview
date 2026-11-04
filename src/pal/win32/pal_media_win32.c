@@ -1,4 +1,5 @@
 #ifdef _WIN32
+#include "rubraview/core.h"
 #include <stdlib.h>
 #include "rubraview/pal/pal_media_backend.h"
 #include "rubraview/pal/pal_media_host.h"
@@ -42,7 +43,7 @@ rubraview_media_open_result_t rubraview_pal_media_open(proven_u8str_view_t path,
     void *impl = api->open(path, &result.failure, &info, gpu);
     if (!impl) return result;
 
-    rubraview_media_t *media = (rubraview_media_t*)calloc(1, sizeof(*media));
+    rubraview_media_t *media = (rubraview_media_t*)rubraview_alloc_zero(1, sizeof(*media));
     if (!media) {
         api->close(impl);
         result.failure = RUBRAVIEW_MEDIA_FAIL_FILE;
@@ -60,7 +61,7 @@ rubraview_media_open_result_t rubraview_pal_media_open(proven_u8str_view_t path,
 void rubraview_pal_media_close(rubraview_media_t *media) {
     if (!media) return;
     media->api->close(media->impl);
-    free(media);
+    rubraview_free(media);
 }
 
 bool rubraview_pal_media_peek_frame(rubraview_media_t *media, rubraview_video_frame_t *out_frame) {

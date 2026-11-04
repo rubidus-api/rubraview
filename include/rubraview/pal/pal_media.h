@@ -140,7 +140,7 @@ rubraview_ffmpeg_refusal_t rubraview_pal_ffmpeg_refused(void);
 #define RUBRAVIEW_FFMPEG_WRITES_AVIF       2u
 #define RUBRAVIEW_FFMPEG_WRITES_JXL_ANIM   4u   /* libjxl_anim */
 #define RUBRAVIEW_FFMPEG_WRITES_AVIF_ALPHA 8u   /* libaom: transparency as a second, grey picture */
-uint32_t rubraview_pal_ffmpeg_image_encoders(char *names, size_t size);
+uint32_t rubraview_pal_ffmpeg_image_encoders(proven_mem_mut_t names_view);
 
 typedef struct rubraview_ffmpeg_still {
     bool    avif;        /* AVIF, else JPEG XL */
@@ -155,7 +155,7 @@ typedef struct rubraview_ffmpeg_still {
  * picture, or laid over white by another encoder) or JPEG XL (libjxl, libjxl_anim for more than one; alpha
  * kept). `picture` fills picture `index` as straight BGRA rows, width * 4 bytes apart, and says how long it
  * shows; it is asked for every picture twice (whether any is see-through, then to write). The file's bytes
- * (free()), or NULL and `why` (an N_ literal).
+ * (rubraview_free()), or NULL and `why` (an N_ literal).
  */
 uint8_t *rubraview_pal_ffmpeg_pictures_encode(int32_t width, int32_t height, size_t count,
                                               bool (*picture)(void *context, size_t index, uint8_t *bgra, double *seconds),
@@ -166,7 +166,7 @@ uint8_t *rubraview_pal_ffmpeg_pictures_encode(int32_t width, int32_t height, siz
 uint8_t *rubraview_pal_ffmpeg_image_encode(const rubraview_pixbuf_t *pixels, const rubraview_ffmpeg_still_t *how,
                                            size_t *out_size, const char **why);
 
-bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t max_side,
+bool rubraview_pal_ffmpeg_jxl_decode(proven_mem_view_t data_view, int32_t max_side,
                                      uint8_t *(*room)(void *context, int32_t width, int32_t height),
                                      void *context, int32_t *out_width, int32_t *out_height);
 
@@ -176,7 +176,7 @@ bool rubraview_pal_ffmpeg_jxl_decode(const uint8_t *data, size_t size, int32_t m
  * how long the picture stays, and ends the reading by refusing (NULL).
  * True when at least one picture was written.
  */
-bool rubraview_pal_ffmpeg_jxl_frames(const uint8_t *data, size_t size, int32_t max_side,
+bool rubraview_pal_ffmpeg_jxl_frames(proven_mem_view_t data_view, int32_t max_side,
                                      uint8_t *(*room)(void *context, int32_t width, int32_t height, double seconds),
                                      void *context);
 

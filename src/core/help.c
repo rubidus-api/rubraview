@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/help.h"
 #include "rubraview/lang.h"
 #include "rubraview/action_words.h"
@@ -8,7 +9,7 @@ static proven_u8str_view_t arena_text(proven_arena_t *arena, const char *text, s
     proven_result_mem_mut_t res = proven_arena_alloc(arena, len + 1);
     if (!proven_is_ok(res.err)) return PROVEN_LIT("");
     char *out = (char*)res.value.ptr;
-    memcpy(out, text, len);
+    proven_sys_mem_copy(out, text, len);
     out[len] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = len };
 }
@@ -21,16 +22,16 @@ proven_u8str_view_t rubraview_help_action_label(const rubraview_boxes_doc_t *box
     for (size_t i = 0; i < boxes->node_count; ++i) {
         const rubraview_box_node_t *node = &boxes->nodes[i];
         if (node->kind != RUBRAVIEW_BOX_NODE_ITEM) continue;
-        if (node->action.size == action.size && memcmp(node->action.ptr, action.ptr, action.size) == 0) {
+        if (node->action.size == action.size && proven_sys_mem_cmp(node->action.ptr, action.ptr, action.size) == 0) {
             return rubraview_tr_ctx_u8("menu", node->label);
         }
     }
     /* 1.23.0: the built-in menu is gone; the words the key tables say it in are the sentence now. */
     const char *words = rubraview_action_words(action);
-    if (words) return rubraview_tr_u8((proven_u8str_view_t){ .ptr = (const proven_byte_t *)words, .size = strlen(words) });
+    if (words) return rubraview_tr_u8((proven_u8str_view_t){ .ptr = (const proven_byte_t *)words, .size = proven_cstr_len(words) });
     for (size_t i = 0; i < boxes->tile_count; ++i) {
         const rubraview_box_tile_t *tile = &boxes->tiles[i];
-        if (tile->action.size == action.size && memcmp(tile->action.ptr, action.ptr, action.size) == 0) {
+        if (tile->action.size == action.size && proven_sys_mem_cmp(tile->action.ptr, action.ptr, action.size) == 0) {
             return rubraview_tr_ctx_u8("toolbox", tile->caption);
         }
     }
@@ -64,7 +65,7 @@ static proven_u8str_view_t combo_list(proven_arena_t *arena, const rubraview_key
         }
         size_t room = sizeof(line) - at - 1;
         size_t n = text.size < room ? text.size : room;
-        memcpy(line + at, text.ptr, n);
+        proven_sys_mem_copy(line + at, text.ptr, n);
         at += n;
     }
     line[at] = '\0';
@@ -72,7 +73,7 @@ static proven_u8str_view_t combo_list(proven_arena_t *arena, const rubraview_key
 }
 
 static proven_u8str_view_t lit_text(const char *text) {
-    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = strlen(text) };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = proven_cstr_len(text) };
 }
 
 /* Writes one line while there is room; false when the caller's array is full. */
@@ -117,7 +118,7 @@ size_t rubraview_help_build(proven_arena_t *arena,
                 proven_u8str_view_t heading = binding->context;
                 if (pass < group_count) {
                     char line[160];
-                    int n = snprintf(line, sizeof(line), "%s (%s)", rubraview_tr(groups[pass].heading), rubraview_tr(groups[pass].when));
+                    int n = rubraview_fmt(line, sizeof(line), "{} ({})", PROVEN_ARG(rubraview_tr(groups[pass].heading)), PROVEN_ARG(rubraview_tr(groups[pass].when)));
                     heading = arena_text(arena, line, n > 0 ? ((size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1) : 0);
                 }
                 if (!push(out, max, &count, RUBRAVIEW_HELP_BLANK, empty, empty)) return count;
@@ -155,8 +156,8 @@ size_t rubraview_help_build(proven_arena_t *arena,
                 if (label.size == 0) label = spell_out(arena, b->action);
                 const rubraview_key_context_info_t *info = rubraview_keymap_context_info(b->context);
                 proven_u8str_view_t where = info ? lit_text(rubraview_tr(info->heading)) : b->context;
-                int n = snprintf(line + at, sizeof(line) - at, "%s%.*s (%.*s)", at ? "  ·  " : "", (int)label.size, (const char *)label.ptr,
-                                 (int)where.size, (const char *)where.ptr);
+                int n = rubraview_fmt(line + at, sizeof(line) - at, "{}{} ({})", PROVEN_ARG(at ? "  ·  " : ""), PROVEN_ARG(rubraview_bytes_view((const char *)label.ptr, (int)label.size)),
+                                 PROVEN_ARG(rubraview_bytes_view((const char *)where.ptr, (int)where.size)));
                 if (n <= 0 || (size_t)n >= sizeof(line) - at) break;
                 at += (size_t)n;
             }

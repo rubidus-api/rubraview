@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/avif_read.h"
 
 #include "avif/avif.h"
@@ -10,28 +11,32 @@ struct rubraview_avif {
     int32_t width, height;
 };
 
-bool rubraview_avif_is(const uint8_t *bytes, size_t size) {
-    if (!bytes || size < 16 || memcmp(bytes + 4, "ftyp", 4) != 0) return false;
+bool rubraview_avif_is(proven_mem_view_t bytes_view) {
+    const uint8_t *bytes = (const uint8_t *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
+    if (!bytes || size < 16 || proven_sys_mem_cmp(bytes + 4, "ftyp", 4) != 0) return false;
     uint32_t box = ((uint32_t)bytes[0] << 24) | ((uint32_t)bytes[1] << 16) | ((uint32_t)bytes[2] << 8) | bytes[3];
     if (box < 16 || box > size) box = (uint32_t)(size < 4096 ? size : 4096);
     /* The major brand, then (after the minor version) the compatible ones. */
     for (size_t at = 8; at + 4 <= box; at += at == 8 ? 8 : 4) {
-        if (memcmp(bytes + at, "avif", 4) == 0 || memcmp(bytes + at, "avis", 4) == 0) return true;
+        if (proven_sys_mem_cmp(bytes + at, "avif", 4) == 0 || proven_sys_mem_cmp(bytes + at, "avis", 4) == 0) return true;
     }
     return false;
 }
 
-rubraview_avif_t *rubraview_avif_open(const uint8_t *bytes, size_t size, int32_t max_side,
+rubraview_avif_t *rubraview_avif_open(proven_mem_view_t bytes_view, int32_t max_side,
                                       int32_t *out_width, int32_t *out_height, size_t *out_frames) {
+    const uint8_t *bytes = (const uint8_t *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
     if (out_width) *out_width = 0;
     if (out_height) *out_height = 0;
     if (out_frames) *out_frames = 0;
-    if (!rubraview_avif_is(bytes, size) || max_side <= 0) return NULL;
+    if (!rubraview_avif_is(rubraview_mem_view(bytes, size)) || max_side <= 0) return NULL;
 
-    rubraview_avif_t *avif = (rubraview_avif_t*)calloc(1, sizeof(*avif));
+    rubraview_avif_t *avif = (rubraview_avif_t*)rubraview_alloc_zero(1, sizeof(*avif));
     if (!avif) return NULL;
     avif->decoder = avifDecoderCreate();
-    if (!avif->decoder) { free(avif); return NULL; }
+    if (!avif->decoder) { rubraview_free(avif); return NULL; }
     avif->decoder->codecChoice = AVIF_CODEC_CHOICE_DAV1D;
     avif->decoder->maxThreads = 4;
     avif->decoder->imageDimensionLimit = (uint32_t)max_side;
@@ -102,5 +107,5 @@ double rubraview_avif_frame_seconds(rubraview_avif_t *avif, size_t index) {
 void rubraview_avif_close(rubraview_avif_t *avif) {
     if (!avif) return;
     if (avif->decoder) avifDecoderDestroy(avif->decoder);
-    free(avif);
+    rubraview_free(avif);
 }

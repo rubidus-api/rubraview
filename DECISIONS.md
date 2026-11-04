@@ -3265,3 +3265,43 @@ Do not store credentials, private infrastructure details, personal data, private
   spread went two files on (on the VM, PageUp from the fifth film went to the third).
 - Decision: such a page is `force_standalone` in every layout (`navigate.c`): alone in its spread, so a list of
   films goes one at a time; a mixed list keeps D-98 (they are skipped among pictures).
+
+## 2026-11-04: D-272 Frames blended for a film that does not fit the refresh (W-20261104-0200)
+
+- Status: Accepted (owner 2026-11-03: "프레임 섞기"; 2026-11-04: "모두 다 proven 방식으로 바꿔주시고, 배포는 1번만 몰아서
+  마지막에 해 주세요. 프레임 섞이도 진행해 주세요"). RV-215 step 4, mpv's interpolation (oversample).
+- Decision: Settings › Video › Blend frames (`video.blend_frames`, off by default; not with HDR output). With it on, a
+  film's frame is shown as soon as it starts within the refresh it is seen at (`rubraview_media_schedule_blend`), and
+  the frame before it is kept in a second texture and drawn under it, the new one covering it by the share of that
+  refresh that is its own; the next refresh shows the new frame alone, and a paused film its frame alone. 24 frames
+  on 60 Hz then stray 0.42 of a refresh from time instead of 0.71 in 3:2, none dropped (`test_mediaclock`).
+- The second texture is dropped with the film, after a lost device and when the setting goes off.
+- Verified on the VM (T351): with it on, shots of a slowed film show two frames mixed, with it off none, and a paused
+  film one frame; the evenness itself cannot be judged there (its software adapter, 17 frames a second at 32 Hz):
+  the owner's screen decides whether it is worth keeping on. After a seek the first frame is not blended with one
+  from before it.
+
+## 2026-11-04: D-275 Our own sources on proven's ways (W-20261104-0200)
+
+- Status: Accepted (owner 2026-11-03: "proven c lib의 메모리 할당과 문자열 방식을 제대로 잘 쓰는지 확인 ... 메모리 슬라이스
+  또는 문자열 슬라이스 적극적으로 사용하도록 확인하고 고칠 것. 출력 함수들도 proven c lib 쪽으로 변경할 것"; 2026-11-04: "모두
+  다 proven 방식으로 바꿔주시고, 배포는 1번만 몰아서 마지막에"). RV-220.
+- Allocation: one heap, `rubraview_heap()`, a `proven_allocator_t` over the C runtime's malloc family, and
+  `rubraview_alloc` / `_alloc_zero` / `_realloc` / `_free` / `_strdup` over it. Not proven's own heap: on Windows it
+  is `_aligned_malloc`, which must never be freed by `free`, and Windows and the libraries hand back malloc'd blocks.
+- Text: printf's family is gone from our sources; `rubraview_fmt` is `proven_fmt_to` (`{}` formats, `PROVEN_ARG`
+  with each argument cast to the type its old conversion named), `rubraview_g_text` writes what `%g` wrote (330
+  numbers checked against printf), wide text goes through `rubraview_wfmt` (UTF-8 formatted, then
+  `proven_utf8_to_utf16`). The 315 translated formats of each language pack moved to `{}` with them; the language
+  check compares placeholders by argument and spec, so a translation may reorder them with `{N}`.
+- Memory and strings: `proven_sys_mem_*` for block copies, `proven_cstr_len` and views for lengths and searches,
+  bounded wide copies (`pal_wide.h`, an array's size taken from the array). A pointer and its length passed together
+  are one slice: 253 of our functions take a `proven_u8str_view_t`, `proven_mem_view_t` or `proven_mem_mut_t`
+  instead of the two (callbacks whose address is taken keep their shape).
+- Output: the console's lines through `proven_print`.
+- Kept: `src/menu` (the Explorer DLL, its own small runtime), FFmpeg's log callback (`vsnprintf` on its `va_list`),
+  and the tests' own printf. `scripts/check-proven-ways.py` (in the project check) refuses the C runtime's calls
+  anywhere else. Wide comparisons that ignored case now fold ASCII letters only (extensions, switches, drive letters).
+- Verified: every host test under ASan and UBSan, the Windows build, and on the VM the Korean information window of
+  a picture, a film and a CBZ, the zoom display, the compress window and a 7z with a password, `--version` and a
+  batch run's console line: the same text as 1.39.84 (T351).

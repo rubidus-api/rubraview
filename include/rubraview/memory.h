@@ -33,7 +33,7 @@ typedef struct rubraview_region {
 } rubraview_region_t;
 
 /** A region with its first chunk; false when the heap refuses it. */
-bool rubraview_region_init(rubraview_region_t *region, const char *name, size_t chunk_bytes, size_t limit);
+bool rubraview_region_init(rubraview_region_t *region, proven_u8str_view_t name_view, size_t limit);
 /**
  * Room for `need` bytes in `region->arena`: when the newest chunk cannot
  * hold them, a new chunk (of `need` or the chunk size, the larger) becomes
@@ -56,7 +56,7 @@ typedef struct rubraview_halves {
     int                live;
 } rubraview_halves_t;
 
-bool rubraview_halves_init(rubraview_halves_t *h, const char *name, size_t chunk_bytes, size_t limit);
+bool rubraview_halves_init(rubraview_halves_t *h, proven_u8str_view_t name_view, size_t limit);
 void rubraview_halves_release(rubraview_halves_t *h);
 /** The half in use, with room for `need`; NULL past its limit. */
 proven_arena_t *rubraview_halves_live(rubraview_halves_t *h, size_t need);

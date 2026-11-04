@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/ui_settings.h"
 #include "rubraview/lang.h"
 #include <math.h>
@@ -18,7 +19,9 @@
 /* ---- cells: how wide text is on a fixed-width grid ---- */
 
 /* One code point from UTF-8; returns how many bytes it took (at least 1). */
-static size_t next_code_point(const char *p, size_t len, uint32_t *out) {
+static size_t next_code_point(proven_u8str_view_t p_view, uint32_t *out) {
+    const char *p = (const char *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     unsigned char c = (unsigned char)p[0];
     size_t n = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xE ? 3 : (c >> 3) == 0x1E ? 4 : 1;
     if (n > len) n = 1;
@@ -45,7 +48,7 @@ static int32_t cells_of(proven_u8str_view_t text) {
     int32_t cells = 0;
     for (size_t i = 0; i < text.size;) {
         uint32_t cp = 0;
-        i += next_code_point((const char *)text.ptr + i, text.size - i, &cp);
+        i += next_code_point(rubraview_bytes_view((const char *)text.ptr + i, text.size - i), &cp);
         cells += cell_width(cp);
     }
     return cells;
@@ -65,7 +68,7 @@ proven_u8str_view_t rubraview_settings_choice_word(const rubraview_setting_def_t
     const char *word = tr_choice(def->choices[index]);
     if (proven_u8str_view_eq(def->section, PROVEN_LIT("general")) && proven_u8str_view_eq(def->key, PROVEN_LIT("language")) &&
         rubraview_lang_native_name(def->choices[index])) word = rubraview_lang_native_name(def->choices[index]);
-    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)word, .size = strlen(word) };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)word, .size = proven_cstr_len(word) };
 }
 
 size_t rubraview_cell_runs(proven_u8str_view_t text, rubraview_cell_run_t *out, size_t capacity) {
@@ -75,7 +78,7 @@ size_t rubraview_cell_runs(proven_u8str_view_t text, rubraview_cell_run_t *out, 
     bool open_narrow = false;
     for (size_t i = 0; i < text.size;) {
         uint32_t cp = 0;
-        size_t n = next_code_point((const char *)text.ptr + i, text.size - i, &cp);
+        size_t n = next_code_point(rubraview_bytes_view((const char *)text.ptr + i, text.size - i), &cp);
         int w = cell_width(cp);
         bool isolate = cp >= 0x2066 && cp <= 0x2069;   /* drawn apart: what it sets apart is a run of its own */
         if (!isolate && ((w == 1 && open_narrow) || (w == 0 && count > 0))) {
@@ -100,9 +103,11 @@ typedef struct cell_writer {
     int32_t cells;
 } cell_writer_t;
 
-static void put_bytes(cell_writer_t *w, const char *p, size_t n, int32_t cells) {
+static void put_bytes(cell_writer_t *w, proven_u8str_view_t p_view, int32_t cells) {
+    const char *p = (const char *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     if (w->used + n + 1 > w->capacity) return;
-    memcpy(w->buffer + w->used, p, n);
+    proven_sys_mem_copy(w->buffer + w->used, p, n);
     w->used += n;
     w->cells += cells;
 }
@@ -112,10 +117,10 @@ static void put_text(cell_writer_t *w, proven_u8str_view_t text, int32_t limit) 
     int32_t written = 0;
     for (size_t i = 0; i < text.size;) {
         uint32_t cp = 0;
-        size_t n = next_code_point((const char *)text.ptr + i, text.size - i, &cp);
+        size_t n = next_code_point(rubraview_bytes_view((const char *)text.ptr + i, text.size - i), &cp);
         int cw = cell_width(cp);
         if (written + cw > limit) break;
-        put_bytes(w, (const char *)text.ptr + i, n, cw);
+        put_bytes(w, rubraview_bytes_view((const char *)text.ptr + i, n), cw);
         written += cw;
         i += n;
     }
@@ -126,7 +131,7 @@ static void put_text(cell_writer_t *w, proven_u8str_view_t text, int32_t limit) 
 static bool has_rtl(proven_u8str_view_t text) {
     for (size_t i = 0; i < text.size;) {
         uint32_t cp = 0;
-        i += next_code_point((const char *)text.ptr + i, text.size - i, &cp);
+        i += next_code_point(rubraview_bytes_view((const char *)text.ptr + i, text.size - i), &cp);
         if ((cp >= 0x0590 && cp <= 0x08FF) || (cp >= 0xFB1D && cp <= 0xFDFF) || (cp >= 0xFE70 && cp <= 0xFEFF)) return true;
     }
     return false;
@@ -134,9 +139,9 @@ static bool has_rtl(proven_u8str_view_t text) {
 
 static void put_words(cell_writer_t *w, proven_u8str_view_t text, int32_t limit) {
     if (!has_rtl(text)) { put_text(w, text, limit); return; }
-    put_bytes(w, "\xE2\x81\xA8", 3, 0);   /* FSI */
+    put_bytes(w, rubraview_bytes_view("\xE2\x81\xA8", 3), 0);   /* FSI */
     put_text(w, text, limit);
-    put_bytes(w, "\xE2\x81\xA9", 3, 0);   /* PDI */
+    put_bytes(w, rubraview_bytes_view("\xE2\x81\xA9", 3), 0);   /* PDI */
 }
 
 /* A note's rows (owner, 2026-10-18: a long explanation ran off the window):
@@ -155,7 +160,7 @@ static int32_t note_row(proven_u8str_view_t text, int32_t width, int32_t k, prov
         int32_t cells = 0;
         while (i < text.size) {
             uint32_t cp = 0;
-            size_t n = next_code_point((const char *)text.ptr + i, text.size - i, &cp);
+            size_t n = next_code_point(rubraview_bytes_view((const char *)text.ptr + i, text.size - i), &cp);
             int c = cell_width(cp);
             if (cp == ' ') cut = i;                       /* a break before the space */
             else if (c == 2 && i > start) cut = i;        /* or before a wide character */
@@ -177,16 +182,18 @@ static int32_t note_row(proven_u8str_view_t text, int32_t width, int32_t k, prov
 static void pad_to(cell_writer_t *w, int32_t cells) {
     while (w->cells < cells) {
         int32_t before = w->cells;
-        put_bytes(w, " ", 1, 1);
+        put_bytes(w, rubraview_bytes_view(" ", 1), 1);
         if (w->cells == before) break;
     }
 }
 
-static void repeat(cell_writer_t *w, const char *glyph, int32_t count) {
-    size_t n = strlen(glyph);
+static void repeat(cell_writer_t *w, proven_u8str_view_t glyph_view) {
+    const char *glyph = (const char *)glyph_view.ptr;
+    int32_t count = (int32_t)glyph_view.size;
+    size_t n = proven_cstr_len(glyph);
     for (int32_t i = 0; i < count; ++i) {
         int32_t before = w->cells;
-        put_bytes(w, glyph, n, 1);
+        put_bytes(w, rubraview_bytes_view(glyph, n), 1);
         if (w->cells == before) break;
     }
 }
@@ -475,7 +482,7 @@ static const char *const BUTTON_TEXT[RUBRAVIEW_BUTTON_COUNT] = { N_("[ Revert ]"
 proven_u8str_view_t rubraview_settings_button_text(rubraview_settings_button_t button) {
     if (button < 0 || button >= RUBRAVIEW_BUTTON_COUNT) return PROVEN_LIT("");
     const char *text = rubraview_tr(BUTTON_TEXT[button]);
-    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = strlen(text) };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = proven_cstr_len(text) };
 }
 
 void rubraview_settings_view_button_cells(const rubraview_settings_view_t *view,
@@ -552,8 +559,8 @@ static void slider_cells(const rubraview_settings_view_t *view, const rubraview_
     int32_t width = view->cols - view->content_col - 1 - view->label_cols;
     char value_text[48];
     int n = def->type == RUBRAVIEW_SETTING_FLOAT
-        ? snprintf(value_text, sizeof(value_text), " %.1f", def->max_value)
-        : snprintf(value_text, sizeof(value_text), " %.0f", def->max_value);
+        ? rubraview_fmt(value_text, sizeof(value_text), " {:.1}", PROVEN_ARG((double)def->max_value))
+        : rubraview_fmt(value_text, sizeof(value_text), " {:.0}", PROVEN_ARG((double)def->max_value));
     int32_t value_cells = (n > 0 ? n : 0) + (def->unit.size > 0 ? cells_of(tr_unit(def->unit)) + 1 : 0);
     int32_t inner = width - 2 - value_cells;
     if (inner < 4) inner = 4;
@@ -835,11 +842,11 @@ proven_u8str_view_t rubraview_settings_line_text(const rubraview_settings_view_t
 
     switch (view->lines[line].kind) {
         case RUBRAVIEW_LINE_SECTION:
-            repeat(&w, "\xE2\x94\x80", 2);                 /* ── */
-            put_bytes(&w, " ", 1, 1);
+            repeat(&w, rubraview_bytes_view("\xE2\x94\x80", 2));                 /* ── */
+            put_bytes(&w, rubraview_bytes_view(" ", 1), 1);
             put_words(&w, tr(node->text), width - 4);
-            put_bytes(&w, " ", 1, 1);
-            repeat(&w, "\xE2\x94\x80", width - w.cells);
+            put_bytes(&w, rubraview_bytes_view(" ", 1), 1);
+            repeat(&w, rubraview_bytes_view("\xE2\x94\x80", width - w.cells));
             break;
 
         case RUBRAVIEW_LINE_INFO: {   /* 1.30.1: the value wrapped under itself, the label on its first row */
@@ -875,11 +882,11 @@ proven_u8str_view_t rubraview_settings_line_text(const rubraview_settings_view_t
 
         case RUBRAVIEW_LINE_ACTION:
             pad_to(&w, view->label_cols);
-            put_bytes(&w, "<", 1, 1);
-            put_bytes(&w, " ", 1, 1);
+            put_bytes(&w, rubraview_bytes_view("<", 1), 1);
+            put_bytes(&w, rubraview_bytes_view(" ", 1), 1);
             put_words(&w, tr(node->text), width - w.cells - 2);
-            put_bytes(&w, " ", 1, 1);
-            put_bytes(&w, ">", 1, 1);
+            put_bytes(&w, rubraview_bytes_view(" ", 1), 1);
+            put_bytes(&w, rubraview_bytes_view(">", 1), 1);
             break;
 
         case RUBRAVIEW_LINE_SETTING: {
@@ -895,12 +902,12 @@ proven_u8str_view_t rubraview_settings_line_text(const rubraview_settings_view_t
                 double other = settings ? rubraview_settings_get(settings, second->section, second->key) : second->default_value;
                 bool focused = view->focus_line == (int32_t)line && view->focus_button == RUBRAVIEW_BUTTON_NONE;
                 int32_t start = w.cells;
-                put_bytes(&w, focused && view->focus_part == 0 ? ">" : " ", 1, 1);
-                put_bytes(&w, value > 0.5 ? "[x] " : "[ ] ", 4, 4);
+                put_bytes(&w, rubraview_bytes_view(focused && view->focus_part == 0 ? ">" : " ", 1), 1);
+                put_bytes(&w, rubraview_bytes_view(value > 0.5 ? "[x] " : "[ ] ", 4), 4);
                 put_text(&w, tr(second->unit), room - (w.cells - start));
                 pad_to(&w, view->label_cols + 1 + 4 + cells_of(tr(second->unit)) + 1);
-                put_bytes(&w, focused && view->focus_part == 1 ? ">" : " ", 1, 1);
-                put_bytes(&w, other > 0.5 ? "[x] " : "[ ] ", 4, 4);
+                put_bytes(&w, rubraview_bytes_view(focused && view->focus_part == 1 ? ">" : " ", 1), 1);
+                put_bytes(&w, rubraview_bytes_view(other > 0.5 ? "[x] " : "[ ] ", 4), 4);
                 put_text(&w, tr(second->label), room - (w.cells - start));
                 break;
             }
@@ -917,9 +924,9 @@ proven_u8str_view_t rubraview_settings_line_text(const rubraview_settings_view_t
                         word = rubraview_lang_native_name(def->choices[index]);
                     }
                     char text[96];
-                    bool rtl = has_rtl((proven_u8str_view_t){ .ptr = (const proven_byte_t *)word, .size = strlen(word) });
-                    int n = snprintf(text, sizeof(text), rtl ? "< \xE2\x81\xA8%s\xE2\x81\xA9 >  %d/%d" : "< %s >  %d/%d",
-                                     word, index + 1, def->choice_count);
+                    bool rtl = has_rtl((proven_u8str_view_t){ .ptr = (const proven_byte_t *)word, .size = proven_cstr_len(word) });
+                    int n = rubraview_fmt(text, sizeof(text), rtl ? "< \xE2\x81\xA8{}\xE2\x81\xA9 >  {}/{}" : "< {} >  {}/{}",
+                                     PROVEN_ARG(word), PROVEN_ARG((int)(index + 1)), PROVEN_ARG((int)def->choice_count));
                     put_text(&w, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n > 0 ? (size_t)n : 0 }, room);
                     break;
                 }
@@ -931,17 +938,17 @@ proven_u8str_view_t rubraview_settings_line_text(const rubraview_settings_view_t
                     int32_t filled = span > 0.0 ? (int32_t)floor((value - def->min_value) / span * (double)cells + 0.5) : 0;
                     if (filled < 0) filled = 0;
                     if (filled > cells) filled = cells;
-                    put_bytes(&w, "[", 1, 1);
-                    repeat(&w, "#", filled);
-                    repeat(&w, "-", cells - filled);
-                    put_bytes(&w, "]", 1, 1);
+                    put_bytes(&w, rubraview_bytes_view("[", 1), 1);
+                    repeat(&w, rubraview_bytes_view("#", filled));
+                    repeat(&w, rubraview_bytes_view("-", cells - filled));
+                    put_bytes(&w, rubraview_bytes_view("]", 1), 1);
                     char text[64];
                     int n = def->type == RUBRAVIEW_SETTING_FLOAT
-                        ? snprintf(text, sizeof(text), " %.1f", value)
-                        : snprintf(text, sizeof(text), " %.0f", value);
+                        ? rubraview_fmt(text, sizeof(text), " {:.1}", PROVEN_ARG((double)value))
+                        : rubraview_fmt(text, sizeof(text), " {:.0}", PROVEN_ARG((double)value));
                     put_text(&w, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n > 0 ? (size_t)n : 0 }, width - w.cells);
                     if (def->unit.size > 0) {
-                        put_bytes(&w, " ", 1, 1);
+                        put_bytes(&w, rubraview_bytes_view(" ", 1), 1);
                         put_words(&w, tr_unit(def->unit), width - w.cells);
                     }
                     break;
@@ -950,11 +957,11 @@ proven_u8str_view_t rubraview_settings_line_text(const rubraview_settings_view_t
                 default: {
                     proven_u8str_view_t text = settings ? rubraview_settings_get_text(settings, def->section, def->key)
                                             : PROVEN_LIT("");
-                    put_bytes(&w, "[", 1, 1);
+                    put_bytes(&w, rubraview_bytes_view("[", 1), 1);
                     int32_t inner = room - 2;
                     put_text(&w, text.size > 0 ? text : TU8("(not set)"), inner);
                     pad_to(&w, view->label_cols + room - 1);
-                    put_bytes(&w, "]", 1, 1);
+                    put_bytes(&w, rubraview_bytes_view("]", 1), 1);
                     break;
                 }
             }
@@ -1007,12 +1014,12 @@ size_t rubraview_grid_selection_copy(const rubraview_grid_selection_t *selection
         proven_u8str_view_t text = rows[row];
         for (size_t i = 0; i < text.size;) {
             uint32_t cp = 0;
-            size_t n = next_code_point((const char *)text.ptr + i, text.size - i, &cp);
+            size_t n = next_code_point(rubraview_bytes_view((const char *)text.ptr + i, text.size - i), &cp);
             int w = cell_width(cp);
             if (cell > last) break;
             if (cell + w - 1 >= first) {
                 if (len + n >= capacity) { out[len] = '\0'; return len; }
-                memcpy(out + len, text.ptr + i, n);
+                proven_sys_mem_copy(out + len, text.ptr + i, n);
                 len += n;
             }
             cell += w;

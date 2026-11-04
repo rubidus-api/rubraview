@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/gmic.h"
 #include "rubraview/lang.h"
 #include "rubraview/number.h"
@@ -78,7 +79,7 @@ static proven_u8str_view_t parse_string(jparser_t *j) {
                 proven_byte_t u[4];
                 size_t k = proven_utf8_encode_one((proven_u32)cp, u);
                 if (k == 0 || n + k > len) { j->failed = true; return PROVEN_LIT(""); }
-                memcpy(out + n, u, k);
+                proven_sys_mem_copy(out + n, u, k);
                 n += k;
                 break;
             }
@@ -100,12 +101,12 @@ static bool jlist_push(jparser_t *j, jlist_t *l, proven_u8str_view_t key, jnode_
         size_t cap = l->cap ? l->cap * 2 : 8;
         proven_result_mem_mut_t n = rubraview_arena_alloc_array(j->arena, cap, sizeof(jnode_t));
         if (!proven_is_ok(n.err)) return false;
-        if (l->count) memcpy(n.value.ptr, l->nodes, l->count * sizeof(jnode_t));
+        if (l->count) proven_sys_mem_copy(n.value.ptr, l->nodes, l->count * sizeof(jnode_t));
         l->nodes = (jnode_t *)(void *)n.value.ptr;
         if (keyed) {
             proven_result_mem_mut_t k = rubraview_arena_alloc_array(j->arena, cap, sizeof(proven_u8str_view_t));
             if (!proven_is_ok(k.err)) return false;
-            if (l->count) memcpy(k.value.ptr, l->keys, l->count * sizeof(proven_u8str_view_t));
+            if (l->count) proven_sys_mem_copy(k.value.ptr, l->keys, l->count * sizeof(proven_u8str_view_t));
             l->keys = (proven_u8str_view_t *)(void *)k.value.ptr;
         }
         l->cap = cap;
@@ -185,7 +186,7 @@ static proven_u8str_view_t member_text(const jnode_t *obj, const char *key) {
 
 /* A name as shown: G'MIC's markup (`<i>`, `<span ...>`) taken out, its five entities decoded. */
 static proven_u8str_view_t plain(proven_arena_t *arena, proven_u8str_view_t s) {
-    if (s.size == 0 || (!memchr(s.ptr, '<', s.size) && !memchr(s.ptr, '&', s.size))) return s;
+    if (s.size == 0 || (!rubraview_mem_chr(s.ptr, '<', s.size) && !rubraview_mem_chr(s.ptr, '&', s.size))) return s;
     proven_result_mem_mut_t res = proven_arena_alloc(arena, s.size + 1);
     if (!proven_is_ok(res.err)) return s;
     uint8_t *out = res.value.ptr;
@@ -202,8 +203,8 @@ static proven_u8str_view_t plain(proven_arena_t *arena, proven_u8str_view_t s) {
         bool done = false;
         if (s.ptr[i] == '&') {
             for (size_t e = 0; e < sizeof(ENT) / sizeof(ENT[0]) && !done; ++e) {
-                size_t el = strlen(ENT[e].name);
-                if (s.size - i >= el && memcmp(s.ptr + i, ENT[e].name, el) == 0) { out[n++] = (uint8_t)ENT[e].c; i += el; done = true; }
+                size_t el = proven_cstr_len(ENT[e].name);
+                if (s.size - i >= el && proven_sys_mem_cmp(s.ptr + i, ENT[e].name, el) == 0) { out[n++] = (uint8_t)ENT[e].c; i += el; done = true; }
             }
         }
         if (!done) out[n++] = s.ptr[i++];
@@ -296,19 +297,19 @@ rubraview_gmic_catalog_t rubraview_gmic_catalog_parse(proven_arena_t *arena, pro
     if (json.size > RUBRAVIEW_GMIC_LIST_MAX) { if (why) *why = N_("the filter list is too large"); return cat; }
     /* The tree takes about ten times the text; it lives only while the list is read out of it. */
     size_t room = json.size * 12u + (1u << 20);
-    void *scratch_mem = malloc(room);
+    void *scratch_mem = rubraview_alloc(room);
     if (!scratch_mem) { if (why) *why = N_("out of memory"); return cat; }
     proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = scratch_mem, .size = room });
     jparser_t j = { .arena = &scratch, .strings = arena, .p = json.ptr, .end = json.ptr + json.size };
     jnode_t root = parse_value(&j, 0);
     if (!j.failed) { skip_space(&j); if (j.p != j.end) j.failed = true; }   /* nothing after the list */
     if (j.failed || root.type != J_OBJ) {
-        free(scratch_mem);
+        rubraview_free(scratch_mem);
         if (why) *why = j.full ? N_("out of memory") : N_("the filter list is not G'MIC's JSON");
         return cat;
     }
     cat = catalog_of(arena, &root, why);
-    free(scratch_mem);
+    rubraview_free(scratch_mem);
     return cat;
 }
 
@@ -387,7 +388,7 @@ typedef struct out_buf { char *p; size_t cap, n; bool full; } out_buf_t;
 
 static void put(out_buf_t *o, const char *s, size_t n) {
     if (o->full || o->n + n + 1 > o->cap) { o->full = true; return; }
-    memcpy(o->p + o->n, s, n);
+    proven_sys_mem_copy(o->p + o->n, s, n);
     o->n += n;
     o->p[o->n] = '\0';
 }
@@ -430,19 +431,19 @@ size_t rubraview_gmic_args(const rubraview_gmic_filter_t *filter, const double *
         int n = 0;
         switch (p->kind) {
             case RUBRAVIEW_GMIC_INT:
-                n = snprintf(num, sizeof(num), "%lld", (long long)llround(fmin(fmax(v, p->min), p->max)));
+                n = rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG((long long)llround(fmin(fmax(v, p->min), p->max))));
                 break;
             case RUBRAVIEW_GMIC_FLOAT:
-                n = snprintf(num, sizeof(num), "%.9g", fmin(fmax(v, p->min), p->max));
+                n = rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(fmin(fmax(v, p->min), p->max)), 9)));
                 break;
             case RUBRAVIEW_GMIC_BOOL:
-                n = snprintf(num, sizeof(num), "%d", v > 0.5 ? 1 : 0);
+                n = rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG((int)(v > 0.5 ? 1 : 0)));
                 break;
             case RUBRAVIEW_GMIC_CHOICE:
-                n = snprintf(num, sizeof(num), "%d", (int)fmin(fmax(floor(v), 0.0), p->max));
+                n = rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG((int)fmin(fmax(floor(v), 0.0), p->max)));
                 break;
             case RUBRAVIEW_GMIC_BUTTON:
-                n = snprintf(num, sizeof(num), "0");
+                n = rubraview_fmt(num, sizeof(num), "0");
                 break;
             case RUBRAVIEW_GMIC_COLOR:
             case RUBRAVIEW_GMIC_POINT:

@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/slideshow.h"
 
 #include <math.h>
@@ -42,9 +43,11 @@ double rubraview_slideshow_interval_nudge(double base_seconds, int steps) {
     return clamp_interval(seconds);
 }
 
-int rubraview_slideshow_interval_text(char *buffer, size_t size, double seconds) {
+int rubraview_slideshow_interval_text(proven_mem_mut_t buffer_view, double seconds) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t size = (size_t)buffer_view.size;
     if (!buffer || size == 0) return 0;
-    int n = snprintf(buffer, size, "%.1f", seconds);
+    int n = rubraview_fmt(buffer, size, "{:.1}", PROVEN_ARG((double)seconds));
     if (n <= 0 || (size_t)n >= size) return 0;
     if (n >= 2 && buffer[n - 1] == '0' && buffer[n - 2] == '.') { n -= 2; buffer[n] = '\0'; }
     if ((size_t)n + 2 >= size) return 0;

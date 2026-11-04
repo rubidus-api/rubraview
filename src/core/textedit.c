@@ -1,6 +1,7 @@
 /*
  * A one-line text field (rename box, "Change ext"). See textedit.h.
  */
+#include "rubraview/core.h"
 #include "rubraview/textedit.h"
 #include <string.h>
 
@@ -53,7 +54,7 @@ proven_u8str_view_t rubraview_textedit_selection(const rubraview_textedit_t *te)
 /* Removes [a, b) and puts the caret at a. */
 static void remove_range(rubraview_textedit_t *te, size_t a, size_t b) {
     if (b <= a) return;
-    memmove(te->buf + a, te->buf + b, te->len - b);
+    proven_sys_mem_move(te->buf + a, te->buf + b, te->len - b);
     te->len -= b - a;
     te->caret = te->anchor = a;
     terminate(te);
@@ -82,7 +83,7 @@ size_t rubraview_textedit_insert(rubraview_textedit_t *te, proven_u8str_view_t t
         while (n > 0 && is_continuation(text.ptr[n])) n--;
     }
     if (n == 0) return 0;
-    memmove(te->buf + te->caret + n, te->buf + te->caret, te->len - te->caret);
+    proven_sys_mem_move(te->buf + te->caret + n, te->buf + te->caret, te->len - te->caret);
     for (size_t i = 0; i < n; ++i) {
         char c = text.ptr[i];
         te->buf[te->caret + i] = (c == '\n' || c == '\r' || c == '\t') ? ' ' : c;

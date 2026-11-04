@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/audio_dsp.h"
 #include "rubraview/lang.h"
 #include "rubraview/number.h"
@@ -134,7 +135,7 @@ static const float EQ_PRESETS[RUBRAVIEW_EQ_PRESET_COUNT][RUBRAVIEW_EQ_BANDS] = {
 void rubraview_eq_preset_gains(rubraview_eq_preset_t preset, float *out_gains_db) {
     if (!out_gains_db) return;
     if ((int)preset < 0 || preset >= RUBRAVIEW_EQ_PRESET_COUNT) preset = RUBRAVIEW_EQ_FLAT;
-    memcpy(out_gains_db, EQ_PRESETS[preset], sizeof(EQ_PRESETS[0]));
+    proven_sys_mem_copy(out_gains_db, EQ_PRESETS[preset], sizeof(EQ_PRESETS[0]));
 }
 
 proven_u8str_view_t rubraview_eq_preset_name(rubraview_eq_preset_t preset) {

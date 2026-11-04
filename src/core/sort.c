@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/sort.h"
 #include "proven/algorithm.h"
 #include <ctype.h>
@@ -15,8 +16,8 @@ int rubraview_str_lexcmp(proven_u8str_view_t a, proven_u8str_view_t b) {
     for (size_t i = 0; i < min_len; ++i) {
         char ca = a.ptr[i];
         char cb = b.ptr[i];
-        char la = (char)tolower((unsigned char)ca);
-        char lb = (char)tolower((unsigned char)cb);
+        char la = (char)rubraview_ascii_tolower((unsigned char)ca);
+        char lb = (char)rubraview_ascii_tolower((unsigned char)cb);
 
         if (la != lb) {
             return (int)(unsigned char)la - (int)(unsigned char)lb;
@@ -83,8 +84,8 @@ int rubraview_str_natcmp(proven_u8str_view_t a, proven_u8str_view_t b) {
             }
         } else {
             // Compare as characters (case-insensitive primary)
-            char la = (char)tolower((unsigned char)ca);
-            char lb = (char)tolower((unsigned char)cb);
+            char la = (char)rubraview_ascii_tolower((unsigned char)ca);
+            char lb = (char)rubraview_ascii_tolower((unsigned char)cb);
             if (la != lb) {
                 return (int)(unsigned char)la - (int)(unsigned char)lb;
             }

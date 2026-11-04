@@ -133,7 +133,7 @@ void panel_apply_row(app_state_t *app, int32_t index) {
                     b->steps_from = 0;
                 }
                 if (b->steps_from == 0) b->steps_file[0] = '\0';
-                if (b->steps_from == 2 && !strstr(b->steps_file, ".rvsteps")) b->steps_file[0] = '\0';
+                if (b->steps_from == 2 && !rubraview_cstr_str(b->steps_file, ".rvsteps")) b->steps_file[0] = '\0';
                 break;
             case PANEL_BATCH_BORDER:        b->border = v; break;
             case PANEL_BATCH_FRAME_COLOUR:  b->frame_colour = (int32_t)v; break;
@@ -402,10 +402,10 @@ void panel_button(app_state_t *app, int32_t index) {
                 const char *why = NULL;
                 if (text.size == 0 || !rubraview_edit_steps_parse(app->arena, text, &probe, &why)) {
                     char line[300];
-                    snprintf(line, sizeof(line), T("not used: %s"), why ? rubraview_tr(why) : T("the file could not be read"));
+                    rubraview_fmt(line, sizeof(line), T("not used: {}"), PROVEN_ARG(why ? rubraview_tr(why) : T("the file could not be read")));
                     osd_say(app, cstr(line));
                 } else {
-                    snprintf(app->batch.steps_file, sizeof(app->batch.steps_file), "%.*s", (int)picked.paths[0].size, picked.paths[0].ptr);
+                    rubraview_fmt(app->batch.steps_file, sizeof(app->batch.steps_file), "{}", PROVEN_ARG(rubraview_bytes_view(picked.paths[0].ptr, (int)picked.paths[0].size)));
                     edit_steps_say_programs(app, &probe);
                 }
             }
@@ -442,7 +442,7 @@ void panel_button(app_state_t *app, int32_t index) {
                                                       .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
                 rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
                 if (picked.accepted && picked.count > 0)
-                    snprintf(app->batch.mark, sizeof(app->batch.mark), "%.*s", (int)picked.paths[0].size, picked.paths[0].ptr);
+                    rubraview_fmt(app->batch.mark, sizeof(app->batch.mark), "{}", PROVEN_ARG(rubraview_bytes_view(picked.paths[0].ptr, (int)picked.paths[0].size)));
                 panel_open_batch(app);
             }
             break;
@@ -484,7 +484,7 @@ static bool edit_type_value_at(app_state_t *app, rubraview_panel_t *panel, int32
     if (app->rename_active) rename_end(app);
     char now[32];
     const rubraview_panel_row_t *row = &panel->rows[index];
-    int n = snprintf(now, sizeof(now), row->step >= 1.0 ? "%.0f" : "%.2f", row->value);
+    int n = rubraview_fmt(now, sizeof(now), row->step >= 1.0 ? "{:.0}" : "{:.2}", PROVEN_ARG((double)row->value));
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
     rubraview_textedit_set(&app->rename_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
     rubraview_textedit_select_all(&app->rename_edit);
@@ -507,11 +507,11 @@ void edit_value_typed(app_state_t *app) {
     proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
     char buf[48];
     size_t n = text.size < sizeof(buf) - 1 ? text.size : sizeof(buf) - 1;
-    memcpy(buf, text.ptr, n);
+    proven_sys_mem_copy(buf, text.ptr, n);
     buf[n] = '\0';
     for (size_t i = 0; i < n; ++i) if (buf[i] == ',') buf[i] = '.';
     char *end = NULL;
-    double v = strtod(buf, &end);
+    double v = proven_strtod(buf, &end);
     int32_t which = app->typed_panel, id = app->typed_id;
     rename_end(app);
     if (!end || end == buf) { osd_say(app, TU8("that is not a number")); return; }
@@ -689,7 +689,7 @@ rows:
             if (numbers) {
                 /* The owner's edit: every value as a number, typed by pressing its name. */
                 char number[24];
-                int k = snprintf(number, sizeof(number), row->step >= 1.0 ? "%.0f" : "%.2f", row->value);
+                int k = rubraview_fmt(number, sizeof(number), row->step >= 1.0 ? "{:.0}" : "{:.2}", PROVEN_ARG((double)row->value));
                 rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding * 0.5, r.height };
                 if (k > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)k }, at,
                                                           text_size * 0.9, 0xFFB8D0F0u, RUBRAVIEW_TEXT_RIGHT);
@@ -697,7 +697,7 @@ rows:
                 (row->id == PANEL_RESIZE || row->id == PANEL_SHARPEN_RADIUS || row->id == PANEL_SHARPEN_THRESHOLD)) {
                 char number[16];
                 rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
-                rubraview_pal_render_draw_text(app->renderer, adjust_row_text(app, row, number, sizeof(number)),
+                rubraview_pal_render_draw_text(app->renderer, adjust_row_text(app, row, rubraview_mem_mut(number, sizeof(number))),
                                                at, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
             }
             bool shown = numbers || (!app->panel_is_print && !app->panel_is_convert &&
@@ -706,13 +706,13 @@ rows:
                 /* D-87: a scale or a margin is chosen by its number. */
                 char number[16];
                 rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
-                rubraview_pal_render_draw_text(app->renderer, print_row_text(row, number, sizeof(number)),
+                rubraview_pal_render_draw_text(app->renderer, print_row_text(row, rubraview_mem_mut(number, sizeof(number))),
                                                at, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
                 shown = true;
             }
             if (!shown) {   /* 1.24.0: every slider says its number */
                 char number[24];
-                int k = snprintf(number, sizeof(number), row->step >= 1.0 ? "%.0f" : "%.2f", row->value);
+                int k = rubraview_fmt(number, sizeof(number), row->step >= 1.0 ? "{:.0}" : "{:.2}", PROVEN_ARG((double)row->value));
                 rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
                 if (k > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)k }, at,
                                                           text_size, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
@@ -735,13 +735,13 @@ rows:
             /* D-87: the print panel's choices have names. */
             char words[48];
             rubraview_pal_rect_t value = { c.x, c.y, c.width, c.height };
-            rubraview_pal_render_draw_text(app->renderer, print_row_text(row, words, sizeof(words)),
+            rubraview_pal_render_draw_text(app->renderer, print_row_text(row, rubraview_mem_mut(words, sizeof(words))),
                                            value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         } else if (row->kind == RUBRAVIEW_ROW_CHOICE) {
             /* RV-108: a choice says its word. */
             char words[48];
             rubraview_pal_rect_t value = { c.x, c.y, c.width, c.height };
-            rubraview_pal_render_draw_text(app->renderer, adjust_row_text(app, row, words, sizeof(words)),
+            rubraview_pal_render_draw_text(app->renderer, adjust_row_text(app, row, rubraview_mem_mut(words, sizeof(words))),
                                            value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         }
     }

@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/picker.h"
 #include "rubraview/lang.h"
 #include <stdio.h>
@@ -105,7 +106,7 @@ rubraview_archive_level_t rubraview_picker_archive_level(proven_arena_t *arena, 
         if (cut == rest.size || cut == 0) continue;   /* a page here, or an empty part */
         proven_u8str_view_t folder = { .ptr = rest.ptr, .size = cut };
         if (folder_count > 0 && folders[folder_count - 1].size == cut &&
-            memcmp(folders[folder_count - 1].ptr, folder.ptr, cut) == 0) continue;
+            proven_sys_mem_cmp(folders[folder_count - 1].ptr, folder.ptr, cut) == 0) continue;
         folders[folder_count++] = folder;
     }
     size_t count = 0;
@@ -157,7 +158,7 @@ proven_u8str_view_t rubraview_picker_typed_path(proven_arena_t *arena, proven_u8
         /* A slice of what was typed: copied, so the OS gets its NUL. */
         proven_result_mem_mut_t res = proven_arena_alloc(arena, n + 1);
         if (!proven_is_ok(res.err)) return none;
-        memcpy(res.value.ptr, p, n);
+        proven_sys_mem_copy(res.value.ptr, p, n);
         res.value.ptr[n] = '\0';
         cleaned = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = n };
     }
@@ -168,12 +169,12 @@ rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(proven_u8str_view_t path) {
     rubraview_breadcrumbs_t crumbs = {0};
     if (!path.ptr || path.size == 0) return crumbs;
 
-    crumbs.items[0].label = proven_u8str_view_from_bytes(T("PC"), strlen(T("PC")));
+    crumbs.items[0].label = proven_u8str_view_from_bytes(T("PC"), proven_cstr_len(T("PC")));
     crumbs.items[0].prefix = PROVEN_LIT(RUBRAVIEW_PICKER_PLACES);
     crumbs.count = 1;
     if (rubraview_picker_is_places(path)) return crumbs;
     if (rubraview_picker_is_recent(path)) {
-        crumbs.items[1].label = proven_u8str_view_from_bytes(T("Recent"), strlen(T("Recent")));
+        crumbs.items[1].label = proven_u8str_view_from_bytes(T("Recent"), proven_cstr_len(T("Recent")));
         crumbs.items[1].prefix = PROVEN_LIT(RUBRAVIEW_PICKER_RECENT);
         crumbs.count = 2;
         return crumbs;
@@ -260,7 +261,7 @@ void rubraview_picker_reveal_focus(rubraview_picker_t *picker) {
 bool rubraview_picker_type_ahead(rubraview_picker_t *picker, char letter) {
     if (!picker || !picker->listing || picker->listing->count == 0) return false;
 
-    int wanted = tolower((unsigned char)letter);
+    int wanted = rubraview_ascii_tolower((unsigned char)letter);
     size_t count = picker->listing->count;
 
     /* Start after the current focus so pressing the same letter again
@@ -270,7 +271,7 @@ bool rubraview_picker_type_ahead(rubraview_picker_t *picker, char letter) {
         proven_u8str_view_t name = picker->listing->entries[index].name;
         if (name.size == 0) continue;
 
-        if (tolower((unsigned char)name.ptr[0]) == wanted) {
+        if (rubraview_ascii_tolower((unsigned char)name.ptr[0]) == wanted) {
             picker->focus = index;
             rubraview_picker_reveal_focus(picker);
             return true;
@@ -379,10 +380,10 @@ void rubraview_picker_selection_metrics(const rubraview_picker_t *picker,
 size_t rubraview_picker_size_text(char *buf, size_t cap, uint64_t bytes) {
     int n;
     if (!buf || cap == 0) return 0;
-    if (bytes < 1024u) n = snprintf(buf, cap, "%u B", (unsigned)bytes);
-    else if (bytes < 1024u * 1024u) n = snprintf(buf, cap, T("%.0f KB"), (double)bytes / 1024.0);
-    else if (bytes < 1024ull * 1024ull * 1024ull) n = snprintf(buf, cap, T("%.1f MB"), (double)bytes / (1024.0 * 1024.0));
-    else n = snprintf(buf, cap, T("%.2f GB"), (double)bytes / (1024.0 * 1024.0 * 1024.0));
+    if (bytes < 1024u) n = rubraview_fmt(buf, cap, "{} B", PROVEN_ARG((unsigned)bytes));
+    else if (bytes < 1024u * 1024u) n = rubraview_fmt(buf, cap, T("{:.0} KB"), PROVEN_ARG((double)bytes / 1024.0));
+    else if (bytes < 1024ull * 1024ull * 1024ull) n = rubraview_fmt(buf, cap, T("{:.1} MB"), PROVEN_ARG((double)bytes / (1024.0 * 1024.0)));
+    else n = rubraview_fmt(buf, cap, T("{:.2} GB"), PROVEN_ARG((double)bytes / (1024.0 * 1024.0 * 1024.0)));
     if (n <= 0 || (size_t)n >= cap) { buf[0] = '\0'; return 0; }
     return (size_t)n;
 }
@@ -509,7 +510,7 @@ void rubraview_picker_sort_order(const rubraview_fs_listing_t *listing, const ru
     size_t n = listing->count;
     for (size_t i = 0; i < n; ++i) order[i] = i;
     sort_ctx_t c = { .listing = listing, .media = media, .key = key, .descending = descending };
-    size_t *tmp = n > 1 ? (size_t*)malloc(n * sizeof(size_t)) : NULL;
+    size_t *tmp = n > 1 ? (size_t*)rubraview_alloc(n * sizeof(size_t)) : NULL;
     if (!tmp) {
         /* no room for the merge: insertion, stable too */
         for (size_t i = 1; i < n; ++i) {
@@ -528,9 +529,9 @@ void rubraview_picker_sort_order(const rubraview_fs_listing_t *listing, const ru
             while (i < mid) tmp[k++] = order[i++];
             while (j < hi) tmp[k++] = order[j++];
         }
-        memcpy(order, tmp, n * sizeof(size_t));
+        proven_sys_mem_copy(order, tmp, n * sizeof(size_t));
     }
-    free(tmp);
+    rubraview_free(tmp);
 }
 
 int32_t rubraview_folder_show_for(int32_t show, int32_t opened_kind, bool same_kind) {
@@ -672,7 +673,7 @@ static struct rubraview_shape_slot *shape_slot(rubraview_shape_cache_t *cache, p
     if (cache->count >= RUBRAVIEW_SHAPE_CACHE_MAX) rubraview_shape_cache_free(cache);   /* starts over */
     if (!cache->slots || (cache->count + 1) * 10 > cache->capacity * 7) {
         size_t capacity = cache->capacity ? cache->capacity * 2 : 256;
-        struct rubraview_shape_slot *slots = (struct rubraview_shape_slot*)calloc(capacity, sizeof(*slots));
+        struct rubraview_shape_slot *slots = (struct rubraview_shape_slot*)rubraview_alloc_zero(capacity, sizeof(*slots));
         if (!slots) return NULL;
         rubraview_shape_cache_t grown = { .slots = slots, .capacity = capacity, .count = cache->count, .clock = cache->clock };
         for (size_t i = 0; i < cache->capacity; ++i) {
@@ -682,16 +683,16 @@ static struct rubraview_shape_slot *shape_slot(rubraview_shape_cache_t *cache, p
                                                          cache->slots[i].hash);
             *to = cache->slots[i];
         }
-        free(cache->slots);
+        rubraview_free(cache->slots);
         *cache = grown;
     }
     uint64_t h = shape_hash(path);
     struct rubraview_shape_slot *s = shape_find(cache, path, h);
     if (!s) return NULL;
     if (!s->path) {
-        char *copy = (char*)malloc(path.size);
+        char *copy = (char*)rubraview_alloc(path.size);
         if (!copy) return NULL;
-        memcpy(copy, path.ptr, path.size);
+        proven_sys_mem_copy(copy, path.ptr, path.size);
         *s = (struct rubraview_shape_slot){ .path = copy, .len = path.size, .hash = h, .seconds = -1.0 };
         cache->count++;
     }
@@ -725,12 +726,14 @@ bool rubraview_shape_cache_put_facts(rubraview_shape_cache_t *cache, proven_u8st
 
 #define FACTS_HEAD "rubraview facts 1\n"
 
-size_t rubraview_shape_cache_parse(rubraview_shape_cache_t *cache, const char *text, size_t size) {
-    if (!cache || !text || size < sizeof(FACTS_HEAD) - 1 || memcmp(text, FACTS_HEAD, sizeof(FACTS_HEAD) - 1) != 0) return 0;
+size_t rubraview_shape_cache_parse(rubraview_shape_cache_t *cache, proven_u8str_view_t text_view) {
+    const char *text = (const char *)text_view.ptr;
+    size_t size = (size_t)text_view.size;
+    if (!cache || !text || size < sizeof(FACTS_HEAD) - 1 || proven_sys_mem_cmp(text, FACTS_HEAD, sizeof(FACTS_HEAD) - 1) != 0) return 0;
     size_t added = 0, line = 0;
     for (size_t at = sizeof(FACTS_HEAD) - 1; at < size; ++line) {
         const char *start = text + at;
-        const char *nl = memchr(start, '\n', size - at);
+        const char *nl = rubraview_mem_chr(start, '\n', size - at);
         size_t n = nl ? (size_t)(nl - start) : size - at;
         at += n + 1;
         char buf[64];
@@ -740,12 +743,12 @@ size_t rubraview_shape_cache_parse(rubraview_shape_cache_t *cache, const char *t
         double seconds = -1.0;
         bool ok = true;
         for (; fields < 5 && ok; ++fields) {   /* five numbers, then the path */
-            const char *end = memchr(tab, '\t', n - (size_t)(tab - start));
+            const char *end = rubraview_mem_chr(tab, '\t', n - (size_t)(tab - start));
             if (!end || end == tab || (size_t)(end - tab) >= sizeof(buf)) { ok = false; break; }
-            memcpy(buf, tab, (size_t)(end - tab));
+            proven_sys_mem_copy(buf, tab, (size_t)(end - tab));
             buf[end - tab] = '\0';
             char *stop = NULL;
-            if (fields == 3) { seconds = buf[0] == '-' ? -1.0 : strtod(buf, &stop); ok = buf[0] == '-' || (stop && *stop == '\0'); }
+            if (fields == 3) { seconds = buf[0] == '-' ? -1.0 : proven_strtod(buf, &stop); ok = buf[0] == '-' || (stop && *stop == '\0'); }
             else { values[fields] = strtoll(buf, &stop, 10); ok = stop && *stop == '\0'; }
             tab = end + 1;
         }
@@ -778,10 +781,10 @@ char *rubraview_shape_cache_serialize(const rubraview_shape_cache_t *cache, size
                                       bool (*kept_out)(void *context, proven_u8str_view_t path), void *context, size_t *out_size) {
     *out_size = 0;
     size_t n = 0;
-    const struct rubraview_shape_slot **order = cache && cache->count ? (const struct rubraview_shape_slot **)malloc(cache->count * sizeof(*order)) : NULL;
+    const struct rubraview_shape_slot **order = cache && cache->count ? (const struct rubraview_shape_slot **)rubraview_alloc(cache->count * sizeof(*order)) : NULL;
     for (size_t i = 0; order && i < cache->capacity; ++i) {
         const struct rubraview_shape_slot *s = &cache->slots[i];
-        if (!s->path || s->mtime == 0 || memchr(s->path, '\n', s->len) || memchr(s->path, '\t', s->len)) continue;
+        if (!s->path || s->mtime == 0 || rubraview_mem_chr(s->path, '\n', s->len) || rubraview_mem_chr(s->path, '\t', s->len)) continue;
         if (kept_out && kept_out(context, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s->path, .size = s->len })) continue;
         order[n++] = s;
     }
@@ -789,21 +792,21 @@ char *rubraview_shape_cache_serialize(const rubraview_shape_cache_t *cache, size
     if (n > max_entries) n = max_entries;
     size_t cap = sizeof(FACTS_HEAD) + 1;
     for (size_t i = 0; i < n; ++i) cap += order[i]->len + 96;
-    char *out = (char *)malloc(cap);
-    if (!out) { free(order); return NULL; }
-    size_t at = (size_t)snprintf(out, cap, "%s", FACTS_HEAD);
+    char *out = (char *)rubraview_alloc(cap);
+    if (!out) { rubraview_free(order); return NULL; }
+    size_t at = (size_t)rubraview_fmt(out, cap, "{}", PROVEN_ARG(FACTS_HEAD));
     for (size_t i = 0; i < n; ++i) {
         const struct rubraview_shape_slot *s = order[i];
         char secs[32] = "-";
-        if (s->seconds >= 0.0) snprintf(secs, sizeof(secs), "%.3f", s->seconds);
-        int k = snprintf(out + at, cap - at, "%lld\t%d\t%d\t%s\t%d\t", (long long)s->mtime, (int)s->width, (int)s->height, secs, (int)s->shape);
+        if (s->seconds >= 0.0) rubraview_fmt(secs, sizeof(secs), "{:.3}", PROVEN_ARG((double)s->seconds));
+        int k = rubraview_fmt(out + at, cap - at, "{}\t{}\t{}\t{}\t{}\t", PROVEN_ARG((long long)s->mtime), PROVEN_ARG((int)s->width), PROVEN_ARG((int)s->height), PROVEN_ARG(secs), PROVEN_ARG((int)s->shape));
         if (k < 0 || (size_t)k + s->len + 2 > cap - at) break;
         at += (size_t)k;
-        memcpy(out + at, s->path, s->len);
+        proven_sys_mem_copy(out + at, s->path, s->len);
         at += s->len;
         out[at++] = '\n';
     }
-    free(order);
+    rubraview_free(order);
     out[at] = '\0';   /* text: ended, not counted */
     *out_size = at;
     return out;
@@ -811,7 +814,7 @@ char *rubraview_shape_cache_serialize(const rubraview_shape_cache_t *cache, size
 
 void rubraview_shape_cache_free(rubraview_shape_cache_t *cache) {
     if (!cache) return;
-    for (size_t i = 0; i < cache->capacity; ++i) free(cache->slots[i].path);
-    free(cache->slots);
+    for (size_t i = 0; i < cache->capacity; ++i) rubraview_free(cache->slots[i].path);
+    rubraview_free(cache->slots);
     *cache = (rubraview_shape_cache_t){0};
 }

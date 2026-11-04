@@ -23,7 +23,7 @@ typedef struct rubraview_tiles rubraview_tiles_t;
 typedef struct rubraview_tile_result {
     uint32_t generation;
     rubraview_tile_key_t key;
-    uint8_t *bgra;          /* premultiplied, top row first; NULL: could not be made. free() it */
+    uint8_t *bgra;          /* premultiplied, top row first; NULL: could not be made. rubraview_free() it */
     int32_t  width, height;
 } rubraview_tile_result_t;
 
@@ -40,7 +40,7 @@ void rubraview_pal_tiles_source(rubraview_tiles_t *tiles, uint32_t generation, p
 /* The same for a page with no file of its own — an archive page (RV-085).
    `bytes` is a malloc'd copy of the page the thread takes over and frees;
    it is freed here if no thread is running. */
-void rubraview_pal_tiles_source_bytes(rubraview_tiles_t *tiles, uint32_t generation, uint8_t *bytes, size_t size,
+void rubraview_pal_tiles_source_bytes(rubraview_tiles_t *tiles, uint32_t generation, proven_mem_mut_t bytes_view,
                                       bool apply_exif_orientation, int32_t picture_w, int32_t picture_h);
 /* The tiles wanted now, replacing what was wanted before (at most 128). */
 void rubraview_pal_tiles_want(rubraview_tiles_t *tiles, uint32_t generation,

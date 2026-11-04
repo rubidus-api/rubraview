@@ -293,13 +293,13 @@ typedef struct rubraview_mhost_frame_ref {
 /** The table's size for `count` pictures. */
 size_t rubraview_mhost_frames_head(uint32_t count);
 /** Picture `index` of a frames payload of `size` bytes, checked; false when it does not lie inside. */
-bool rubraview_mhost_frame_at(const uint8_t *payload, size_t size, uint32_t index, int32_t max_side,
+bool rubraview_mhost_frame_at(proven_mem_view_t payload_view, uint32_t index, int32_t max_side,
                               rubraview_mhost_frame_ref_t *out);
-uint32_t rubraview_mhost_frame_count(const uint8_t *payload, size_t size);
+uint32_t rubraview_mhost_frame_count(proven_mem_view_t payload_view);
 
 /* FFmpeg's filter catalog as bytes: the child packs it, the viewer unpacks it into its arena. */
 size_t rubraview_mhost_catalog_pack(const rubraview_ffilter_catalog_t *catalog, uint8_t *out, size_t cap);
-bool rubraview_mhost_catalog_unpack(proven_arena_t *arena, const uint8_t *data, size_t size,
+bool rubraview_mhost_catalog_unpack(proven_arena_t *arena, proven_mem_view_t data_view,
                                     rubraview_ffilter_catalog_t *out);
 
 #ifdef __cplusplus

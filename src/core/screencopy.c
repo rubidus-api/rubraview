@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/screencopy.h"
 #include <math.h>
 #include <string.h>
@@ -45,7 +46,7 @@ bool rubraview_screencopy_bounds(const rubraview_screencopy_key_t *key,
 
 static void let_go(rubraview_screencopy_slot_t *s, bool *drop) {
     *drop = s->used && s->made;
-    memset(s, 0, sizeof(*s));
+    proven_sys_mem_set(s, 0, sizeof(*s));
 }
 
 void rubraview_screencopy_frame(rubraview_screencopy_t *sc, bool drop[RUBRAVIEW_SCREENCOPY_SLOTS]) {

@@ -1,10 +1,13 @@
+#include "rubraview/core.h"
 #include "rubraview/textview.h"
 #include "rubraview/lang.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-uint32_t rubraview_text_next_cp(const char *s, size_t len, size_t *i) {
+uint32_t rubraview_text_next_cp(proven_u8str_view_t s_view, size_t *i) {
+    const char *s = (const char *)s_view.ptr;
+    size_t len = (size_t)s_view.size;
     const uint8_t *b = (const uint8_t *)s;
     uint8_t c = b[*i];
     int n = c < 0x80 ? 1 : c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 0;
@@ -22,7 +25,7 @@ static uint32_t prev_cp(const char *s, size_t end, size_t *start) {
     if (i > 0) --i;
     size_t j = i;
     if (start) *start = i;
-    return end > 0 ? rubraview_text_next_cp(s, end, &j) : 0;
+    return end > 0 ? rubraview_text_next_cp(rubraview_bytes_view(s, end), &j) : 0;
 }
 
 static bool is_space_cp(uint32_t cp) { return cp == ' ' || cp == '\t' || cp == 0x3000 || cp == 0xA0; }
@@ -50,7 +53,7 @@ static bool is_sentence_end(uint32_t cp) {
 static void trim(const char *s, size_t *start, size_t *end) {
     while (*start < *end) {
         size_t i = *start;
-        if (!is_space_cp(rubraview_text_next_cp(s, *end, &i))) break;
+        if (!is_space_cp(rubraview_text_next_cp(rubraview_bytes_view(s, *end), &i))) break;
         *start = i;
     }
     while (*end > *start) {
@@ -60,16 +63,20 @@ static void trim(const char *s, size_t *start, size_t *end) {
     }
 }
 
-bool rubraview_text_ends_sentence(const char *line, size_t len) {
+bool rubraview_text_ends_sentence(proven_u8str_view_t line_view) {
+    const char *line = (const char *)line_view.ptr;
+    size_t len = (size_t)line_view.size;
     size_t start = 0, end = len;
     trim(line, &start, &end);
     return end > start && is_sentence_end(prev_cp(line, end, NULL));
 }
 
-static bool starts_indented(const char *line, size_t len) {
+static bool starts_indented(proven_u8str_view_t line_view) {
+    const char *line = (const char *)line_view.ptr;
+    size_t len = (size_t)line_view.size;
     if (len == 0) return false;
     size_t i = 0;
-    return is_space_cp(rubraview_text_next_cp(line, len, &i));
+    return is_space_cp(rubraview_text_next_cp(rubraview_bytes_view(line, len), &i));
 }
 
 typedef struct { size_t start, end; } line_t;
@@ -85,12 +92,12 @@ static void put(builder_t *b, const char *p, size_t n) {
     if (b->v->len + n + 2 > b->text_cap) {
         size_t cap = b->text_cap ? b->text_cap * 2 : 4096;
         while (cap < b->v->len + n + 2) cap *= 2;
-        char *t = (char *)realloc(b->v->text, cap);
+        char *t = (char *)rubraview_realloc(rubraview_mem_mut(b->v->text, cap));
         if (!t) { b->failed = true; return; }
         b->v->text = t;
         b->text_cap = cap;
     }
-    memcpy(b->v->text + b->v->len, p, n);
+    proven_sys_mem_copy(b->v->text + b->v->len, p, n);
     b->v->len += n;
     b->v->text[b->v->len] = '\0';
 }
@@ -101,7 +108,7 @@ static void begin(builder_t *b, size_t source, bool gap, bool joined) {
     if (b->v->count > 0 && !joined) put(b, "\n", 1);
     if (b->v->count + 1 > b->para_cap) {
         size_t cap = b->para_cap ? b->para_cap * 2 : 256;
-        rubraview_text_para_t *p = (rubraview_text_para_t *)realloc(b->v->paras, cap * sizeof(*p));
+        rubraview_text_para_t *p = (rubraview_text_para_t *)rubraview_realloc(rubraview_mem_mut(b->v->paras, cap * sizeof(*p)));
         if (!p) { b->failed = true; return; }
         b->v->paras = p;
         b->para_cap = cap;
@@ -124,7 +131,7 @@ static void join_line(builder_t *b, const char *s, size_t start, size_t end) {
     if (b->failed || start >= end) return;
     if (b->v->len > p->start) {
         size_t i = start;
-        uint32_t next = rubraview_text_next_cp(s, end, &i);
+        uint32_t next = rubraview_text_next_cp(rubraview_bytes_view(s, end), &i);
         uint32_t last = prev_cp(b->v->text, b->v->len, NULL);
         if (!is_unspaced(last) && !is_unspaced(next)) put(b, " ", 1);
     }
@@ -134,22 +141,26 @@ static void join_line(builder_t *b, const char *s, size_t start, size_t end) {
 /* RV-123: the line before k is blank. */
 static bool blank_before(const bool *blank, size_t k) { return k > 0 && blank[k - 1]; }
 
-bool rubraview_text_view_build(rubraview_text_view_t *out, const char *s, size_t len,
+bool rubraview_text_view_build(rubraview_text_view_t *out, proven_u8str_view_t s_view,
                                rubraview_text_breaks_t breaks, bool trim_lead) {
-    return rubraview_text_view_build_ex(out, s, len, breaks, trim_lead, false);
+    const char *s = (const char *)s_view.ptr;
+    size_t len = (size_t)s_view.size;
+    return rubraview_text_view_build_ex(out, rubraview_bytes_view(s, len), breaks, trim_lead, false);
 }
 
-bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, size_t len,
+bool rubraview_text_view_build_ex(rubraview_text_view_t *out, proven_u8str_view_t s_view,
                                rubraview_text_breaks_t breaks, bool trim_lead, bool headings) {
+    const char *s = (const char *)s_view.ptr;
+    size_t len = (size_t)s_view.size;
     *out = (rubraview_text_view_t){0};
     builder_t b = { .v = out };
 
     /* The lines, and the blank ones. */
     size_t count = 1;
     for (size_t i = 0; i < len; ++i) count += s[i] == '\n';
-    line_t *lines = (line_t *)malloc(count * sizeof(line_t));
-    bool *blank = (bool *)malloc(count * sizeof(bool));
-    if (!lines || !blank) { free(lines); free(blank); return false; }
+    line_t *lines = (line_t *)rubraview_alloc(count * sizeof(line_t));
+    bool *blank = (bool *)rubraview_alloc(count * sizeof(bool));
+    if (!lines || !blank) { rubraview_free(lines); rubraview_free(blank); return false; }
     size_t n = 0, at = 0;
     for (size_t i = 0; i <= len; ++i) {
         if (i == len || s[i] == '\n') {
@@ -182,7 +193,7 @@ bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, siz
             if (!open) { begin(&b, lines[k].start, false, false); open = true; }
             rubraview_text_para_t *p = &b.v->paras[b.v->count - 1];
             if (!b.failed && b.v->len - p->start >= RUBRAVIEW_TEXT_PIECE &&
-                rubraview_text_ends_sentence(b.v->text + p->start, b.v->len - p->start)) {
+                rubraview_text_ends_sentence(rubraview_bytes_view(b.v->text + p->start, b.v->len - p->start))) {
                 end_para(&b);
                 put(&b, " ", 1);   /* the space the run had here, at the end of the piece before */
                 b.v->paras[b.v->count - 1].len++;
@@ -198,17 +209,17 @@ bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, siz
            never has more (a break and nothing else between paragraphs) ends
            one where a sentence ends and the next line is indented, or, with
            no indenting at all, wherever a line ends a sentence. */
-        size_t *run = (size_t *)calloc(n ? n : 1, sizeof(size_t));
+        size_t *run = (size_t *)rubraview_alloc_zero(n ? n : 1, sizeof(size_t));
         size_t hist[8] = {0}, lines_in = 0, lines_indented = 0;
         bool any_indent = false;
-        if (!run) { free(lines); free(blank); return false; }
+        if (!run) { rubraview_free(lines); rubraview_free(blank); return false; }
         for (size_t k = 0; k < n; ++k) {
             if (blank[k]) continue;
             size_t r = 1, j = k + 1;
             while (j < n && blank[j]) { ++r; ++j; }
             run[k] = j < n ? r : 0;   /* the last line: nothing follows */
             if (run[k]) hist[r < 7 ? r : 7]++;
-            bool in = starts_indented(s + lines[k].start, lines[k].end - lines[k].start);
+            bool in = starts_indented(rubraview_bytes_view(s + lines[k].start, lines[k].end - lines[k].start));
             any_indent = any_indent || in;
             lines_in++;
             lines_indented += in;
@@ -232,14 +243,14 @@ bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, siz
             /* (a blank line before it, or the file's start, and one after it) */
             bool heading = headings && e > a && run[k] >= 2 && (k == first_line || blank_before(blank, k)) &&
                            rubraview_text_columns((proven_u8str_view_t){ .ptr = (const proven_byte_t *)s + a, .size = e - a }) <= 30 &&
-                           !rubraview_text_ends_sentence(s + lines[k].start, lines[k].end - lines[k].start);
+                           !rubraview_text_ends_sentence(rubraview_bytes_view(s + lines[k].start, lines[k].end - lines[k].start));
             if (heading && open) { end_para(&b); open = false; }
             if (!open) {
                 /* 1.25.0 (owner, 2026-10-20: "문단의 맨 처음은 띄우게 ... 문단의 끝에서 개행. 빈 줄이 들어가는건 아님"):
                    as in a printed novel — the first line in by a space, the next paragraph on the next line */
                 begin(&b, lines[k].start, false, false);
                 open = true;
-                if (!trim_lead && starts_indented(s + lines[k].start, lines[k].end - lines[k].start)) {
+                if (!trim_lead && starts_indented(rubraview_bytes_view(s + lines[k].start, lines[k].end - lines[k].start))) {
                     size_t keep_a = lines[k].start;
                     put(&b, s + keep_a, a - keep_a);   /* the indent the paragraph had */
                 } else if (!heading) {
@@ -252,20 +263,20 @@ bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, siz
             if (heading) { end_para(&b); open = false; continue; }
             if (run[k] == 0) continue;
             size_t next = k + run[k];
-            bool sentence = rubraview_text_ends_sentence(s + lines[k].start, lines[k].end - lines[k].start);
+            bool sentence = rubraview_text_ends_sentence(rubraview_bytes_view(s + lines[k].start, lines[k].end - lines[k].start));
             bool ends;
             if (more_ever) ends = sentence && (run[k] > usual ||
-                                               (indent_marks && starts_indented(s + lines[next].start, lines[next].end - lines[next].start)));
-            else if (any_indent) ends = sentence && starts_indented(s + lines[next].start, lines[next].end - lines[next].start);
+                                               (indent_marks && starts_indented(rubraview_bytes_view(s + lines[next].start, lines[next].end - lines[next].start))));
+            else if (any_indent) ends = sentence && starts_indented(rubraview_bytes_view(s + lines[next].start, lines[next].end - lines[next].start));
             else ends = sentence;
             if (ends) { end_para(&b); open = false; }
         }
         if (open) end_para(&b);
-        free(run);
+        rubraview_free(run);
     }
 
-    free(lines);
-    free(blank);
+    rubraview_free(lines);
+    rubraview_free(blank);
     if (out->count == 0 && !b.failed) { begin(&b, 0, false, false); end_para(&b); }
     if (b.failed) { rubraview_text_view_free(out); return false; }
     if (!out->text) { put(&b, "", 0); if (b.failed) { rubraview_text_view_free(out); return false; } }
@@ -274,8 +285,8 @@ bool rubraview_text_view_build_ex(rubraview_text_view_t *out, const char *s, siz
 
 void rubraview_text_view_free(rubraview_text_view_t *view) {
     if (!view) return;
-    free(view->text);
-    free(view->paras);
+    rubraview_free(view->text);
+    rubraview_free(view->paras);
     *view = (rubraview_text_view_t){0};
 }
 
@@ -316,7 +327,7 @@ static bool match_at(const char *s, size_t len, size_t i, const uint32_t *needle
     size_t j = i;
     for (size_t k = 0; k < n; ++k) {
         if (j >= len) return false;
-        if (fold(rubraview_text_next_cp(s, len, &j)) != needle[k]) return false;
+        if (fold(rubraview_text_next_cp(rubraview_bytes_view(s, len), &j)) != needle[k]) return false;
     }
     *bytes = j - i;
     return true;
@@ -324,7 +335,7 @@ static bool match_at(const char *s, size_t len, size_t i, const uint32_t *needle
 
 static size_t folded(proven_u8str_view_t needle, uint32_t *out, size_t cap) {
     size_t n = 0, i = 0;
-    while (i < needle.size && n < cap) out[n++] = fold(rubraview_text_next_cp((const char *)needle.ptr, needle.size, &i));
+    while (i < needle.size && n < cap) out[n++] = fold(rubraview_text_next_cp(rubraview_bytes_view((const char *)needle.ptr, needle.size), &i));
     return n;
 }
 
@@ -344,7 +355,7 @@ bool rubraview_text_find(const rubraview_text_view_t *view, proven_u8str_view_t 
             while (i < stop) {
                 if (match_at(s, total, i, want, n, &bytes)) { *at = i; *len = bytes; return true; }
                 size_t j = i;
-                (void)rubraview_text_next_cp(s, total, &j);
+                (void)rubraview_text_next_cp(rubraview_bytes_view(s, total), &j);
                 i = j;
             }
         }
@@ -377,7 +388,7 @@ size_t rubraview_text_count(const rubraview_text_view_t *view, proven_u8str_view
             continue;
         }
         size_t j = i;
-        (void)rubraview_text_next_cp(view->text, view->len, &j);
+        (void)rubraview_text_next_cp(rubraview_bytes_view(view->text, view->len), &j);
         i = j;
     }
     return count;

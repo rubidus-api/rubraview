@@ -50,8 +50,7 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture(rubraview_rendere
  * where the bytes come from the archive VFS and never touch the disk.
  */
 rubraview_image_load_result_t rubraview_pal_image_load_texture_from_memory(rubraview_renderer_t *renderer,
-                                                                           const uint8_t *data,
-                                                                           size_t size,
+                                                                           proven_mem_view_t data_view,
                                                                            bool apply_exif_orientation);
 
 /**
@@ -66,7 +65,7 @@ rubraview_image_load_result_t rubraview_pal_image_load_texture_from_memory(rubra
  * larger. Returns 1 for an ordinary image and 0 if it cannot be read.
  */
 size_t rubraview_pal_image_frame_info(proven_u8str_view_t path,
-                                      const uint8_t *data, size_t size,
+                                      proven_mem_view_t data_view,
                                       rubraview_frame_t *out_frames, size_t cap);
 
 /**
@@ -77,7 +76,7 @@ size_t rubraview_pal_image_frame_info(proven_u8str_view_t path,
  */
 rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_t *renderer,
                                                              proven_u8str_view_t path,
-                                                             const uint8_t *data, size_t size,
+                                                             proven_mem_view_t data_view,
                                                              size_t frame_index,
                                                              bool apply_exif_orientation,
                                                              double *out_delay_seconds);
@@ -98,7 +97,7 @@ rubraview_image_load_result_t rubraview_pal_image_load_frame(rubraview_renderer_
  */
 typedef struct rubraview_anim_reader rubraview_anim_reader_t;
 
-rubraview_anim_reader_t *rubraview_pal_anim_open(proven_u8str_view_t path, const uint8_t *data, size_t size,
+rubraview_anim_reader_t *rubraview_pal_anim_open(proven_u8str_view_t path, proven_mem_view_t data_view,
                                                  const rubraview_frame_t **out_frames, size_t *out_count,
                                                  int32_t *out_canvas_width, int32_t *out_canvas_height);
 
@@ -141,7 +140,7 @@ void rubraview_pal_image_thread_end(void);
  * — and says where it stopped and what the operating system said.
  */
 proven_u8str_view_t rubraview_pal_image_diagnose(rubraview_renderer_t *renderer, proven_u8str_view_t path,
-                                     char *buffer, size_t buffer_size);
+                                     proven_mem_mut_t buffer_view);
 
 /**
  * §3.13's commit layer needs the pixels on the CPU, which the viewing
@@ -165,7 +164,7 @@ typedef struct rubraview_image_desc {
     bool     color_profile;
 } rubraview_image_desc_t;
 
-bool rubraview_pal_image_describe(proven_u8str_view_t path, const uint8_t *data, size_t size, rubraview_image_desc_t *out);
+bool rubraview_pal_image_describe(proven_u8str_view_t path, proven_mem_view_t data_view, rubraview_image_desc_t *out);
 
 /**
  * A picture's size as stored, without decoding its pixels — enough for a
@@ -176,7 +175,7 @@ bool rubraview_pal_image_size(proven_u8str_view_t path, int32_t *out_width, int3
 
 rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
                                                    proven_u8str_view_t path,
-                                                   const uint8_t *data, size_t size,
+                                                   proven_mem_view_t data_view,
                                                    bool apply_exif_orientation);
 
 /**
@@ -187,7 +186,7 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels(proven_arena_t *arena,
  */
 rubraview_pixbuf_t rubraview_pal_image_read_pixels_within(proven_arena_t *arena,
                                                           proven_u8str_view_t path,
-                                                          const uint8_t *data, size_t size,
+                                                          proven_mem_view_t data_view,
                                                           bool apply_exif_orientation,
                                                           int32_t max_width, int32_t max_height);
 
@@ -232,11 +231,11 @@ const char *rubraview_pal_image_save_why(void);
  * its FFmpeg cannot write a moving JPEG XL (the first picture is then written as a still one). Why it failed:
  * rubraview_pal_image_save_why().
  */
-int rubraview_pal_image_save_animation_ffmpeg(proven_u8str_view_t out_path, proven_u8str_view_t source_path, const uint8_t *data, size_t size,
+int rubraview_pal_image_save_animation_ffmpeg(proven_u8str_view_t out_path, proven_u8str_view_t source_path, proven_mem_view_t data_view,
                                               const rubraview_export_options_t *options, bool avif);
 
 int rubraview_pal_image_save_animation_webp(proven_u8str_view_t out_path, proven_u8str_view_t source_path,
-                                            const uint8_t *data, size_t size,
+                                            proven_mem_view_t data_view,
                                             const rubraview_export_options_t *options);
 
 /**

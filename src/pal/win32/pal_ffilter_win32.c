@@ -1,4 +1,6 @@
 #ifdef _WIN32
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include <windows.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -71,7 +73,7 @@ static void ffl_log(void *avcl, int level, const char *fmt, va_list vl) {
         int n = vsnprintf(line, sizeof(line), fmt, copy);
         va_end(copy);
         while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == ' ')) line[--n] = '\0';
-        if (n > 0 && !g_ffl_said[0]) snprintf(g_ffl_said, g_ffl_said_size, "%s", line);   /* the first: the cause ("No such filter: 'eq'") */
+        if (n > 0 && !g_ffl_said[0]) rubraview_fmt(g_ffl_said, g_ffl_said_size, "{}", PROVEN_ARG(line));   /* the first: the cause ("No such filter: 'eq'") */
         return;
     }
     if (g_ffl.av_log_default_callback) g_ffl.av_log_default_callback(avcl, level, fmt, vl);
@@ -84,8 +86,8 @@ static HMODULE ffl_load_beside(HMODULE util) {
     while (n > 0 && path[n - 1] != L'\\') --n;
     static const WCHAR *const NAMES[2] = { L"avfilter-" AV_STRINGIFY(LIBAVFILTER_VERSION_MAJOR) L".dll", L"avfilter.dll" };
     for (int i = 0; i < 2; ++i) {
-        size_t k = wcslen(NAMES[i]);
-        memcpy(path + n, NAMES[i], (k + 1) * sizeof(WCHAR));
+        size_t k = rubraview_wlen(NAMES[i]);
+        proven_sys_mem_copy(path + n, NAMES[i], (k + 1) * sizeof(WCHAR));
         if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) continue;
         HMODULE m = LoadLibraryExW(path, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
         if (m) return m;
@@ -151,17 +153,17 @@ static bool video_one_to_one(const AVFilter *f) {
     /* a graphics card's, which want its frames */
     static const char *const CARD[] = { "_opencl", "_vulkan", "_cuda", "_npp", "_qsv", "_vaapi", "_d3d11", "_d3d12", "_amf",
                                         "_videotoolbox", "_vt", "_metal", "_cuvid", "_libplacebo", "hwupload", "hwdownload", "hwmap" };
-    for (size_t i = 0; i < sizeof(CARD) / sizeof(CARD[0]); ++i) if (strstr(f->name, CARD[i])) return false;
+    for (size_t i = 0; i < sizeof(CARD) / sizeof(CARD[0]); ++i) if (rubraview_cstr_str(f->name, CARD[i])) return false;
     return rubraview_ffilter_refused(proven_u8str_view_from_cstr(f->name)) == NULL;
 }
 
 static proven_u8str_view_t copy_text(proven_arena_t *arena, const char *s) {
     if (!s) return PROVEN_LIT("");
-    size_t n = strlen(s);
+    size_t n = proven_cstr_len(s);
     if (n > 512) n = 512;
     proven_result_mem_mut_t r = proven_arena_alloc(arena, n + 1);
     if (!proven_is_ok(r.err)) return PROVEN_LIT("");
-    memcpy(r.value.ptr, s, n);
+    proven_sys_mem_copy(r.value.ptr, s, n);
     ((char *)r.value.ptr)[n] = '\0';
     return proven_u8str_view_from_bytes(r.value.ptr, n);
 }
@@ -184,14 +186,14 @@ static bool option_of(proven_arena_t *arena, const AVFilter *f, const AVOption *
         proven_u8str_view_t names[RUBRAVIEW_FFILTER_MAX_CHOICES];
         int32_t count = 0, at = -1;
         for (const AVOption *c = NULL; (c = g_ffl.av_opt_next(&f->priv_class, c)) && count < RUBRAVIEW_FFILTER_MAX_CHOICES;) {
-            if (c->type != AV_OPT_TYPE_CONST || !c->unit || strcmp(c->unit, o->unit) != 0) continue;
+            if (c->type != AV_OPT_TYPE_CONST || !c->unit || rubraview_cstr_cmp(c->unit, o->unit) != 0) continue;
             if (c->default_val.i64 == o->default_val.i64 && at < 0) at = count;
             names[count++] = copy_text(arena, c->name);
         }
         if (count > 0 && at >= 0) {
             proven_result_mem_mut_t r = rubraview_arena_alloc_array(arena, (size_t)count, sizeof(names[0]));
             if (proven_is_ok(r.err)) {
-                memcpy(r.value.ptr, names, sizeof(names[0]) * (size_t)count);
+                proven_sys_mem_copy(r.value.ptr, names, sizeof(names[0]) * (size_t)count);
                 out->kind = RUBRAVIEW_FFILTER_CHOICE;
                 out->choices = (proven_u8str_view_t *)r.value.ptr;
                 out->choice_count = count;
@@ -199,7 +201,7 @@ static bool option_of(proven_arena_t *arena, const AVFilter *f, const AVOption *
                 return true;
             }
         }
-        snprintf(num, sizeof(num), "%lld", (long long)o->default_val.i64);
+        rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG((long long)o->default_val.i64));
         out->text = copy_text(arena, num);
         return true;
     }
@@ -214,12 +216,12 @@ static bool option_of(proven_arena_t *arena, const AVFilter *f, const AVOption *
             return true;
         case AV_OPT_TYPE_INT: case AV_OPT_TYPE_INT64: case AV_OPT_TYPE_UINT:
             if (slider_range(o->min, o->max)) { out->kind = RUBRAVIEW_FFILTER_INT; out->value = (double)o->default_val.i64; return true; }
-            snprintf(num, sizeof(num), "%lld", (long long)o->default_val.i64);
+            rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG((long long)o->default_val.i64));
             out->text = copy_text(arena, num);
             return true;
         case AV_OPT_TYPE_DOUBLE: case AV_OPT_TYPE_FLOAT:
             if (slider_range(o->min, o->max)) { out->kind = RUBRAVIEW_FFILTER_FLOAT; out->value = o->default_val.dbl; return true; }
-            snprintf(num, sizeof(num), "%.9g", o->default_val.dbl);
+            rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(o->default_val.dbl), 9)));
             out->text = copy_text(arena, num);
             return true;
         case AV_OPT_TYPE_STRING: case AV_OPT_TYPE_IMAGE_SIZE: case AV_OPT_TYPE_VIDEO_RATE: case AV_OPT_TYPE_COLOR:
@@ -259,7 +261,7 @@ bool rubraview_ffilter_local_list(proven_arena_t *arena, rubraview_ffilter_catal
             proven_result_mem_mut_t m = k ? rubraview_arena_alloc_array(arena, (size_t)k, sizeof(rows[0]))
                                           : (proven_result_mem_mut_t){0};
             if (k && proven_is_ok(m.err)) {
-                memcpy(m.value.ptr, rows, sizeof(rows[0]) * (size_t)k);
+                proven_sys_mem_copy(m.value.ptr, rows, sizeof(rows[0]) * (size_t)k);
                 x->options = (rubraview_ffilter_option_t *)m.value.ptr;
                 x->option_count = k;
             }
@@ -275,24 +277,28 @@ bool rubraview_ffilter_local_list(proven_arena_t *arena, rubraview_ffilter_catal
 /* ---- a run ---- */
 
 static void say(char *said, size_t size, const char *text) {
-    if (said && size) snprintf(said, size, "%s", text);
+    if (said && size) rubraview_fmt(said, size, "{}", PROVEN_ARG(text));
 }
 
-static void say_error(char *said, size_t size, int err) {
+static void say_error(proven_mem_mut_t said_view, int err) {
+    char *said = (char *)said_view.ptr;
+    size_t size = (size_t)said_view.size;
     if (!said || !size || said[0]) return;   /* FFmpeg's own message, when it gave one, says more */
     char text[128] = "";
-    if (g_ffl.av_strerror(err, text, sizeof(text)) < 0) snprintf(text, sizeof(text), "error %d", err);
-    snprintf(said, size, "%s", text);
+    if (g_ffl.av_strerror(err, text, sizeof(text)) < 0) rubraview_fmt(text, sizeof(text), "error {}", PROVEN_ARG((int)err));
+    rubraview_fmt(said, size, "{}", PROVEN_ARG(text));
 }
 
 bool rubraview_ffilter_local_run(const char *graph_text, const uint8_t *bgra, int32_t width, int32_t height,
-                               uint8_t **out, int32_t *out_width, int32_t *out_height, char *said, size_t said_size) {
+                               uint8_t **out, int32_t *out_width, int32_t *out_height, proven_mem_mut_t said_view) {
+    char *said = (char *)said_view.ptr;
+    size_t said_size = (size_t)said_view.size;
     *out = NULL;
     *out_width = *out_height = 0;
     if (said && said_size) said[0] = '\0';
     if (rubraview_ffilter_local_state() != RUBRAVIEW_FFILTER_READY) { say(said, said_size, "avfilter is not loaded"); return false; }
     const char *refused = rubraview_ffilter_refused(proven_u8str_view_from_cstr(graph_text));
-    if (refused) { snprintf(said, said_size, "the filter %s is not allowed here", refused); return false; }
+    if (refused) { rubraview_fmt(said, said_size, "the filter {} is not allowed here", PROVEN_ARG(refused)); return false; }
     if (width <= 0 || height <= 0 || width > MAX_SIDE || height > MAX_SIDE) { say(said, said_size, "the picture is too large"); return false; }
 
     g_ffl_said = said;
@@ -306,7 +312,7 @@ bool rubraview_ffilter_local_run(const char *graph_text, const uint8_t *bgra, in
     if (!graph || !ins || !outs || !frame || !done) { say(said, said_size, "out of memory"); goto end; }
 
     char args[160];
-    snprintf(args, sizeof(args), "video_size=%dx%d:pix_fmt=%d:time_base=1/25:pixel_aspect=1/1", width, height, (int)AV_PIX_FMT_BGRA);
+    rubraview_fmt(args, sizeof(args), "video_size={}x{}:pix_fmt={}:time_base=1/25:pixel_aspect=1/1", PROVEN_ARG((int)width), PROVEN_ARG((int)height), PROVEN_ARG((int)AV_PIX_FMT_BGRA));
     if ((err = g_ffl.avfilter_graph_create_filter(&src, g_ffl.avfilter_get_by_name("buffer"), "in", args, NULL, graph)) < 0) goto fail;
     sink = g_ffl.avfilter_graph_alloc_filter(graph, g_ffl.avfilter_get_by_name("buffersink"), "out");
     if (!sink) { err = AVERROR(ENOMEM); goto fail; }
@@ -332,7 +338,7 @@ bool rubraview_ffilter_local_run(const char *graph_text, const uint8_t *bgra, in
     frame->sample_aspect_ratio = (AVRational){ 1, 1 };
     if ((err = g_ffl.av_frame_get_buffer(frame, 0)) < 0) goto fail;
     for (int32_t y = 0; y < height; ++y)
-        memcpy(frame->data[0] + (size_t)y * (size_t)frame->linesize[0], bgra + (size_t)y * (size_t)width * 4u, (size_t)width * 4u);
+        proven_sys_mem_copy(frame->data[0] + (size_t)y * (size_t)frame->linesize[0], bgra + (size_t)y * (size_t)width * 4u, (size_t)width * 4u);
     if ((err = g_ffl.av_buffersrc_add_frame_flags(src, frame, 0)) < 0) goto fail;
     if ((err = g_ffl.av_buffersrc_add_frame_flags(src, NULL, 0)) < 0) goto fail;   /* the end: filters that wait for more give what they have */
     if ((err = g_ffl.av_buffersink_get_frame(sink, done)) < 0) goto fail;
@@ -343,17 +349,17 @@ bool rubraview_ffilter_local_run(const char *graph_text, const uint8_t *bgra, in
         goto end;
     }
     size_t row = (size_t)done->width * 4u;
-    uint8_t *pixels = (uint8_t *)malloc(row * (size_t)done->height);
+    uint8_t *pixels = (uint8_t *)rubraview_alloc(row * (size_t)done->height);
     if (!pixels) { say(said, said_size, "out of memory"); goto end; }
     for (int32_t y = 0; y < done->height; ++y)
-        memcpy(pixels + (size_t)y * row, done->data[0] + (ptrdiff_t)y * done->linesize[0], row);   /* vflip's run upwards */
+        proven_sys_mem_copy(pixels + (size_t)y * row, done->data[0] + (ptrdiff_t)y * done->linesize[0], row);   /* vflip's run upwards */
     *out = pixels;
     *out_width = done->width;
     *out_height = done->height;
     ok = true;
     goto end;
 fail:
-    say_error(said, said_size, err);
+    say_error(rubraview_mem_mut(said, said_size), err);
 end:
     g_ffl_said = NULL;
     if (frame) g_ffl.av_frame_free(&frame);
@@ -374,10 +380,12 @@ bool rubraview_pal_ffilter_list(proven_arena_t *arena, rubraview_ffilter_catalog
 }
 
 bool rubraview_pal_ffilter_run(const char *graph, const uint8_t *bgra, int32_t width, int32_t height,
-                               uint8_t **out, int32_t *out_width, int32_t *out_height, char *said, size_t said_size) {
+                               uint8_t **out, int32_t *out_width, int32_t *out_height, proven_mem_mut_t said_view) {
+    char *said = (char *)said_view.ptr;
+    size_t said_size = (size_t)said_view.size;
     if (rubraview_pal_ffmpeg_remote())
-        return rubraview_mhost_remote_filter_run(graph, bgra, width, height, out, out_width, out_height, said, said_size);
-    return rubraview_ffilter_local_run(graph, bgra, width, height, out, out_width, out_height, said, said_size);
+        return rubraview_mhost_remote_filter_run(graph, bgra, width, height, out, out_width, out_height, rubraview_mem_mut(said, said_size));
+    return rubraview_ffilter_local_run(graph, bgra, width, height, out, out_width, out_height, rubraview_mem_mut(said, said_size));
 }
 
 #endif /* _WIN32 */

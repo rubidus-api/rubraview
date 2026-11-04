@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "rubraview/core.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,14 +22,14 @@ extern "C" {
 typedef struct rubraview_avif rubraview_avif_t;
 
 /** Whether the bytes begin as an AVIF file does (`ftyp` with the brand avif or avis). */
-bool rubraview_avif_is(const uint8_t *bytes, size_t size);
+bool rubraview_avif_is(proven_mem_view_t bytes_view);
 
 /**
  * Open an AVIF held in memory; the bytes must stay where they are until
  * it is closed. NULL when it is not one, is damaged, or is larger than
  * `max_side` on a side. An animation has more than one frame.
  */
-rubraview_avif_t *rubraview_avif_open(const uint8_t *bytes, size_t size, int32_t max_side,
+rubraview_avif_t *rubraview_avif_open(proven_mem_view_t bytes_view, int32_t max_side,
                                       int32_t *out_width, int32_t *out_height, size_t *out_frames);
 
 /**

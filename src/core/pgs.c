@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/pgs.h"
 #include <string.h>
 
@@ -48,20 +49,26 @@ static bool segment_at(const uint8_t *bytes, size_t size, size_t at,
 
 /* A PCS that only sends a new palette is a step of a fade: it composes
    the same picture again and carries no object of its own. */
-static bool pcs_is_palette_only(const uint8_t *body, size_t len) {
+static bool pcs_is_palette_only(proven_mem_view_t body_view) {
+    const uint8_t *body = (const uint8_t *)body_view.ptr;
+    size_t len = (size_t)body_view.size;
     return len >= 11 && body[8] != 0;
 }
 
 /* A PCS says how many objects are composed; none means "clear". */
-static bool pcs_has_objects(const uint8_t *body, size_t len,
+static bool pcs_has_objects(proven_mem_view_t body_view,
                             int32_t *out_width, int32_t *out_height) {
+    const uint8_t *body = (const uint8_t *)body_view.ptr;
+    size_t len = (size_t)body_view.size;
     if (len < 11) return false;
     *out_width = (int32_t)be16(body);
     *out_height = (int32_t)be16(body + 2);
     return body[10] != 0;
 }
 
-rubraview_pgs_track_t rubraview_pgs_index(proven_arena_t *arena, const uint8_t *bytes, size_t size) {
+rubraview_pgs_track_t rubraview_pgs_index(proven_arena_t *arena, proven_mem_view_t bytes_view) {
+    const uint8_t *bytes = (const uint8_t *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
     rubraview_pgs_track_t track = {0};
     if (!arena || !bytes || size < PGS_HEADER) return track;
 
@@ -80,8 +87,8 @@ rubraview_pgs_track_t rubraview_pgs_index(proven_arena_t *arena, const uint8_t *
             size_t len = 0, next = 0;
             if (!segment_at(bytes, size, at, &type, &pts, &body, &len, &next)) break;
 
-            if (type == PGS_PCS && !pcs_is_palette_only(body, len)) {
-                bool draws = pcs_has_objects(body, len, &w, &h);
+            if (type == PGS_PCS && !pcs_is_palette_only(rubraview_mem_view(body, len))) {
+                bool draws = pcs_has_objects(rubraview_mem_view(body, len), &w, &h);
                 if (w > 0 && h > 0) { track.frame_width = w; track.frame_height = h; }
 
                 /* Whatever was on screen ends here — either because this
@@ -112,7 +119,7 @@ rubraview_pgs_track_t rubraview_pgs_index(proven_arena_t *arena, const uint8_t *
             proven_result_mem_mut_t mem = rubraview_arena_alloc_array(arena, wanted, sizeof(rubraview_pgs_entry_t));
             if (!proven_is_ok(mem.err)) return track;
             track.entries = (rubraview_pgs_entry_t*)mem.value.ptr;
-            memset(track.entries, 0, wanted * sizeof(rubraview_pgs_entry_t));
+            proven_sys_mem_set(track.entries, 0, wanted * sizeof(rubraview_pgs_entry_t));
         } else {
             track.count = count < wanted ? count : wanted;
         }
@@ -150,8 +157,10 @@ static uint32_t ycbcr_to_argb(uint8_t y, uint8_t cb, uint8_t cr, uint8_t alpha) 
  *   00 8L CC          L pixels of colour CC        (L < 64)
  *   00 CL LL CC       up to 16383 pixels of colour CC
  */
-static void decode_rle(const uint8_t *data, size_t size, int32_t width, int32_t height, uint8_t *out) {
-    memset(out, 0, (size_t)width * (size_t)height);
+static void decode_rle(proven_mem_view_t data_view, int32_t width, int32_t height, uint8_t *out) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
+    proven_sys_mem_set(out, 0, (size_t)width * (size_t)height);
     size_t at = 0;
     int32_t x = 0, y = 0;
     while (at < size && y < height) {
@@ -184,7 +193,7 @@ static void decode_rle(const uint8_t *data, size_t size, int32_t width, int32_t 
         }
         if (run == 0) continue;
         if (x + (int32_t)run > width) run = (uint32_t)(width - x);
-        if (run > 0) memset(out + (size_t)y * (size_t)width + (size_t)x, colour, run);
+        if (run > 0) proven_sys_mem_set(out + (size_t)y * (size_t)width + (size_t)x, colour, run);
         x += (int32_t)run;
         /* A line ends when the stream says so and not before: a run that
            fills the width is still followed by its own `00 00`. */
@@ -192,8 +201,10 @@ static void decode_rle(const uint8_t *data, size_t size, int32_t width, int32_t 
 }
 
 bool rubraview_pgs_decode(const rubraview_pgs_track_t *track, size_t index,
-                          const uint8_t *bytes, size_t size,
+                          proven_mem_view_t bytes_view,
                           uint8_t *pixels, rubraview_pgs_cue_t *out_cue) {
+    const uint8_t *bytes = (const uint8_t *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
     if (!track || !bytes || !pixels || !out_cue || index >= track->count) return false;
 
     rubraview_pgs_cue_t cue = {
@@ -253,7 +264,7 @@ bool rubraview_pgs_decode(const rubraview_pgs_track_t *track, size_t index,
             if (!gathering) { at = next; continue; }
             size_t piece = len - data_at;
             if (object_len + piece > sizeof(object)) piece = sizeof(object) - object_len;
-            memcpy(object + object_len, body + data_at, piece);
+            proven_sys_mem_copy(object + object_len, body + data_at, piece);
             object_len += piece;
             have_object = true;
         } else if (type == PGS_END) {
@@ -266,7 +277,7 @@ bool rubraview_pgs_decode(const rubraview_pgs_track_t *track, size_t index,
     if ((size_t)width * (size_t)height > RUBRAVIEW_PGS_MAX_PIXELS) return false;
     if (!have_placement) { cue.x = 0; cue.y = 0; }
 
-    decode_rle(object, object_len, width, height, pixels);
+    decode_rle(rubraview_mem_view(object, object_len), width, height, pixels);
     cue.width = width;
     cue.height = height;
     *out_cue = cue;

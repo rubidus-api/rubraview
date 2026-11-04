@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/bigtiff.h"
 #include <string.h>
 
@@ -20,7 +21,9 @@ static void wr32(uint8_t *p, bool le, uint32_t v) {
     for (int i = 0; i < 4; ++i) p[le ? i : 3 - i] = (uint8_t)(v >> (8 * i));
 }
 
-bool rubraview_bigtiff_is(const uint8_t *b, size_t size) {
+bool rubraview_bigtiff_is(proven_mem_view_t b_view) {
+    const uint8_t *b = (const uint8_t *)b_view.ptr;
+    size_t size = (size_t)b_view.size;
     if (!b || size < 16) return false;
     bool le = b[0] == 'I' && b[1] == 'I';
     if (!le && !(b[0] == 'M' && b[1] == 'M')) return false;
@@ -45,7 +48,7 @@ static bool points_at_directory(uint16_t tag, uint16_t type) {
 
 /* One walk for both: with `out` NULL only the room is counted. */
 static size_t convert(const uint8_t *b, size_t size, uint8_t *out) {
-    if (!rubraview_bigtiff_is(b, size)) return 0;
+    if (!rubraview_bigtiff_is(rubraview_mem_view(b, size))) return 0;
     bool le = b[0] == 'I';
     uint64_t dir = rd64(b + 8, le);
     uint64_t at = (uint64_t)size + (size & 1u);          /* where the next thing is written; even */
@@ -101,11 +104,11 @@ static size_t convert(const uint8_t *b, size_t size, uint8_t *out) {
                 wr16(to + 2, le, new_type);
                 wr32(to + 4, le, (uint32_t)count);
                 uint8_t *dst = in_entry ? to + 8 : stays ? NULL : out + more;
-                if (in_entry) memset(to + 8, 0, 4); else wr32(to + 8, le, (uint32_t)target);
+                if (in_entry) proven_sys_mem_set(to + 8, 0, 4); else wr32(to + 8, le, (uint32_t)target);
                 if (dst && narrow) {
                     for (uint64_t k = 0; k < count; ++k) wr32(dst + k * 4, le, (uint32_t)rd64(values + k * 8, le));
                 } else if (dst) {
-                    memcpy(dst, values, (size_t)new_total);
+                    proven_sys_mem_copy(dst, values, (size_t)new_total);
                 }
                 to += 12;
             }
@@ -129,13 +132,19 @@ static size_t convert(const uint8_t *b, size_t size, uint8_t *out) {
     return (size_t)(at - size);
 }
 
-size_t rubraview_bigtiff_classic_extra(const uint8_t *bytes, size_t size) {
+size_t rubraview_bigtiff_classic_extra(proven_mem_view_t bytes_view) {
+    const uint8_t *bytes = (const uint8_t *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
     return convert(bytes, size, NULL);
 }
 
-bool rubraview_bigtiff_to_classic(const uint8_t *bytes, size_t size, uint8_t *out, size_t out_size) {
+bool rubraview_bigtiff_to_classic(proven_mem_view_t bytes_view, proven_mem_mut_t out_view) {
+    const uint8_t *bytes = (const uint8_t *)bytes_view.ptr;
+    size_t size = (size_t)bytes_view.size;
+    uint8_t *out = (uint8_t *)out_view.ptr;
+    size_t out_size = (size_t)out_view.size;
     size_t extra = convert(bytes, size, NULL);
     if (extra == 0 || !out || out_size < size + extra) return false;
-    memcpy(out, bytes, size);
+    proven_sys_mem_copy(out, bytes, size);
     return convert(bytes, size, out) == extra;
 }

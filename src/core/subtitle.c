@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/subtitle.h"
 #include "rubraview/lang.h"
 #include "rubraview/number.h"
@@ -46,7 +47,7 @@ static bool cue_push(proven_arena_t *arena, cue_buf_t *b, rubraview_subtitle_cue
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, new_cap, sizeof(*b->data));
         if (!proven_is_ok(res.err)) return false;
         rubraview_subtitle_cue_t *data = (rubraview_subtitle_cue_t*)(void*)res.value.ptr;
-        if (b->data && b->count > 0) memcpy(data, b->data, b->count * sizeof(*b->data));
+        if (b->data && b->count > 0) proven_sys_mem_copy(data, b->data, b->count * sizeof(*b->data));
         b->data = data;
         b->capacity = new_cap;
     }
@@ -140,7 +141,9 @@ static bool is_paragraph_tag(proven_u8str_view_t rest) {
    `out` (four at most, never more than it took), and how many it took in
    `*took`. Zero when it is not one that is known; it is then kept as
    typed. The five HTML 4 kept without their `;` are read that way too. */
-static size_t html_entity(const char *p, size_t len, char out[4], size_t *took) {
+static size_t html_entity(proven_u8str_view_t p_view, char out[4], size_t *took) {
+    const char *p = (const char *)p_view.ptr;
+    size_t len = (size_t)p_view.size;
     if (len < 3 || p[0] != '&') return 0;
     if (p[1] == '#') {
         bool hex = len > 2 && (p[2] == 'x' || p[2] == 'X');
@@ -180,14 +183,14 @@ static size_t html_entity(const char *p, size_t len, char out[4], size_t *took) 
         { "shy", "", false },
     };
     for (size_t k = 0; k < sizeof(NAMED) / sizeof(NAMED[0]); ++k) {
-        size_t n = strlen(NAMED[k].name);
+        size_t n = proven_cstr_len(NAMED[k].name);
         if (len < 1 + n || !proven_u8str_view_starts_with_ascii_ci((proven_u8str_view_t){ .ptr = (const proven_byte_t *)p + 1, .size = len - 1 }, proven_u8str_view_from_cstr(NAMED[k].name))) continue;
         size_t end = 1 + n;
         if (end < len && p[end] == ';') end++;
         else if (!NAMED[k].bare) continue;
         else if (end < len && ((p[end] >= 'a' && p[end] <= 'z') || (p[end] >= 'A' && p[end] <= 'Z') || (p[end] >= '0' && p[end] <= '9'))) continue;
-        size_t b = strlen(NAMED[k].bytes);
-        memcpy(out, NAMED[k].bytes, b);
+        size_t b = proven_cstr_len(NAMED[k].bytes);
+        proven_sys_mem_copy(out, NAMED[k].bytes, b);
         *took = end;
         return b;
     }
@@ -250,12 +253,12 @@ static proven_u8str_view_t strip_markup_as(proven_arena_t *arena, proven_u8str_v
         if (html && text.ptr[i] == '&') {
             char bytes[4];
             size_t took = 0;
-            size_t n = html_entity((const char *)text.ptr + i, text.size - i, bytes, &took);
+            size_t n = html_entity(rubraview_bytes_view((const char *)text.ptr + i, text.size - i), bytes, &took);
             if (took > 0) {
                 /* a no-break space is kept, but not before the first words or a line's */
                 bool nbsp = n == 2 && (unsigned char)bytes[0] == 0xC2 && (unsigned char)bytes[1] == 0xA0;
                 if (!(nbsp && (written == 0 || out[written - 1] == '\n'))) {
-                    memcpy(out + written, bytes, n);
+                    proven_sys_mem_copy(out + written, bytes, n);
                     written += n;
                 }
                 i += took - 1;
@@ -363,7 +366,7 @@ static void parse_srt_like(proven_arena_t *arena, proven_u8str_view_t text, cue_
 
             if (used + body.size + 1 < sizeof(buffer)) {
                 if (used > 0) buffer[used++] = '\n';
-                memcpy(buffer + used, body.ptr, body.size);
+                proven_sys_mem_copy(buffer + used, body.ptr, body.size);
                 used += body.size;
                 if (!body_first) body_first = (const char *)body.ptr;
                 body_end = (const char *)body.ptr + body.size;
@@ -541,7 +544,7 @@ static void parse_smi(proven_arena_t *arena, proven_u8str_view_t text, cue_buf_t
         for (size_t n = k + 1; n < cues->count; ++n) {
             const rubraview_subtitle_cue_t *later = &cues->data[n];
             if (later->language.size != cue->language.size) continue;
-            if (later->language.size > 0 && memcmp(later->language.ptr, cue->language.ptr, cue->language.size) != 0) continue;
+            if (later->language.size > 0 && proven_sys_mem_cmp(later->language.ptr, cue->language.ptr, cue->language.size) != 0) continue;
             end = later->start_seconds;
             /* An empty caption does nothing but close this one: its number is this one's end. */
             if (later->text.size == 0) {
@@ -694,7 +697,7 @@ size_t rubraview_subtitle_languages(const rubraview_subtitle_track_t *track, pro
         bool seen = false;
         for (size_t k = 0; k < count && !seen; ++k) {
             seen = out[k].size == language.size &&
-                   (language.size == 0 || memcmp(out[k].ptr, language.ptr, language.size) == 0);
+                   (language.size == 0 || proven_sys_mem_cmp(out[k].ptr, language.ptr, language.size) == 0);
         }
         if (!seen) out[count++] = language;
     }
@@ -705,7 +708,7 @@ static bool cue_is_shown(const rubraview_subtitle_track_t *track, const rubravie
     if (cue->removed) return false;   /* RV-115: taken out, kept only for the save */
     if (track->shown_language.size == 0) return true;
     return cue->language.size == track->shown_language.size &&
-           memcmp(cue->language.ptr, track->shown_language.ptr, cue->language.size) == 0;
+           proven_sys_mem_cmp(cue->language.ptr, track->shown_language.ptr, cue->language.size) == 0;
 }
 
 const rubraview_subtitle_cue_t *rubraview_subtitle_at(const rubraview_subtitle_track_t *track,
@@ -750,11 +753,13 @@ void rubraview_subtitle_sync_reset(rubraview_subtitle_track_t *track) {
     if (track) track->offset_seconds = 0.0;
 }
 
-proven_u8str_view_t rubraview_subtitle_offset_text(char *buffer, size_t buffer_size, double offset_seconds) {
+proven_u8str_view_t rubraview_subtitle_offset_text(proven_mem_mut_t buffer_view, double offset_seconds) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     if (!buffer || buffer_size == 0) return PROVEN_LIT("");
     buffer[0] = '\0';
     if (fabs(offset_seconds) < 0.0005) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = 0 };
-    int n = snprintf(buffer, buffer_size, N_("sub %+.1f s"), offset_seconds);
+    int n = rubraview_fmt(buffer, buffer_size, N_("sub {:+.1} s"), PROVEN_ARG((double)offset_seconds));
     if (n < 0) { buffer[0] = '\0'; n = 0; }
     size_t len = (size_t)n < buffer_size ? (size_t)n : buffer_size - 1;
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = len };
@@ -765,7 +770,7 @@ proven_u8str_view_t rubraview_subtitle_language_tag(proven_u8str_view_t video_pa
     proven_u8str_view_t stem = rubraview_path_stem(rubraview_path_basename(video_path));
     proven_u8str_view_t name = rubraview_path_basename(subtitle_path);
     if (stem.size == 0 || name.size <= stem.size + 1) return none;
-    if (memcmp(name.ptr, stem.ptr, stem.size) != 0 || name.ptr[stem.size] != '.') return none;
+    if (proven_sys_mem_cmp(name.ptr, stem.ptr, stem.size) != 0 || name.ptr[stem.size] != '.') return none;
 
     /* What is left is either `srt` — the extension, and no language —
        or `kor.srt`, whose first part is the tag. */
@@ -782,7 +787,7 @@ static bool is_kept_copy(proven_u8str_view_t name) {
     proven_u8str_view_t ext = rubraview_path_ext(name);
     size_t end = name.size - ext.size, at = end;
     while (at > 0 && name.ptr[at - 1] >= '0' && name.ptr[at - 1] <= '9') at--;
-    return at < end && at >= 4 && memcmp(name.ptr + at - 4, ".old", 4) == 0;
+    return at < end && at >= 4 && proven_sys_mem_cmp(name.ptr + at - 4, ".old", 4) == 0;
 }
 
 size_t rubraview_subtitle_discover(proven_u8str_view_t video_path,
@@ -803,7 +808,7 @@ size_t rubraview_subtitle_discover(proven_u8str_view_t video_path,
            the name has to *begin* with the stem, not equal it, because
            the language tag lives between the stem and the extension. */
         if (name.size < stem.size) continue;
-        if (memcmp(name.ptr, stem.ptr, stem.size) != 0) continue;
+        if (proven_sys_mem_cmp(name.ptr, stem.ptr, stem.size) != 0) continue;
         if (name.size > stem.size && name.ptr[stem.size] != '.') continue;
         if (is_kept_copy(name)) continue;
 
@@ -817,11 +822,13 @@ size_t rubraview_subtitle_discover(proven_u8str_view_t video_path,
 
 /* ---- writing back (RV-115, D-126) ---- */
 
-static proven_u8str_view_t arena_copy(proven_arena_t *arena, const char *ptr, size_t len) {
+static proven_u8str_view_t arena_copy(proven_arena_t *arena, proven_u8str_view_t ptr_view) {
+    const char *ptr = (const char *)ptr_view.ptr;
+    size_t len = (size_t)ptr_view.size;
     proven_u8str_view_t empty = PROVEN_LIT("");
     proven_result_mem_mut_t res = proven_arena_alloc(arena, len + 1);
     if (!proven_is_ok(res.err)) return empty;
-    if (len > 0) memcpy(res.value.ptr, ptr, len);
+    if (len > 0) proven_sys_mem_copy(res.value.ptr, ptr, len);
     res.value.ptr[len] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = len };
 }
@@ -881,7 +888,7 @@ static bool retype_cue(proven_arena_t *arena, const rubraview_subtitle_track_t *
     }
     const char *brk = track->format == RUBRAVIEW_SUBTITLE_SMI ? "<br>"
                     : track->format == RUBRAVIEW_SUBTITLE_ASS ? "\\N" : eol;
-    size_t brk_len = strlen(brk);
+    size_t brk_len = proven_cstr_len(brk);
 
     proven_result_mem_mut_t res = proven_arena_alloc(arena, typed.size * 2 + 1);   /* a break is four bytes at most for two typed */
     if (!proven_is_ok(res.err)) return false;
@@ -892,7 +899,7 @@ static bool retype_cue(proven_arena_t *arena, const rubraview_subtitle_track_t *
         if (c == '\r' || c == '\n') continue;                 /* one line is typed */
         if (c == '\\' && i + 1 < typed.size && typed.ptr[i + 1] == 'N') {
             /* no blank line inside a SubRip cue: it would end it */
-            if (n > 0) { memcpy(out + n, brk, brk_len); n += brk_len; }
+            if (n > 0) { proven_sys_mem_copy(out + n, brk, brk_len); n += brk_len; }
             i++;
             while (i + 1 < typed.size && typed.ptr[i + 1] == ' ') i++;
             continue;
@@ -1008,9 +1015,9 @@ int32_t rubraview_subtitle_cue_add(proven_arena_t *arena, rubraview_subtitle_tra
     rubraview_subtitle_cue_t *cues = (rubraview_subtitle_cue_t*)(void*)res.value.ptr;
     size_t at = 0;
     while (at < track->count && track->cues[at].start_seconds <= start) at++;
-    memcpy(cues, track->cues, at * sizeof(cues[0]));
+    proven_sys_mem_copy(cues, track->cues, at * sizeof(cues[0]));
     cues[at] = made;
-    memcpy(cues + at + 1, track->cues + at, (track->count - at) * sizeof(cues[0]));
+    proven_sys_mem_copy(cues + at + 1, track->cues + at, (track->count - at) * sizeof(cues[0]));
     track->cues = cues;
     track->count++;
     return (int32_t)at;
@@ -1042,17 +1049,19 @@ static bool copy_swapped(char *out, size_t *n, size_t cap, proven_u8str_view_t s
         if (swaps[i].len == 0 || swaps[i].at < at || swaps[i].at + swaps[i].len > from + len) continue;   /* not in this piece */
         size_t plain = swaps[i].at - at;
         if (*n + plain + swaps[i].with.size > cap) return false;
-        memcpy(out + *n, source.ptr + at, plain); *n += plain;
-        memcpy(out + *n, swaps[i].with.ptr, swaps[i].with.size); *n += swaps[i].with.size;
+        proven_sys_mem_copy(out + *n, source.ptr + at, plain); *n += plain;
+        proven_sys_mem_copy(out + *n, swaps[i].with.ptr, swaps[i].with.size); *n += swaps[i].with.size;
         at = swaps[i].at + swaps[i].len;
     }
     if (*n + (from + len - at) > cap) return false;
-    memcpy(out + *n, source.ptr + at, from + len - at);
+    proven_sys_mem_copy(out + *n, source.ptr + at, from + len - at);
     *n += from + len - at;
     return true;
 }
 
-static bool ends_blank(const char *p, size_t n) {   /* a blank line at the end: "\n\n" or "\n\r\n" */
+static bool ends_blank(proven_u8str_view_t p_view) {
+    const char *p = (const char *)p_view.ptr;
+    size_t n = (size_t)p_view.size;   /* a blank line at the end: "\n\n" or "\n\r\n" */
     return (n >= 2 && p[n - 1] == '\n' && p[n - 2] == '\n') || (n >= 3 && p[n - 1] == '\n' && p[n - 2] == '\r' && p[n - 3] == '\n');
 }
 
@@ -1062,7 +1071,7 @@ static proven_u8str_view_t added_block(proven_arena_t *arena, const rubraview_su
                            const rubraview_subtitle_cue_t *cue, bool after, proven_u8str_view_t words) {
     proven_u8str_view_t empty = PROVEN_LIT("");
     const char *eol = source_eol(track);
-    size_t eol_len = strlen(eol);
+    size_t eol_len = proven_cstr_len(eol);
     proven_u8str_view_t start = write_time(arena, track->format, cue->start_seconds);
     proven_u8str_view_t end = write_time(arena, track->format, cue->end_seconds);
     const rubraview_subtitle_place_t *pl = &tpl->place;
@@ -1077,8 +1086,8 @@ static proven_u8str_view_t added_block(proven_arena_t *arena, const rubraview_su
         const char *b = (const char *)track->source.ptr + pl->block_at;
         size_t bl = pl->block_len;
         bool line_ended = bl > 0 && b[bl - 1] == '\n';
-        if (!line_ended) { memcpy(out + n, eol, eol_len); n += eol_len; }
-        if (lines && !ends_blank(b, bl)) { memcpy(out + n, eol, eol_len); n += eol_len; }
+        if (!line_ended) { proven_sys_mem_copy(out + n, eol, eol_len); n += eol_len; }
+        if (lines && !ends_blank(rubraview_bytes_view(b, bl))) { proven_sys_mem_copy(out + n, eol, eol_len); n += eol_len; }
     }
     swap_t swaps[3] = { { pl->start_at, pl->start_len, start }, { pl->end_at, pl->end_len, end },
                         { pl->text_at, words.size ? pl->text_len : 0, words } };   /* no words given: its own stay */
@@ -1086,11 +1095,11 @@ static proven_u8str_view_t added_block(proven_arena_t *arena, const rubraview_su
     /* (a SAMI caption's closing SYNC is `added_close`: it goes where its own time does) */
     if ((lines || track->format == RUBRAVIEW_SUBTITLE_ASS) && (n == 0 || out[n - 1] != '\n')) {
         if (n + eol_len > cap) return empty;
-        memcpy(out + n, eol, eol_len); n += eol_len;
+        proven_sys_mem_copy(out + n, eol, eol_len); n += eol_len;
     }
-    if (lines && !ends_blank(out, n)) {
+    if (lines && !ends_blank(rubraview_bytes_view(out, n))) {
         if (n + eol_len > cap) return empty;
-        memcpy(out + n, eol, eol_len); n += eol_len;
+        proven_sys_mem_copy(out + n, eol, eol_len); n += eol_len;
     }
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = n };
 }
@@ -1102,15 +1111,15 @@ static proven_u8str_view_t write_time(proven_arena_t *arena, rubraview_subtitle_
     long long ms = (long long)(seconds * 1000.0 + 0.5);
     int n;
     if (format == RUBRAVIEW_SUBTITLE_SMI) {
-        n = snprintf(buf, sizeof(buf), "%lld", ms);
+        n = rubraview_fmt(buf, sizeof(buf), "{}", PROVEN_ARG((long long)ms));
     } else if (format == RUBRAVIEW_SUBTITLE_ASS) {
         long long cs = (long long)(seconds * 100.0 + 0.5);
-        n = snprintf(buf, sizeof(buf), "%lld:%02lld:%02lld.%02lld", cs / 360000, cs / 6000 % 60, cs / 100 % 60, cs % 100);
+        n = rubraview_fmt(buf, sizeof(buf), "{}:{:02}:{:02}.{:02}", PROVEN_ARG((long long)(cs / 360000)), PROVEN_ARG((long long)(cs / 6000 % 60)), PROVEN_ARG((long long)(cs / 100 % 60)), PROVEN_ARG((long long)(cs % 100)));
     } else {
-        n = snprintf(buf, sizeof(buf), "%02lld:%02lld:%02lld%c%03lld", ms / 3600000, ms / 60000 % 60, ms / 1000 % 60,
-                     format == RUBRAVIEW_SUBTITLE_VTT ? '.' : ',', ms % 1000);
+        n = rubraview_fmt(buf, sizeof(buf), "{:02}:{:02}:{:02}{}{:03}", PROVEN_ARG((long long)(ms / 3600000)), PROVEN_ARG((long long)(ms / 60000 % 60)), PROVEN_ARG((long long)(ms / 1000 % 60)),
+                     PROVEN_ARG((char)(format == RUBRAVIEW_SUBTITLE_VTT ? '.' : ',')), PROVEN_ARG((long long)(ms % 1000)));
     }
-    return n > 0 ? arena_copy(arena, buf, (size_t)n) : PROVEN_LIT("");
+    return n > 0 ? arena_copy(arena, rubraview_bytes_view(buf, (size_t)n)) : PROVEN_LIT("");
 }
 
 /* RV-115: the empty SYNC that closes a SAMI caption made from `tpl`, at `cue`'s end; empty when `tpl` has none. */
@@ -1198,7 +1207,7 @@ proven_u8str_view_t rubraview_subtitle_patched(proven_arena_t *arena, const rubr
         proven_result_mem_mut_t mres = rubraview_arena_alloc_array(arena, track->count ? track->count : 1, sizeof(bool));
         if (!proven_is_ok(mres.err)) { *out_why = N_("no memory"); return empty; }
         moved = (bool*)(void*)mres.value.ptr;
-        memset(moved, 0, track->count * sizeof(bool));
+        proven_sys_mem_set(moved, 0, track->count * sizeof(bool));
         size_t gap_from = 0;
         size_t before = 0;            /* the block of the unchanged caption before the gap */
         bool have_before = false;
@@ -1327,13 +1336,13 @@ proven_u8str_view_t rubraview_subtitle_patched(proven_arena_t *arena, const rubr
     char *out = (char*)(void*)out_res.value.ptr;
     size_t n = 0, from = 0;
     for (size_t i = 0; i < kept; ++i) {
-        memcpy(out + n, track->source.ptr + from, patches[i].at - from);
+        proven_sys_mem_copy(out + n, track->source.ptr + from, patches[i].at - from);
         n += patches[i].at - from;
-        memcpy(out + n, patches[i].with.ptr, patches[i].with.size);
+        proven_sys_mem_copy(out + n, patches[i].with.ptr, patches[i].with.size);
         n += patches[i].with.size;
         from = patches[i].at + patches[i].len;
     }
-    memcpy(out + n, track->source.ptr + from, track->source.size - from);
+    proven_sys_mem_copy(out + n, track->source.ptr + from, track->source.size - from);
     n += track->source.size - from;
     out[n] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = n };
@@ -1345,14 +1354,14 @@ proven_u8str_view_t rubraview_subtitle_backup_path(proven_arena_t *arena, proven
     proven_u8str_view_t ext = rubraview_path_ext(path);
     size_t stem = path.size - ext.size;
     char mark[32];
-    int m = snprintf(mark, sizeof(mark), ".old%u", number);
+    int m = rubraview_fmt(mark, sizeof(mark), ".old{}", PROVEN_ARG((unsigned)number));
     if (m <= 0) return empty;
     proven_result_mem_mut_t res = proven_arena_alloc(arena, path.size + (size_t)m + 1);
     if (!proven_is_ok(res.err)) return empty;
     char *out = (char*)(void*)res.value.ptr;
-    memcpy(out, path.ptr, stem);
-    memcpy(out + stem, mark, (size_t)m);
-    memcpy(out + stem + (size_t)m, path.ptr + stem, ext.size);
+    proven_sys_mem_copy(out, path.ptr, stem);
+    proven_sys_mem_copy(out + stem, mark, (size_t)m);
+    proven_sys_mem_copy(out + stem + (size_t)m, path.ptr + stem, ext.size);
     out[path.size + (size_t)m] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = path.size + (size_t)m };
 }

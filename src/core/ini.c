@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/ini.h"
 #include "rubraview/number.h"
 #include <string.h>
@@ -8,7 +9,9 @@
 
 /* ---- values: what the subset writes, and what older files hold ---- */
 
-static bool all_digits(const char *p, size_t n) {
+static bool all_digits(proven_u8str_view_t p_view) {
+    const char *p = (const char *)p_view.ptr;
+    size_t n = (size_t)p_view.size;
     if (n == 0) return false;
     for (size_t i = 0; i < n; ++i) if (p[i] < '0' || p[i] > '9') return false;
     return true;
@@ -29,11 +32,11 @@ static rubraview_ini_kind_t kind_of_bare(proven_u8str_view_t v) {
     for (size_t k = 0; k < n; ++k) if (p[k] == '.') { dot = k; break; }
 
     if (dot == n) {
-        if (!all_digits(p, n)) return RUBRAVIEW_INI_STRING;
+        if (!all_digits(rubraview_bytes_view(p, n))) return RUBRAVIEW_INI_STRING;
         if (n > 1 && p[0] == '0') return RUBRAVIEW_INI_STRING;
         return RUBRAVIEW_INI_INT;
     }
-    if (!all_digits(p, dot) || !all_digits(p + dot + 1, n - dot - 1)) return RUBRAVIEW_INI_STRING;
+    if (!all_digits(rubraview_bytes_view(p, dot)) || !all_digits(rubraview_bytes_view(p + dot + 1, n - dot - 1))) return RUBRAVIEW_INI_STRING;
     if (dot > 1 && p[0] == '0') return RUBRAVIEW_INI_STRING;
     return RUBRAVIEW_INI_FLOAT;
 }
@@ -97,7 +100,7 @@ static bool ini_entries_reserve(proven_arena_t *arena, rubraview_ini_doc_t *doc,
 
     rubraview_ini_entry_t *new_entries = (rubraview_ini_entry_t*)(void*)res.value.ptr;
     if (doc->entries && doc->count > 0) {
-        memcpy(new_entries, doc->entries, doc->count * sizeof(rubraview_ini_entry_t));
+        proven_sys_mem_copy(new_entries, doc->entries, doc->count * sizeof(rubraview_ini_entry_t));
     }
     doc->entries = new_entries;
     doc->capacity = new_cap;
@@ -176,12 +179,12 @@ bool rubraview_ini_get_bool(const rubraview_ini_doc_t *doc, proven_u8str_view_t 
 
     char buf[8];
     size_t n = v->size < sizeof(buf) - 1 ? v->size : sizeof(buf) - 1;
-    for (size_t i = 0; i < n; ++i) buf[i] = (char)tolower((unsigned char)v->ptr[i]);
+    for (size_t i = 0; i < n; ++i) buf[i] = (char)rubraview_ascii_tolower((unsigned char)v->ptr[i]);
     buf[n] = '\0';
 
     if (n == v->size) {
-        if (strcmp(buf, "true") == 0 || strcmp(buf, "1") == 0 || strcmp(buf, "yes") == 0 || strcmp(buf, "on") == 0) return true;
-        if (strcmp(buf, "false") == 0 || strcmp(buf, "0") == 0 || strcmp(buf, "no") == 0 || strcmp(buf, "off") == 0) return false;
+        if (rubraview_cstr_cmp(buf, "true") == 0 || rubraview_cstr_cmp(buf, "1") == 0 || rubraview_cstr_cmp(buf, "yes") == 0 || rubraview_cstr_cmp(buf, "on") == 0) return true;
+        if (rubraview_cstr_cmp(buf, "false") == 0 || rubraview_cstr_cmp(buf, "0") == 0 || rubraview_cstr_cmp(buf, "no") == 0 || rubraview_cstr_cmp(buf, "off") == 0) return false;
     }
     return default_value;
 }
@@ -239,14 +242,14 @@ static proven_u8str_view_t arena_text(proven_arena_t *arena, const char *text, i
     if (!arena || len <= 0) return PROVEN_LIT("");
     proven_result_mem_mut_t res = proven_arena_alloc(arena, (size_t)len + 1);
     if (!proven_is_ok(res.err)) return PROVEN_LIT("");
-    memcpy(res.value.ptr, text, (size_t)len);
+    proven_sys_mem_copy(res.value.ptr, text, (size_t)len);
     res.value.ptr[len] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)(const char*)res.value.ptr, .size = (size_t)len };
 }
 
 void rubraview_ini_set_int(proven_arena_t *arena, rubraview_ini_doc_t *doc, proven_u8str_view_t section, proven_u8str_view_t key, long long value) {
     char buffer[32];
-    int n = snprintf(buffer, sizeof(buffer), "%lld", value);
+    int n = rubraview_fmt(buffer, sizeof(buffer), "{}", PROVEN_ARG((long long)value));
     set_kind(arena, doc, section, key, arena_text(arena, buffer, n), RUBRAVIEW_INI_INT);
 }
 
@@ -254,8 +257,8 @@ void rubraview_ini_set_float(proven_arena_t *arena, rubraview_ini_doc_t *doc, pr
     /* TOML wants digits on both sides of the point and no exponent; %.6f
        then trailing zeros trimmed keeps one digit after the point. */
     char buffer[64];
-    int n = snprintf(buffer, sizeof(buffer), "%.6f", value);
-    if (n <= 0 || n >= (int)sizeof(buffer)) { n = snprintf(buffer, sizeof(buffer), "0.0"); }
+    int n = rubraview_fmt(buffer, sizeof(buffer), "{:.6}", PROVEN_ARG((double)value));
+    if (n <= 0 || n >= (int)sizeof(buffer)) { n = rubraview_fmt(buffer, sizeof(buffer), "0.0"); }
     while (n > 2 && buffer[n - 1] == '0' && buffer[n - 2] != '.') buffer[--n] = '\0';
     set_kind(arena, doc, section, key, arena_text(arena, buffer, n), RUBRAVIEW_INI_FLOAT);
 }
@@ -265,18 +268,18 @@ void rubraview_ini_set_float(proven_arena_t *arena, rubraview_ini_doc_t *doc, pr
    becomes a space — the subset has no multi-line strings. */
 static void append_value(proven_arena_t *arena, proven_u8str_t *b, const rubraview_ini_entry_t *e) {
     if (e->kind != RUBRAVIEW_INI_STRING) {
-        rubraview_text_append(arena, b, (e->value).ptr, (e->value).size);
+        rubraview_text_append(arena, b, rubraview_mem_view((e->value).ptr, (e->value).size));
         return;
     }
-    rubraview_text_append(arena, b, "\"", 1);
+    rubraview_text_append(arena, b, rubraview_mem_view("\"", 1));
     for (size_t i = 0; i < e->value.size; ++i) {
         char c = e->value.ptr[i];
-        if (c == '\\') rubraview_text_append(arena, b, "\\\\", 2);
-        else if (c == '"') rubraview_text_append(arena, b, "\\\"", 2);
-        else if (c == '\n' || c == '\r' || c == '\t') rubraview_text_append(arena, b, " ", 1);
-        else rubraview_text_append(arena, b, &c, 1);
+        if (c == '\\') rubraview_text_append(arena, b, rubraview_mem_view("\\\\", 2));
+        else if (c == '"') rubraview_text_append(arena, b, rubraview_mem_view("\\\"", 2));
+        else if (c == '\n' || c == '\r' || c == '\t') rubraview_text_append(arena, b, rubraview_mem_view(" ", 1));
+        else rubraview_text_append(arena, b, rubraview_mem_view(&c, 1));
     }
-    rubraview_text_append(arena, b, "\"", 1);
+    rubraview_text_append(arena, b, rubraview_mem_view("\"", 1));
 }
 
 proven_u8str_view_t rubraview_ini_serialize(proven_arena_t *arena, const rubraview_ini_doc_t *doc) {
@@ -287,10 +290,10 @@ proven_u8str_view_t rubraview_ini_serialize(proven_arena_t *arena, const rubravi
     /* Emit global-section entries first, with no [section] header. */
     for (size_t i = 0; i < doc->count; ++i) {
         if (doc->entries[i].section.size != 0) continue;
-        rubraview_text_append(arena, &buf, (doc->entries[i].key).ptr, (doc->entries[i].key).size);
-        rubraview_text_append(arena, &buf, " = ", 3);
+        rubraview_text_append(arena, &buf, rubraview_mem_view((doc->entries[i].key).ptr, (doc->entries[i].key).size));
+        rubraview_text_append(arena, &buf, rubraview_mem_view(" = ", 3));
         append_value(arena, &buf, &doc->entries[i]);
-        rubraview_text_append(arena, &buf, "\n", 1);
+        rubraview_text_append(arena, &buf, rubraview_mem_view("\n", 1));
     }
 
     /* Emit each remaining section, once, in first-appearance order. */
@@ -307,9 +310,9 @@ proven_u8str_view_t rubraview_ini_serialize(proven_arena_t *arena, const rubravi
         }
         if (already_flushed) continue;
 
-        rubraview_text_append(arena, &buf, "[", 1);
-        rubraview_text_append(arena, &buf, (section).ptr, (section).size);
-        rubraview_text_append(arena, &buf, "]\n", 2);
+        rubraview_text_append(arena, &buf, rubraview_mem_view("[", 1));
+        rubraview_text_append(arena, &buf, rubraview_mem_view((section).ptr, (section).size));
+        rubraview_text_append(arena, &buf, rubraview_mem_view("]\n", 2));
 
         for (size_t i = 0; i < doc->count; ++i) {
             if (!proven_u8str_view_eq(doc->entries[i].section, section)) continue;
@@ -323,10 +326,10 @@ proven_u8str_view_t rubraview_ini_serialize(proven_arena_t *arena, const rubravi
                 }
             }
             if (later) continue;
-            rubraview_text_append(arena, &buf, (doc->entries[i].key).ptr, (doc->entries[i].key).size);
-            rubraview_text_append(arena, &buf, " = ", 3);
+            rubraview_text_append(arena, &buf, rubraview_mem_view((doc->entries[i].key).ptr, (doc->entries[i].key).size));
+            rubraview_text_append(arena, &buf, rubraview_mem_view(" = ", 3));
             append_value(arena, &buf, &doc->entries[i]);
-            rubraview_text_append(arena, &buf, "\n", 1);
+            rubraview_text_append(arena, &buf, rubraview_mem_view("\n", 1));
         }
     }
 

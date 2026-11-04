@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/ui_menu.h"
 #include "rubraview/lang.h"
 #include <string.h>
@@ -96,30 +97,36 @@ void rubraview_menu_reset(rubraview_menu_state_t *state) {
     state->depth = 0;
 }
 
-static size_t append_bounded(char *buffer, size_t buffer_size, size_t pos, const char *text, size_t len) {
+static size_t append_bounded(proven_mem_mut_t buffer_view, size_t pos, proven_u8str_view_t text_view) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
+    const char *text = (const char *)text_view.ptr;
+    size_t len = (size_t)text_view.size;
     if (pos >= buffer_size - 1) return pos;
     size_t room = buffer_size - 1 - pos;
     size_t copy = len < room ? len : room;
-    memcpy(buffer + pos, text, copy);
+    proven_sys_mem_copy(buffer + pos, text, copy);
     return pos + copy;
 }
 
-proven_u8str_view_t rubraview_menu_breadcrumb(const rubraview_menu_state_t *state, char *buffer, size_t buffer_size) {
+proven_u8str_view_t rubraview_menu_breadcrumb(const rubraview_menu_state_t *state, proven_mem_mut_t buffer_view) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     if (!buffer || buffer_size == 0) return PROVEN_LIT("");
 
     size_t pos = 0;
     const char *ROOT = T("Menu");
     static const char SEPARATOR[] = " > ";
 
-    pos = append_bounded(buffer, buffer_size, pos, ROOT, strlen(ROOT));
+    pos = append_bounded(rubraview_mem_mut(buffer, buffer_size), pos, rubraview_bytes_view(ROOT, proven_cstr_len(ROOT)));
 
     if (state && state->tree && state->tree->items) {
         for (int32_t level = 0; level < state->depth; ++level) {
             int32_t index = state->path[level];
             if (index < 0 || (size_t)index >= state->tree->item_count) break;
             const rubraview_menu_item_t *item = &state->tree->items[index];
-            pos = append_bounded(buffer, buffer_size, pos, SEPARATOR, sizeof(SEPARATOR) - 1);
-            pos = append_bounded(buffer, buffer_size, pos, (const char *)item->label.ptr, item->label.size);
+            pos = append_bounded(rubraview_mem_mut(buffer, buffer_size), pos, rubraview_bytes_view(SEPARATOR, sizeof(SEPARATOR) - 1));
+            pos = append_bounded(rubraview_mem_mut(buffer, buffer_size), pos, rubraview_bytes_view((const char *)item->label.ptr, item->label.size));
         }
     }
 

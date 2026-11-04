@@ -180,7 +180,7 @@ static void draw_ctxmenu_on_in(app_state_t *app, rubraview_renderer_t *r, double
         if (rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now)) {
             text = proven_u8str_view_eq(item->action, PROVEN_LIT("recent_clear")) ? TU8("Clear?") : TU8("Delete?");
         } else {
-            text = rubraview_tile_caption(rubraview_tr_ctx_u8("menu", item->caption), false, st.mark, st.value, scratch, sizeof(scratch));
+            text = rubraview_tile_caption(rubraview_tr_ctx_u8("menu", item->caption), false, st.mark, st.value, rubraview_mem_mut(scratch, sizeof(scratch)));
         }
         rubraview_pal_rect_t words = { cell.x + 10.0 * dpi, cell.y, cell.width - 14.0 * dpi, cell.height };
         rubraview_pal_render_draw_text(r, text, words, 14.0 * dpi * place_size(app, PF_MENU), enabled[i] ? COLOR_TEXT : 0x60F0F0F0u, RUBRAVIEW_TEXT_LEFT);
@@ -207,9 +207,11 @@ void list_row_menu(app_state_t *app, size_t row, double x, double y, bool in_fil
 }
 
 /* What the field says when it is not being typed in: the delay, "3.5". */
-static proven_u8str_view_t slidepop_delay_text(const app_state_t *app, char *buffer, size_t size) {
+static proven_u8str_view_t slidepop_delay_text(const app_state_t *app, proven_mem_mut_t buffer_view) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t size = (size_t)buffer_view.size;
     if (app->slidepop_typing) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->slidepop_text, .size = app->slidepop_len };
-    int n = snprintf(buffer, size, "%.1f s", app->slideshow.interval_seconds);
+    int n = rubraview_fmt(buffer, size, "{:.1} s", PROVEN_ARG((double)app->slideshow.interval_seconds));
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = n > 0 ? (size_t)n : 0 };
 }
 
@@ -257,7 +259,7 @@ void draw_slidepop(app_state_t *app) {
         switch ((rubraview_slidepop_part_t)p) {
             case RUBRAVIEW_SLIDEPOP_DELAY_DOWN:  text = PROVEN_LIT("-"); break;
             case RUBRAVIEW_SLIDEPOP_DELAY_UP:    text = PROVEN_LIT("+"); break;
-            case RUBRAVIEW_SLIDEPOP_DELAY_FIELD: text = slidepop_delay_text(app, buffer, sizeof(buffer)); current = app->slidepop_typing; break;
+            case RUBRAVIEW_SLIDEPOP_DELAY_FIELD: text = slidepop_delay_text(app, rubraview_mem_mut(buffer, sizeof(buffer))); current = app->slidepop_typing; break;
             case RUBRAVIEW_SLIDEPOP_FX_CUT:      text = TU8("Cut");   current = fx == 0; break;
             case RUBRAVIEW_SLIDEPOP_FX_FADE:     text = TU8("Fade");  current = fx == 1; break;
             case RUBRAVIEW_SLIDEPOP_FX_SLIDE:    text = TU8("Slide"); current = fx == 2; break;
@@ -292,7 +294,7 @@ static void slidepop_press(app_state_t *app, double x, double y) {
         case RUBRAVIEW_SLIDEPOP_DELAY_UP:   interval_set(app, rubraview_slidepop_step(app->slideshow.interval_seconds, +1)); break;
         case RUBRAVIEW_SLIDEPOP_DELAY_FIELD:
             if (!app->slidepop_typing) {
-                int n = snprintf(app->slidepop_text, sizeof(app->slidepop_text), "%.1f", app->slideshow.interval_seconds);
+                int n = rubraview_fmt(app->slidepop_text, sizeof(app->slidepop_text), "{:.1}", PROVEN_ARG((double)app->slideshow.interval_seconds));
                 app->slidepop_len = n > 0 ? (size_t)n : 0;
                 app->slidepop_typing = true;
             }
@@ -389,7 +391,7 @@ proven_u8str_view_t hint_with_keys(app_state_t *app, proven_u8str_view_t action,
     const char *words = said ? said : rubraview_action_words(action);
     if (words && !said) words = rubraview_tr(words);
     size_t at = 0;
-    int n = snprintf(buffer, capacity, "%s", words ? words : "");
+    int n = rubraview_fmt(buffer, capacity, "{}", PROVEN_ARG(words ? words : ""));
     at = n > 0 ? ((size_t)n < capacity ? (size_t)n : capacity - 1) : 0;
     size_t keys = 0;
     for (size_t b = 0; b < app->keymap.count && keys < 3; ++b) {
@@ -399,7 +401,7 @@ proven_u8str_view_t hint_with_keys(app_state_t *app, proven_u8str_view_t action,
             char combo[48];
             proven_u8str_view_t k = rubraview_key_combo_format(combo, sizeof(combo), binding->combos[c]);
             if (k.size == 0) continue;
-            n = snprintf(buffer + at, capacity - at, "%s%.*s", keys == 0 ? (at > 0 ? "  (" : "(") : ", ", (int)k.size, k.ptr);
+            n = rubraview_fmt(buffer + at, capacity - at, "{}{}", PROVEN_ARG(keys == 0 ? (at > 0 ? "  (" : "(") : ", "), PROVEN_ARG(rubraview_bytes_view(k.ptr, (int)k.size)));
             if (n > 0) at += (size_t)n < capacity - at ? (size_t)n : capacity - at - 1;
             keys++;
         }
@@ -548,8 +550,8 @@ void draw_reading(app_state_t *app, double win_w, double win_h, double dpi) {
     rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
     int pct = (int)(done * 100u / count);
     char line[128];
-    int k = snprintf(line, sizeof line, sizes ? T("Reading the sizes: %zu / %zu (%d%%)") : T("Reading the lengths: %zu / %zu (%d%%)"),
-                     done, count, pct);
+    int k = rubraview_fmt(line, sizeof line, sizes ? T("Reading the sizes: {} / {} ({}%)") : T("Reading the lengths: {} / {} ({}%)"),
+                     PROVEN_ARG((size_t)done), PROVEN_ARG((size_t)count), PROVEN_ARG((int)pct));
     rubraview_pal_rect_t text = { box.x + 12.0 * dpi, box.y + 6.0 * dpi, w - 24.0 * dpi, 26.0 * dpi };
     if (k > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k },
                                               text, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
@@ -635,7 +637,7 @@ static void draw_pack_window(app_state_t *app, rubraview_pal_rect_t name_label, 
             char dots[3 * 256];
             size_t nd = 0;
             for (size_t i = 0; i < app->pack_pw_len[f - 1]; ++i)
-                if (((unsigned char)app->pack_pw[f - 1][i] & 0xC0) != 0x80) { memcpy(dots + nd, "\xE2\x97\x8F", 3); nd += 3; }
+                if (((unsigned char)app->pack_pw[f - 1][i] & 0xC0) != 0x80) { proven_sys_mem_copy(dots + nd, "\xE2\x97\x8F", 3); nd += 3; }
             if (nd) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)dots, .size = nd },
                                                    (rubraview_pal_rect_t){ field.x + 10.0 * dpi, field.y, field.width - 20.0 * dpi, field.height },
                                                    14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
@@ -729,8 +731,8 @@ static void draw_pack_ask(app_state_t *app, double win_w, double win_h, double d
     rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_CLOSE_HOVER, 2.0, 3.0);
     char line[1200];
     proven_u8str_view_t set = rubraview_path_basename(proven_u8str_view_from_cstr(app->pack_ask_set));
-    int n = snprintf(line, sizeof line, T("Parts of an older split %.*s are in the way (%zu files)."), (int)set.size, (const char *)set.ptr,
-                     app->pack_ask_parts);
+    int n = rubraview_fmt(line, sizeof line, T("Parts of an older split {} are in the way ({} files)."), PROVEN_ARG(rubraview_bytes_view((const char *)set.ptr, (int)set.size)),
+                     PROVEN_ARG((size_t)app->pack_ask_parts));
     if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)(n < (int)sizeof line ? n : (int)sizeof line - 1) },
                                               (rubraview_pal_rect_t){ box.x + 12.0 * dpi, box.y + 14.0 * dpi, box.width - 24.0 * dpi, 30.0 * dpi },
                                               16.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
@@ -789,7 +791,7 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
                 rubraview_pal_render_fill_rect(app->renderer, r, on ? COLOR_TILE_CURRENT : pal_rect_has(r, app->pointer_x, app->pointer_y) ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
                 char line[128];
                 proven_u8str_view_t to = on ? rubraview_textedit_text(&app->rename_edit) : cstr(app->ext_to[k]);
-                int n = snprintf(line, sizeof(line), "%s   \xE2\x86\x92   %.*s", app->ext_from[k], (int)(to.size < 64 ? to.size : 64), to.ptr);
+                int n = rubraview_fmt(line, sizeof(line), "{}   \xE2\x86\x92   {}", PROVEN_ARG(app->ext_from[k]), PROVEN_ARG(rubraview_bytes_view(to.ptr, (int)(to.size < 64 ? to.size : 64))));
                 if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
                                                           (rubraview_pal_rect_t){ r.x + 14.0 * dpi, r.y, r.width - 28.0 * dpi, r.height },
                                                           16.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
@@ -848,9 +850,9 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
         const rubraview_textedit_t *te = &app->rename_edit;
         char shown[3 * (sizeof(app->rename_buffer) + sizeof(app->rename_composing))];
         size_t caret = te->caret, len = te->len, comp = app->rename_composing_length;
-        memcpy(shown, app->rename_buffer, caret);
-        memcpy(shown + caret, app->rename_composing, comp);
-        memcpy(shown + caret + comp, app->rename_buffer + caret, len - caret);
+        proven_sys_mem_copy(shown, app->rename_buffer, caret);
+        proven_sys_mem_copy(shown + caret, app->rename_composing, comp);
+        proven_sys_mem_copy(shown + caret + comp, app->rename_buffer + caret, len - caret);
         size_t total = len + comp;
         size_t sel_a = 0, sel_b = 0;
         bool has_selection = rubraview_textedit_has_selection(te);
@@ -859,7 +861,7 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             /* A dot a character (the IME's unfinished syllable too); the
                caret and the selection are counted in characters. */
             char plain[sizeof(app->rename_buffer) + sizeof(app->rename_composing)];
-            memcpy(plain, shown, total);
+            proven_sys_mem_copy(plain, shown, total);
             size_t dots = 0, at_caret = 0, at_a = 0, at_b = 0;
             for (size_t i = 0; i <= total; ++i) {
                 if (i == caret + comp) at_caret = dots;
@@ -867,8 +869,8 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
                 if (i == (sel_b >= caret ? sel_b + comp : sel_b)) at_b = dots;
                 if (i < total && ((unsigned char)plain[i] & 0xC0) != 0x80) dots++;
             }
-            secure_wipe(plain, sizeof(plain));
-            for (size_t d = 0; d < dots; ++d) memcpy(shown + 3 * d, "\xE2\x97\x8F", 3);   /* ● */
+            secure_wipe(rubraview_mem_mut(plain, sizeof(plain)));
+            for (size_t d = 0; d < dots; ++d) proven_sys_mem_copy(shown + 3 * d, "\xE2\x97\x8F", 3);   /* ● */
             total = 3 * dots;
             caret = 3 * at_caret;
             comp = 0;
@@ -879,7 +881,7 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             rubraview_pal_rect_t label = { box.x, box.y - 30.0 * dpi, box.width, 26.0 * dpi };
             char title[1200];
             proven_u8str_view_t name = rubraview_path_basename((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->password_for, .size = app->password_for_len });
-            int tn = snprintf(title, sizeof(title), T("Password for %.*s"), (int)name.size, name.ptr);
+            int tn = rubraview_fmt(title, sizeof(title), T("Password for {}"), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)));
             if (tn > 0 && !app->rename_is_pack) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)title, .size = (size_t)(tn < (int)sizeof(title) ? tn : (int)sizeof(title) - 1) },
                                                        label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
@@ -1000,7 +1002,7 @@ void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi) 
             rubraview_pal_render_stroke_rect(app->renderer, r, here ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, here ? 2.0 : 1.0, 3.0);
             char shown[16];
             proven_u8str_view_t t = ab_part(app, side, part);
-            int n = snprintf(shown, sizeof(shown), "%.*s%s", (int)t.size, t.ptr, here && caret_lit && !app->ab_edit_fresh ? "|" : "");
+            int n = rubraview_fmt(shown, sizeof(shown), "{}{}", PROVEN_ARG(rubraview_bytes_view(t.ptr, (int)t.size)), PROVEN_ARG(here && caret_lit && !app->ab_edit_fresh ? "|" : ""));
             if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = (size_t)n }, r, 17.0 * dpi,
                                                       COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
             rubraview_pal_rect_t unit = { r.x + r.width, r.y, AB_UNIT_W * dpi, r.height };
@@ -1021,7 +1023,7 @@ static void px_unit_buttons(app_state_t *app, double dpi) {
         bool ratio = (app->px_edit_ratio & (1u << k)) != 0;
         rubraview_pal_render_fill_rect(app->renderer, b, ratio ? 0xFF2E4A6Eu : 0xFF3A3A3Au, 3.0);
         char word[64];
-        int n = snprintf(word, sizeof(word), "%s: %s", app->px_edit_crop ? CROP[k] : SIZE[k], ratio ? T("ratio") : T("pixels"));
+        int n = rubraview_fmt(word, sizeof(word), "{}: {}", PROVEN_ARG(app->px_edit_crop ? CROP[k] : SIZE[k]), PROVEN_ARG(ratio ? T("ratio") : T("pixels")));
         rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)word, .size = n > 0 ? (size_t)n : 0 },
                                        b, 13.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
@@ -1042,9 +1044,9 @@ void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi) 
         int at = 0;
         for (int32_t k = 0; k < 4 && at < (int)sizeof(line); ++k) {
             bool here = app->px_edit_field == k;
-            int m = snprintf(line + at, sizeof(line) - (size_t)at, "%s%s %s%.*s%s%s", k == 0 ? "" : k == 2 ? "    " : "  ", NAME[k],
-                             here ? "[" : " ", (int)app->px_edit_length[k], app->px_edit_text[k], here ? (caret_lit ? "|]" : " ]") : " ",
-                             (app->px_edit_ratio & (1u << k)) ? "×" : "");
+            int m = rubraview_fmt(line + at, sizeof(line) - (size_t)at, "{}{} {}{}{}{}", PROVEN_ARG(k == 0 ? "" : k == 2 ? "    " : "  "), PROVEN_ARG(NAME[k]),
+                             PROVEN_ARG(here ? "[" : " "), PROVEN_ARG(rubraview_bytes_view(app->px_edit_text[k], (int)app->px_edit_length[k])), PROVEN_ARG(here ? (caret_lit ? "|]" : " ]") : " "),
+                             PROVEN_ARG((app->px_edit_ratio & (1u << k)) ? "×" : ""));
             if (m < 0) break;
             at += m;
         }
@@ -1057,11 +1059,11 @@ void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi) 
         px_unit_buttons(app, dpi);
         return;
     }
-    int n = snprintf(line, sizeof(line), T("Width %s%.*s%s%s  x  Height %s%.*s%s%s"),
-                     app->px_edit_field == 0 ? "[" : " ", (int)app->px_edit_length[0], app->px_edit_text[0],
-                     app->px_edit_field == 0 ? (caret_lit ? "|]" : " ]") : " ", (app->px_edit_ratio & 1u) ? "×" : "",
-                     app->px_edit_field == 1 ? "[" : " ", (int)app->px_edit_length[1], app->px_edit_text[1],
-                     app->px_edit_field == 1 ? (caret_lit ? "|]" : " ]") : " ", (app->px_edit_ratio & 2u) ? "×" : "");
+    int n = rubraview_fmt(line, sizeof(line), T("Width {}{}{}{}  x  Height {}{}{}{}"),
+                     PROVEN_ARG(app->px_edit_field == 0 ? "[" : " "), PROVEN_ARG(rubraview_bytes_view(app->px_edit_text[0], (int)app->px_edit_length[0])),
+                     PROVEN_ARG(app->px_edit_field == 0 ? (caret_lit ? "|]" : " ]") : " "), PROVEN_ARG((app->px_edit_ratio & 1u) ? "×" : ""),
+                     PROVEN_ARG(app->px_edit_field == 1 ? "[" : " "), PROVEN_ARG(rubraview_bytes_view(app->px_edit_text[1], (int)app->px_edit_length[1])),
+                     PROVEN_ARG(app->px_edit_field == 1 ? (caret_lit ? "|]" : " ]") : " "), PROVEN_ARG((app->px_edit_ratio & 2u) ? "×" : ""));
     if (n > 0) {
         rubraview_pal_rect_t top = { box.x, box.y + 10.0 * dpi, box.width, 34.0 * dpi };
         rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
@@ -1232,7 +1234,7 @@ void draw_list_bar(app_state_t *app, rubraview_renderer_t *rr, const rubraview_l
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);   /* 1.25.0 */
     char del[40];
     size_t checked = list_checked_total(app);
-    if (checked > 0) snprintf(del, sizeof(del), T("Del (%zu)"), checked); else snprintf(del, sizeof(del), T("Del"));
+    if (checked > 0) rubraview_fmt(del, sizeof(del), T("Del ({})"), PROVEN_ARG((size_t)checked)); else rubraview_fmt(del, sizeof(del), T("Del"));
     list_check_mark(rr, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ALL),
                     app->list_checked_count > 0 && checked == app->list_checked_count, checked > 0);
     list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ADD), T("Add"), small, false, COLOR_TEXT);
@@ -1256,10 +1258,10 @@ void draw_list_tools(app_state_t *app, rubraview_renderer_t *rr, const rubraview
     if (!lw->editable || !lw->tools) return;
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);
     char ext[32];
-    if (app->list_ext_off_n > 0) snprintf(ext, sizeof(ext), ".ext (-%zu)", app->list_ext_off_n); else snprintf(ext, sizeof(ext), ".ext");
+    if (app->list_ext_off_n > 0) rubraview_fmt(ext, sizeof(ext), ".ext (-{})", PROVEN_ARG((size_t)app->list_ext_off_n)); else rubraview_fmt(ext, sizeof(ext), ".ext");
     list_button(rr, px, py, rubraview_listwin_tool_rect(lw, RUBRAVIEW_LISTWIN_EXT), ext, small, app->list_ext_off_n > 0, COLOR_TEXT);
     char shape[48];   /* RV-192 */
-    snprintf(shape, sizeof(shape), "%s \xE2\x96\xBE", T("Shape"));
+    rubraview_fmt(shape, sizeof(shape), "{} \xE2\x96\xBE", PROVEN_ARG(T("Shape")));
     list_button(rr, px, py, rubraview_listwin_tool_rect(lw, RUBRAVIEW_LISTWIN_SHAPE), shape, small, false, COLOR_TEXT);
     rubraview_rect_t f = rubraview_listwin_tool_rect(lw, RUBRAVIEW_LISTWIN_FILTER);
     if (f.width > 0.0) {
@@ -1269,7 +1271,7 @@ void draw_list_tools(app_state_t *app, rubraview_renderer_t *rr, const rubraview
         rubraview_pal_render_stroke_rect(rr, box, typing ? 0xFF5B9BD5u : COLOR_BOX_BORDER, 1.0, 2.0);
         char words[160];
         bool empty = app->list_filter[0] == '\0';
-        snprintf(words, sizeof(words), "%s%s", empty && !typing ? T("Filter") : app->list_filter, typing && in_files ? "|" : "");
+        rubraview_fmt(words, sizeof(words), "{}{}", PROVEN_ARG(empty && !typing ? T("Filter") : app->list_filter), PROVEN_ARG(typing && in_files ? "|" : ""));
         rubraview_pal_rect_t inner = { box.x + 6.0, box.y, box.width - 12.0 - (empty ? 0.0 : box.height), box.height };
         rubraview_pal_render_draw_text(rr, cstr(words), inner, small, empty && !typing ? 0x90F0F0F0u : COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         if (!empty) list_button(rr, px, py, (rubraview_rect_t){ f.x + f.width - f.height, f.y, f.height, f.height }, "\xC3\x97", small, false, COLOR_TEXT);
@@ -1361,10 +1363,10 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
 
     const char *what = app->list_is_set ? T("Playlist") : app->source.archive_path.size > 0 ? T("In this archive") : T("In this folder");
     char title[96];
-    int n = current >= 0 ? snprintf(title, sizeof(title), "%s   %d / %zu", what, current + 1, page_count(app))
-                         : snprintf(title, sizeof(title), "%s   %zu", what, page_count(app));
+    int n = current >= 0 ? rubraview_fmt(title, sizeof(title), "{}   {} / {}", PROVEN_ARG(what), PROVEN_ARG((int)(current + 1)), PROVEN_ARG((size_t)(page_count(app))))
+                         : rubraview_fmt(title, sizeof(title), "{}   {}", PROVEN_ARG(what), PROVEN_ARG((size_t)(page_count(app))));
     if (n > 0 && list_viewed(app) && (size_t)n < sizeof(title))
-        n += snprintf(title + n, sizeof(title) - (size_t)n, T("   (%zu shown)"), count);
+        n += rubraview_fmt(title + n, sizeof(title) - (size_t)n, T("   ({} shown)"), PROVEN_ARG((size_t)count));
     if (n >= (int)sizeof(title)) n = (int)sizeof(title) - 1;
     rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, rubraview_listwin_title_text_right(lw) - lw->x - lw->row_height * 0.4, lw->title_height };
     if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, lw->title_height * 0.45,
@@ -1405,7 +1407,7 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
         if (lw->editable) draw_list_row_parts(app, app->renderer, lw, i, count, app->pointer_x, app->pointer_y, page);
         char line[512], fit[512];
         proven_u8str_view_t name = page_display_name(app, page);
-        int m = snprintf(line, sizeof(line), "%4zu   %.*s", page + 1, (int)(name.size < 480 ? name.size : 480), name.ptr);
+        int m = rubraview_fmt(line, sizeof(line), "{:4}   {}", PROVEN_ARG((size_t)(page + 1)), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 480 ? name.size : 480))));
         rubraview_pal_rect_t text = { text_x + lw->row_height * 0.3, row.y, lw->x + lw->width - text_x - lw->row_height * 0.6, row.height };
         if (m > 0) rubraview_pal_render_draw_text(app->renderer,
                                                   files_fit_text(fit, sizeof(fit), (proven_u8str_view_t){ (const proven_byte_t *)line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) },
@@ -1430,7 +1432,7 @@ void draw_eqwin(app_state_t *app, double win_w, double win_h) {
     int preset = eq_preset_now(app);
     proven_u8str_view_t name = eq_preset_label(preset);
     char title[96];
-    int n = snprintf(title, sizeof(title), T("Equaliser   %.*s"), (int)name.size, name.ptr);
+    int n = rubraview_fmt(title, sizeof(title), T("Equaliser   {}"), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)));
     rubraview_pal_rect_t head = { w->x + pad, w->y, w->width - w->title_height - pad, w->title_height };
     if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, w->title_height * 0.45,
                                               COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
@@ -1469,12 +1471,12 @@ void draw_eqwin(app_state_t *app, double win_w, double win_h) {
         uint32_t knob = held ? COLOR_TILE_CURRENT : hover ? 0xFFFFFFFFu : 0xFFD0D0D0u;
         rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cx - kw * 0.5, ky - kh * 0.5, kw, kh }, knob, 3.0);
         char v[16];
-        int m = snprintf(v, sizeof(v), "%+.1f", (double)gains[b]);
+        int m = rubraview_fmt(v, sizeof(v), "{:+.1}", PROVEN_ARG((double)gains[b]));
         rubraview_pal_rect_t top = { col.x, col.y, col.width, w->label_height };
         if (m > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)v, (size_t)m }, top, w->label_height * 0.55,
                                                   COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         char f[16];
-        m = freqs[b] >= 1000.0 ? snprintf(f, sizeof(f), "%gk", freqs[b] / 1000.0) : snprintf(f, sizeof(f), "%g", freqs[b]);
+        m = freqs[b] >= 1000.0 ? rubraview_fmt(f, sizeof(f), "{}k", PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(freqs[b] / 1000.0), 6))) : rubraview_fmt(f, sizeof(f), "{}", PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(freqs[b]), 6)));
         rubraview_pal_rect_t bottom = { col.x, col.y + col.height - w->label_height, col.width, w->label_height };
         if (m > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)f, (size_t)m }, bottom, w->label_height * 0.55,
                                                   0xC0F0F0F0u, RUBRAVIEW_TEXT_CENTER);

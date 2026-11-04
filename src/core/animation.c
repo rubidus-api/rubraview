@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/animation.h"
 #include <string.h>
 
@@ -275,23 +276,23 @@ bool rubraview_frame_canvas_show(rubraview_frame_canvas_t *canvas, size_t index,
     for (size_t f = from; f <= index; ++f) {
         const rubraview_frame_t *frame = &canvas->frames[f];
         if (f == start) {
-            memset(canvas->pixels, 0, whole);
+            proven_sys_mem_set(canvas->pixels, 0, whole);
         } else {
             /* The frame before leaves as it said it would. */
             const rubraview_frame_t *before = &canvas->frames[f - 1];
             frame_rect_t gone = rect_on_canvas(canvas, before);
             if (before->disposal == RUBRAVIEW_FRAME_CLEAR) {
                 for (int32_t y = 0; y < gone.h; ++y) {
-                    memset(canvas->pixels + (size_t)(gone.y + y) * row + (size_t)gone.x * 4, 0, (size_t)gone.w * 4);
+                    proven_sys_mem_set(canvas->pixels + (size_t)(gone.y + y) * row + (size_t)gone.x * 4, 0, (size_t)gone.w * 4);
                 }
             } else if (before->disposal == RUBRAVIEW_FRAME_RESTORE) {
                 for (int32_t y = 0; y < gone.h; ++y) {
                     size_t at = (size_t)(gone.y + y) * row + (size_t)gone.x * 4;
-                    memcpy(canvas->pixels + at, canvas->backup + at, (size_t)gone.w * 4);
+                    proven_sys_mem_copy(canvas->pixels + at, canvas->backup + at, (size_t)gone.w * 4);
                 }
             }
         }
-        if (frame->disposal == RUBRAVIEW_FRAME_RESTORE) memcpy(canvas->backup, canvas->pixels, whole);
+        if (frame->disposal == RUBRAVIEW_FRAME_RESTORE) proven_sys_mem_copy(canvas->backup, canvas->pixels, whole);
 
         if (frame->width <= 0 || frame->height <= 0 ||
             frame->width > canvas->width || frame->height > canvas->height) {
@@ -307,7 +308,7 @@ bool rubraview_frame_canvas_show(rubraview_frame_canvas_t *canvas, size_t index,
             const uint8_t *src = canvas->scratch + (size_t)(on.y - frame->top + y) * stride + (size_t)(on.x - frame->left) * 4;
             uint8_t *dst = canvas->pixels + (size_t)(on.y + y) * row + (size_t)on.x * 4;
             if (frame->replaces) {
-                memcpy(dst, src, (size_t)on.w * 4);
+                proven_sys_mem_copy(dst, src, (size_t)on.w * 4);
                 continue;
             }
             for (int32_t x = 0; x < on.w; ++x, src += 4, dst += 4) {
@@ -331,7 +332,7 @@ bool rubraview_frame_canvas_show(rubraview_frame_canvas_t *canvas, size_t index,
 
 void rubraview_frame_canvas_seed(rubraview_frame_canvas_t *canvas, size_t index, const uint8_t *pixels) {
     if (!canvas || !canvas->pixels || !pixels || index >= canvas->frame_count) return;
-    memcpy(canvas->pixels, pixels, (size_t)canvas->width * 4 * (size_t)canvas->height);
+    proven_sys_mem_copy(canvas->pixels, pixels, (size_t)canvas->width * 4 * (size_t)canvas->height);
     canvas->shown = (int64_t)index;
 }
 

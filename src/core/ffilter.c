@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/ffilter.h"
 #include <math.h>
 #include <stdio.h>
@@ -9,7 +10,7 @@
 static int by_name(const void *a, const void *b) {
     const rubraview_ffilter_t *x = (const rubraview_ffilter_t *)a, *y = (const rubraview_ffilter_t *)b;
     size_t n = x->name.size < y->name.size ? x->name.size : y->name.size;
-    int c = n ? memcmp(x->name.ptr, y->name.ptr, n) : 0;
+    int c = n ? proven_sys_mem_cmp(x->name.ptr, y->name.ptr, n) : 0;
     return c ? c : (x->name.size > y->name.size) - (x->name.size < y->name.size);
 }
 
@@ -52,10 +53,10 @@ void rubraview_ffilter_group_name(const rubraview_ffilter_catalog_t *catalog, co
     if (x == y) {
         /* one letter in two groups or more: by the names' beginnings */
         const rubraview_ffilter_t *fa = &catalog->filters[a], *fb = &catalog->filters[b];
-        snprintf(out, cap, "%.*s \xE2\x80\x93 %.*s", (int)(fa->name.size < 4 ? fa->name.size : 4), (const char *)fa->name.ptr,
-                 (int)(fb->name.size < 4 ? fb->name.size : 4), (const char *)fb->name.ptr);
+        rubraview_fmt(out, cap, "{} \xE2\x80\x93 {}", PROVEN_ARG(rubraview_bytes_view((const char *)fa->name.ptr, (int)(fa->name.size < 4 ? fa->name.size : 4))),
+                 PROVEN_ARG(rubraview_bytes_view((const char *)fb->name.ptr, (int)(fb->name.size < 4 ? fb->name.size : 4))));
     } else {
-        snprintf(out, cap, "%c \xE2\x80\x93 %c", x, y);
+        rubraview_fmt(out, cap, "{} \xE2\x80\x93 {}", PROVEN_ARG((char)x), PROVEN_ARG((char)y));
     }
 }
 
@@ -115,14 +116,14 @@ size_t rubraview_ffilter_graph(const rubraview_ffilter_t *filter, const double *
             case RUBRAVIEW_FFILTER_INT: {
                 long long r = llround(fmin(fmax(v, p->min), p->max)), d = llround(p->value);
                 if (r == d) continue;
-                snprintf(num, sizeof(num), "%lld", r);
+                rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG((long long)r));
                 value = proven_u8str_view_from_cstr(num);
                 break;
             }
             case RUBRAVIEW_FFILTER_FLOAT: {
                 double r = fmin(fmax(v, p->min), p->max);
                 if (fabs(r - p->value) <= 1e-9 * fmax(1.0, fabs(p->value))) continue;
-                snprintf(num, sizeof(num), "%.9g", r);
+                rubraview_fmt(num, sizeof(num), "{}", PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(r), 9)));
                 value = proven_u8str_view_from_cstr(num);
                 break;
             }
@@ -171,7 +172,7 @@ const char *rubraview_ffilter_refused(proven_u8str_view_t graph) {
         if (n && !long_word) {
             word[n] = '\0';
             for (size_t k = 0; k < sizeof(REFUSED) / sizeof(REFUSED[0]); ++k)
-                if (strcmp(word, REFUSED[k]) == 0) return REFUSED[k];
+                if (rubraview_cstr_cmp(word, REFUSED[k]) == 0) return REFUSED[k];
         }
         n = 0;
         long_word = false;

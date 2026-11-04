@@ -150,7 +150,7 @@ extern bool g_text_on;
 #define TEXT_KINDS (g_text_on ? ";" TEXT_FILTER : "")
 /* `base` with the text kinds after it when they are shown; `buf` holds it. */
 static inline proven_u8str_view_t kinds_with_text(char *buf, size_t cap, const char *base) {
-    int n = snprintf(buf, cap, "%s%s", base, TEXT_KINDS);
+    int n = rubraview_fmt(buf, cap, "{}{}", PROVEN_ARG(base), PROVEN_ARG(TEXT_KINDS));
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 && (size_t)n < cap ? (size_t)n : 0 };
 }
 /* How far the picture's clock may run on from the last thing the sound
@@ -239,7 +239,7 @@ static inline rubraview_tile_metrics_t tile_metrics(double dpi_scale) {
 
 /* PROVEN_LIT() only works on string literals; this is its runtime counterpart. */
 static inline proven_u8str_view_t cstr(const char *s) {
-    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = strlen(s) };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = proven_cstr_len(s) };
 }
 
 /* D-99: how long one viewer waits for another to finish with a state file
@@ -570,6 +570,12 @@ typedef struct app_state {
     double                 media_speed;       /* D-15: 0.25–4.0, kept across files for the session */
     double                 media_resample;    /* D-271: the film matched to the screen (1 when not); played at speed × this */
     double                 media_refresh_hz;  /* the refresh it was matched to */
+    /* D-272 (RV-215 step 4, mpv's interpolation): with Blend frames on, the frame before the one shown, drawn under it
+       at media_blend_weight (the share of the refresh that is still the earlier frame's) for the refresh it was chosen
+       for; media_blend_at is that refresh's film time, so the next refresh shows the new frame alone. */
+    rubraview_texture_t   *media_prev_texture;
+    double                 media_blend_weight;
+    double                 media_blend_at;
     double                 ab_a, ab_b;        /* D-15 A-B repeat points in file seconds, -1 when unset */
     /* The same two points, typed (owner, 2026-09-24). The box holds one
        field per point; a key stamps the playhead into the one in hand,
@@ -1739,7 +1745,7 @@ rubraview_pal_rect_t ab_part_rect(const app_state_t *app, int32_t side, int32_t 
 rubraview_action_facts_t action_facts(const app_state_t *app);
 void address_begin(app_state_t *app);
 void address_typed(app_state_t *app);
-proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_panel_row_t *row, char *buffer, size_t size);
+proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_panel_row_t *row, proven_mem_mut_t buffer_view);
 int anim_end_mode(const app_state_t *app);
 bool anim_plays(const app_state_t *app);
 void animation_prepare(app_state_t *app);
@@ -1765,7 +1771,7 @@ bool arc_ask_press(app_state_t *app, double x, double y);
 enum { ARC_DEL_PAGE = 1, ARC_DEL_WHOLE, ARC_DEL_CANCEL };
 rubraview_arcedit_target_t arc_convert_target(const app_state_t *app);
 void arc_edit_on_page(app_state_t *app, rubraview_arcedit_op_t op, const char *name);
-void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry, const char *name, uint8_t *data, size_t size);
+void arc_edit_request(app_state_t *app, rubraview_arcedit_op_t op, size_t entry, const char *name, proven_mem_mut_t data_view);
 void arc_edit_start(app_state_t *app, rubraview_arcedit_target_t target);
 void arc_job_poll(app_state_t *app, bool quitting);
 bool arc_temp_path(char *dst, size_t cap, const char *tag, proven_u8str_view_t leaf);
@@ -2146,7 +2152,7 @@ void media_tick(app_state_t *app);
 void media_toggle_pause(app_state_t *app);
 void memory_watch(app_state_t *app, double now);
 void menu_rebuild(app_state_t *app);
-proven_u8str_view_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, char *scratch, size_t scratch_size,
+proven_u8str_view_t menu_tile_caption(const rubraview_menu_state_t *menu, int32_t tile, proven_mem_mut_t scratch_view,
                                  bool *out_enabled, bool *out_current);
 void mini_close(app_state_t *app);
 bool mini_paused(const app_state_t *app);
@@ -2293,7 +2299,7 @@ void print_now(app_state_t *app);
 void print_papers_load(app_state_t *app);
 void print_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count);
 proven_u8str_view_t print_printer_name(const app_state_t *app);
-proven_u8str_view_t print_row_text(const rubraview_panel_row_t *row, char *buffer, size_t size);
+proven_u8str_view_t print_row_text(const rubraview_panel_row_t *row, proven_mem_mut_t buffer_view);
 void print_sheet_load(app_state_t *app);
 void print_temp_drop(app_state_t *app);
 void print_thumbs_load(app_state_t *app);
@@ -2352,7 +2358,7 @@ void save_job_poll(app_state_t *app, bool wait);
 uint64_t scene_signature(const app_state_t *app);
 proven_arena_t *scratch_begin(app_state_t *app, rubraview_scratch_t *s, size_t bytes);
 void scratch_end(app_state_t *app, rubraview_scratch_t *s);
-void secure_wipe(void *p, size_t n);
+void secure_wipe(proven_mem_mut_t p_view);
 bool seek_tile_action(proven_u8str_view_t action, bool *out_forward);
 void seekfan_let_go(app_state_t *app);
 void seekfan_pointer(app_state_t *app, double x, double y);
@@ -2413,7 +2419,8 @@ void source_close(app_state_t *app);
 void speed_set(app_state_t *app, double speed);
 double media_rate(const app_state_t *app);   /* D-271: the speed asked times the match to the screen */
 void media_resample_follow(app_state_t *app);
-int speed_text(char *buffer, size_t size, double speed);
+void media_blend_drop(app_state_t *app);
+int speed_text(proven_mem_mut_t buffer_view, double speed);
 void speed_tile_move(app_state_t *app, double y, bool detached);
 void speed_tile_press(app_state_t *app, double y, bool detached, bool interval);
 void speed_tile_release(app_state_t *app, bool detached);

@@ -2,6 +2,7 @@
  * RV-207: extracting and compressing (see archive_job.h). FultaArc reads and writes the archives; this file
  * decides the names and the places, keeps what is there, and checks what it made.
  */
+#include "rubraview/core.h"
 #include "rubraview/archive_job.h"
 #include "rubraview/lang.h"
 #include "rubraview/pal/pal_fs.h"
@@ -30,7 +31,9 @@ const char *rubraview_archive_result_text(rubraview_archive_result_t result) {
 
 static char lower(char c) { return c >= 'A' && c <= 'Z' ? (char)(c - 'A' + 'a') : c; }
 
-static bool device_name(const char *s, size_t n) {
+static bool device_name(proven_u8str_view_t s_view) {
+    const char *s = (const char *)s_view.ptr;
+    size_t n = (size_t)s_view.size;
     static const char *const DEV[] = { "con", "prn", "aux", "nul" };
     size_t stem = 0;
     while (stem < n && s[stem] != '.') stem++;
@@ -43,10 +46,12 @@ static bool device_name(const char *s, size_t n) {
     return false;
 }
 
-size_t rubraview_archive_safe_part(const char *part, size_t len, char *out, size_t cap) {
+size_t rubraview_archive_safe_part(proven_u8str_view_t part_view, char *out, size_t cap) {
+    const char *part = (const char *)part_view.ptr;
+    size_t len = (size_t)part_view.size;
     if (!out || cap == 0) return 0;
     size_t n = 0;
-    if (part && len > 0 && device_name(part, len) && n + 1 < cap) out[n++] = '_';
+    if (part && len > 0 && device_name(rubraview_bytes_view(part, len)) && n + 1 < cap) out[n++] = '_';
     for (size_t i = 0; part && i < len && n + 1 < cap; ++i) {
         unsigned char c = (unsigned char)part[i];
         bool bad = c < 0x20 || c == '<' || c == '>' || c == ':' || c == '"' || c == '|' || c == '?' || c == '*' ||
@@ -59,8 +64,10 @@ size_t rubraview_archive_safe_part(const char *part, size_t len, char *out, size
     return n;
 }
 
-static bool ends_ci(const char *s, size_t n, const char *tail) {
-    size_t t = strlen(tail);
+static bool ends_ci(proven_u8str_view_t s_view, const char *tail) {
+    const char *s = (const char *)s_view.ptr;
+    size_t n = (size_t)s_view.size;
+    size_t t = proven_cstr_len(tail);
     if (n < t) return false;
     for (size_t i = 0; i < t; ++i) if (lower(s[n - t + i]) != tail[i]) return false;
     return true;
@@ -80,20 +87,20 @@ size_t rubraview_archive_stem(proven_u8str_view_t archive_path, char *out, size_
         n = dot;   /* ".zip", or ".001" of "book.7z.001" */
         if (digits) {   /* a split one's own extension too */
             static const char *const KIND[] = { ".7z", ".zip", ".rar", ".egg", ".alz" };
-            for (size_t k = 0; k < 5; ++k) if (ends_ci(p, n, KIND[k])) { n -= strlen(KIND[k]); break; }
+            for (size_t k = 0; k < 5; ++k) if (ends_ci(rubraview_bytes_view(p, n), KIND[k])) { n -= proven_cstr_len(KIND[k]); break; }
         }
         /* "book.part1" of "book.part1.rar" */
         size_t d = n;
         while (d > 0 && p[d - 1] >= '0' && p[d - 1] <= '9') d--;
-        if (d < n && d >= 5 && ends_ci(p, d, ".part")) n = d - 5;
+        if (d < n && d >= 5 && ends_ci(rubraview_bytes_view(p, d), ".part")) n = d - 5;
     }
     if (n == 0) { p = "archive"; n = 7; }
-    return rubraview_archive_safe_part(p, n, out, cap);
+    return rubraview_archive_safe_part(rubraview_bytes_view(p, n), out, cap);
 }
 
 bool rubraview_archive_free_name(proven_u8str_view_t path, bool (*exists)(proven_u8str_view_t path), char *out, size_t cap) {
     if (!out || cap == 0 || path.size + 1 > cap) return false;
-    memcpy(out, path.ptr, path.size);
+    proven_sys_mem_copy(out, path.ptr, path.size);
     out[path.size] = '\0';
     if (!exists || !exists(path)) return true;
     const char *s = (const char *)path.ptr;
@@ -102,7 +109,7 @@ bool rubraview_archive_free_name(proven_u8str_view_t path, bool (*exists)(proven
     for (size_t i = path.size; i > sep; --i) if (s[i - 1] == '.') { dot = i - 1; break; }
     if (dot == sep) dot = path.size;   /* ".hidden" has no extension to keep */
     for (unsigned k = 1; k < 100000; ++k) {
-        int w = snprintf(out, cap, "%.*s-%u%.*s", (int)dot, s, k, (int)(path.size - dot), s + dot);
+        int w = rubraview_fmt(out, cap, "{}-{}{}", PROVEN_ARG(rubraview_bytes_view(s, (int)dot)), PROVEN_ARG((unsigned)k), PROVEN_ARG(rubraview_bytes_view(s + dot, (int)(path.size - dot))));
         if (w <= 0 || (size_t)w >= cap) return false;
         if (!exists((proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = (size_t)w })) return true;
     }
@@ -111,18 +118,18 @@ bool rubraview_archive_free_name(proven_u8str_view_t path, bool (*exists)(proven
 
 bool rubraview_archive_free_folder_name(proven_u8str_view_t path, bool (*exists)(proven_u8str_view_t path), char *out, size_t cap) {
     if (!out || cap == 0 || path.size + 1 > cap) return false;
-    memcpy(out, path.ptr, path.size);
+    proven_sys_mem_copy(out, path.ptr, path.size);
     out[path.size] = '\0';
     if (!exists || !exists(path)) return true;
     for (unsigned k = 1; k < 100000; ++k) {
-        int w = snprintf(out, cap, "%.*s-%u", (int)path.size, (const char *)path.ptr, k);
+        int w = rubraview_fmt(out, cap, "{}-{}", PROVEN_ARG(rubraview_bytes_view((const char *)path.ptr, (int)path.size)), PROVEN_ARG((unsigned)k));
         if (w <= 0 || (size_t)w >= cap) return false;
         if (!exists((proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = (size_t)w })) return true;
     }
     return false;
 }
 
-static proven_u8str_view_t view(const char *s) { return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = s ? strlen(s) : 0 }; }
+static proven_u8str_view_t view(const char *s) { return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = s ? proven_cstr_len(s) : 0 }; }
 static bool exists_fn(proven_u8str_view_t path) { return rubraview_pal_fs_exists(path); }
 
 /* D-263: a split set's names. Volume `i` of the set named `set` ("x.7z", "x.zip"), not its last (ZIP's last is the
@@ -137,7 +144,7 @@ static _Thread_local rubraview_pack_format_t g_set_format;
 static bool set_exists_fn(proven_u8str_view_t path) {
     char set[RUBRAVIEW_ARCHIVE_PATH], first[RUBRAVIEW_ARCHIVE_PATH + 16];
     if (path.size >= sizeof set) return true;
-    memcpy(set, path.ptr, path.size);
+    proven_sys_mem_copy(set, path.ptr, path.size);
     set[path.size] = '\0';
     return rubraview_pal_fs_exists(path) || !volume_name(g_set_format, set, 0, first, sizeof first) || rubraview_pal_fs_exists(view(first));
 }
@@ -146,8 +153,8 @@ size_t rubraview_pack_set_parts(rubraview_pack_format_t format, const char *set,
     size_t n = 0;
     char name[RUBRAVIEW_PACK_PART_PATH];
     for (uint32_t i = 0; i < 1000 && n < cap && volume_name(format, set, i, name, sizeof name); ++i)   /* gaps too: older sets' */
-        if (rubraview_pal_fs_exists(view(name))) snprintf(out[n++], RUBRAVIEW_PACK_PART_PATH, "%s", name);
-    if (format == RUBRAVIEW_PACK_ZIP && n < cap && rubraview_pal_fs_exists(view(set))) snprintf(out[n++], RUBRAVIEW_PACK_PART_PATH, "%s", set);
+        if (rubraview_pal_fs_exists(view(name))) rubraview_fmt(out[n++], RUBRAVIEW_PACK_PART_PATH, "{}", PROVEN_ARG(name));
+    if (format == RUBRAVIEW_PACK_ZIP && n < cap && rubraview_pal_fs_exists(view(set))) rubraview_fmt(out[n++], RUBRAVIEW_PACK_PART_PATH, "{}", PROVEN_ARG(set));
     return n;
 }
 
@@ -173,7 +180,7 @@ static char separator_of(const char *path) {
 
 static void say(char *why, size_t cap, const char *what, const char *name) {
     if (why[0]) return;   /* the first one */
-    snprintf(why, cap, "%s: %s", name ? name : "", what);
+    rubraview_fmt(why, cap, "{}: {}", PROVEN_ARG(name ? name : ""), PROVEN_ARG(what));
 }
 
 /* ---- extracting ---- */
@@ -201,7 +208,7 @@ static fulta_arc_err_t ex_volume(void *ctx, uint32_t index, const char *name, fu
 static fulta_arc_err_t ex_write(void *ctx, const void *data, size_t n) {
     ex_ctx_t *x = ctx;
     if (atomic_load(&x->job->cancel)) return FULTA_ARC_ERR_CANCELLED;
-    if (!rubraview_pal_fs_writer_write(&x->writer, data, n)) return FULTA_ARC_ERR_IO;
+    if (!rubraview_pal_fs_writer_write(&x->writer, rubraview_mem_view(data, n))) return FULTA_ARC_ERR_IO;
     atomic_fetch_add(&x->job->done, n);
     return FULTA_ARC_OK;
 }
@@ -229,21 +236,21 @@ static bool picked(const rubraview_extract_job_t *job, size_t index) {
 static bool place_of(const rubraview_extract_job_t *job, const char *name, char sep, char *out, size_t cap) {
     size_t skip = 0;
     if (job->only && job->inner && job->inner[0]) {
-        size_t k = strlen(job->inner);
-        if (strncmp(name, job->inner, k) == 0) skip = k;
+        size_t k = proven_cstr_len(job->inner);
+        if (rubraview_cstr_cmp_n(name, rubraview_bytes_view(job->inner, k)) == 0) skip = k;
     }
     const char *p = name + skip;
     size_t n = 0;
     out[0] = '\0';
     while (*p) {
-        const char *end = strchr(p, '/');
-        size_t len = end ? (size_t)(end - p) : strlen(p);
+        const char *end = rubraview_cstr_chr(p, '/');
+        size_t len = end ? (size_t)(end - p) : proven_cstr_len(p);
         if (len > 0) {
             if (n > 0) { if (n + 1 >= cap) return false; out[n++] = sep; }
             char part[512];
-            size_t m = rubraview_archive_safe_part(p, len, part, sizeof part);
+            size_t m = rubraview_archive_safe_part(rubraview_bytes_view(p, len), part, sizeof part);
             if (n + m + 1 >= cap) return false;
-            memcpy(out + n, part, m);
+            proven_sys_mem_copy(out + n, part, m);
             n += m;
             out[n] = '\0';
         }
@@ -262,13 +269,13 @@ static bool one_top(const fulta_arc_t *arc, const rubraview_extract_job_t *job) 
         if (!picked(job, i)) continue;
         const fulta_arc_entry_t *e = fulta_arc_entry(arc, i);
         const char *name = e->name;
-        if (job->only && job->inner && strncmp(name, job->inner, strlen(job->inner)) == 0) name += strlen(job->inner);
-        const char *slash = strchr(name, '/');
-        size_t len = slash ? (size_t)(slash - name) : strlen(name);
+        if (job->only && job->inner && rubraview_cstr_cmp_n(name, rubraview_bytes_view(job->inner, proven_cstr_len(job->inner))) == 0) name += proven_cstr_len(job->inner);
+        const char *slash = rubraview_cstr_chr(name, '/');
+        size_t len = slash ? (size_t)(slash - name) : proven_cstr_len(name);
         if (!(e->flags & FULTA_ARC_ENTRY_DIR)) files++;
         if (!slash && !(e->flags & FULTA_ARC_ENTRY_DIR)) foldered = false;   /* a file at the top */
         if (!top) { top = name; top_len = len; }
-        else if (len != top_len || strncmp(name, top, len) != 0) return false;
+        else if (len != top_len || rubraview_cstr_cmp_n(name, rubraview_bytes_view(top, len)) != 0) return false;
     }
     return top && (foldered || files == 1);
 }
@@ -319,18 +326,18 @@ rubraview_archive_result_t rubraview_archive_index_read(const char *archive, rub
     err = fulta_arc_open(&src, &opt, &arc);
     if (err != FULTA_ARC_OK) return result_of(err);
     size_t n = fulta_arc_count(arc);
-    out->items = n ? calloc(n, sizeof *out->items) : NULL;
+    out->items = n ? rubraview_alloc_zero(n, sizeof *out->items) : NULL;
     if (n && !out->items) { fulta_arc_close(arc); return RUBRAVIEW_ARCHIVE_CANNOT_READ; }
     for (size_t i = 0; i < n; ++i) {
         const fulta_arc_entry_t *e = fulta_arc_entry(arc, i);
         const char *name = e->name ? e->name : "";
         while (*name == '/') name++;
-        size_t len = strlen(name);
+        size_t len = proven_cstr_len(name);
         while (len > 0 && name[len - 1] == '/') len--;
         rubraview_archive_item_t *it = &out->items[out->count++];
-        it->name = malloc(len + 1);
+        it->name = rubraview_alloc(len + 1);
         if (!it->name) { rubraview_archive_index_free(out); fulta_arc_close(arc); return RUBRAVIEW_ARCHIVE_CANNOT_READ; }
-        memcpy(it->name, name, len);
+        proven_sys_mem_copy(it->name, name, len);
         it->name[len] = '\0';
         it->size = e->size;
         it->mtime = (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? e->mtime / 1000000000 : 0;
@@ -343,15 +350,15 @@ rubraview_archive_result_t rubraview_archive_index_read(const char *archive, rub
 
 void rubraview_archive_index_free(rubraview_archive_index_t *index) {
     if (!index) return;
-    for (size_t i = 0; i < index->count; ++i) free(index->items[i].name);
-    free(index->items);
+    for (size_t i = 0; i < index->count; ++i) rubraview_free(index->items[i].name);
+    rubraview_free(index->items);
     *index = (rubraview_archive_index_t){ 0 };
 }
 
 /* The part of `name` after the folder `inner` and its '/', when it is in it. */
 static bool in_folder(const char *name, proven_u8str_view_t inner, const char **rest) {
     if (inner.size == 0) { *rest = name; return name[0] != '\0'; }
-    if (strncmp(name, (const char *)inner.ptr, inner.size) != 0 || name[inner.size] != '/' || !name[inner.size + 1]) return false;
+    if (rubraview_cstr_cmp_n(name, rubraview_bytes_view((const char *)inner.ptr, inner.size)) != 0 || name[inner.size] != '/' || !name[inner.size + 1]) return false;
     *rest = name + inner.size + 1;
     return true;
 }
@@ -366,11 +373,11 @@ size_t rubraview_archive_index_level(const rubraview_archive_index_t *index, pro
         const rubraview_archive_item_t *it = &index->items[i];
         const char *rest;
         if (!in_folder(it->name, inner, &rest)) continue;
-        const char *slash = strchr(rest, '/');
+        const char *slash = rubraview_cstr_chr(rest, '/');
         if (!slash && !it->is_dir) continue;
-        size_t len = slash ? (size_t)(slash - rest) : strlen(rest);
+        size_t len = slash ? (size_t)(slash - rest) : proven_cstr_len(rest);
         size_t k = 0;
-        while (k < n && !(out[k].name.size == len && memcmp(out[k].name.ptr, rest, len) == 0)) k++;
+        while (k < n && !(out[k].name.size == len && proven_sys_mem_cmp(out[k].name.ptr, rest, len) == 0)) k++;
         if (k == n) {   /* a new one */
             if (n == cap) continue;
             out[n++] = (rubraview_archive_child_t){ .name = { .ptr = (const proven_byte_t *)rest, .size = len },
@@ -382,9 +389,9 @@ size_t rubraview_archive_index_level(const rubraview_archive_index_t *index, pro
     for (size_t i = 0; i < index->count; ++i) {
         const rubraview_archive_item_t *it = &index->items[i];
         const char *rest;
-        if (it->is_dir || !in_folder(it->name, inner, &rest) || strchr(rest, '/')) continue;
+        if (it->is_dir || !in_folder(it->name, inner, &rest) || rubraview_cstr_chr(rest, '/')) continue;
         if (n == cap) break;
-        out[n++] = (rubraview_archive_child_t){ .name = { .ptr = (const proven_byte_t *)rest, .size = strlen(rest) },
+        out[n++] = (rubraview_archive_child_t){ .name = { .ptr = (const proven_byte_t *)rest, .size = proven_cstr_len(rest) },
                                                 .is_dir = false, .item = i, .size = it->size, .mtime = it->mtime };
     }
     return n;
@@ -397,7 +404,7 @@ size_t rubraview_archive_index_under(const rubraview_archive_index_t *index, pro
     for (size_t i = 0; i < index->count; ++i) {
         const char *name = index->items[i].name;
         bool here = path.size == 0 ||
-                    (strncmp(name, (const char *)path.ptr, path.size) == 0 && (name[path.size] == '\0' || name[path.size] == '/'));
+                    (rubraview_cstr_cmp_n(name, rubraview_bytes_view((const char *)path.ptr, path.size)) == 0 && (name[path.size] == '\0' || name[path.size] == '/'));
         if (!here) continue;
         if (n < cap && out) out[n] = i;
         n++;
@@ -415,17 +422,17 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
     if (err != FULTA_ARC_OK) { job->result = result_of(err); say(job->why, sizeof job->why, fulta_arc_strerror(err), job->archive); return; }
 
     char sep = separator_of(job->dest);
-    size_t dn = strlen(job->dest);
+    size_t dn = proven_cstr_len(job->dest);
     while (dn > 1 && (job->dest[dn - 1] == '/' || job->dest[dn - 1] == '\\')) dn--;
     bool own_folder = job->mode == RUBRAVIEW_EXTRACT_FOLDER || (job->mode == RUBRAVIEW_EXTRACT_SMART && !one_top(arc, job));
     if (own_folder) {
         char stem[512], want[RUBRAVIEW_ARCHIVE_PATH];
         rubraview_archive_stem(view(job->archive), stem, sizeof stem);
-        snprintf(want, sizeof want, "%.*s%c%s", (int)dn, job->dest, sep, stem);
+        rubraview_fmt(want, sizeof want, "{}{}{}", PROVEN_ARG(rubraview_bytes_view(job->dest, (int)dn)), PROVEN_ARG((char)sep), PROVEN_ARG(stem));
         /* a file or a folder of that name there already: book-1, so nothing is mixed into what was there */
-        if (!rubraview_archive_free_folder_name(view(want), exists_fn, job->root, sizeof job->root)) snprintf(job->root, sizeof job->root, "%s", want);
+        if (!rubraview_archive_free_folder_name(view(want), exists_fn, job->root, sizeof job->root)) rubraview_fmt(job->root, sizeof job->root, "{}", PROVEN_ARG(want));
     } else {
-        snprintf(job->root, sizeof job->root, "%.*s", (int)dn, job->dest);
+        rubraview_fmt(job->root, sizeof job->root, "{}", PROVEN_ARG(rubraview_bytes_view(job->dest, (int)dn)));
     }
 
     uint64_t total = 0;
@@ -446,12 +453,12 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
         if (!picked(job, i)) continue;
         const fulta_arc_entry_t *e = fulta_arc_entry(arc, i);
         if (!place_of(job, e->name, sep, rel, sizeof rel)) continue;   /* the picked folder itself */
-        int w = snprintf(path, sizeof path, "%s%c%s", job->root, sep, rel);
+        int w = rubraview_fmt(path, sizeof path, "{}{}{}", PROVEN_ARG(job->root), PROVEN_ARG((char)sep), PROVEN_ARG(rel));
         if (w <= 0 || (size_t)w >= sizeof path) { job->failed++; say(job->why, sizeof job->why, T("the name is too long"), e->name); continue; }
         if (e->flags & FULTA_ARC_ENTRY_DIR) { (void)rubraview_pal_fs_make_dirs(view(path)); continue; }
         if (e->flags & FULTA_ARC_ENTRY_SYMLINK) { job->skipped++; continue; }   /* a link is not followed out of the folder */
         /* its folder */
-        char *last = strrchr(path, sep);
+        char *last = rubraview_cstr_rchr(path, sep);
         if (last) { *last = '\0'; (void)rubraview_pal_fs_make_dirs(view(path)); *last = sep; }
         proven_u8str_view_t pv = view(path);
         bool there = rubraview_pal_fs_exists(pv);
@@ -459,9 +466,9 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
         if (there && job->exists == RUBRAVIEW_EXISTS_NUMBER) {
             if (!rubraview_archive_free_name(pv, exists_fn, final, sizeof final)) { job->failed++; continue; }
         } else {
-            snprintf(final, sizeof final, "%s", path);
+            rubraview_fmt(final, sizeof final, "{}", PROVEN_ARG(path));
         }
-        snprintf(part, sizeof part, "%s.rvpart", final);
+        rubraview_fmt(part, sizeof part, "{}.rvpart", PROVEN_ARG(final));
         (void)rubraview_pal_fs_delete(view(part));   /* one left by a run that was stopped hard */
         ex_ctx_t x = { .job = job };
         if (!rubraview_pal_fs_writer_open(&x.writer, view(part))) {
@@ -517,29 +524,33 @@ typedef struct pack_list {
     bool failed;
 } pack_list_t;
 
-static char *dup_n(const char *s, size_t n) {
-    char *d = malloc(n + 1);
-    if (d) { memcpy(d, s, n); d[n] = '\0'; }
+static char *dup_n(proven_u8str_view_t s_view) {
+    const char *s = (const char *)s_view.ptr;
+    size_t n = (size_t)s_view.size;
+    char *d = rubraview_alloc(n + 1);
+    if (d) { proven_sys_mem_copy(d, s, n); d[n] = '\0'; }
     return d;
 }
 
-static void list_add(pack_list_t *l, const char *name, const char *path, uint64_t size, int64_t mtime, bool dir) {
+static void list_add(pack_list_t *l, const char *name, proven_u8str_view_t path_view, int64_t mtime, bool dir) {
+    const char *path = (const char *)path_view.ptr;
+    uint64_t size = (uint64_t)path_view.size;
     if (l->failed) return;
     if (l->count == l->cap) {
         size_t cap = l->cap ? l->cap * 2 : 64;
-        pack_item_t *more = realloc(l->items, cap * sizeof *more);
+        pack_item_t *more = rubraview_realloc(rubraview_mem_mut(l->items, cap * sizeof *more));
         if (!more) { l->failed = true; return; }
         l->items = more;
         l->cap = cap;
     }
-    pack_item_t it = { .name = dup_n(name, strlen(name)), .path = dup_n(path, strlen(path)), .size = size, .mtime = mtime, .dir = dir };
-    if (!it.name || !it.path) { free(it.name); free(it.path); l->failed = true; return; }
+    pack_item_t it = { .name = dup_n(rubraview_bytes_view(name, proven_cstr_len(name))), .path = dup_n(rubraview_bytes_view(path, proven_cstr_len(path))), .size = size, .mtime = mtime, .dir = dir };
+    if (!it.name || !it.path) { rubraview_free(it.name); rubraview_free(it.path); l->failed = true; return; }
     l->items[l->count++] = it;
 }
 
 static void list_free(pack_list_t *l) {
-    for (size_t i = 0; i < l->count; ++i) { free(l->items[i].name); free(l->items[i].path); }
-    free(l->items);
+    for (size_t i = 0; i < l->count; ++i) { rubraview_free(l->items[i].name); rubraview_free(l->items[i].path); }
+    rubraview_free(l->items);
     *l = (pack_list_t){ 0 };
 }
 
@@ -547,7 +558,7 @@ static void list_free(pack_list_t *l) {
 
 static void walk(pack_list_t *l, const char *name, const char *path, rubraview_compress_job_t *job, int depth) {
     if (depth > 64 || l->failed || atomic_load(&job->cancel)) return;
-    void *mem = malloc(LIST_ARENA);
+    void *mem = rubraview_alloc(LIST_ARENA);
     if (!mem) { l->failed = true; return; }
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = mem, .size = LIST_ARENA });
     rubraview_fs_listing_t listing = rubraview_pal_fs_list_dir(&arena, view(path));
@@ -555,16 +566,16 @@ static void walk(pack_list_t *l, const char *name, const char *path, rubraview_c
     for (size_t i = 0; i < listing.count && !l->failed; ++i) {
         const rubraview_fs_entry_t *e = &listing.entries[i];
         char child_name[RUBRAVIEW_ARCHIVE_PATH], child_path[RUBRAVIEW_ARCHIVE_PATH];
-        int a = snprintf(child_name, sizeof child_name, "%s/%.*s%s", name, (int)e->name.size, (const char *)e->name.ptr, e->is_directory ? "/" : "");
-        int b = snprintf(child_path, sizeof child_path, "%s%c%.*s", path, sep, (int)e->name.size, (const char *)e->name.ptr);
+        int a = rubraview_fmt(child_name, sizeof child_name, "{}/{}{}", PROVEN_ARG(name), PROVEN_ARG(rubraview_bytes_view((const char *)e->name.ptr, (int)e->name.size)), PROVEN_ARG(e->is_directory ? "/" : ""));
+        int b = rubraview_fmt(child_path, sizeof child_path, "{}{}{}", PROVEN_ARG(path), PROVEN_ARG((char)sep), PROVEN_ARG(rubraview_bytes_view((const char *)e->name.ptr, (int)e->name.size)));
         if (a <= 0 || b <= 0 || (size_t)a >= sizeof child_name || (size_t)b >= sizeof child_path) continue;
-        list_add(l, child_name, child_path, e->size_bytes, e->mtime, e->is_directory);
+        list_add(l, child_name, rubraview_bytes_view(child_path, e->size_bytes), e->mtime, e->is_directory);
         if (e->is_directory) {
             child_name[a - 1] = '\0';   /* without its '/' */
             walk(l, child_name, child_path, job, depth + 1);
         }
     }
-    free(mem);
+    rubraview_free(mem);
 }
 
 typedef struct pack_reader {
@@ -590,7 +601,7 @@ static fulta_arc_err_t pack_read(void *ctx, void *buf, size_t cap, size_t *got) 
     }
     uint64_t left = r->map.size - r->at;
     size_t n = left < cap ? (size_t)left : cap;
-    if (n) memcpy(buf, r->map.data + r->at, n);
+    if (n) proven_sys_mem_copy(buf, r->map.data + r->at, n);
     r->at += n;
     *got = n;
     if (r->at == r->map.size) { rubraview_pal_fs_unmap(&r->map); r->mapped = false; r->at = r->item->size; }
@@ -604,12 +615,12 @@ static fulta_arc_err_t mem_write(void *ctx, const void *data, size_t n) {
     mem_sink_t *m = ctx;
     if (m->size + n > m->cap) {
         size_t cap = (m->size + n) * 2 + 64;
-        uint8_t *more = realloc(m->data, cap);
+        uint8_t *more = rubraview_realloc(rubraview_mem_mut(m->data, cap));
         if (!more) return FULTA_ARC_ERR_NOMEM;
         m->data = more;
         m->cap = cap;
     }
-    if (n) memcpy(m->data + m->size, data, n);
+    if (n) proven_sys_mem_copy(m->data + m->size, data, n);
     m->size += n;
     return FULTA_ARC_OK;
 }
@@ -617,7 +628,7 @@ static fulta_arc_err_t mem_write(void *ctx, const void *data, size_t n) {
 static fulta_arc_err_t mem_patch(void *ctx, uint64_t offset, const void *data, size_t n) {
     mem_sink_t *m = ctx;
     if (offset > m->size || n > m->size - offset) return FULTA_ARC_ERR_IO;
-    memcpy(m->data + offset, data, n);
+    proven_sys_mem_copy(m->data + offset, data, n);
     return FULTA_ARC_OK;
 }
 
@@ -639,7 +650,7 @@ typedef struct cmp_ctx {
 static fulta_arc_err_t cmp_write(void *ctx, const void *data, size_t n) {
     cmp_ctx_t *c = ctx;
     if (atomic_load(&c->job->cancel)) return FULTA_ARC_ERR_CANCELLED;
-    if (c->at + n > c->size || memcmp(c->src + c->at, data, n) != 0) { c->same = false; return FULTA_ARC_ERR_CHECKSUM; }
+    if (c->at + n > c->size || proven_sys_mem_cmp(c->src + c->at, data, n) != 0) { c->same = false; return FULTA_ARC_ERR_CHECKSUM; }
     c->at += n;
     atomic_fetch_add(&c->job->done, n);
     return FULTA_ARC_OK;
@@ -653,7 +664,7 @@ static fulta_arc_err_t cmp_password(void *ctx, uint32_t attempt, const char **ut
 }
 
 static int cmp_order(const void *a, const void *b) {
-    return strcmp(((const pack_item_t *)a)->name, ((const pack_item_t *)b)->name);
+    return rubraview_cstr_cmp(((const pack_item_t *)a)->name, ((const pack_item_t *)b)->name);
 }
 
 /* The archive at `path` holds exactly `list`'s files and folders, byte for byte. */
@@ -666,20 +677,20 @@ static bool check_written(const char *path, pack_list_t *list, rubraview_compres
     qsort(list->items, list->count, sizeof list->items[0], cmp_order);
     for (size_t i = 0; ok && i < fulta_arc_count(arc); ++i) {
         const fulta_arc_entry_t *e = fulta_arc_entry(arc, i);
-        size_t n = strlen(e->name);
+        size_t n = proven_cstr_len(e->name);
         while (n > 0 && e->name[n - 1] == '/') n--;
-        pack_item_t key = { .name = dup_n(e->name, n) };
+        pack_item_t key = { .name = dup_n(rubraview_bytes_view(e->name, n)) };
         if (!key.name) { ok = false; break; }
         /* the list's folders end in '/'; look both ways */
         pack_item_t *hit = bsearch(&key, list->items, list->count, sizeof list->items[0], cmp_order);
         if (!hit) {
-            char *slashed = malloc(n + 2);
-            if (slashed) { memcpy(slashed, e->name, n); slashed[n] = '/'; slashed[n + 1] = '\0'; }
+            char *slashed = rubraview_alloc(n + 2);
+            if (slashed) { proven_sys_mem_copy(slashed, e->name, n); slashed[n] = '/'; slashed[n + 1] = '\0'; }
             pack_item_t k2 = { .name = slashed };
             hit = slashed ? bsearch(&k2, list->items, list->count, sizeof list->items[0], cmp_order) : NULL;
-            free(slashed);
+            rubraview_free(slashed);
         }
-        free(key.name);
+        rubraview_free(key.name);
         if (!hit || hit->dir != ((e->flags & FULTA_ARC_ENTRY_DIR) != 0) || (!hit->dir && e->size != hit->size)) { ok = false; break; }
         if (hit->dir || hit->size == 0) continue;
         rubraview_fs_mapping_t map = { 0 };
@@ -805,19 +816,19 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
             list_free(&list);
             return;
         }
-        size_t n = strlen(path);
+        size_t n = proven_cstr_len(path);
         while (n > 1 && (path[n - 1] == '/' || path[n - 1] == '\\')) n--;
         size_t from = 0;
         for (size_t i = 0; i < n; ++i) if (path[i] == '/' || path[i] == '\\') from = i + 1;
         char base[512];
-        rubraview_archive_safe_part(path + from, n - from, base, sizeof base);
+        rubraview_archive_safe_part(rubraview_bytes_view(path + from, n - from), base, sizeof base);
         if (st.is_directory) {
             char slashed[520];
-            snprintf(slashed, sizeof slashed, "%s/", base);
-            list_add(&list, slashed, path, 0, st.mtime, true);
+            rubraview_fmt(slashed, sizeof slashed, "{}/", PROVEN_ARG(base));
+            list_add(&list, slashed, rubraview_bytes_view(path, 0), st.mtime, true);
             walk(&list, base, path, job, 0);
         } else {
-            list_add(&list, base, path, st.size_bytes, st.mtime, false);
+            list_add(&list, base, rubraview_bytes_view(path, st.size_bytes), st.mtime, false);
         }
     }
     if (list.failed) { job->result = RUBRAVIEW_ARCHIVE_CANNOT_READ; say(job->why, sizeof job->why, T("not enough memory"), ""); list_free(&list); return; }
@@ -827,11 +838,11 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
     /* two sources of one name would be one entry twice: the second is numbered */
     for (size_t i = 0; i < list.count; ++i) {
         for (size_t j = 0; j < i; ++j) {
-            if (strcmp(list.items[i].name, list.items[j].name) != 0) continue;
+            if (rubraview_cstr_cmp(list.items[i].name, list.items[j].name) != 0) continue;
             char renamed[RUBRAVIEW_ARCHIVE_PATH];
-            snprintf(renamed, sizeof renamed, "%s-%zu", list.items[i].name, i);
-            free(list.items[i].name);
-            list.items[i].name = dup_n(renamed, strlen(renamed));
+            rubraview_fmt(renamed, sizeof renamed, "{}-{}", PROVEN_ARG(list.items[i].name), PROVEN_ARG((size_t)i));
+            rubraview_free(list.items[i].name);
+            list.items[i].name = dup_n(rubraview_bytes_view(renamed, proven_cstr_len(renamed)));
             break;
         }
     }
@@ -854,7 +865,7 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
     fulta_arc_write_sink_t ms = { .ctx = &empty7z, .write = mem_write, .patch = mem_patch };
     fulta_arc_t *base = NULL;
     fulta_arc_edit_t *edit = NULL;
-    pack_reader_t *readers = calloc(list.count, sizeof *readers);
+    pack_reader_t *readers = rubraview_alloc_zero(list.count, sizeof *readers);
     fulta_arc_err_t err = readers ? FULTA_ARC_OK : FULTA_ARC_ERR_NOMEM;
     if (err == FULTA_ARC_OK && job->format == RUBRAVIEW_PACK_ZIP) err = fulta_arc_write(FULTA_ARC_FORMAT_7Z, NULL, 0, NULL, &ms);
     if (err == FULTA_ARC_OK)
@@ -888,16 +899,16 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
         if (readers[i].mapped) rubraview_pal_fs_unmap(&readers[i].map);
         if (readers[i].failed && err != FULTA_ARC_OK) say(job->why, sizeof job->why, T("it could not be read"), list.items[i].path);
     }
-    free(readers);
+    rubraview_free(readers);
     if (edit) fulta_arc_edit_free(edit);
     if (base) fulta_arc_close(base);
-    free(empty7z.data);
+    rubraview_free(empty7z.data);
     if (err != FULTA_ARC_OK) {
         (void)rubraview_pal_fs_delete(view(job->written));   /* FultaArc renames only a whole one over it; nothing of ours stays */
         job->result = err == FULTA_ARC_ERR_CANCELLED || atomic_load(&job->cancel) ? RUBRAVIEW_ARCHIVE_CANCELLED
                     : job->why[0] ? RUBRAVIEW_ARCHIVE_CANNOT_READ : RUBRAVIEW_ARCHIVE_CANNOT_WRITE;
         job->older_parts = err == FULTA_ARC_ERR_EXISTS;
-        if (split) snprintf(job->set_name, sizeof job->set_name, "%s", job->written);
+        if (split) rubraview_fmt(job->set_name, sizeof job->set_name, "{}", PROVEN_ARG(job->written));
         if (err == FULTA_ARC_ERR_EXISTS) say(job->why, sizeof job->why, T("a later part of an older split set of that name is there: move it away first"), job->written);
         if (!job->why[0] && job->result == RUBRAVIEW_ARCHIVE_CANNOT_WRITE) say(job->why, sizeof job->why, fulta_arc_strerror(err), job->written);
         job->written[0] = '\0';
@@ -908,9 +919,9 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
     /* read back and compared before it is kept; a split set opened as Rubraview opens it (D-263): a 7z's first volume,
        a ZIP's own name */
     char set[RUBRAVIEW_ARCHIVE_PATH];
-    snprintf(set, sizeof set, "%s", job->written);
+    rubraview_fmt(set, sizeof set, "{}", PROVEN_ARG(job->written));
     if (split && job->format == RUBRAVIEW_PACK_7Z && !volume_name(job->format, set, 0, job->written, sizeof job->written))
-        snprintf(job->written, sizeof job->written, "%s", set);
+        rubraview_fmt(job->written, sizeof job->written, "{}", PROVEN_ARG(set));
     atomic_store(&job->phase, 2);
     atomic_store(&job->done, 0);
     if (!check_written(job->written, &list, job)) {

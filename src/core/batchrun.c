@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/batchrun.h"
 #include "rubraview/effects.h"
 #include "rubraview/plugin.h"
@@ -12,12 +13,12 @@
 /* ---- small parsing helpers ---- */
 
 static proven_u8str_view_t cstr(const char *s) {
-    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = s ? strlen(s) : 0 };
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = s ? proven_cstr_len(s) : 0 };
 }
 
 static bool starts_with(proven_u8str_view_t s, const char *prefix, proven_u8str_view_t *out_rest) {
-    size_t n = strlen(prefix);
-    if (s.size < n || memcmp(s.ptr, prefix, n) != 0) return false;
+    size_t n = proven_cstr_len(prefix);
+    if (s.size < n || proven_sys_mem_cmp(s.ptr, prefix, n) != 0) return false;
     if (out_rest) *out_rest = (proven_u8str_view_t){ .ptr = s.ptr + n, .size = s.size - n };
     return true;
 }
@@ -413,7 +414,7 @@ void rubraview_cli_parse(rubraview_cli_result_t *out, proven_arena_t *arena,
                 result.err = RUBRAVIEW_CLI_ERR_BAD_VALUE; result.offending = arg; *out = result; out->job.actions = out->actions; return;
             }
             dotted[0] = 'x'; dotted[1] = '.';
-            memcpy(dotted + 2, value.ptr, value.size);
+            proven_sys_mem_copy(dotted + 2, value.ptr, value.size);
             rubraview_export_format_t format =
                 rubraview_export_format_for_name((proven_u8str_view_t){ .ptr = (const proven_byte_t *)dotted, .size = value.size + 2 });
             if (format == RUBRAVIEW_EXPORT_SAME_AS_SOURCE) {
@@ -726,7 +727,7 @@ proven_u8str_view_t rubraview_batch_output_name(proven_arena_t *arena, const rub
     proven_result_mem_mut_t res = proven_arena_alloc(arena, made.size + 1);
     if (!proven_is_ok(res.err)) return made;
     char *p = (char *)res.value.ptr;
-    memcpy(p, made.ptr, made.size);
+    proven_sys_mem_copy(p, made.ptr, made.size);
     p[made.size] = '\0';
     size_t body = made.size;   /* the extension (after the last dot) keeps its letters */
     for (size_t i = made.size; i > 0; --i) if (p[i - 1] == '.') { body = i - 1; break; }

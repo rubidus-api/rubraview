@@ -1,4 +1,6 @@
 #ifdef _WIN32
+#include "rubraview/pal/pal_wide.h"
+#include "rubraview/core.h"
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
@@ -28,10 +30,10 @@ static bool is_file(const WCHAR *path) {
 proven_u8str_view_t rubraview_pal_gmic_find(proven_arena_t *arena, proven_u8str_view_t where) {
     WCHAR path[MAX_PATH + 16];
     if (!arena || where.size == 0 || !wide_of(where, path, MAX_PATH)) return PROVEN_LIT("");
-    size_t n = wcslen(path);
+    size_t n = rubraview_wlen(path);
     while (n > 0 && (path[n - 1] == L'\\' || path[n - 1] == L'/')) path[--n] = L'\0';
-    if (n > 4 && _wcsicmp(path + n - 4, L".exe") == 0) return is_file(path) ? utf8_of(arena, path) : PROVEN_LIT("");
-    wcscat(path, L"\\gmic.exe");
+    if (n > 4 && rubraview_wcmp_ci(path + n - 4, L".exe") == 0) return is_file(path) ? utf8_of(arena, path) : PROVEN_LIT("");
+    rubraview_wcat_a(path, L"\\gmic.exe");
     return is_file(path) ? utf8_of(arena, path) : PROVEN_LIT("");
 }
 
@@ -46,10 +48,10 @@ proven_u8str_view_t rubraview_pal_gmic_temp(proven_arena_t *arena, uint32_t tag,
         DWORD s = GetShortPathNameW(dir, shortened, MAX_PATH);
         if (s == 0 || s >= MAX_PATH) return PROVEN_LIT("");
         for (DWORD i = 0; i < s; ++i) if (shortened[i] >= 0x80) return PROVEN_LIT("");
-        wcscpy(dir, shortened);
+        rubraview_wcopy_a(dir, shortened);
     }
-    _snwprintf(name, sizeof(name) / sizeof(name[0]), L"%lsrubraview-gmic-%lu-%lu-%ls.png", dir,
-               (unsigned long)GetCurrentProcessId(), (unsigned long)tag, output ? L"out" : L"in");
+    rubraview_wfmt(name, sizeof(name) / sizeof(name[0]), "{}rubraview-gmic-{}-{}-{}.png", PROVEN_ARG(rubraview_wide_view(dir)),
+               PROVEN_ARG((unsigned long)((unsigned long)GetCurrentProcessId())), PROVEN_ARG((unsigned long)((unsigned long)tag)), PROVEN_ARG(rubraview_wide_view(output ? L"out" : L"in")));
     name[sizeof(name) / sizeof(name[0]) - 1] = L'\0';
     return utf8_of(arena, name);
 }
@@ -88,7 +90,7 @@ static void keep_tail(rubraview_gmic_exec_t *r, size_t *used, const char *data, 
         char c = data[i];
         if (c == '\r') continue;
         if ((unsigned char)c < 0x20 && c != '\n' && c != '\t') continue;   /* colour codes and the like */
-        if (*used == cap) { memmove(r->said, r->said + 1, cap - 1); (*used)--; }
+        if (*used == cap) { proven_sys_mem_move(r->said, r->said + 1, cap - 1); (*used)--; }
         r->said[(*used)++] = c;
     }
     r->said[*used] = '\0';
@@ -110,7 +112,7 @@ rubraview_gmic_exec_t rubraview_pal_gmic_exec(proven_u8str_view_t exe, const pro
     static SRWLOCK line_lock = SRWLOCK_INIT;
     WCHAR program[MAX_PATH + 1], arg[8192];
     if (exe.size == 0 || count > RUBRAVIEW_GMIC_MAX_ITEMS || !wide_of(exe, program, MAX_PATH)) {
-        snprintf(r.said, sizeof(r.said), "%s", "gmic.exe was not found");
+        rubraview_fmt(r.said, sizeof(r.said), "{}", PROVEN_ARG("gmic.exe was not found"));
         return r;
     }
     AcquireSRWLockExclusive(&line_lock);
@@ -121,7 +123,7 @@ rubraview_gmic_exec_t rubraview_pal_gmic_exec(proven_u8str_view_t exe, const pro
     }
     if (!fits) {
         ReleaseSRWLockExclusive(&line_lock);
-        snprintf(r.said, sizeof(r.said), "%s", "the command is too long");
+        rubraview_fmt(r.said, sizeof(r.said), "{}", PROVEN_ARG("the command is too long"));
         return r;
     }
 
@@ -133,14 +135,14 @@ rubraview_gmic_exec_t rubraview_pal_gmic_exec(proven_u8str_view_t exe, const pro
         if (write_end) CloseHandle(write_end);
         if (nul != INVALID_HANDLE_VALUE) CloseHandle(nul);
         ReleaseSRWLockExclusive(&line_lock);
-        snprintf(r.said, sizeof(r.said), "%s", "gmic.exe could not be started");
+        rubraview_fmt(r.said, sizeof(r.said), "{}", PROVEN_ARG("gmic.exe could not be started"));
         return r;
     }
     SetHandleInformation(read_end, HANDLE_FLAG_INHERIT, 0);
 
     SIZE_T attr_size = 0;
     InitializeProcThreadAttributeList(NULL, 1, 0, &attr_size);
-    LPPROC_THREAD_ATTRIBUTE_LIST attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)malloc(attr_size);
+    LPPROC_THREAD_ATTRIBUTE_LIST attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)rubraview_alloc(attr_size);
     HANDLE inherit[2] = { write_end, nul };   /* its output and an empty input, nothing else of ours */
     bool attrs_ok = attrs && InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size) &&
                     UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof(inherit), NULL, NULL);
@@ -149,8 +151,8 @@ rubraview_gmic_exec_t rubraview_pal_gmic_exec(proven_u8str_view_t exe, const pro
                           .lpAttributeList = attrs_ok ? attrs : NULL };
     /* Its own folder is where it runs: its DLLs and nothing of the viewer's folder */
     WCHAR folder[MAX_PATH + 1];
-    wcscpy(folder, program);
-    WCHAR *slash = wcsrchr(folder, L'\\');
+    rubraview_wcopy_a(folder, program);
+    WCHAR *slash = rubraview_wrchr(folder, L'\\');
     if (slash) *slash = L'\0';
     PROCESS_INFORMATION pi = {0};
     HANDLE job = CreateJobObjectW(NULL, NULL);
@@ -162,13 +164,13 @@ rubraview_gmic_exec_t rubraview_pal_gmic_exec(proven_u8str_view_t exe, const pro
                                               NULL, slash ? folder : NULL, &si.StartupInfo, &pi);
     ReleaseSRWLockExclusive(&line_lock);
     if (attrs_ok) DeleteProcThreadAttributeList(attrs);
-    free(attrs);
+    rubraview_free(attrs);
     CloseHandle(write_end);   /* only the child writes now: its end closes when it ends */
     CloseHandle(nul);
     if (!started) {
         CloseHandle(read_end);
         if (job) CloseHandle(job);
-        snprintf(r.said, sizeof(r.said), "%s", "gmic.exe could not be started");
+        rubraview_fmt(r.said, sizeof(r.said), "{}", PROVEN_ARG("gmic.exe could not be started"));
         return r;
     }
     if (job) AssignProcessToJobObject(job, pi.hProcess);

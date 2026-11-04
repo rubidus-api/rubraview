@@ -85,14 +85,14 @@ size_t rubraview_pagebar_page(double bar_x, double bar_width, double click_x, si
  * `hh:mm:ss.mmm`, or `mm:ss.mmm` for anything under an hour — what the
  * HUD shows. Writes into `buffer` and returns the slice.
  */
-proven_u8str_view_t rubraview_format_timecode(char *buffer, size_t buffer_size, double seconds, bool with_milliseconds);
+proven_u8str_view_t rubraview_format_timecode(proven_mem_mut_t buffer_view, double seconds, bool with_milliseconds);
 
 /**
  * The film's line in the toolbox (owner, 2026-09-29): "00:02 / 00:10   vol
  * 100%", then the speed when it is not 1x and "A-B" or "A-" while a repeat
  * is set (a point below 0 is unset). NUL-terminated.
  */
-proven_u8str_view_t rubraview_media_status(char *buffer, size_t buffer_size, double position, double duration,
+proven_u8str_view_t rubraview_media_status(proven_mem_mut_t buffer_view, double position, double duration,
                                int volume, bool muted, double speed, double ab_a, double ab_b);
 
 /**
@@ -185,7 +185,7 @@ int32_t rubraview_tracks_next(const rubraview_track_set_t *set, rubraview_track_
 size_t rubraview_tracks_count(const rubraview_track_set_t *set, rubraview_track_kind_t kind);
 
 /** A human label: "#2  Korean (AAC 2.0)". */
-proven_u8str_view_t rubraview_track_label(char *buffer, size_t buffer_size,
+proven_u8str_view_t rubraview_track_label(proven_mem_mut_t buffer_view,
                               const rubraview_track_set_t *set, int32_t index);
 
 #ifdef __cplusplus

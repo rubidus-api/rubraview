@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/lyrics.h"
 #include "rubraview/number.h"
 #include <string.h>
@@ -33,7 +34,7 @@ static bool lyric_push(proven_arena_t *arena, lyric_buf_t *b, rubraview_lyric_li
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, cap, sizeof(*b->data));
         if (!proven_is_ok(res.err)) return false;
         rubraview_lyric_line_t *data = (rubraview_lyric_line_t*)(void*)res.value.ptr;
-        if (b->data && b->count > 0) memcpy(data, b->data, b->count * sizeof(*b->data));
+        if (b->data && b->count > 0) proven_sys_mem_copy(data, b->data, b->count * sizeof(*b->data));
         b->data = data;
         b->capacity = cap;
     }
@@ -171,7 +172,7 @@ rubraview_lyrics_t rubraview_lyrics_from_lines(proven_arena_t *arena, const rubr
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, count, sizeof(rubraview_lyric_line_t));
     if (!proven_is_ok(res.err)) return lyrics;
     lyrics.lines = (rubraview_lyric_line_t*)(void*)res.value.ptr;
-    memcpy(lyrics.lines, lines, count * sizeof(rubraview_lyric_line_t));
+    proven_sys_mem_copy(lyrics.lines, lines, count * sizeof(rubraview_lyric_line_t));
     lyrics.count = count;
     sort_lyrics(lyrics.lines, count);
     return lyrics;
@@ -264,7 +265,7 @@ rubraview_cue_sheet_t rubraview_cue_parse(proven_arena_t *arena, proven_u8str_vi
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, track_count, sizeof(rubraview_cue_track_t));
     if (!proven_is_ok(res.err)) return sheet;
     rubraview_cue_track_t *tracks = (rubraview_cue_track_t*)(void*)res.value.ptr;
-    memset(tracks, 0, track_count * sizeof(*tracks));
+    proven_sys_mem_set(tracks, 0, track_count * sizeof(*tracks));
 
     line_reader_t r = { .ptr = (const char *)text.ptr, .len = text.size, .pos = 0 };
     size_t current = 0;
@@ -365,16 +366,18 @@ static size_t cue_stem_len(proven_u8str_view_t s) {
     return s.size;
 }
 
-static bool cue_same_ci(const char *a, const char *b, size_t n) {
+static bool cue_same_ci(const char *a, proven_u8str_view_t b_view) {
+    const char *b = (const char *)b_view.ptr;
+    size_t n = (size_t)b_view.size;
     return proven_u8str_view_eq_ascii_ci(proven_u8str_view_from_bytes(a, n), proven_u8str_view_from_bytes(b, n));
 }
 
 bool rubraview_cue_names_audio(const rubraview_cue_sheet_t *sheet, proven_u8str_view_t audio_name) {
     if (!sheet || sheet->audio_file.size == 0 || audio_name.size == 0) return false;
     proven_u8str_view_t named = cue_basename(sheet->audio_file), have = cue_basename(audio_name);
-    if (named.size == have.size && cue_same_ci((const char *)named.ptr, (const char *)have.ptr, have.size)) return true;
+    if (named.size == have.size && cue_same_ci((const char *)named.ptr, rubraview_bytes_view((const char *)have.ptr, have.size))) return true;
     size_t a = cue_stem_len(named), b = cue_stem_len(have);
-    return a > 0 && a == b && cue_same_ci((const char *)named.ptr, (const char *)have.ptr, a);
+    return a > 0 && a == b && cue_same_ci((const char *)named.ptr, rubraview_bytes_view((const char *)have.ptr, a));
 }
 
 int32_t rubraview_cue_track_at(const rubraview_cue_sheet_t *sheet, double time_seconds) {

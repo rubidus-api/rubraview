@@ -25,7 +25,7 @@ extern "C" {
  * beyond U+10FFFF) returns RUBRAVIEW_UTF8_INVALID and *out_len is set to 1
  * so callers can skip forward without looping.
  */
-uint32_t rubraview_utf8_decode(const uint8_t *s, size_t len, size_t *out_len);
+uint32_t rubraview_utf8_decode(proven_mem_view_t s_view, size_t *out_len);
 
 /* RV-160: whole-text validation and encoding are proven's (`proven_utf8_validate`, `proven_utf8_encode_one`). */
 

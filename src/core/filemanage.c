@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/filemanage.h"
 #include "rubraview/ini.h"
 #include "rubraview/path.h"
@@ -26,7 +27,7 @@ static bool is_reserved_stem(proven_u8str_view_t stem) {
     };
 
     for (size_t i = 0; i < sizeof(RESERVED) / sizeof(RESERVED[0]); ++i) {
-        size_t n = strlen(RESERVED[i]);
+        size_t n = proven_cstr_len(RESERVED[i]);
         if (stem.size != n) continue;
 
         bool same = true;
@@ -101,7 +102,7 @@ size_t rubraview_rename_append(char *buffer, size_t capacity, size_t *length, pr
         bool control = n == 1 && (lead < 0x20u || lead == 0x7Fu);
         if (!control) {
             if (*length + n + 1 > capacity) break;                /* no room: leave it out, not half of it */
-            memcpy(buffer + *length, text.ptr + i, n);
+            proven_sys_mem_copy(buffer + *length, text.ptr + i, n);
             *length += n;
             added += n;
         }
@@ -131,8 +132,8 @@ proven_u8str_view_t rubraview_rename_compose(proven_arena_t *arena, proven_u8str
     if (!proven_is_ok(res.err)) return empty;
 
     char *out = (char*)(void*)res.value.ptr;
-    if (new_stem.size > 0) memcpy(out, new_stem.ptr, new_stem.size);
-    if (ext.size > 0) memcpy(out + new_stem.size, ext.ptr, ext.size);
+    if (new_stem.size > 0) proven_sys_mem_copy(out, new_stem.ptr, new_stem.size);
+    if (ext.size > 0) proven_sys_mem_copy(out + new_stem.size, ext.ptr, ext.size);
     out[total] = '\0';
 
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = total };
@@ -229,10 +230,10 @@ proven_u8str_view_t rubraview_filing_target(proven_arena_t *arena, proven_u8str_
         if (!proven_is_ok(res.err)) return none;
         char *name = (char*)res.value.ptr;
         size_t at = 0;
-        memcpy(name, filename.ptr, stem); at = stem;
+        proven_sys_mem_copy(name, filename.ptr, stem); at = stem;
         name[at++] = '-';
         while (d > 0) name[at++] = digits[--d];
-        memcpy(name + at, filename.ptr + stem, filename.size - stem); at += filename.size - stem;
+        proven_sys_mem_copy(name + at, filename.ptr + stem, filename.size - stem); at += filename.size - stem;
         name[at] = '\0';
         target = rubraview_path_join(arena, dir, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = at });
         if (target.size == 0) return none;
@@ -317,7 +318,7 @@ proven_u8str_view_t rubraview_shell_progid(proven_arena_t *arena, proven_u8str_v
     if (!proven_is_ok(res.err)) return empty;
 
     char *out = (char*)(void*)res.value.ptr;
-    memcpy(out, PREFIX, prefix_len);
+    proven_sys_mem_copy(out, PREFIX, prefix_len);
     for (size_t i = 0; i < extension.size; ++i) {
         out[prefix_len + i] = rubraview_ascii_lower(extension.ptr[i]);
     }
@@ -349,7 +350,7 @@ proven_u8str_view_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32
     if (!arena) return empty;
     size_t total = 0;
     for (size_t i = 0; i < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++i) {
-        if (groups & SHELL_GROUPS[i].group) total += strlen(SHELL_GROUPS[i].extensions) + 1;
+        if (groups & SHELL_GROUPS[i].group) total += proven_cstr_len(SHELL_GROUPS[i].extensions) + 1;
     }
     if (total == 0) return empty;
     proven_result_mem_mut_t res = proven_arena_alloc(arena, total);
@@ -359,8 +360,8 @@ proven_u8str_view_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32
     for (size_t i = 0; i < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++i) {
         if (!(groups & SHELL_GROUPS[i].group)) continue;
         if (at > 0) out[at++] = ';';
-        size_t n = strlen(SHELL_GROUPS[i].extensions);
-        memcpy(out + at, SHELL_GROUPS[i].extensions, n);
+        size_t n = proven_cstr_len(SHELL_GROUPS[i].extensions);
+        proven_sys_mem_copy(out + at, SHELL_GROUPS[i].extensions, n);
         at += n;
     }
     out[at] = '\0';
@@ -377,7 +378,7 @@ uint32_t rubraview_shell_groups_parse(proven_u8str_view_t words) {
         if (word.size == 0) continue;
         uint32_t found = 0;
         for (size_t g = 0; g < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++g) {
-            if (word.size == strlen(SHELL_GROUPS[g].word) && memcmp(word.ptr, SHELL_GROUPS[g].word, word.size) == 0) {
+            if (word.size == proven_cstr_len(SHELL_GROUPS[g].word) && proven_sys_mem_cmp(word.ptr, SHELL_GROUPS[g].word, word.size) == 0) {
                 found = SHELL_GROUPS[g].group;
             }
         }
@@ -403,7 +404,7 @@ static bool word_is(proven_u8str_view_t word, const char *text, size_t n) {
 }
 
 static bool list_has(const char *list, proven_u8str_view_t word) {
-    proven_u8str_view_t all = { .ptr = (const proven_byte_t *)list, .size = strlen(list) }, one;
+    proven_u8str_view_t all = { .ptr = (const proven_byte_t *)list, .size = proven_cstr_len(list) }, one;
     for (size_t at = 0; next_word(all, ';', &at, &one);) {
         if (word_is(word, (const char *)one.ptr, one.size)) return true;
     }
@@ -427,14 +428,14 @@ size_t rubraview_shell_type_name(proven_u8str_view_t extension, char *out, size_
     const char *word = kind == RUBRAVIEW_SHELL_PICTURES ? "Picture" : kind == RUBRAVIEW_SHELL_COMICS ? "Comic book"
                      : kind == RUBRAVIEW_SHELL_VIDEO ? "Video" : kind == RUBRAVIEW_SHELL_MUSIC ? "Music"
                      : kind == RUBRAVIEW_SHELL_TEXT ? "Text" : kind == RUBRAVIEW_SHELL_ARCHIVES ? "Archive" : "File";
-    size_t n = strlen(word), len = extension.size + 1 + n;
+    size_t n = proven_cstr_len(word), len = extension.size + 1 + n;
     if (!out || cap <= len) return len;
     for (size_t i = 0; i < extension.size; ++i) {
         char c = (char)extension.ptr[i];
         out[i] = (c >= 'a' && c <= 'z') ? (char)(c - 'a' + 'A') : c;
     }
     out[extension.size] = ' ';
-    memcpy(out + extension.size + 1, word, n + 1);
+    proven_sys_mem_copy(out + extension.size + 1, word, n + 1);
     return len;
 }
 
@@ -457,7 +458,7 @@ static bool words_choose(proven_u8str_view_t words, proven_u8str_view_t extensio
     proven_u8str_view_t word;
     for (size_t at = 0; next_word(words, ',', &at, &word);) {
         if (word.size > 0 && word.ptr[0] == '.') { word.ptr++; word.size--; }
-        if (word_is(word, (const char *)extension.ptr, extension.size) || word_is(word, kind_word, strlen(kind_word)) ||
+        if (word_is(word, (const char *)extension.ptr, extension.size) || word_is(word, kind_word, proven_cstr_len(kind_word)) ||
             word_is(word, "all", 3)) {
             return true;
         }
@@ -477,7 +478,7 @@ proven_u8str_view_t rubraview_shell_selection_parse(proven_arena_t *arena, prove
         if (word.size > 0 && word.ptr[0] == '.') { word.ptr++; word.size--; }
         bool known = word_is(word, "all", 3) || rubraview_shell_kind_of(word) != 0;
         for (size_t g = 0; !known && g < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++g) {
-            known = word_is(word, SHELL_GROUPS[g].word, strlen(SHELL_GROUPS[g].word));
+            known = word_is(word, SHELL_GROUPS[g].word, proven_cstr_len(SHELL_GROUPS[g].word));
         }
         if (!known) return empty;
         seen++;
@@ -485,17 +486,17 @@ proven_u8str_view_t rubraview_shell_selection_parse(proven_arena_t *arena, prove
     if (seen == 0) return empty;
 
     size_t cap = 0;
-    for (size_t g = 0; g < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++g) cap += strlen(SHELL_GROUPS[g].extensions) + 1;
+    for (size_t g = 0; g < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++g) cap += proven_cstr_len(SHELL_GROUPS[g].extensions) + 1;
     proven_result_mem_mut_t res = proven_arena_alloc(arena, cap + 1);
     if (!proven_is_ok(res.err)) return empty;
     char *out = (char*)(void*)res.value.ptr;
     size_t len = 0;
     for (size_t g = 0; g < sizeof(SHELL_GROUPS) / sizeof(SHELL_GROUPS[0]); ++g) {
-        proven_u8str_view_t all = { .ptr = (const proven_byte_t *)SHELL_GROUPS[g].extensions, .size = strlen(SHELL_GROUPS[g].extensions) }, one;
+        proven_u8str_view_t all = { .ptr = (const proven_byte_t *)SHELL_GROUPS[g].extensions, .size = proven_cstr_len(SHELL_GROUPS[g].extensions) }, one;
         for (size_t at = 0; next_word(all, ';', &at, &one);) {
             if (!words_choose(words, one, SHELL_GROUPS[g].word)) continue;
             if (len > 0) out[len++] = ';';
-            memcpy(out + len, one.ptr, one.size);
+            proven_sys_mem_copy(out + len, one.ptr, one.size);
             len += one.size;
         }
     }
@@ -514,7 +515,7 @@ proven_u8str_view_t rubraview_shell_selection_of_kinds(proven_arena_t *arena, pr
     for (size_t at = 0; next_word(selection, ';', &at, &one);) {
         if (!(rubraview_shell_kind_of(one) & kinds)) continue;
         if (len > 0) out[len++] = ';';
-        memcpy(out + len, one.ptr, one.size);
+        proven_sys_mem_copy(out + len, one.ptr, one.size);
         len += one.size;
     }
     out[len] = '\0';

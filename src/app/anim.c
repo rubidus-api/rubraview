@@ -29,12 +29,12 @@ int anim_end_mode(const app_state_t *app) {
 
 static void anim_close(app_state_t *app) {
     if (app->anim_cache) {
-        for (size_t i = 0; i < app->animation.frame_count; ++i) free(app->anim_cache[i]);
-        free(app->anim_cache);
+        for (size_t i = 0; i < app->animation.frame_count; ++i) rubraview_free(app->anim_cache[i]);
+        rubraview_free(app->anim_cache);
         app->anim_cache = NULL;
     }
     app->anim_kept_bytes = 0;
-    free(app->anim_buffers);
+    rubraview_free(app->anim_buffers);
     app->anim_buffers = NULL;
     if (app->anim_reader) {
         /* The frame list was the reader's. */
@@ -89,13 +89,13 @@ void picture_copy(app_state_t *app) {
         return;
     }
     size_t big = picture_bytes((size_t)w, (size_t)h, 4u * 3u, 16u << 20);
-    void *memory = malloc(big);
+    void *memory = rubraview_alloc(big);
     if (!memory) { osd_say(app, TU8("there is not memory enough to copy this picture")); return; }
     proven_arena_t scratch = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t*)memory, .size = big });
     rubraview_pixbuf_t full = {0};
     proven_u8str_view_t path = app->source.pages[page].path;
     if (path.size > 0) {
-        full = rubraview_pal_image_read_pixels_within(&scratch, path, NULL, 0, true, 0, 0);
+        full = rubraview_pal_image_read_pixels_within(&scratch, path, rubraview_mem_view(NULL, 0), true, 0, 0);
     } else {
         rubraview_page_bytes_t bytes = { .ok = false };
         AcquireSRWLockExclusive(&app->source_lock);
@@ -103,14 +103,14 @@ void picture_copy(app_state_t *app) {
         ReleaseSRWLockExclusive(&app->source_lock);
         if (bytes.ok && bytes.data.size > 0) {
             full = rubraview_pal_image_read_pixels_within(&scratch, PROVEN_LIT(""),
-                                                          (const uint8_t*)bytes.data.ptr, bytes.data.size, true, 0, 0);
+                                                          rubraview_mem_view((const uint8_t*)bytes.data.ptr, bytes.data.size), true, 0, 0);
         }
     }
     rubraview_pixbuf_t bgra = !rubraview_pixbuf_is_valid(&full) || full.format == RUBRAVIEW_PIXFMT_BGRA8
         ? full : rubraview_pixbuf_convert(&scratch, &full, RUBRAVIEW_PIXFMT_BGRA8);
     bool copied = rubraview_pixbuf_is_valid(&bgra) &&
                   rubraview_pal_clipboard_set_image(app->window, bgra.pixels, bgra.width, bgra.height, (size_t)bgra.stride);
-    free(memory);
+    rubraview_free(memory);
     osd_say(app, copied ? TU8("the picture is on the clipboard") : TU8("the picture could not be copied"));
 }
 
@@ -134,15 +134,15 @@ void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int32_t he
     for (size_t i = name.size; i > 0; --i) if (name.ptr[i - 1] == '.') { stem = i - 1; break; }
     double at = app->media ? app->media_position : play_position(app);
     char file[512];
-    int n = snprintf(file, sizeof(file), "%.*s_%02d-%02d-%03d.png", (int)(stem < 400 ? stem : 400), name.ptr,
-                     (int)(at / 60.0), (int)fmod(at, 60.0), (int)(fmod(at, 1.0) * 1000.0));
+    int n = rubraview_fmt(file, sizeof(file), "{}_{:02}-{:02}-{:03}.png", PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(stem < 400 ? stem : 400))),
+                     PROVEN_ARG((int)(at / 60.0)), PROVEN_ARG((int)fmod(at, 60.0)), PROVEN_ARG((int)(fmod(at, 1.0) * 1000.0)));
     if (n <= 0) return;
     proven_u8str_view_t target = rubraview_path_join(app->arena, rubraview_path_dirname(path), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)file, .size = (size_t)n });
     /* The frame as the writer wants it: its own rows, alpha full. */
     uint8_t *copy = (uint8_t*)rubraview_malloc_product((size_t)width, 4u, (size_t)height);
     if (!copy) return;
     for (int32_t y = 0; y < height; ++y) {
-        memcpy(copy + (size_t)y * (size_t)width * 4u, bgra + (size_t)y * stride, (size_t)width * 4u);
+        proven_sys_mem_copy(copy + (size_t)y * (size_t)width * 4u, bgra + (size_t)y * stride, (size_t)width * 4u);
         for (int32_t x = 0; x < width; ++x) copy[((size_t)y * (size_t)width + (size_t)x) * 4u + 3u] = 255;
     }
     rubraview_pixbuf_t pixels = { .pixels = copy, .width = width, .height = height, .stride = width * 4,
@@ -150,14 +150,14 @@ void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int32_t he
     rubraview_export_options_t options = rubraview_export_defaults();
     options.format = RUBRAVIEW_EXPORT_PNG;
     bool written = rubraview_pal_image_save(target, &pixels, &options);
-    free(copy);
+    rubraview_free(copy);
     if (wanted == FRAME_EDIT && written && target.size < sizeof(app->edit_after)) {
-        memcpy(app->edit_after, target.ptr, target.size);   /* Edit opens once it is the page on screen */
+        proven_sys_mem_copy(app->edit_after, target.ptr, target.size);   /* Edit opens once it is the page on screen */
         app->edit_after[target.size] = '\0';
         reopen_on_path(app, app_keep(app, target), (size_t)page + 1);
     }
     char line[600];
-    snprintf(line, sizeof(line), written ? T("frame saved: %s") : T("could not write %s"), file);
+    rubraview_fmt(line, sizeof(line), written ? T("frame saved: {}") : T("could not write {}"), PROVEN_ARG(file));
     osd_say(app, cstr(line));
 }
 
@@ -190,9 +190,9 @@ static void anim_show(app_state_t *app, size_t frame_index) {
         if (app->anim_cache && apart >= app->anim_keep_stride &&
             rubraview_frame_canvas_keepable(canvas, frame_index) &&
             app->anim_kept_bytes + whole <= ANIM_CACHE_BYTES) {
-            uint8_t *kept = (uint8_t*)malloc(whole);
+            uint8_t *kept = (uint8_t*)rubraview_alloc(whole);
             if (kept) {
-                memcpy(kept, canvas->pixels, whole);
+                proven_sys_mem_copy(kept, canvas->pixels, whole);
                 app->anim_cache[frame_index] = kept;
                 app->anim_kept_bytes += whole;
             }
@@ -205,7 +205,7 @@ static void anim_show(app_state_t *app, size_t frame_index) {
         uint8_t *flat = canvas->scratch;
         for (size_t i = 0; i < whole; i += 4) {
             uint32_t a = picture[i + 3];
-            if (a == 255) { memcpy(flat + i, picture + i, 4); continue; }
+            if (a == 255) { proven_sys_mem_copy(flat + i, picture + i, 4); continue; }
             uint32_t keep = 255 - a;
             for (int c = 0; c < 3; ++c) {
                 uint32_t v = picture[i + c] + (back[c] * keep + 127) / 255;
@@ -251,9 +251,9 @@ void show_frame(app_state_t *app, size_t frame_index) {
 
     double delay = 0.0;
     rubraview_image_load_result_t loaded = rubraview_pal_image_load_frame(
-        app->renderer, path, (const uint8_t*)bytes.data.ptr, bytes.data.size,
+        app->renderer, path, rubraview_mem_view((const uint8_t*)bytes.data.ptr, bytes.data.size),
         frame_index, true, &delay);
-    free(mem);
+    rubraview_free(mem);
     if (!loaded.ok) return;
 
     if (page->texture) rubraview_pal_texture_destroy(page->texture);
@@ -305,7 +305,7 @@ void animation_prepare(app_state_t *app) {
         }
         app->pages[page_index].animated = true;
         if (others) {
-            free(mem);
+            rubraview_free(mem);
             app->needs_relayout = true;
             return;
         }
@@ -316,10 +316,10 @@ void animation_prepare(app_state_t *app) {
     size_t timed_count = 0;
     int32_t canvas_w = 0, canvas_h = 0;
     const rubraview_frame_t *timed_frames = NULL;
-    app->anim_reader = rubraview_pal_anim_open(path, (const uint8_t*)bytes.data.ptr, bytes.data.size,
+    app->anim_reader = rubraview_pal_anim_open(path, rubraview_mem_view((const uint8_t*)bytes.data.ptr, bytes.data.size),
                                                &timed_frames, &timed_count, &canvas_w, &canvas_h);
     if (app->anim_reader) {
-        free(mem);
+        rubraview_free(mem);
         size_t whole = picture_bytes((size_t)canvas_w, (size_t)canvas_h, 4u, 0);
         app->anim_buffers = (uint8_t*)rubraview_malloc_product(whole, 3, 1);
         if (!app->anim_buffers) { anim_close(app); return; }
@@ -328,7 +328,7 @@ void animation_prepare(app_state_t *app) {
         app->animation = rubraview_animation_create(RUBRAVIEW_FRAMES_ANIMATION, timed_frames, timed_count);
         app->anim_keep_stride = rubraview_frame_keep_stride(whole, timed_count, ANIM_CACHE_BYTES);
         app->anim_kept_bytes = 0;
-        app->anim_cache = (uint8_t**)calloc(timed_count, sizeof(uint8_t*));
+        app->anim_cache = (uint8_t**)rubraview_alloc_zero(timed_count, sizeof(uint8_t*));
         app->animation.speed = app->media_speed > 0.0 ? app->media_speed : 1.0;
         app->anim_page = page_index;
         app->anim_active = true;
@@ -342,8 +342,8 @@ void animation_prepare(app_state_t *app) {
         show_frame(app, 0);
         if (rubraview_pal_anim_cut(app->anim_reader)) {
             char line[128];
-            int n = snprintf(line, sizeof(line), T("showing the first %zu pictures — the rest does not fit in memory"),
-                             timed_count);
+            int n = rubraview_fmt(line, sizeof(line), T("showing the first {} pictures — the rest does not fit in memory"),
+                             PROVEN_ARG((size_t)timed_count));
             if (n > 0) {
                 osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
                 app->notice_seconds = MEDIA_NOTICE_SECONDS;
@@ -354,12 +354,12 @@ void animation_prepare(app_state_t *app) {
 
     if (!app->anim_frames) {
         /* Kept for the session: one list, for whichever page has sub-pages. */
-        app->anim_frames = (rubraview_frame_t*)calloc(ANIM_MAX_FRAMES, sizeof(rubraview_frame_t));
-        if (!app->anim_frames) { free(mem); return; }
+        app->anim_frames = (rubraview_frame_t*)rubraview_alloc_zero(ANIM_MAX_FRAMES, sizeof(rubraview_frame_t));
+        if (!app->anim_frames) { rubraview_free(mem); return; }
     }
-    size_t count = rubraview_pal_image_frame_info(path, (const uint8_t*)bytes.data.ptr, bytes.data.size,
+    size_t count = rubraview_pal_image_frame_info(path, rubraview_mem_view((const uint8_t*)bytes.data.ptr, bytes.data.size),
                                                   app->anim_frames, ANIM_MAX_FRAMES);
-    free(mem);
+    rubraview_free(mem);
     if (count <= 1) return;               /* an ordinary image */
     if (count > ANIM_MAX_FRAMES) count = ANIM_MAX_FRAMES;
 

@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.84.exe              the viewer, as built
-dist/rubraview-v1.39.84/                 the release bundle
-dist/rubraview-v1.39.84.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.85.exe              the viewer, as built
+dist/rubraview-v1.39.85/                 the release bundle
+dist/rubraview-v1.39.85.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1562,6 +1562,11 @@ filename code page, the memory cap). Some worth knowing:
   24 frames on 60 Hz stay as they are (three refreshes, then two). The
   information window's Live rows say **Matched to the screen** and by how
   much, or that it is played as it is.
+- **Video** › **Blend frames** (off): a film whose frames do not fit the
+  refresh — 24 on 60 Hz — moves evenly instead of three refreshes, then two:
+  a frame that starts within a refresh is shown at once, mixed with the one
+  before it by how much of that refresh is still the earlier frame's, as
+  mpv's interpolation does. Not with HDR output.
 - **Video** also has the subtitle's **font** (type a family's name, such
   as `Malgun Gothic`) and **colour**, and **Preferred sound** and
   **Preferred subtitles**: a language as films name it (`kor`, `eng`,

@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/settings.h"
 #include "rubraview/settings_doc.h"
 #include <string.h>
@@ -19,7 +20,7 @@ const rubraview_setting_def_t *rubraview_settings_schema(size_t *out_count) {
 }
 
 static bool same(proven_u8str_view_t a, proven_u8str_view_t b) {
-    return a.size == b.size && (a.size == 0 || memcmp(a.ptr, b.ptr, a.size) == 0);
+    return a.size == b.size && (a.size == 0 || proven_sys_mem_cmp(a.ptr, b.ptr, a.size) == 0);
 }
 
 static int32_t index_of(proven_u8str_view_t section, proven_u8str_view_t key) {
@@ -92,7 +93,7 @@ static bool choice_index(const rubraview_setting_def_t *def, proven_u8str_view_t
         if (!proven_u8str_view_eq(def->section, proven_u8str_view_from_cstr(CHOICE_RENAMES[r].section)) ||
             !proven_u8str_view_eq(def->key, proven_u8str_view_from_cstr(CHOICE_RENAMES[r].key)) ||
             !proven_u8str_view_eq_ascii_ci(word, proven_u8str_view_from_cstr(CHOICE_RENAMES[r].old_word))) continue;
-        proven_u8str_view_t now = { .ptr = (const proven_byte_t *)CHOICE_RENAMES[r].new_word, .size = strlen(CHOICE_RENAMES[r].new_word) };
+        proven_u8str_view_t now = { .ptr = (const proven_byte_t *)CHOICE_RENAMES[r].new_word, .size = proven_cstr_len(CHOICE_RENAMES[r].new_word) };
         return choice_index_exact(def, now, out);
     }
     return false;
@@ -171,9 +172,9 @@ proven_u8str_view_t rubraview_settings_save(proven_arena_t *arena, const rubravi
         bool replaced = false;
         for (size_t k = 0; k < kept; ++k) {
             if (doc.entries[k].section.size == e.section.size &&
-                memcmp(doc.entries[k].section.ptr, e.section.ptr, e.section.size) == 0 &&
+                proven_sys_mem_cmp(doc.entries[k].section.ptr, e.section.ptr, e.section.size) == 0 &&
                 doc.entries[k].key.size == e.key.size &&
-                memcmp(doc.entries[k].key.ptr, e.key.ptr, e.key.size) == 0) {
+                proven_sys_mem_cmp(doc.entries[k].key.ptr, e.key.ptr, e.key.size) == 0) {
                 doc.entries[k] = e;
                 replaced = true;
                 break;
@@ -202,7 +203,7 @@ proven_u8str_view_t rubraview_settings_save(proven_arena_t *arena, const rubravi
                 int32_t index = (int32_t)settings->values[i];
                 if (index < 0 || index >= def->choice_count || !def->choices[index]) continue;
                 rubraview_ini_set_string(arena, &doc, def->section, def->key,
-                                         (proven_u8str_view_t){ .ptr = (const proven_byte_t *)def->choices[index], .size = strlen(def->choices[index]) });
+                                         (proven_u8str_view_t){ .ptr = (const proven_byte_t *)def->choices[index], .size = proven_cstr_len(def->choices[index]) });
                 break;
             }
             case RUBRAVIEW_SETTING_BOOL:
@@ -248,7 +249,7 @@ void rubraview_settings_set_text(rubraview_settings_t *settings, proven_u8str_vi
     int32_t index = index_of(section, key);
     if (!settings || index < 0) return;
     const proven_u8str_view_t old = settings->texts[index];
-    if (old.size == text.size && (text.size == 0 || memcmp(old.ptr, text.ptr, text.size) == 0)) return;
+    if (old.size == text.size && (text.size == 0 || proven_sys_mem_cmp(old.ptr, text.ptr, text.size) == 0)) return;
     settings->texts[index] = text;
     settings->revision[index]++;
     settings->revision_total++;

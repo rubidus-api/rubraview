@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/plugin.h"
 #include "rubraview/plugin_filter.h"
 #include "rubraview/lang.h"
@@ -22,7 +23,7 @@ size_t rubraview_plugin_shared_bytes(int32_t width, int32_t height) {
 }
 
 void rubraview_plugin_shared_init(rubraview_plugin_shared_t *s, int32_t op, int32_t width, int32_t height) {
-    memset(s, 0, sizeof(*s));
+    proven_sys_mem_set(s, 0, sizeof(*s));
     s->magic = RUBRAVIEW_PLUGIN_MAGIC;
     s->header_bytes = (uint32_t)header_bytes();
     s->op = op;
@@ -42,7 +43,7 @@ uint8_t *rubraview_plugin_shared_out(rubraview_plugin_shared_t *s) {
 static void copy_text(char *dst, size_t capacity, const char *src) {
     size_t n = 0;
     if (src) while (src[n] && n + 1 < capacity) n++;
-    if (src) memcpy(dst, src, n);
+    if (src) proven_sys_mem_copy(dst, src, n);
     dst[n] = '\0';
 }
 
@@ -57,14 +58,14 @@ bool rubraview_plugin_choice_word(const char *choices, int32_t index, char *out,
     if (!choices || index < 0 || !out || capacity == 0) return false;
     const char *start = choices;
     for (int32_t i = 0; i < index; ++i) {
-        start = strchr(start, '|');
+        start = rubraview_cstr_chr(start, '|');
         if (!start) return false;
         start++;
     }
-    const char *end = strchr(start, '|');
-    size_t n = end ? (size_t)(end - start) : strlen(start);
+    const char *end = rubraview_cstr_chr(start, '|');
+    size_t n = end ? (size_t)(end - start) : proven_cstr_len(start);
     if (n + 1 > capacity) n = capacity - 1;
-    memcpy(out, start, n);
+    proven_sys_mem_copy(out, start, n);
     out[n] = '\0';
     return true;
 }
@@ -116,9 +117,9 @@ void rubraview_plugin_params_clamp(const rubraview_plugin_t *plugin, double *val
 
 bool rubraview_plugin_file_matches(const char *file, proven_u8str_view_t name) {
     if (!file || name.size == 0) return false;
-    size_t n = strlen(file);
+    size_t n = proven_cstr_len(file);
     static const char SUFFIX[] = ".rvf.dll";
-    size_t stem = n >= sizeof(SUFFIX) - 1 && strcmp(file + n - (sizeof(SUFFIX) - 1), SUFFIX) == 0 ? n - (sizeof(SUFFIX) - 1) : n;
+    size_t stem = n >= sizeof(SUFFIX) - 1 && rubraview_cstr_cmp(file + n - (sizeof(SUFFIX) - 1), SUFFIX) == 0 ? n - (sizeof(SUFFIX) - 1) : n;
     for (size_t k = 0; k < 2; ++k) {
         size_t want = k == 0 ? n : stem;
         if (proven_u8str_view_eq_ascii_ci(name, proven_u8str_view_from_bytes(file, want))) return true;
@@ -131,7 +132,7 @@ bool rubraview_plugin_arg_parse(proven_u8str_view_t value, char *name, size_t ca
     size_t colon = 0;
     while (colon < value.size && value.ptr[colon] != ':') colon++;
     if (colon == 0 || colon + 1 > capacity) return false;
-    memcpy(name, value.ptr, colon);
+    proven_sys_mem_copy(name, value.ptr, colon);
     name[colon] = '\0';
     *count = 0;
     if (colon >= value.size) return true;
@@ -141,10 +142,10 @@ bool rubraview_plugin_arg_parse(proven_u8str_view_t value, char *name, size_t ca
         while (end < value.size && value.ptr[end] != ',') end++;
         if (end == at || *count >= RUBRAVIEW_PLUGIN_PARAMS || end - at >= 32) return false;
         char number[32];
-        memcpy(number, value.ptr + at, end - at);
+        proven_sys_mem_copy(number, value.ptr + at, end - at);
         number[end - at] = '\0';
         char *stop = NULL;
-        double v = strtod(number, &stop);
+        double v = proven_strtod(number, &stop);
         if (!stop || *stop != '\0' || !isfinite(v)) return false;
         params[(*count)++] = v;
         at = end + 1;
@@ -185,13 +186,15 @@ static void sha_block(uint32_t h[8], const uint8_t *p) {
     h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
 }
 
-void rubraview_sha256(const uint8_t *data, size_t size, uint8_t out[32]) {
+void rubraview_sha256(proven_mem_view_t data_view, uint8_t out[32]) {
+    const uint8_t *data = (const uint8_t *)data_view.ptr;
+    size_t size = (size_t)data_view.size;
     uint32_t h[8] = { 0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au, 0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u };
     size_t full = size / 64u;
     for (size_t i = 0; i < full; ++i) sha_block(h, data + i * 64u);
     uint8_t last[128] = { 0 };
     size_t rest = size - full * 64u;
-    if (rest) memcpy(last, data + full * 64u, rest);
+    if (rest) proven_sys_mem_copy(last, data + full * 64u, rest);
     last[rest] = 0x80;
     size_t blocks = rest + 9u > 64u ? 2u : 1u;
     uint64_t bits = (uint64_t)size * 8u;

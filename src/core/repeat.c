@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/repeat.h"
 #include "rubraview/lang.h"
 #include <string.h>
@@ -39,14 +40,16 @@ static uint64_t next_random(rubraview_shuffle_t *sh) {
     return x * 0x2545F4914F6CDD1Dull;
 }
 
-void rubraview_shuffle_reset(rubraview_shuffle_t *sh, uint8_t *played, size_t count, uint64_t seed) {
+void rubraview_shuffle_reset(rubraview_shuffle_t *sh, proven_mem_mut_t played_view, uint64_t seed) {
+    uint8_t *played = (uint8_t *)played_view.ptr;
+    size_t count = (size_t)played_view.size;
     if (!sh) return;
     sh->played = played;
     sh->count = played ? count : 0;
     sh->played_count = 0;
     sh->last = -1;
     sh->rng = seed ? seed : 0x9E3779B97F4A7C15ull;
-    if (played && count) memset(played, 0, count);
+    if (played && count) proven_sys_mem_set(played, 0, count);
 }
 
 void rubraview_shuffle_mark(rubraview_shuffle_t *sh, size_t index) {
@@ -76,7 +79,7 @@ int32_t rubraview_shuffle_pick(rubraview_shuffle_t *sh, int32_t current, rubravi
     if (n == 0) {
         /* Every one has played: a new round. `current` (the last one) stays
            out of the first pick, so it is not heard twice in a row. */
-        memset(sh->played, 0, sh->count);
+        proven_sys_mem_set(sh->played, 0, sh->count);
         sh->played_count = 0;
         n = candidates(sh, current, false, plays, ctx, 0, NULL);
         if (n == 0) return current >= 0 && (size_t)current < sh->count && plays(ctx, (size_t)current) ? current : -1;

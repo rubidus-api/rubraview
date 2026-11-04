@@ -1,3 +1,4 @@
+#include "rubraview/core.h"
 #include "rubraview/ui_chrome.h"
 #include "rubraview/lang.h"
 #include "rubraview/playback.h"
@@ -38,9 +39,11 @@ double rubraview_osd_opacity(const rubraview_osd_t *osd) {
     return 1.0 - (into_fade / osd->fade_seconds);
 }
 
-proven_u8str_view_t rubraview_osd_format(char *buffer, size_t buffer_size,
+proven_u8str_view_t rubraview_osd_format(proven_mem_mut_t buffer_view,
                              proven_u8str_view_t file_name, int32_t width, int32_t height,
                              double zoom_percent, size_t index, size_t total) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     if (!buffer || buffer_size == 0) return PROVEN_LIT("");
 
     /* file_name is a slice and need not be NUL-terminated, so its length
@@ -49,12 +52,12 @@ proven_u8str_view_t rubraview_osd_format(char *buffer, size_t buffer_size,
        2026-09-29), and the status line keeps what only it says. */
     int written;
     if (file_name.size == 0 && total == 0) {
-        written = snprintf(buffer, buffer_size, "%d x %d  |  %.0f%%", width, height, zoom_percent);
+        written = rubraview_fmt(buffer, buffer_size, "{} x {}  |  {:.0}%", PROVEN_ARG((int)width), PROVEN_ARG((int)height), PROVEN_ARG((double)zoom_percent));
     } else {
-        written = snprintf(buffer, buffer_size, "%.*s  |  %d x %d  |  %.0f%%  |  %zu / %zu",
-                           (int)file_name.size, file_name.ptr ? (const char *)file_name.ptr : "",
-                           width, height, zoom_percent,
-                           total > 0 ? index + 1 : 0, total);
+        written = rubraview_fmt(buffer, buffer_size, "{}  |  {} x {}  |  {:.0}%  |  {} / {}",
+                           PROVEN_ARG(rubraview_bytes_view(file_name.ptr ? (const char *)file_name.ptr : "", (int)file_name.size)),
+                           PROVEN_ARG((int)width), PROVEN_ARG((int)height), PROVEN_ARG((double)zoom_percent),
+                           PROVEN_ARG((size_t)(total > 0 ? index + 1 : 0)), PROVEN_ARG((size_t)total));
     }
     if (written < 0) {
         buffer[0] = '\0';
@@ -84,45 +87,50 @@ static size_t utf8_offset(proven_u8str_view_t text, size_t chars) {
     return text.size;
 }
 
-proven_u8str_view_t rubraview_middle_ellipsis(char *buffer, size_t buffer_size, proven_u8str_view_t text, size_t head_chars, size_t tail_chars) {
+proven_u8str_view_t rubraview_middle_ellipsis(proven_mem_mut_t buffer_view, proven_u8str_view_t text, size_t head_chars, size_t tail_chars) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     size_t total = rubraview_utf8_chars(text);
     if (total <= head_chars + tail_chars + 3 || !buffer) return text;
     size_t head = utf8_offset(text, head_chars);
     size_t tail = utf8_offset(text, total - tail_chars);
     size_t need = head + 3 + (text.size - tail);
     if (need + 1 > buffer_size) return text;
-    memcpy(buffer, text.ptr, head);
-    memcpy(buffer + head, "...", 3);
-    memcpy(buffer + head + 3, text.ptr + tail, text.size - tail);
+    proven_sys_mem_copy(buffer, text.ptr, head);
+    proven_sys_mem_copy(buffer + head, "...", 3);
+    proven_sys_mem_copy(buffer + head + 3, text.ptr + tail, text.size - tail);
     buffer[need] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = need };
 }
 
-proven_u8str_view_t rubraview_osd_right(char *buffer, size_t buffer_size, size_t index, size_t total,
+proven_u8str_view_t rubraview_osd_right(proven_mem_mut_t buffer_view, size_t index, size_t total,
                             int32_t width, int32_t height, uint64_t bytes, bool reduced,
                             double position, double duration) {
+    char *buffer = (char *)buffer_view.ptr;
+    size_t buffer_size = (size_t)buffer_view.size;
     if (!buffer || buffer_size == 0) return PROVEN_LIT("");
     size_t at = 0;
-    #define OSD_PUT(...) do { if (at < buffer_size) { int w_ = snprintf(buffer + at, buffer_size - at, __VA_ARGS__); \
+    #define OSD_PUT(...) do { if (at < buffer_size) { int w_ = rubraview_fmt(buffer + at, buffer_size - at, __VA_ARGS__); \
                               if (w_ > 0) { at += (size_t)w_; } \
                               if (at >= buffer_size) { at = buffer_size - 1; } } } while (0)
-    if (reduced) OSD_PUT(T("shown reduced  |  "));
+    if (reduced) OSD_PUT("{}", PROVEN_ARG(T("shown reduced  |  ")));
     if (bytes > 0) {
         const char *const UNIT[] = { "B", T("KB"), T("MB"), T("GB"), T("TB") };
         double v = (double)bytes;
         int u = 0;
         while (v >= 1024.0 && u < 4) { v /= 1024.0; u++; }
-        if (u == 0) OSD_PUT("%.0f %s  |  ", v, UNIT[u]);
-        else OSD_PUT("%.*f %s  |  ", v < 10.0 ? 1 : 0, v, UNIT[u]);
+        if (u == 0) OSD_PUT("{:.0} {}  |  ", PROVEN_ARG(v), PROVEN_ARG(UNIT[u]));
+        else if (v < 10.0) OSD_PUT("{:.1} {}  |  ", PROVEN_ARG(v), PROVEN_ARG(UNIT[u]));
+        else OSD_PUT("{:.0} {}  |  ", PROVEN_ARG(v), PROVEN_ARG(UNIT[u]));
     }
     if (duration > 0.0) {
         char where[32], length[32];   /* to the second (owner, 2026-10-16) */
-        proven_u8str_view_t a = rubraview_format_timecode(where, sizeof(where), position > duration ? duration : position, false);
-        proven_u8str_view_t l = rubraview_format_timecode(length, sizeof(length), duration, false);
-        OSD_PUT("%.*s / %.*s  |  ", (int)a.size, a.ptr, (int)l.size, l.ptr);
+        proven_u8str_view_t a = rubraview_format_timecode(rubraview_mem_mut(where, sizeof(where)), position > duration ? duration : position, false);
+        proven_u8str_view_t l = rubraview_format_timecode(rubraview_mem_mut(length, sizeof(length)), duration, false);
+        OSD_PUT("{} / {}  |  ", PROVEN_ARG(a), PROVEN_ARG(l));
     }
-    if (width > 0 && height > 0) OSD_PUT("%d x %d  |  ", (int)width, (int)height);
-    OSD_PUT("%zu / %zu", total > 0 ? index + 1 : 0, total);   /* the place, at the very right */
+    if (width > 0 && height > 0) OSD_PUT("{} x {}  |  ", PROVEN_ARG((int)width), PROVEN_ARG((int)height));
+    OSD_PUT("{} / {}", PROVEN_ARG((size_t)(total > 0 ? index + 1 : 0)), PROVEN_ARG((size_t)total));   /* the place, at the very right */
     #undef OSD_PUT
     buffer[at] = '\0';
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = at };

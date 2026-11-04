@@ -54,14 +54,14 @@ typedef struct rubraview_pgs_cue {
  * Walk the file and note every subtitle: when it appears, when it is
  * cleared, and where its segments begin. Nothing is decoded here.
  */
-rubraview_pgs_track_t rubraview_pgs_index(proven_arena_t *arena, const uint8_t *bytes, size_t size);
+rubraview_pgs_track_t rubraview_pgs_index(proven_arena_t *arena, proven_mem_view_t bytes_view);
 
 /**
  * Decode the `index`-th subtitle into `pixels` (RUBRAVIEW_PGS_MAX_PIXELS
  * bytes). False when it cannot be read, which costs that subtitle only.
  */
 bool rubraview_pgs_decode(const rubraview_pgs_track_t *track, size_t index,
-                          const uint8_t *bytes, size_t size,
+                          proven_mem_view_t bytes_view,
                           uint8_t *pixels, rubraview_pgs_cue_t *out_cue);
 
 /** Which subtitle belongs on screen at `seconds`, or -1. */
