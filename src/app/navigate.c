@@ -52,7 +52,10 @@ void rebuild_layout(app_state_t *app) {
         bool other = is_media_path(app->source.pages[i].path) || is_text_path(app->source.pages[i].path) ||
                      is_text_path(app->source.pages[i].name) || app->pages[i].animated;
         infos[i].skip = pictures_only && other && (int32_t)i != app->layout_exempt;
-        if ((int32_t)i == app->layout_exempt && other) infos[i].force_standalone = true;
+        /* D-274 (owner, 2026-11-04: "재생목록에서 파일을 2개씩 이동하는 버그 ... 이미지 2개씩 보는 모드의 영향"): a film,
+           a sound or a text never pairs with its neighbour — a list of nothing but those, shown in two pages, went two
+           at a time */
+        if (other) infos[i].force_standalone = true;
         if (!other) stills++;
     }
     for (size_t i = 0; i < page_count(app); ++i) {

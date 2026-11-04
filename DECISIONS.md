@@ -3255,3 +3255,13 @@ Do not store credentials, private infrastructure details, personal data, private
   too; the licence notices are unchanged; the VM smoke matches the 1.39.82 release (T347). Its `proven_fmt_to`
   (snprintf's shape over `{}` formats) and the `{:.N}` precision on views are what the conversion the owner asked
   for next would use; that conversion is planned on its own (T3), not done here.
+
+## 2026-11-04: D-274 A film, a sound or a text never pairs in a two-page layout (W-20261104-0100)
+
+- Status: Accepted (owner 2026-11-04: "재생목록에서 파일을 2개씩 이동하는 버그가 있어요. 1개씩 움직이게 해 주세요";
+  "아마 이미지 2개씩 보는 모드의 영향을 받은 것 같아요").
+- Cause: D-98 leaves films, sounds, texts and moving pictures out of a layout for pictures and, when there is
+  nothing else, shows them all; those were then laid out as pictures, two to a spread, and the next or the previous
+  spread went two files on (on the VM, PageUp from the fifth film went to the third).
+- Decision: such a page is `force_standalone` in every layout (`navigate.c`): alone in its spread, so a list of
+  films goes one at a time; a mixed list keeps D-98 (they are skipped among pictures).
