@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.87.exe              the viewer, as built
-dist/rubraview-v1.39.87/                 the release bundle
-dist/rubraview-v1.39.87.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.88.exe              the viewer, as built
+dist/rubraview-v1.39.88/                 the release bundle
+dist/rubraview-v1.39.88.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -1686,8 +1686,9 @@ password. A password box takes English letters, digits and
 symbols as dots; the eye at its right end shows the password as you type and
 then takes any letter, Hangul too, for an archive someone made that way. Inside it, pick what you want and Extract it (a folder
 brings all that is in it; nothing picked, the whole archive); a picture opens
-the book at that page; `..` leaves it. Copying, moving, renaming and
-recycling are for files on disk: extract first. Work goes on while the
+the book at that page; `..` leaves it. Dragging them out, `Ctrl+C` and
+`Ctrl+X` work there too (Out of an archive, below); renaming and recycling
+are for files on disk: extract first. Work goes on while the
 screen is used; a line says how far it is and `Esc` stops it.
 
 **A new folder.** `Ctrl+Shift+N`, New folder here on a right click, or a
@@ -1699,6 +1700,24 @@ and opens its name to type (`Enter` keeps it, `Esc` leaves it "New folder").
 a right click past the tiles) puts them there. Files copied in Explorer
 paste here, and what you copy here pastes in Explorer. A name there
 already gets -1; `Ctrl+Z` takes the paste back.
+
+**Dragging out.** Drag what is picked (or the tile you press, alone) to an
+Explorer window, the desktop or another program: a left drag copies, a
+right drag ends in Windows' own menu — Copy here, Move here (Create
+shortcuts here for files on disk), Cancel. A right click that does not
+move still opens this screen's own list.
+
+**Out of an archive.** Inside an archive the same works. A drag takes what
+is picked out of the archive when you let go over a place that takes it (a
+small window counts the share; `Esc` stops it), so a drag let go nowhere
+costs nothing. `Ctrl+C` and `Ctrl+X` take them out at once (the line under
+the picture counts; `Esc` stops it), and Explorer or another program then
+pastes them. A move — Move here, or `Ctrl+X` pasted — takes them out of a ZIP
+or a 7z once they have arrived; one that did not arrive stays in it, and
+`Ctrl+Z` brings the archive back as it was. A RAR, an ALZ, an EGG, a split
+set or one whose files are locked only copies. The copies are kept in the
+system's temporary folder until the viewer closes; a copy not yet pasted
+then leaves the clipboard.
 
 Inside an archive the pictures show their thumbnails too (not those locked
 by a password, nor one deep inside a large solid 7z).

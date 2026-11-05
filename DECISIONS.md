@@ -3340,3 +3340,29 @@ Do not store credentials, private infrastructure details, personal data, private
   to `rubraview_shell_extensions()` (no archives) and gives the menu every extension, as before; `--types=zip` or
   `archives` (what Settings sends for every user) makes them types.
 - Not changed: the Store's package (its `[assoc]` list, D-255) declares no archive type.
+
+## 2026-11-06: D-278 Dragged and copied out of the open-file screen (W-20261106-0100)
+
+- Status: Accepted (owner 2026-11-06: "압축파일 내부를 브라우징할 때, 드래그 앤 드롭으로 윈도 탐색기 창이나 다른 곳에 선택된
+  파일들만을 좌클릭 드래그로 복사하거나 우클릭 드래그로 컨텍스트 메뉴를 불러 적절한 동작을 지정할 수 있으면 좋겠네요. 그리고
+  Ctrl+C나 Ctrl+X로 복사 혹은 잘라내기를 하면 클립보드로 가서 다른 윈도 탐색기나 기타 앱에 붙일 수 있으면 좋겠네요"; the plan's
+  four questions answered as recommended: files on disk too, written out when the target asks, a move out of a ZIP or a 7z
+  takes them out once arrived, the clipboard emptied at the close). RV-223, plan archived.
+- Measured first (VM, `tests/win/dragout_probe.c`, T354): Explorer asks a drag's data object for CF_HDROP while the button
+  is still held (drag enter and over) and the clipboard's at once and at every right click, so "when the target asks" is
+  "when the button is let go over a target" for a drag — the files named from the start, written in
+  `QueryContinueDrag` before the drop — and "when Ctrl+C / Ctrl+X is pressed" for the clipboard (told to the owner).
+  Explorer says what it did with "Performed DropEffect" (1 copy, 2 move; an optimised move returns 0 from DoDragDrop);
+  "Paste Succeeded" did not come. "Preferred DropEffect" copy makes a same-drive left drag copy.
+- A move is taken out of the archive only for the tiles whose files left our folder (checked for ten seconds, as
+  Explorer may still be moving), in one writing (`arcedit`'s DELETE of several entries), the old archive kept as
+  `.rvold` for Ctrl+Z (D-89); never on DoDragDrop's word alone. RAR, ALZ, EGG, split sets and locked files only copy.
+- A left drag offers the copy alone, on disk too: with a move allowed, Explorer moved files on the same drive although
+  the preferred effect said copy (VM). A right drag offers copy, move and link on disk, copy and move out of an archive.
+- The gestures: a left press that moves 10 px drags (the long press keeps its distance); a right press waits for its
+  release to open our list, and moved it is a right drag. Our own window takes no drop of our drag.
+- Not done: files offered as virtual streams (FileGroupDescriptor) — every target takes CF_HDROP; a picture on screen
+  dragged out of the viewer. Known: a move told within the ten seconds before the viewer closes leaves those entries in
+  the archive (a copy too many, nothing lost); the viewer waits in the drag while the target takes what was dropped
+  (Explorer copies before DoDragDrop returns, and its question about a name already there holds it) — an
+  asynchronous drop (IDataObjectAsyncCapability) would free it, not built.

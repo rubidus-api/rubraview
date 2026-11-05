@@ -668,7 +668,7 @@ void picker_recycle(app_state_t *app) {
    clipboard as Explorer does, so Explorer pastes it too; Ctrl+V puts what is there — from here or from Explorer —
    into the folder on screen: a name there already gets -1, a cut is then cleared, one undo takes all of it back. */
 void picker_clip_put(app_state_t *app, bool moving) {
-    if (picker_in_archive(app)) { osd_say(app, TU8("inside an archive: extract what you need first")); return; }
+    if (picker_in_archive(app)) { picker_clip_put_archive(app, moving); return; }   /* RV-223 */
     rubraview_fs_entry_t *entries = NULL;
     size_t n = picker_picked_entries(app, &entries);
     rubraview_fs_entry_t one;
@@ -736,6 +736,7 @@ void picker_clip_paste(app_state_t *app) {
         done++;
     }
     rubraview_free(buf);
+    if (moving && done > 0) dragout_clip_pasted(app);   /* RV-223: a cut out of an archive, pasted here */
     if (moving && done > 0 && failed == 0) rubraview_pal_clipboard_clear(app->window);   /* as Explorer: a cut is pasted once */
     char line[160];
     int written = failed > 0 ? rubraview_fmt(line, sizeof(line), T("{} pasted, {} could not be"), PROVEN_ARG((size_t)done), PROVEN_ARG((size_t)failed))

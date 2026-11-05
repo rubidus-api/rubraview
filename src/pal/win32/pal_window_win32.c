@@ -850,7 +850,8 @@ static ULONG STDMETHODCALLTYPE dt_release(IDropTarget *self) {
 static HRESULT STDMETHODCALLTYPE dt_drag_enter(IDropTarget *self, IDataObject *data, DWORD keys, POINTL pt, DWORD *effect) {
     (void)keys; (void)pt;
     rv_drop_target_t *t = (rv_drop_target_t*)self;
-    t->effect = drop_effect_for(data, effect ? *effect : 0);
+    /* RV-223: our own drag out takes nothing here */
+    t->effect = rubraview_pal_dragging_out() ? DROPEFFECT_NONE : drop_effect_for(data, effect ? *effect : 0);
     if (effect) *effect = t->effect;
     return S_OK;
 }

@@ -127,7 +127,18 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (app->picker_hold) {   /* 1.22.0: moved off: neither a tap nor a long press */
                 double dx = event->mouse.x - app->picker_hold_x, dy = event->mouse.y - app->picker_hold_y;
                 double slop = 10.0 * rubraview_pal_window_dpi_scale(app->window);
-                if (dx * dx + dy * dy > slop * slop) app->picker_hold = false;
+                if (dx * dx + dy * dy > slop * slop) {
+                    app->picker_hold = false;
+                    if (app->picker_open) picker_drag_out(app, app->picker_hold_index, false);   /* RV-223: a drag out */
+                }
+            }
+            if (app->picker_rhold) {   /* RV-223: a right press moved off its tile: a right drag, Windows' menu at its end */
+                double dx = event->mouse.x - app->picker_rhold_x, dy = event->mouse.y - app->picker_rhold_y;
+                double slop = 10.0 * rubraview_pal_window_dpi_scale(app->window);
+                if (dx * dx + dy * dy > slop * slop) {
+                    app->picker_rhold = false;
+                    if (app->picker_open) picker_drag_out(app, app->picker_rhold_index, true);
+                }
             }
             if (app->fav_press >= 0) {
                 app->fav_drag_x = event->mouse.x;
@@ -344,7 +355,13 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                             app->picker_anchor = index;
                             break;
                         }
-                        if (event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) { picker_context(app, index, event->mouse.x, event->mouse.y); break; }
+                        if (event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {   /* RV-223: its list on release; moved, a right drag */
+                            app->picker_rhold = true;
+                            app->picker_rhold_index = index;
+                            app->picker_rhold_x = event->mouse.x;
+                            app->picker_rhold_y = event->mouse.y;
+                            break;
+                        }
                         /* 1.24.0 (owner, 2026-10-19): Ctrl+click picks or lets go of one, Shift+click a range from the last one clicked */
                         bool ctrl = (event->mouse.modifiers & RUBRAVIEW_MOD_CTRL) != 0, shift = (event->mouse.modifiers & RUBRAVIEW_MOD_SHIFT) != 0;
                         if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && (ctrl || shift) && app->picker_selected && !picker_is_up(app, index)) {
@@ -512,6 +529,12 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
         }
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+            if (app->picker_rhold && event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {   /* RV-223: a right click, not a drag */
+                app->picker_rhold = false;
+                if (app->picker_open && app->picker_rhold_index < app->picker_listing.count)
+                    picker_context(app, app->picker_rhold_index, app->picker_rhold_x, app->picker_rhold_y);
+                break;
+            }
             if (scrollbar_release(app, app->window)) break;   /* RV-170 */
             if (app->col_drag && picker_columns_release(app, event->mouse.x)) break;   /* 1.25.0 */
             if (app->picker_hold && event->mouse.button == RUBRAVIEW_MOUSE_LEFT) {   /* 1.22.0: the tap, now it is one */

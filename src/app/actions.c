@@ -495,6 +495,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
     if (proven_u8str_view_eq(action, PROVEN_LIT("quit"))) {
         /* Esc closes what is open before it closes the program. */
         if (archwork_busy(app)) { (void)archwork_stop(app); return; }   /* RV-207 */
+        if (dragout_stop(app)) return;   /* RV-223 */
         if (app->arc_job && !atomic_load(&app->arc_job->job.cancel)) {
             atomic_store(&app->arc_job->job.cancel, true);
             osd_say(app, PROVEN_LIT("stopping..."));
@@ -795,7 +796,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         /* §3.18.1: a permanent delete asks first, every time. */
         app->confirm_purge = true;
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("undo"))) {
-        if (!arc_undo(app)) triage_undo(app);
+        if (!arc_undo(app) && !dragout_undo(app)) triage_undo(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("rename_file"))) {
         rename_begin(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_file_list"))) {
@@ -1262,7 +1263,10 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     }
     if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "A")) { picker_select_everything(app); return true; }   /* 1.22.0 */
     if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "F")) { picker_filter_begin(app); return true; }        /* 1.22.0 */
-    if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "Z")) { triage_undo(app); return true; }   /* 1.23.0: what was done here, back */
+    if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "Z")) {   /* 1.23.0: what was done here, back */
+        if (!dragout_undo(app)) triage_undo(app);   /* RV-223: a move out of the archive shown, first */
+        return true;
+    }
     if (combo.modifiers & RUBRAVIEW_MOD_ALT) {   /* 1.24.0: back, forward and up through the folders, as Explorer */
         if (key_is(combo, "Left"))  { picker_history_go(app, false); return true; }
         if (key_is(combo, "Right")) { picker_history_go(app, true); return true; }

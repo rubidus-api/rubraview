@@ -1375,6 +1375,9 @@ typedef struct app_state {
     bool                   picker_hold;              /* a left press on a tile, not yet a tap or a long press */
     size_t                 picker_hold_index;
     double                 picker_hold_x, picker_hold_y, picker_hold_at;
+    bool                   picker_rhold;             /* RV-223: a right press on a tile: its list when let go, a drag when moved */
+    size_t                 picker_rhold_index;
+    double                 picker_rhold_x, picker_rhold_y;
     double                 picker_tap_at;          /* RV-213: the last tap, for a second one that opens */
     /* RV-215 (D-248): measured while the information window is open, listed at its top once a second */
     double                 stats_since, stats_worst, stats_draw, stats_present;
@@ -2359,6 +2362,16 @@ uint64_t scene_signature(const app_state_t *app);
 proven_arena_t *scratch_begin(app_state_t *app, rubraview_scratch_t *s, size_t bytes);
 void scratch_end(app_state_t *app, rubraview_scratch_t *s);
 void secure_wipe(proven_mem_mut_t p_view);
+/* RV-223 (D-278): dragged, copied and cut out of the open-file screen (dragout.c) */
+void picker_drag_out(app_state_t *app, size_t pressed, bool right);
+void picker_clip_put_archive(app_state_t *app, bool moving);
+void dragout_clip_pasted(app_state_t *app);
+bool dragout_stop(app_state_t *app);
+bool dragout_busy(void);
+void dragout_poll(app_state_t *app, bool quitting);
+bool dragout_undo(app_state_t *app);
+void dragout_quit(app_state_t *app);
+void dragout_sweep(app_state_t *app);
 bool seek_tile_action(proven_u8str_view_t action, bool *out_forward);
 void seekfan_let_go(app_state_t *app);
 void seekfan_pointer(app_state_t *app, double x, double y);

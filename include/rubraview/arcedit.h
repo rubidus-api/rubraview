@@ -87,6 +87,9 @@ typedef struct rubraview_arcedit_job {
     rubraview_codepage_t codepage;     /* how its names are read, as the viewer reads them */
     rubraview_arcedit_op_t op;
     size_t entry_index;                /* the entry (FultaArc's index) the edit is about */
+    const size_t *entries;             /* RV-223: DELETE of these entries (folders' too) in one writing, `entry_index`
+                                          not used; NULL: the one entry */
+    size_t entry_count;
     const char *name;                  /* a name without folders */
     const uint8_t *data;
     size_t size;

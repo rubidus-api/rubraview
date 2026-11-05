@@ -294,6 +294,7 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
 
     rubraview_arcedit_result_t result = RUBRAVIEW_ARCEDIT_OK;
     fulta_arc_edit_t *edit = NULL;
+    bool *gone = NULL;           /* RV-223: the entries a DELETE of several takes out */
     expect_t *want = NULL;
     char *full = NULL;           /* `name`, with the folder of the entry it is about */
     char **names = NULL;         /* the viewer's reading of a name, where the new archive takes it */
@@ -307,7 +308,16 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
 
     if (editable == FULTA_ARC_EDIT_ENCRYPTED) { result = RUBRAVIEW_ARCEDIT_REFUSED_ENCRYPTED; goto done; }
     if (out_format != FULTA_ARC_FORMAT_ZIP && out_format != FULTA_ARC_FORMAT_7Z) { result = RUBRAVIEW_ARCEDIT_UNWRITABLE; goto done; }
-    {
+    bool several = job->op == RUBRAVIEW_ARCEDIT_DELETE && job->entries;
+    if (several) {
+        gone = (bool*)rubraview_alloc_zero(count + 1, sizeof(bool));
+        if (!gone) { result = RUBRAVIEW_ARCEDIT_NO_MEMORY; goto done; }
+        if (job->entry_count == 0) { result = RUBRAVIEW_ARCEDIT_UNREADABLE; goto done; }
+        for (size_t k = 0; k < job->entry_count; ++k) {
+            if (job->entries[k] >= count || !fulta_arc_entry(arc, job->entries[k])) { result = RUBRAVIEW_ARCEDIT_UNREADABLE; goto done; }
+            gone[job->entries[k]] = true;
+        }
+    } else {
         const fulta_arc_entry_t *en = fulta_arc_entry(arc, job->entry_index);
         if (!en || (en->flags & FULTA_ARC_ENTRY_DIR)) { result = RUBRAVIEW_ARCEDIT_UNREADABLE; goto done; }
     }
@@ -373,7 +383,9 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
     fulta_arc_reader_t reader = { .ctx = &run, .read = run_read, .size = job->size > 0 ? job->size : UINT64_MAX };
     switch (job->op) {
         case RUBRAVIEW_ARCEDIT_DELETE:
-            err = fulta_arc_edit_remove(edit, job->entry_index);
+            if (!several) { err = fulta_arc_edit_remove(edit, job->entry_index); break; }
+            for (size_t i = 0; i < count && err == FULTA_ARC_OK; ++i)
+                if (gone[i]) err = fulta_arc_edit_remove(edit, i);
             break;
         case RUBRAVIEW_ARCEDIT_RENAME:
             err = fulta_arc_edit_replace(edit, job->entry_index, full, NULL);
@@ -397,7 +409,7 @@ rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job) {
     for (size_t i = 0; i < count; ++i) {
         const fulta_arc_entry_t *en = fulta_arc_entry(arc, i);
         if (!en || (en->flags & FULTA_ARC_ENTRY_DIR)) continue;
-        bool it = job->op != RUBRAVIEW_ARCEDIT_ADD && i == job->entry_index;
+        bool it = job->op != RUBRAVIEW_ARCEDIT_ADD && (several ? gone[i] : i == job->entry_index);
         if (it && job->op == RUBRAVIEW_ARCEDIT_DELETE) continue;
         expect_t e = { .name = names[i] ? names[i] : en->name, .size = en->size, .crc = en->crc32,
                        .has_crc = (en->flags & FULTA_ARC_ENTRY_HAS_CRC32) != 0 };
@@ -425,6 +437,7 @@ done:
     rubraview_free(names);
     rubraview_free(want);
     rubraview_free(full);
+    rubraview_free(gone);
     if (result != RUBRAVIEW_ARCEDIT_OK) discard(job->out_path);
     return result;
 }

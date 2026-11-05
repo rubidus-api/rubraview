@@ -331,6 +331,25 @@ bool rubraview_pal_clipboard_set_files(rubraview_window_t *window, const proven_
 size_t rubraview_pal_clipboard_get_files(rubraview_window_t *window, char *buf, size_t cap, bool *moving);
 void rubraview_pal_clipboard_clear(rubraview_window_t *window);
 
+/** RV-223 (D-278): files of ours dragged to another program (OLE). `paths` (UTF-8) are what it gets (CF_HDROP, a copy
+    preferred); `allowed` RUBRAVIEW_DROP_* of dragout.h; `right` a right-button drag, which ends in Windows' menu.
+    `ready` is called once, when the button is let go over something that takes them and before it does: it writes
+    them (false gives the drag up). Returns what happened, RUBRAVIEW_DROP_COPY / MOVE / LINK, 0 when nothing did. While
+    it runs, the window's own drop target takes nothing (rubraview_pal_dragging_out). */
+uint32_t rubraview_pal_drag_out(rubraview_window_t *window, const proven_u8str_view_t *paths, size_t count, uint32_t allowed,
+                                bool right, bool (*ready)(void *ctx), void *ctx);
+bool rubraview_pal_dragging_out(void);
+/** RV-223: the same on the clipboard as a data object of ours, so a paste tells what it did: the effect the last
+    paste reported (0 none since), read once. Taking it back leaves the clipboard empty (never written out first). */
+bool rubraview_pal_clipboard_set_files_told(rubraview_window_t *window, const proven_u8str_view_t *paths, size_t count, bool moving);
+uint32_t rubraview_pal_clipboard_said(void);
+bool rubraview_pal_clipboard_is_ours(void);
+void rubraview_pal_clipboard_let_go(void);
+/** Waits until `done` says so, Windows' messages going on; after half a second a small window by the pointer shows
+    `text` and the share done (0..1). Esc gives up: false. */
+bool rubraview_pal_wait_with_progress(rubraview_window_t *window, bool (*done)(void *ctx, double *share), void *ctx,
+                                      proven_u8str_view_t text);
+
 /** RV-108: a picture on the clipboard — BGRA rows, top first — as other programs paste it. */
 bool rubraview_pal_clipboard_set_image(rubraview_window_t *window, const uint8_t *bgra,
                                        int32_t width, int32_t height, size_t stride);

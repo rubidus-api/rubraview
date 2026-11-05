@@ -353,6 +353,9 @@ static void arc_reopen(app_state_t *app, proven_u8str_view_t path, const char *l
     finish_open(app, start);
 }
 
+/* RV-223: the book again after its archive was written again from the open-file screen. */
+void arc_reopen_at(app_state_t *app, proven_u8str_view_t path, size_t page) { arc_reopen(app, path, NULL, page); }
+
 /* The new archive is written and checked: it takes the old one's place.
    The viewer lets go of the old file first — Windows replaces nothing
    that is mapped — and opens the book again afterwards. */
