@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.86.exe              the viewer, as built
-dist/rubraview-v1.39.86/                 the release bundle
-dist/rubraview-v1.39.86.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.87.exe              the viewer, as built
+dist/rubraview-v1.39.87/                 the release bundle
+dist/rubraview-v1.39.87.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -124,9 +124,11 @@ size and its folder. A click opens one; its box and **Remove**, or its
 switches say what — **Open by double click (file types)** and
 **Right-click menu** — and under them every extension has two boxes of
 its own, **Open with** (double click) and **Right-click menu**, by kind:
-pictures, comics, video, music, and the plain archives (ZIP, 7z, RAR, ALZ,
-EGG), which get the menu only and are never made Rubraview's to open by
-double click. `←` and `→` go from one box to the other, `Space` ticks the
+pictures, comics, video, music, text and the plain archives (ZIP, 7z, RAR,
+ALZ, EGG). An archive's **Open with** is off as it comes: ticked and
+registered, a double click on it lists what is in it in Rubraview rather
+than in your archiver (a comic archive opens as a book). The installer
+registers the archives for the menu only. `←` and `→` go from one box to the other, `Space` ticks the
 one marked `>`, and the mark stays in its column going up and down.
 
 The Microsoft Store's copy says so at the top of the page (**This copy**):

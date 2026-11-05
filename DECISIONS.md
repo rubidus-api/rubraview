@@ -3323,3 +3323,20 @@ Do not store credentials, private infrastructure details, personal data, private
   single, On) and six selections (a picture, a Korean name, a folder with a space, two pictures, a picture and a
   text, 400 long names going through a list file); on the VM 1.39.85's DLL and the new one printed the same 121
   lines (T352). Windows 11's own menu was not opened with the new DLL.
+
+## 2026-11-05: D-277 The plain archives as file types, when chosen (W-20261105-2330)
+
+- Status: Accepted (owner 2026-11-05: "압축파일에 대해 확장자 등록 가능하게 해 주세요. 현재는 설정창에서 막혀있다고 나오고
+  실제로 확장자 등록이 되지 않습니다"). RV-222. Changes D-86's "the five plain archives get the menu only and are never a file
+  type of ours".
+- Settings › Explorer › Archives (no longer "right-click menu only"): ZIP, 7z, RAR, ALZ and EGG each have a working Open with
+  box, off as they come (`shell.ext_zip` ... default false, was true and ignored), so a reader who registers again is not
+  moved off their archiver without ticking it; a note under the section says what it does. Ticked and registered, the
+  type is `Rubraview.zip` ("ZIP Archive", the book icon) and a double click lists the archive's tree (D-257; a comic
+  archive opens as a book).
+- Registration: the file types are chosen from `RUBRAVIEW_SHELL_FILE_TYPES` (every kind with the archives); what is taken
+  off first, and what Remove takes, is every extension with the archives (`rubraview_shell_extensions_all`), so an
+  archive switched off loses ours. `--register-shell` without `--types` (the MSI's `--setup` run) keeps the file types
+  to `rubraview_shell_extensions()` (no archives) and gives the menu every extension, as before; `--types=zip` or
+  `archives` (what Settings sends for every user) makes them types.
+- Not changed: the Store's package (its `[assoc]` list, D-255) declares no archive type.

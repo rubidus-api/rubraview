@@ -341,7 +341,7 @@ static const struct { uint32_t group; const char *word; const char *extensions; 
     { RUBRAVIEW_SHELL_VIDEO,    "video",    "mp4;mkv;webm;avi;mov;wmv;asf;mpg;mpeg" },
     { RUBRAVIEW_SHELL_MUSIC,    "music",    "mp3;flac;wav;ogg;opus;m4a" },
     { RUBRAVIEW_SHELL_TEXT,     "text",     "txt;log;nfo;md" },
-    /* D-86: offered the right-click menu only, never made a file type of ours. */
+    /* D-86: the right-click menu; D-277: a file type of ours only when named. */
     { RUBRAVIEW_SHELL_ARCHIVES, "archives", "zip;7z;rar;alz;egg" },
 };
 

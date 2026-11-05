@@ -244,7 +244,8 @@ rubraview_instance_action_t rubraview_instance_decide(bool single_instance_enabl
  */
 proven_u8str_view_t rubraview_shell_progid(proven_arena_t *arena, proven_u8str_view_t extension);
 
-/** The extensions §3.19.3 offers to associate, as a `;`-separated list. */
+/** The extensions made file types of ours when none is named (`--register-shell` without `--types`, the
+    installer's), as a `;`-separated list: every kind but the archives (D-277). */
 proven_u8str_view_t rubraview_shell_extensions(void);
 
 /* The same list by kind, so a reader can give Rubraview the comics and
@@ -254,14 +255,16 @@ proven_u8str_view_t rubraview_shell_extensions(void);
 #define RUBRAVIEW_SHELL_VIDEO    4u
 #define RUBRAVIEW_SHELL_MUSIC    8u
 #define RUBRAVIEW_SHELL_ALL      15u
-/* D-86: ZIP, 7z, RAR, ALZ, EGG. They get the right-click menu and are
-   never registered as a file type of ours, so this is not in ALL. */
+/* D-86: ZIP, 7z, RAR, ALZ, EGG: the right-click menu. D-277 (owner 2026-11-05): a file type of ours too, but only
+   when named (Settings › Explorer's box, `--types=zip` or `archives`), so this is not in ALL. */
 #define RUBRAVIEW_SHELL_ARCHIVES 16u
 /* RV-123 (RFC-0005 §9): .txt .log .nfo .md, offered both columns, off as they come. */
 #define RUBRAVIEW_SHELL_TEXT     32u
 /* RV-207 (D-252): menu items only, no extension list: any file at all, and folders. */
 #define RUBRAVIEW_SHELL_ANY_FILE 64u
 #define RUBRAVIEW_SHELL_FOLDERS  128u
+/* D-277: the kinds that may become a file type of ours (double click), each when chosen. */
+#define RUBRAVIEW_SHELL_FILE_TYPES (RUBRAVIEW_SHELL_ALL | RUBRAVIEW_SHELL_TEXT | RUBRAVIEW_SHELL_ARCHIVES)
 
 /** The extensions of the kinds in `groups`, `;`-separated; empty for none. */
 proven_u8str_view_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32_t groups);

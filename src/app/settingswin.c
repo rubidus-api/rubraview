@@ -1214,8 +1214,8 @@ int shell_apply(proven_arena_t *arena, proven_u8str_view_t selection, proven_u8s
     if (types != SHELL_PART_LEAVE) {
         /* Ours is taken off everything first, so an extension switched
            off since the last time loses it. */
-        if (!rubraview_pal_shell_unregister_for(rubraview_shell_extensions(), all_users)) ok = false;
-        proven_u8str_view_t list = types == SHELL_PART_APPLY ? rubraview_shell_selection_of_kinds(arena, selection, RUBRAVIEW_SHELL_ALL | RUBRAVIEW_SHELL_TEXT)
+        if (!rubraview_pal_shell_unregister_for(rubraview_shell_extensions_all(), all_users)) ok = false;
+        proven_u8str_view_t list = types == SHELL_PART_APPLY ? rubraview_shell_selection_of_kinds(arena, selection, RUBRAVIEW_SHELL_FILE_TYPES)
                                                  : PROVEN_LIT("");
         if (list.size > 0 && !rubraview_pal_shell_register_for(list, all_users)) ok = false;
     }
@@ -1234,7 +1234,7 @@ int shell_apply(proven_arena_t *arena, proven_u8str_view_t selection, proven_u8s
 }
 
 int shell_remove(bool all_users) {
-    bool ok = rubraview_pal_shell_unregister_for(rubraview_shell_extensions(), all_users);
+    bool ok = rubraview_pal_shell_unregister_for(rubraview_shell_extensions_all(), all_users);
     if (!rubraview_pal_shell_menu_unregister(all_users)) ok = false;
     return ok ? SHELL_DONE : SHELL_FAILED;
 }

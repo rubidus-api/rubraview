@@ -96,7 +96,8 @@ bool run_command_line(proven_arena_t *arena, int *exit_code) {
         }
 
         /* §3.19.3, D-86: registering the file types and the menu is a job,
-           not a launch. Without --types every extension is meant. */
+           not a launch. Without --types every extension is meant: the menu's every one, the file types' all
+           but the archives, which become one only when named (D-277). */
         if (cli.wipe_shell) {
             /* D-110: this user's entries; with --all-users every user's, and the packages. */
             int removed = shell_wipe(cli.shell_all_users);
@@ -108,10 +109,12 @@ bool run_command_line(proven_arena_t *arena, int *exit_code) {
         if (cli.register_shell || cli.unregister_shell) {
             int code = SHELL_FAILED;
             if (cli.register_shell) {
-                proven_u8str_view_t selection = cli.shell_types.size > 0 ? cli.shell_types : rubraview_shell_extensions_all();
+                proven_u8str_view_t selection = cli.shell_types.size > 0 ? cli.shell_types : rubraview_shell_extensions();
+                proven_u8str_view_t menu_selection = cli.shell_menu_types.size > 0 || cli.shell_types.size > 0 ? cli.shell_menu_types
+                                                                                                               : rubraview_shell_extensions_all();
                 shell_part_t types = cli.shell_no_types ? SHELL_PART_LEAVE : cli.shell_remove_types ? SHELL_PART_REMOVE : SHELL_PART_APPLY;
                 shell_part_t menu = cli.shell_no_menu ? SHELL_PART_LEAVE : cli.shell_remove_menu ? SHELL_PART_REMOVE : SHELL_PART_APPLY;
-                code = shell_apply(arena, selection, cli.shell_menu_types, types, menu, cli.shell_all_users);
+                code = shell_apply(arena, selection, menu_selection, types, menu, cli.shell_all_users);
             } else {
                 code = shell_remove(cli.shell_all_users);
             }
