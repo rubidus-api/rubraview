@@ -3305,3 +3305,21 @@ Do not store credentials, private infrastructure details, personal data, private
 - Verified: every host test under ASan and UBSan, the Windows build, and on the VM the Korean information window of
   a picture, a film and a CBZ, the zoom display, the compress window and a 7z with a password, `--version` and a
   batch run's console line: the same text as 1.39.84 (T351).
+
+## 2026-11-05: D-276 The Explorer menu DLL on proven's ways too (W-20261105-2300)
+
+- Status: Accepted (owner 2026-11-05: "탐색기 메뉴 dll도 proven으로"). RV-221; D-275 kept it out.
+- `rubraview_menu.dll` links proven_c_lib's static library. Its blocks come from a `proven_allocator_t` of its own
+  over the process heap (zeroed; they never leave the DLL, so it is not `rubraview_heap`, which is in the viewer's
+  core); copies through `proven_sys_mem_copy`; wide text with `pal_wide.h`'s bounded copies, appends, searches and
+  comparisons; the command line grows from `proven_u16str_view_t` slices; the log's number and the list file's name
+  through `proven_fmt_to`, then `proven_utf8_to_utf16`; the list file's lines through `proven_utf16_to_utf8` (a name
+  that is not valid UTF-16 is left out, as one the program could not open). No new DLL is imported; the file grew
+  from 105 KB to 205 KB.
+- `scripts/check-proven-ways.py` now covers `src/menu`; what it allows is FFmpeg's log callback and
+  `rubraview_heap` itself.
+- Verified: `tests/win/menu_probe.c` (`make menu-probe`) drives the DLL as Explorer does, through
+  `DllGetClassObject`, over a test item of five sub-items (Text.ko, Icon, `%1`, `%*`, none, Multi each / one /
+  single, On) and six selections (a picture, a Korean name, a folder with a space, two pictures, a picture and a
+  text, 400 long names going through a list file); on the VM 1.39.85's DLL and the new one printed the same 121
+  lines (T352). Windows 11's own menu was not opened with the new DLL.

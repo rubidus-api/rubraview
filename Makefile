@@ -162,7 +162,7 @@ TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resa
             build/tests/test_lru build/tests/test_exif build/tests/test_keymap build/tests/test_slideshow build/tests/test_batch \
             build/tests/test_playlist build/tests/test_pal_fs build/tests/test_pal_time build/tests/test_compositor build/tests/test_transform build/tests/test_ui_input build/tests/test_ui_box build/tests/test_ui_chrome build/tests/test_ui_edgenav build/tests/test_ui_listwin build/tests/test_ui_scrollbar build/tests/test_ui_subwin build/tests/test_ui_ctxmenu build/tests/test_ui_chooser build/tests/test_ui_slidepop build/tests/test_matroska build/tests/test_mp4 build/tests/test_ui_eqwin build/tests/test_repeat build/tests/test_audio_chain build/tests/test_ui_browse build/tests/test_favorites build/tests/test_fileinfo build/tests/test_detail build/tests/test_aspect build/tests/test_default_keymap build/tests/test_history build/tests/test_pagesource build/tests/test_precache build/tests/test_animation build/tests/test_apng build/tests/test_shellreq build/tests/test_arcedit build/tests/test_edit build/tests/test_export build/tests/test_batchrun build/tests/test_resample_mt build/tests/test_jpegtran build/tests/test_webp_write build/tests/test_avif_read build/tests/test_bigtiff build/tests/test_ui_panel build/tests/test_filemanage build/tests/test_settings build/tests/test_settings_doc build/tests/test_ui_settings build/tests/test_boxes_doc build/tests/test_subtitle build/tests/test_vobsub build/tests/test_pgs build/tests/test_tags build/tests/test_music build/tests/test_help build/tests/test_playback build/tests/test_audio_dsp build/tests/test_lyrics build/tests/test_mediaclock build/tests/test_lang build/tests/test_textenc build/tests/test_textview build/tests/test_effects build/tests/test_classify build/tests/test_fontspec build/tests/test_memory build/tests/test_keepinfo build/tests/test_tonemap build/tests/test_plugin build/tests/test_gmic build/tests/test_ffilter build/tests/test_media_host build/tests/test_media_head build/tests/test_filmcache build/tests/test_keyboard build/tests/test_archive_job
 
-.PHONY: all test test-area fuzz-smoke check clean win64 package store mfprobe
+.PHONY: all test test-area fuzz-smoke check clean win64 package store mfprobe menu-probe
 
 all: test
 
@@ -380,12 +380,21 @@ $(RES_WIN): src/app/rubraview.rc resources/distribution/rubraview.ico $(wildcard
 
 # D-86: the COM server of Rubraview's item in Windows 11's context menu. It
 # sits beside rubraview.exe; scripts/package.sh makes the package that names it.
+# D-276: its memory, text and formatting through proven_c_lib, as the viewer's.
 MENU_DLL = dist/rubraview_menu.dll
-$(MENU_DLL): src/menu/rubraview_menu.c src/menu/rubraview_menu.def
+$(MENU_DLL): src/menu/rubraview_menu.c src/menu/rubraview_menu.def include/rubraview/pal/pal_wide.h include/rubraview/core.h $(PROVEN_LIB_WIN)
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -shared -s \
+		-Iinclude -Ivendor/proven/include -Ivendor/proven/platform \
 		src/menu/rubraview_menu.c src/menu/rubraview_menu.def \
-		-lole32 -lshlwapi -ladvapi32 -luser32 -luuid -o $@
+		$(PROVEN_LIB_WIN) -lole32 -lshlwapi -ladvapi32 -luser32 -luuid -o $@
+
+# D-276, T352: drives the menu DLL as Explorer does, on the VM (tests/win/menu_probe.c says how).
+MENU_PROBE = build/menu_probe.exe
+$(MENU_PROBE): tests/win/menu_probe.c
+	@mkdir -p build
+	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode tests/win/menu_probe.c -lole32 -lshell32 -ladvapi32 -luuid -o $@
+menu-probe: $(MENU_PROBE)
 
 win64: $(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) $(AVIF_LIB_WIN) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) $(MENU_DLL)
 	@echo "Cross-building Windows x86_64 target"
