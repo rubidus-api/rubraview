@@ -3392,8 +3392,8 @@ Do not store credentials, private infrastructure details, personal data, private
   gives two pages right to left with the first page alone. A file written now read by an older version shows two pages
   without the cover alone.
 - Known: two readers of one book can see different pairs (it depends where they started) — One page over is the answer.
-  Round again (Settings › Files › At the first and last) lands on the first spread as it is paired, which may be the
-  first page alone; Home re-pairs from it.
+  Round again (Settings › Files › At the first and last) landed on the first spread as it was paired, which could be
+  the first page alone: fixed in D-281.
 
 ## 2026-11-06: D-280 RV-215 closed with its defaults (W-20261106-0300)
 
@@ -3403,3 +3403,13 @@ Do not store credentials, private infrastructure details, personal data, private
   Blend frames off as they come. Why: the stutter first measured was the network drive's (RV-216); a local film then
   dropped no frame; display-resample changes the speed by under 1 %; blending can leave a ghost on fast motion and was
   never seen on a real graphics card. A stutter reported later opens it again.
+
+## 2026-11-06: D-281 Round again pairs from the first page (W-20261106-0400)
+
+- Status: Accepted (owner 2026-11-06: "1번 2번 진행해 주세요" — 1, D-279's known limit). RV-225.
+- Decision: Settings › Files › At the first and last = round, going on past the last page, goes to the first picture
+  as Home does (`spread_for_first_page`: two pages paired from it), not to the first spread as it was paired, which
+  with the pairs anchored on an odd page was the first page alone. Going back past the first still lands on the last
+  spread as paired.
+- Evidence: VM, against 1.39.89 (T356): two pages, opened at p04, End, Next — p01 + p02 (1.39.89: p01 alone), Next
+  p03 (1.39.89: p02).

@@ -2439,7 +2439,8 @@ void speed_tile_press(app_state_t *app, double y, bool detached, bool interval);
 void speed_tile_release(app_state_t *app, bool detached);
 bool spread_composition(app_state_t *app, rubraview_composition_t *out);
 size_t spread_for_chosen_page(app_state_t *app, int32_t page);
-void page_over(app_state_t *app, bool forward);   /* RV-224: two pages paired one page later or earlier */
+void page_over(app_state_t *app, bool forward);
+size_t spread_for_first_page(app_state_t *app);   /* Home and round again: paired from the first picture */   /* RV-224: two pages paired one page later or earlier */
 size_t spread_index_for_page(const app_state_t *app, int32_t page_index);
 void startup_without_file(app_state_t *app, bool no_file);
 void station_alts_note(const rubraview_playlist_entry_t *e);

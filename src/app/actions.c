@@ -545,10 +545,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         const char *const SAY[] = { T("analyser off"), T("analyser: spectrum"), T("analyser: oscilloscope") };
         osd_say(app, cstr(SAY[v]));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("first_page"))) {
-        /* the first picture, two pages paired from it (RV-224) */
-        int32_t first = 0;
-        while ((size_t)first + 1 < page_count(app) && app->pages[first].skipped) first++;
-        go_to_spread(app, page_count(app) > 0 ? spread_for_chosen_page(app, first) : 0);
+        go_to_spread(app, spread_for_first_page(app));   /* the first picture, two pages paired from it (RV-224) */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("page_over_next"))) {
         page_over(app, true);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("page_over_back"))) {

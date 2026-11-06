@@ -160,6 +160,14 @@ size_t spread_for_chosen_page(app_state_t *app, int32_t page) {
     return spread_index_for_page(app, page);
 }
 
+/* The first picture's spread, two pages paired from it (RV-224): Home, and round again to the first (D-281). */
+size_t spread_for_first_page(app_state_t *app) {
+    if (page_count(app) == 0) return 0;
+    int32_t first = 0;
+    while ((size_t)first + 1 < page_count(app) && app->pages[first].skipped) first++;
+    return spread_for_chosen_page(app, first);
+}
+
 /* RV-224 (D-279; owner, 2026-11-06: "딱 한장만 이동하는 버튼"): two pages paired one page later or earlier, so a
    printed book's facing pages can be put right — Shift+PageDown / Shift+PageUp and the tile after Layout. In any
    other layout it is the next or the previous page. */
@@ -424,7 +432,8 @@ bool open_sibling_folder(app_state_t *app, bool forward);
 static void past_the_end(app_state_t *app, bool forward) {
     int mode = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("at_ends")));
     if (mode == 2 && app->layout.count > 1) {
-        go_to_spread(app, forward ? 0 : app->layout.count - 1);
+        /* round to the first: paired from it as Home does, not the first spread as paired (D-281) */
+        go_to_spread(app, forward ? spread_for_first_page(app) : app->layout.count - 1);
         update_precache(app);
         osd_say(app, forward ? TU8("the last: round again to the first") : TU8("the first: round again to the last"));
         return;
