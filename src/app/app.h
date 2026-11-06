@@ -2245,6 +2245,8 @@ void picker_filter_begin(app_state_t *app);
 rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, double dpi, proven_u8str_view_t *out_label, char *buf, size_t cap);
 /* RV-227: the basket button at the top right — 0 all of it, 1 its upper part (put in), 2 its arrow (put here) */
 rubraview_pal_rect_t picker_basket_rect(const app_state_t *app, double dpi, double win_w, int part);
+size_t picker_crumbs_first(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double dpi, double win_w, bool *out_star);
+#define PICKER_CRUMBS_MORE "\xE2\x80\xA6"   /* RV-229: the chip standing for the crumbs left out */
 bool picker_basket_shown(const app_state_t *app);
 void basket_add_picked(app_state_t *app, double x, double y, double above_y);
 void basket_put_open(app_state_t *app, double x, double y, double above_y);

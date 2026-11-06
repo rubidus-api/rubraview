@@ -196,7 +196,7 @@ void draw_titlebar(app_state_t *app, double win_w) {
     if (name.size > 0 && rubraview_pal_render_measure_text(app->renderer, name, font, &name_w)) app->titlebar.name_width = name_w + 20.0 * dpi;
     else app->titlebar.name_width = 0.0;
     rubraview_rect_t nr = rubraview_titlebar_button_rect(&app->titlebar, RUBRAVIEW_TITLEBAR_NAME, win_w);
-    if (nr.width > 0.0) {
+    if (nr.width > 48.0 * dpi) {   /* RV-229: narrower, its letters stood one under another */
         rubraview_pal_rect_t nb = { nr.x, nr.y + 4.0 * dpi, nr.width, nr.height - 8.0 * dpi };
         if (rubraview_rect_contains(nr, app->pointer_x, app->pointer_y) && !app->picker_open)
             rubraview_pal_render_fill_rect(app->renderer, nb, COLOR_TILE_FILL, 3.0 * dpi);

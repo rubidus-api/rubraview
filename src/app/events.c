@@ -253,8 +253,12 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                     rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
                     double x = PICKER_CRUMB_START * dpi;
                     bool on_chip = false;
-                    for (size_t i = 0; i < crumbs.count; ++i) {
-                        double w = picker_chip_width(crumbs.items[i].label, dpi);
+                    int32_t cw = 0, ch = 0;
+                    rubraview_pal_window_get_size(app->window, &cw, &ch);
+                    bool star_room = true;
+                    size_t crumb_first = picker_crumbs_first(app, &crumbs, dpi, (double)cw, &star_room);   /* RV-229: the chip for those left out goes to the one before the first shown */
+                    for (size_t i = crumb_first > 0 ? crumb_first - 1 : 0; i < crumbs.count; ++i) {
+                        double w = picker_chip_width(i + 1 == crumb_first ? PROVEN_LIT(PICKER_CRUMBS_MORE) : crumbs.items[i].label, dpi);
                         if (event->mouse.x >= x && event->mouse.x < x + w) {
                             if (app->rename_active) rename_end(app);
                             picker_navigate(app, crumbs.items[i].prefix);
@@ -264,7 +268,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                         }
                         x += w + 4.0 * dpi;
                     }
-                    proven_u8str_view_t star = on_chip ? PROVEN_LIT("") : picker_star_label(app);
+                    proven_u8str_view_t star = on_chip || !star_room ? PROVEN_LIT("") : picker_star_label(app);
                     if (star.size > 0 && event->mouse.x >= x && event->mouse.x < x + picker_chip_width(star, dpi)) {
                         picker_toggle_favorite(app);
                         break;

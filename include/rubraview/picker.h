@@ -104,6 +104,13 @@ proven_u8str_view_t rubraview_picker_typed_path(proven_arena_t *arena, proven_u8
  */
 rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(proven_u8str_view_t path);
 
+/**
+ * RV-229: the first of `n` chips (`widths[i]` wide, `gap` after each) shown in `room` when they do not all fit — the
+ * last ones kept, after a chip `more_w` wide standing for those left out. 0 when they all fit; the last one alone
+ * (n - 1) when not even it and that chip fit.
+ */
+size_t rubraview_picker_crumbs_first(const double *widths, size_t n, double gap, double room, double more_w);
+
 /*
  * How a tap picks (owner, 2026-09-23: "쉬프트나 컨트롤 입력 없이"). A mode
  * is turned on by its own button and stays on until it is turned off, so

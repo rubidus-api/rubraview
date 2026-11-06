@@ -165,6 +165,17 @@ proven_u8str_view_t rubraview_picker_typed_path(proven_arena_t *arena, proven_u8
     return cleaned;
 }
 
+size_t rubraview_picker_crumbs_first(const double *widths, size_t n, double gap, double room, double more_w) {
+    if (n == 0) return 0;
+    double all = 0.0;
+    for (size_t i = 0; i < n; ++i) all += widths[i] + gap;
+    if (all <= room) return 0;
+    double tail = more_w + gap;   /* the chip standing for those left out, then the last ones */
+    size_t first = n;
+    while (first > 1 && tail + widths[first - 1] + gap <= room) tail += widths[--first] + gap;
+    return first < n ? first : n - 1;
+}
+
 rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(proven_u8str_view_t path) {
     rubraview_breadcrumbs_t crumbs = {0};
     if (!path.ptr || path.size == 0) return crumbs;

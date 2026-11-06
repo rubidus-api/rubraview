@@ -992,16 +992,19 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     }
     rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
     double crumb_x = PICKER_CRUMB_START * dpi;
-    for (size_t i = 0; i < crumbs.count; ++i) {
-        double w = picker_chip_width(crumbs.items[i].label, dpi);
+    bool star_room = true;
+    size_t crumb_first = picker_crumbs_first(app, &crumbs, dpi, win_w, &star_room);   /* RV-229 */
+    for (size_t i = crumb_first > 0 ? crumb_first - 1 : 0; i < crumbs.count; ++i) {
+        proven_u8str_view_t label = i + 1 == crumb_first ? PROVEN_LIT(PICKER_CRUMBS_MORE) : crumbs.items[i].label;
+        double w = picker_chip_width(label, dpi);
         rubraview_pal_rect_t chip = { crumb_x, top + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
         rubraview_pal_render_fill_rect(app->renderer, chip, COLOR_TILE_FILL, 2.0);
         rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
-        rubraview_pal_render_draw_text(app->renderer, crumbs.items[i].label, chip,
+        rubraview_pal_render_draw_text(app->renderer, label, chip,
                                        crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         crumb_x += w + 4.0 * dpi;
     }
-    proven_u8str_view_t star = picker_star_label(app);
+    proven_u8str_view_t star = star_room ? picker_star_label(app) : PROVEN_LIT("");
     if (star.size > 0) {
         double w = picker_chip_width(star, dpi);
         rubraview_pal_rect_t chip = { crumb_x, top + 6.0 * dpi, w, crumb_h - 12.0 * dpi };

@@ -459,8 +459,32 @@ rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, do
                                   : rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Filter names (Ctrl+F)")));
     *out_label = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
     double w = picker_chip_width(*out_label, dpi);
+    /* RV-229: a narrow window leaves the path some room: the chip's one word */
+    if (!app->picker_filter[0] && picker_right_edge(app, dpi, win_w) - w - 8.0 * dpi < (PICKER_CRUMB_START + 160.0) * dpi) {
+        n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Filter")));
+        *out_label = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
+        w = picker_chip_width(*out_label, dpi);
+    }
     double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
     return (rubraview_pal_rect_t){ picker_right_edge(app, dpi, win_w) - w - 8.0 * dpi, picker_top(app) + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
+}
+
+/* RV-229: the first of the path's crumbs drawn — the last ones kept between the arrows and the filter's chip (the star
+   after them, left out too when the last crumb would not fit beside it: Ctrl+D stars), a chip standing for those left
+   out before them. render.c and events.c lay them out alike. */
+size_t picker_crumbs_first(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double dpi, double win_w, bool *out_star) {
+    double widths[RUBRAVIEW_PICKER_MAX_CRUMBS];
+    for (size_t i = 0; i < crumbs->count; ++i) widths[i] = picker_chip_width(crumbs->items[i].label, dpi);
+    char buf[200];
+    proven_u8str_view_t label;
+    double room = picker_filter_chip(app, win_w, dpi, &label, buf, sizeof(buf)).x - 6.0 * dpi - PICKER_CRUMB_START * dpi;
+    double gap = 4.0 * dpi, more_w = picker_chip_width(PROVEN_LIT(PICKER_CRUMBS_MORE), dpi);
+    proven_u8str_view_t star = picker_star_label(app);
+    double star_w = star.size > 0 ? picker_chip_width(star, dpi) + gap : 0.0;
+    double least = crumbs->count == 0 ? 0.0 : widths[crumbs->count - 1] + gap + (crumbs->count > 1 ? more_w + gap : 0.0);
+    *out_star = star.size > 0 && room - star_w >= least;
+    if (*out_star) room -= star_w;
+    return rubraview_picker_crumbs_first(widths, crumbs->count, gap, room, more_w);
 }
 
 /* A tile's check box: its top left corner (a row's left end in the details view). */

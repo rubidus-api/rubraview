@@ -3470,3 +3470,16 @@ Do not store credentials, private infrastructure details, personal data, private
   the other way (`triage_undo`). The copy recycled by the move stays in the recycle bin.
 - Evidence: VM against 1.39.90 (T360): the basket's Move here and Ctrl+X / Ctrl+V into a folder on D:, then Ctrl+Z —
   new: the folder and the file back, the folder on D: empty; 1.39.90: the file back, the folder left on D:.
+
+## 2026-11-07: D-285 The path's chips in a narrow open-file screen (RV-229)
+
+- Status: Accepted (owner 2026-11-07: "다음 진행할거 하고 그다음에 릴리즈 합니다." — of what T360 left: the Filter chip
+  over the path's chips in a narrow window, as in 1.39.89, pushed further by the Basket button). RV-229.
+- Decision: the path's chips that do not fit between the arrows and the filter's chip give way from the left: the
+  last ones are kept after a `…` chip (a tap goes to the folder above the first shown); the star is left out when the
+  last chip would not fit beside it (`Ctrl+D` still stars); the filter's chip, unfiltered, says only "Filter" when its
+  whole words would leave the path under 160 px. `rubraview_picker_crumbs_first` (core, `test_ui_browse`) counts them;
+  `picker_crumbs_first` lays them out for both the drawing and the taps. The title bar's name is not drawn in under
+  48 px (in a 420 px window its letters stood one under another).
+- Evidence: VM against 1.39.90 (T361): at 700, 560 and 420 px the chips and the filter's chip no longer overlap
+  (1.39.90: the filter's chip over rv228, Users, C:); `…` at 560 px went to rv228, at 420 px to bx; 1100 px as before.
