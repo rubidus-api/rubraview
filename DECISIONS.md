@@ -3394,3 +3394,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Known: two readers of one book can see different pairs (it depends where they started) — One page over is the answer.
   Round again (Settings › Files › At the first and last) lands on the first spread as it is paired, which may be the
   first page alone; Home re-pairs from it.
+
+## 2026-11-06: D-280 RV-215 closed with its defaults (W-20261106-0300)
+
+- Status: Accepted (owner 2026-11-06: "1번 해 주세요. 문제가 생기면 차후에 다시 처리하겠습니다", of three: keep the
+  defaults and close, judge on the owner's screen first, blend by default).
+- Decision: RV-215 is done as shipped (D-269 to D-272): Settings › Video › Match a film to the screen stays on and
+  Blend frames off as they come. Why: the stutter first measured was the network drive's (RV-216); a local film then
+  dropped no frame; display-resample changes the speed by under 1 %; blending can leave a ghost on fast motion and was
+  never seen on a real graphics card. A stutter reported later opens it again.
