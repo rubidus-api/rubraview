@@ -213,6 +213,19 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 if (titlebar_click(app, event->mouse.x, event->mouse.y)) break;
                 if (event->mouse.y < top) break;   /* the band holds nothing to press */
                 if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && scrollbar_press(app, RVSB_PICKER, event->mouse.x, event->mouse.y)) break;   /* RV-170 */
+                if (event->mouse.y < header_h && event->mouse.button == RUBRAVIEW_MOUSE_LEFT && picker_basket_shown(app)) {   /* RV-227: the basket button */
+                    int32_t bw = 0, bh = 0;
+                    rubraview_pal_window_get_size(app->window, &bw, &bh);
+                    rubraview_pal_rect_t upper = picker_basket_rect(app, dpi, (double)bw, 1), arrow = picker_basket_rect(app, dpi, (double)bw, 2);
+                    if (pal_rect_has(upper, event->mouse.x, event->mouse.y)) {
+                        basket_add_picked(app, upper.x, arrow.y + arrow.height, upper.y);
+                        break;
+                    }
+                    if (pal_rect_has(arrow, event->mouse.x, event->mouse.y)) {
+                        basket_put_open(app, arrow.x, arrow.y + arrow.height, upper.y);
+                        break;
+                    }
+                }
                 if (event->mouse.y < crumb_h && !app->picker_in_book) {   /* 1.22.0: the filter's chip */
                     int32_t fw = 0, fh = 0;
                     rubraview_pal_window_get_size(app->window, &fw, &fh);

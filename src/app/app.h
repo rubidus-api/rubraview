@@ -36,6 +36,7 @@
 #include "rubraview/subbox.h"
 #include "rubraview/aspect.h"
 #include "rubraview/detail.h"
+#include "rubraview/basket.h"
 #include "rubraview/thumb.h"
 #include "rubraview/textedit.h"
 #include "rubraview/pal/pal_thumbs.h"
@@ -386,7 +387,7 @@ typedef struct apply_all_job {
 
 /* 1.24.0 (owner, 2026-10-19): the list a one-of-many choice opens, in the window where it was pressed. */
 enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_ORDER, CHOOSE_LISTEXT, CHOOSE_LISTSORT, CHOOSE_SHAPE,
-       CHOOSE_PICKEXT /* RV-204 */ };
+       CHOOSE_PICKEXT /* RV-204 */, CHOOSE_BASKET /* RV-227 */ };
 enum { SHAPE_FOR_PICKER = 1, SHAPE_FOR_LIST };   /* RV-192 */
 /* RV-202: what a reading of sizes and lengths is for: the shape's choice, the list sorted by length, the open-file
    screen sorted by length or by resolution */
@@ -1378,6 +1379,11 @@ typedef struct app_state {
     bool                   picker_rhold;             /* RV-223: a right press on a tile: its list when let go, a drag when moved */
     size_t                 picker_rhold_index;
     double                 picker_rhold_x, picker_rhold_y;
+    /* RV-227 (D-282): five baskets of paths, for this run; what a tap or a drag is about to put in one */
+    rubraview_baskets_t    baskets;
+    proven_u8str_view_t   *basket_pending;
+    size_t                 basket_pending_count;
+    bool                   basket_moving;            /* the list's Move here, Copy here each time it opens */
     double                 picker_tap_at;          /* RV-213: the last tap, for a second one that opens */
     /* RV-215 (D-248): measured while the information window is open, listed at its top once a second */
     double                 stats_since, stats_worst, stats_draw, stats_present;
@@ -2237,6 +2243,16 @@ bool picker_enter_book(app_state_t *app, size_t index);
 rubraview_pal_rect_t picker_favwin_chip(const app_state_t *app, double dpi, double win_w);
 void picker_filter_begin(app_state_t *app);
 rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, double dpi, proven_u8str_view_t *out_label, char *buf, size_t cap);
+/* RV-227: the basket button at the top right — 0 all of it, 1 its upper part (put in), 2 its arrow (put here) */
+rubraview_pal_rect_t picker_basket_rect(const app_state_t *app, double dpi, double win_w, int part);
+bool picker_basket_shown(const app_state_t *app);
+void basket_add_picked(app_state_t *app, double x, double y, double above_y);
+void basket_put_open(app_state_t *app, double x, double y, double above_y);
+void basket_chosen(app_state_t *app, int which);   /* from the list: into it, or out of it here */
+size_t basket_total(const app_state_t *app);
+void chooser_open_basket(app_state_t *app, bool put, double x, double y, double above_y);
+size_t paste_paths(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving,
+                   bool *moved, size_t *skipped, size_t *failed);
 void picker_filter_follow(app_state_t *app);
 void picker_filter_forget(app_state_t *app);
 void picker_filter_set(app_state_t *app, proven_u8str_view_t text);

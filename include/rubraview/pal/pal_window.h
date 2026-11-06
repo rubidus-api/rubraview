@@ -339,6 +339,11 @@ void rubraview_pal_clipboard_clear(rubraview_window_t *window);
 uint32_t rubraview_pal_drag_out(rubraview_window_t *window, const proven_u8str_view_t *paths, size_t count, uint32_t allowed,
                                 bool right, bool (*ready)(void *ctx), void *ctx);
 bool rubraview_pal_dragging_out(void);
+/** RV-227 (D-282): while our own drag runs, the window takes it in x, y, w, h (client pixels) — the open-file
+    screen's basket button — and nowhere else; a drop there is done nothing with by the window but noted, read once
+    by rubraview_pal_window_own_drop_taken after the drag. `on` false: our own drag is taken nowhere, as before. */
+void rubraview_pal_window_set_own_drop(rubraview_window_t *window, bool on, double x, double y, double w, double h);
+bool rubraview_pal_window_own_drop_taken(rubraview_window_t *window);
 /** RV-223: the same on the clipboard as a data object of ours, so a paste tells what it did: the effect the last
     paste reported (0 none since), read once. Taking it back leaves the clipboard empty (never written out first). */
 bool rubraview_pal_clipboard_set_files_told(rubraview_window_t *window, const proven_u8str_view_t *paths, size_t count, bool moving);

@@ -83,6 +83,8 @@ struct rubraview_window {
     char drop_storage[16][1024];
     struct rv_drop_target *drop_target;   /* §3.19.2: the OLE drop target, when registered */
     unsigned drop_serial;                 /* one temporary folder per drop of virtual files */
+    bool own_drop_on, own_drop_taken;     /* RV-227: our own drag taken on the basket button only */
+    double own_drop_x, own_drop_y, own_drop_w, own_drop_h;
 
     rubraview_window_event_t queue[EVENT_QUEUE_CAPACITY];
     size_t queue_head;
@@ -847,20 +849,54 @@ static ULONG STDMETHODCALLTYPE dt_release(IDropTarget *self) {
     return (ULONG)left;
 }
 
+/* RV-227: our own drag over the zone the app named (the basket button)? */
+static bool own_drop_at(const rv_drop_target_t *t, POINTL pt) {
+    if (!t->window || !t->window->own_drop_on) return false;
+    POINT at = { pt.x, pt.y };
+    if (!ScreenToClient(t->window->hwnd, &at)) return false;
+    const struct rubraview_window *w = t->window;
+    return at.x >= w->own_drop_x && at.y >= w->own_drop_y && at.x < w->own_drop_x + w->own_drop_w && at.y < w->own_drop_y + w->own_drop_h;
+}
+
 static HRESULT STDMETHODCALLTYPE dt_drag_enter(IDropTarget *self, IDataObject *data, DWORD keys, POINTL pt, DWORD *effect) {
-    (void)keys; (void)pt;
+    (void)keys;
     rv_drop_target_t *t = (rv_drop_target_t*)self;
-    /* RV-223: our own drag out takes nothing here */
-    t->effect = rubraview_pal_dragging_out() ? DROPEFFECT_NONE : drop_effect_for(data, effect ? *effect : 0);
+    /* RV-223: our own drag out takes nothing here; RV-227: but the basket button */
+    if (rubraview_pal_dragging_out()) {
+        t->effect = DROPEFFECT_NONE;
+        if (effect) *effect = own_drop_at(t, pt) ? (*effect & DROPEFFECT_COPY) : DROPEFFECT_NONE;
+        return S_OK;
+    }
+    t->effect = drop_effect_for(data, effect ? *effect : 0);
     if (effect) *effect = t->effect;
     return S_OK;
 }
 
 static HRESULT STDMETHODCALLTYPE dt_drag_over(IDropTarget *self, DWORD keys, POINTL pt, DWORD *effect) {
-    (void)keys; (void)pt;
+    (void)keys;
     rv_drop_target_t *t = (rv_drop_target_t*)self;
+    if (rubraview_pal_dragging_out()) {
+        if (effect) *effect = own_drop_at(t, pt) ? (*effect & DROPEFFECT_COPY) : DROPEFFECT_NONE;
+        return S_OK;
+    }
     if (effect) *effect = (t->effect & *effect) ? t->effect : DROPEFFECT_NONE;
     return S_OK;
+}
+
+void rubraview_pal_window_set_own_drop(rubraview_window_t *window, bool on, double x, double y, double w, double h) {
+    if (!window) return;
+    window->own_drop_on = on;
+    window->own_drop_x = x;
+    window->own_drop_y = y;
+    window->own_drop_w = w;
+    window->own_drop_h = h;
+    if (on) window->own_drop_taken = false;   /* turned off after the drag, what it took is still to be read */
+}
+
+bool rubraview_pal_window_own_drop_taken(rubraview_window_t *window) {
+    if (!window || !window->own_drop_taken) return false;
+    window->own_drop_taken = false;
+    return true;
 }
 
 static HRESULT STDMETHODCALLTYPE dt_drag_leave(IDropTarget *self) {
@@ -974,6 +1010,11 @@ static void drop_take_virtual(struct rubraview_window *w, IDataObject *data, rub
 static HRESULT STDMETHODCALLTYPE dt_drop(IDropTarget *self, IDataObject *data, DWORD keys, POINTL pt, DWORD *effect) {
     (void)keys;
     rv_drop_target_t *t = (rv_drop_target_t*)self;
+    if (rubraview_pal_dragging_out()) {   /* RV-227: our own, on the basket button: noted, nothing done to the files */
+        if (own_drop_at(t, pt)) t->window->own_drop_taken = true;
+        if (effect) *effect = DROPEFFECT_NONE;
+        return S_OK;
+    }
     DWORD chosen = drop_effect_for(data, effect ? *effect : 0);
     if (effect) *effect = chosen;
     if (chosen == DROPEFFECT_NONE || !t->window) return S_OK;

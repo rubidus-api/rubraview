@@ -1020,6 +1020,24 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_render_stroke_rect(app->renderer, filter_chip, COLOR_BOX_BORDER, 1.0, 2.0);
         rubraview_pal_render_draw_text(app->renderer, filter_label, filter_chip, crumb_h * 0.32, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
+    /* RV-227: the basket button — how many are in the baskets above, the arrow that puts them here below */
+    if (picker_basket_shown(app)) {
+        rubraview_pal_rect_t whole = picker_basket_rect(app, dpi, win_w, 0), upper = picker_basket_rect(app, dpi, win_w, 1),
+                             arrow = picker_basket_rect(app, dpi, win_w, 2);
+        bool on_upper = pal_rect_has(upper, app->pointer_x, app->pointer_y), on_arrow = pal_rect_has(arrow, app->pointer_x, app->pointer_y);
+        rubraview_pal_render_fill_rect(app->renderer, whole, COLOR_TILE_FILL, 3.0);
+        if (on_upper) rubraview_pal_render_fill_rect(app->renderer, upper, 0x40FFFFFFu, 3.0);
+        if (on_arrow) rubraview_pal_render_fill_rect(app->renderer, arrow, 0x40FFFFFFu, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, whole, COLOR_TEXT, 1.0, 3.0);
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ arrow.x + 6.0 * dpi, arrow.y, arrow.width - 12.0 * dpi, 1.0 }, COLOR_BOX_BORDER, 0.0);
+        char basket_buf[64];
+        size_t in_baskets = basket_total(app);
+        int bn = in_baskets ? rubraview_fmt(basket_buf, sizeof basket_buf, "{} {}", PROVEN_ARG(T("Basket")), PROVEN_ARG(in_baskets))
+                            : rubraview_fmt(basket_buf, sizeof basket_buf, "{}", PROVEN_ARG(T("Basket")));
+        rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)basket_buf, .size = bn > 0 ? (size_t)bn : 0 },
+                                       upper, crumb_h * 0.30, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_render_draw_text(app->renderer, TU8("\xE2\x96\xBE"), arrow, crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
     /* The rest of the bar takes a typed path (owner, 2026-09-28), and says so. */
     if (!app->rename_is_path && crumb_x + 200.0 * dpi < filter_chip.x) {
         rubraview_pal_rect_t hint = { crumb_x + 8.0 * dpi, top, win_w - crumb_x - 16.0 * dpi, crumb_h };

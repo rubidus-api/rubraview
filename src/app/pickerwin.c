@@ -105,10 +105,30 @@ void favorites_save(app_state_t *app) {
     if (!written) osd_say(app, TU8("could not write favorites.ini"));
 }
 
+/* RV-227 (owner, 2026-11-06: "파일 관리자 우측 상단에 장바구니 버튼(그리고 그 아래에 추가 열기를 위한 아래 화살표)"): the
+   basket button at the top right, over the path's row and the places' row; its upper part puts what is picked in a
+   basket, its arrow puts a basket's files here. Not in a book's pages. */
+#define PICKER_BASKET_W 76.0
+bool picker_basket_shown(const app_state_t *app) { return app->picker_open && !app->picker_in_book; }
+
+rubraview_pal_rect_t picker_basket_rect(const app_state_t *app, double dpi, double win_w, int part) {
+    double y = picker_top(app) + 6.0 * dpi, h = PICKER_HEADER_HEIGHT * dpi - 10.0 * dpi;
+    rubraview_pal_rect_t r = { win_w - (PICKER_BASKET_W + 8.0) * dpi, y, PICKER_BASKET_W * dpi, h };
+    double upper = h * 0.62;
+    if (part == 1) r.height = upper;
+    if (part == 2) { r.y += upper; r.height = h - upper; }
+    return r;
+}
+
+/* What stands left of the basket button. */
+static double picker_right_edge(const app_state_t *app, double dpi, double win_w) {
+    return picker_basket_shown(app) ? win_w - (PICKER_BASKET_W + 14.0) * dpi : win_w;
+}
+
 /* 1.24.0: the favourites window's chip at the places bar's right end; the places stop short of it. */
 rubraview_pal_rect_t picker_favwin_chip(const app_state_t *app, double dpi, double win_w) {
     double w = picker_chip_width(TU8("\xE2\x98\x85 Favourites"), dpi);
-    return (rubraview_pal_rect_t){ win_w - w - 8.0 * dpi, picker_top(app) + PICKER_CRUMB_HEIGHT * dpi + 2.0 * dpi, w, PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi };
+    return (rubraview_pal_rect_t){ picker_right_edge(app, dpi, win_w) - w - 8.0 * dpi, picker_top(app) + PICKER_CRUMB_HEIGHT * dpi + 2.0 * dpi, w, PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi };
 }
 
 /* Where the bar's chip `index` is, as drawn: false past the window's edge. */
@@ -440,7 +460,7 @@ rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, do
     *out_label = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
     double w = picker_chip_width(*out_label, dpi);
     double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
-    return (rubraview_pal_rect_t){ win_w - w - 8.0 * dpi, picker_top(app) + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
+    return (rubraview_pal_rect_t){ picker_right_edge(app, dpi, win_w) - w - 8.0 * dpi, picker_top(app) + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
 }
 
 /* A tile's check box: its top left corner (a row's left end in the details view). */

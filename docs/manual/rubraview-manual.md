@@ -1732,6 +1732,18 @@ set or one whose files are locked only copies. The copies are kept in the
 system's temporary folder until the viewer closes; a copy not yet pasted
 then leaves the clipboard.
 
+**Baskets.** The Basket button at the top right gathers files from several
+folders before they go somewhere together. Pick files (or folders) and
+press its upper part, or drag them onto it, and choose one of five baskets:
+their places are kept, the files stay where they are. Go to the folder they
+go into and press the arrow under it: choose Copy here or Move here at the
+top of the list (Copy here each time it opens), then the basket. A name
+already there gets -1, `Ctrl+Z` takes it back; a move takes the moved ones
+out of the basket, a copy leaves it as it was, so it can be copied
+elsewhere again. The same list empties a basket. The button counts what the
+baskets hold; they are emptied when the viewer closes. An archive's files
+go into a basket once extracted.
+
 Inside an archive the pictures show their thumbnails too (not those locked
 by a password, nor one deep inside a large solid 7z).
 

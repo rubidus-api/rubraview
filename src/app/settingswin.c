@@ -3034,6 +3034,30 @@ void chooser_open_pickext(app_state_t *app, double x, double y, double above_y) 
     if (first > 0 && first < c->count) c->layout.first = first;
 }
 
+/* RV-227 (D-282): the baskets' list — to put the waiting paths in one (`put` false), or (`put`) with Copy here | Move
+   here above it to put one's files here, and a row to empty each that holds any. Values: 0..4 a basket, -1 the
+   choice of copy or move (the list stays open), -2-k empty basket k. */
+void chooser_open_basket(app_state_t *app, bool put, double x, double y, double above_y) {
+    chooser_t *c = &app->chooser;
+    *c = (chooser_t){ .kind = CHOOSE_BASKET, .current = -1, .panel = put ? 1 : 0 };
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(put ? T("Put a basket's files here") : T("Put them in a basket")));
+    if (put)
+        chooser_word(c, -1.0, "{} {}   {} {}", PROVEN_ARG(app->basket_moving ? "\xE2\x97\x8B" : "\xE2\x97\x8F"), PROVEN_ARG(T("Copy here")),
+                     PROVEN_ARG(app->basket_moving ? "\xE2\x97\x8F" : "\xE2\x97\x8B"), PROVEN_ARG(T("Move here")));
+    for (int k = 0; k < RUBRAVIEW_BASKETS; ++k) {
+        size_t n = rubraview_basket_count(&app->baskets, k);
+        if (n == 0) { chooser_word(c, (double)k, T("Basket {} \xE2\x80\x94 empty"), PROVEN_ARG(k + 1)); continue; }
+        proven_u8str_view_t first = rubraview_path_basename(rubraview_basket_path(&app->baskets, k, 0));
+        int shown = (int)(first.size < 40 ? first.size : 40);
+        chooser_word(c, (double)k, T("Basket {} \xE2\x80\x94 {}: {}{}"), PROVEN_ARG(k + 1), PROVEN_ARG(n),
+                     PROVEN_ARG(rubraview_bytes_view(first.ptr, shown)), PROVEN_ARG(n > 1 ? " ..." : ""));
+    }
+    if (put)
+        for (int k = 0; k < RUBRAVIEW_BASKETS; ++k)
+            if (rubraview_basket_count(&app->baskets, k) > 0) chooser_word(c, -2.0 - (double)k, T("Empty basket {}"), PROVEN_ARG(k + 1));
+    chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
+}
+
 /* The files of extension row `k` all picked, or all let go when they all were. */
 static void picker_ext_pick(app_state_t *app, size_t k) {
     if (k >= CHOOSE_MAX || !app->picker_selected) return;
@@ -3225,6 +3249,23 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             picker_ext_pick(app, (size_t)lround(c->values[index]));
             c->open = true;
             chooser_open_pickext(app, f.x, f.y, f.y);
+            break;
+        }
+        case CHOOSE_BASKET: {   /* RV-227 */
+            int value = (int)lround(c->values[index]);
+            rubraview_rect_t f = c->layout.frame;
+            if (value == -1) {   /* copy or move: the list stays open */
+                app->basket_moving = !app->basket_moving;
+                c->open = true;
+                chooser_open_basket(app, true, f.x, f.y, f.y);
+            } else if (value <= -2) {
+                rubraview_basket_empty(&app->baskets, -2 - value);
+                char line[64];
+                rubraview_fmt(line, sizeof line, T("basket {} emptied"), PROVEN_ARG(-1 - value));
+                osd_say(app, cstr(line));
+            } else {
+                basket_chosen(app, value);
+            }
             break;
         }
         case CHOOSE_SHAPE: {   /* RV-192: stays open, its counts new */

@@ -691,6 +691,47 @@ void picker_clip_put(app_state_t *app, bool moving) {
 
 static bool path_is_there(proven_u8str_view_t path) { return rubraview_pal_fs_exists(path); }
 
+/* Copies or moves `sources` into `dir` as a paste does: a name there already gets -1, a folder into itself or a cut
+   into its own folder is skipped, a folder moved to another drive is copied and the one left recycled; one undo for
+   all. `moved[i]` (when given) says which arrived. Returns how many did. */
+size_t paste_paths(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving,
+                   bool *moved, size_t *skipped, size_t *failed) {
+    size_t done = 0;
+    uint32_t batch = ++app->undo_batch;
+    for (size_t i = 0; i < n; ++i) {
+        if (moved) moved[i] = false;
+        proven_u8str_view_t source = sources[i];
+        rubraview_fs_entry_t entry;
+        if (!rubraview_pal_fs_stat(app->arena, source, &entry)) { (*failed)++; continue; }   /* gone since it was copied */
+        rubraview_paste_check_t check = rubraview_paste_check(source, dir, moving);
+        if (check != RUBRAVIEW_PASTE_GO) { (*skipped)++; continue; }
+        proven_u8str_view_t want = rubraview_path_join(app->arena, dir, rubraview_path_basename(source));
+        char target[RUBRAVIEW_ARCHIVE_PATH];
+        bool named = want.size > 0 && (entry.is_directory ? rubraview_archive_free_folder_name(want, path_is_there, target, sizeof(target))
+                                                          : rubraview_archive_free_name(want, path_is_there, target, sizeof(target)));
+        if (!named) { (*failed)++; continue; }
+        proven_u8str_view_t to = app_keep(app, proven_u8str_view_from_cstr(target));
+        bool ok;
+        if (moving) {
+            ok = rubraview_pal_fs_move(source, to);
+            /* a folder to another drive: copied whole, then the one left behind to the recycle bin */
+            if (!ok && entry.is_directory && rubraview_pal_fs_copy_tree(source, to)) ok = rubraview_pal_fs_recycle(source);
+        } else {
+            ok = entry.is_directory ? rubraview_pal_fs_copy_tree(source, to) : rubraview_pal_fs_copy(source, to);
+        }
+        if (!ok) { (*failed)++; continue; }
+        rubraview_undo_push(&app->undo, (rubraview_file_action_t){
+            .op = moving ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
+            .source_path = app_keep(app, source),
+            .target_path = to,
+            .batch = batch,
+        });
+        if (moved) moved[i] = true;
+        done++;
+    }
+    return done;
+}
+
 void picker_clip_paste(app_state_t *app) {
     proven_u8str_view_t dir = app->picker_dir;
     if (dir.size == 0 || rubraview_picker_is_places(dir) || rubraview_picker_is_recent(dir) || app->picker_in_book || picker_in_archive(app)) {
@@ -703,38 +744,13 @@ void picker_clip_paste(app_state_t *app) {
     bool moving = false;
     size_t count = rubraview_pal_clipboard_get_files(app->window, buf, CLIP_BYTES, &moving);
     if (count == 0) { rubraview_free(buf); osd_say(app, TU8("no files on the clipboard: Ctrl+C or Ctrl+X them first")); return; }
-    size_t done = 0, skipped = 0, failed = 0;
-    uint32_t batch = ++app->undo_batch;
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(proven_u8str_view_t));
+    if (!proven_is_ok(res.err)) { rubraview_free(buf); return; }
+    proven_u8str_view_t *sources = (proven_u8str_view_t*)(void*)res.value.ptr;
     const char *at = buf;
-    for (size_t i = 0; i < count; ++i, at += proven_cstr_len(at) + 1) {
-        proven_u8str_view_t source = proven_u8str_view_from_cstr(at);
-        rubraview_fs_entry_t entry;
-        if (!rubraview_pal_fs_stat(app->arena, source, &entry)) { failed++; continue; }   /* gone since it was copied */
-        rubraview_paste_check_t check = rubraview_paste_check(source, dir, moving);
-        if (check != RUBRAVIEW_PASTE_GO) { skipped++; continue; }
-        proven_u8str_view_t want = rubraview_path_join(app->arena, dir, rubraview_path_basename(source));
-        char target[RUBRAVIEW_ARCHIVE_PATH];
-        bool named = want.size > 0 && (entry.is_directory ? rubraview_archive_free_folder_name(want, path_is_there, target, sizeof(target))
-                                                          : rubraview_archive_free_name(want, path_is_there, target, sizeof(target)));
-        if (!named) { failed++; continue; }
-        proven_u8str_view_t to = app_keep(app, proven_u8str_view_from_cstr(target));
-        bool ok;
-        if (moving) {
-            ok = rubraview_pal_fs_move(source, to);
-            /* a folder to another drive: copied whole, then the one left behind to the recycle bin */
-            if (!ok && entry.is_directory && rubraview_pal_fs_copy_tree(source, to)) ok = rubraview_pal_fs_recycle(source);
-        } else {
-            ok = entry.is_directory ? rubraview_pal_fs_copy_tree(source, to) : rubraview_pal_fs_copy(source, to);
-        }
-        if (!ok) { failed++; continue; }
-        rubraview_undo_push(&app->undo, (rubraview_file_action_t){
-            .op = moving ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
-            .source_path = app_keep(app, source),
-            .target_path = to,
-            .batch = batch,
-        });
-        done++;
-    }
+    for (size_t i = 0; i < count; ++i, at += proven_cstr_len(at) + 1) sources[i] = proven_u8str_view_from_cstr(at);
+    size_t skipped = 0, failed = 0;
+    size_t done = paste_paths(app, dir, sources, count, moving, NULL, &skipped, &failed);
     rubraview_free(buf);
     if (moving && done > 0) dragout_clip_pasted(app);   /* RV-223: a cut out of an archive, pasted here */
     if (moving && done > 0 && failed == 0) rubraview_pal_clipboard_clear(app->window);   /* as Explorer: a cut is pasted once */
@@ -787,4 +803,76 @@ void picker_curate(app_state_t *app, int32_t digit, bool moving) {
 bool curation_has_numbers(const app_state_t *app) {
     for (int32_t d = 1; d <= 9; ++d) if (rubraview_curation_target(&app->curation, d).size > 0) return true;
     return false;
+}
+
+/* ---- RV-227 (D-282; owner, 2026-11-06: "여러개 중 하나의 장바구니에 담는 기능"): five baskets of paths ---- */
+
+size_t basket_total(const app_state_t *app) {
+    size_t n = 0;
+    for (int i = 0; i < RUBRAVIEW_BASKETS; ++i) n += rubraview_basket_count(&app->baskets, i);
+    return n;
+}
+
+/* The basket button's upper part: what is picked waits for a basket chosen in the list. A drag let go on the button (dragout.c) sets the waiting paths itself. */
+void basket_add_picked(app_state_t *app, double x, double y, double above_y) {
+    if (picker_in_archive(app)) { osd_say(app, TU8("inside an archive: extract them first, then put them in a basket")); return; }
+    rubraview_fs_entry_t *entries = NULL;
+    size_t n = picker_picked_entries(app, &entries);
+    if (n == 0) { osd_say(app, TU8("pick files first; the arrow under it puts a basket's files here")); return; }
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n, sizeof(proven_u8str_view_t));
+    if (!proven_is_ok(res.err)) return;
+    app->basket_pending = (proven_u8str_view_t*)(void*)res.value.ptr;
+    for (size_t i = 0; i < n; ++i) app->basket_pending[i] = app_keep(app, entries[i].path);
+    app->basket_pending_count = n;
+    chooser_open_basket(app, false, x, y, above_y);
+}
+
+/* The arrow: a basket's files into the folder on screen. */
+void basket_put_open(app_state_t *app, double x, double y, double above_y) {
+    proven_u8str_view_t dir = app->picker_dir;
+    if (dir.size == 0 || rubraview_picker_is_places(dir) || rubraview_picker_is_recent(dir) || picker_in_archive(app)) {
+        osd_say(app, TU8("go to the folder they go into, then the arrow"));
+        return;
+    }
+    if (basket_total(app) == 0) { osd_say(app, TU8("the baskets are empty: pick files, then the Basket button")); return; }
+    app->basket_pending_count = 0;
+    app->basket_moving = false;   /* Copy here each time it opens (the owner's answer) */
+    chooser_open_basket(app, true, x, y, above_y);
+}
+
+/* A basket chosen in the list: the waiting paths into it, or (from the arrow) its files here. */
+void basket_chosen(app_state_t *app, int which) {
+    if (app->basket_pending_count > 0) {
+        size_t n = app->basket_pending_count;
+        size_t added = rubraview_basket_add(&app->baskets, which, app->basket_pending, n);
+        app->basket_pending_count = 0;
+        app->basket_pending = NULL;
+        char line[160];
+        rubraview_fmt(line, sizeof line, T("basket {}: {} put in, {} in it"), PROVEN_ARG(which + 1), PROVEN_ARG(added),
+                      PROVEN_ARG(rubraview_basket_count(&app->baskets, which)));
+        osd_say(app, cstr(line));
+        return;
+    }
+    size_t n = rubraview_basket_count(&app->baskets, which);
+    if (n == 0) { osd_say(app, TU8("that basket is empty")); return; }
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n, sizeof(proven_u8str_view_t));
+    proven_result_mem_mut_t mres = rubraview_arena_alloc_array(app->arena, n, sizeof(bool));
+    if (!proven_is_ok(res.err) || !proven_is_ok(mres.err)) return;
+    proven_u8str_view_t *sources = (proven_u8str_view_t*)(void*)res.value.ptr;
+    bool *moved = (bool*)(void*)mres.value.ptr;
+    for (size_t i = 0; i < n; ++i) sources[i] = app_keep(app, rubraview_basket_path(&app->baskets, which, i));
+    bool moving = app->basket_moving;
+    proven_u8str_view_t dir = app->picker_dir;
+    size_t skipped = 0, failed = 0;
+    size_t done = paste_paths(app, dir, sources, n, moving, moved, &skipped, &failed);
+    if (moving) rubraview_basket_keep_unmoved(&app->baskets, which, moved);   /* a copy keeps the basket */
+    char line[200];
+    if (failed > 0 || skipped > 0)
+        rubraview_fmt(line, sizeof line, moving ? T("basket {}: {} moved here, {} not (gone, or already here)") : T("basket {}: {} copied here, {} not (gone, or already here)"),
+                      PROVEN_ARG(which + 1), PROVEN_ARG(done), PROVEN_ARG(failed + skipped));
+    else
+        rubraview_fmt(line, sizeof line, moving ? T("basket {}: {} moved here  (Ctrl+Z takes it back)") : T("basket {}: {} copied here  (Ctrl+Z takes it back)"),
+                      PROVEN_ARG(which + 1), PROVEN_ARG(done));
+    osd_say(app, cstr(line));
+    if (done > 0) picker_navigate(app, dir);
 }

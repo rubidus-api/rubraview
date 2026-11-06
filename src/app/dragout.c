@@ -341,7 +341,25 @@ void picker_drag_out(app_state_t *app, size_t pressed, bool right) {
     proven_u8str_view_t *views = pick_views(app, p);
     uint32_t allowed = rubraview_dragout_effects(p->from_archive, p->movable, right);
     drag_ctx_t ctx = { .app = app, .pick = p };
+    /* RV-227: files on disk may be let go on the basket button (an archive's entries have no path to keep) */
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    rubraview_pal_rect_t basket = picker_basket_rect(app, rubraview_pal_window_dpi_scale(app->window), (double)win_w, 0);
+    rubraview_pal_window_set_own_drop(app->window, !p->from_archive && picker_basket_shown(app), basket.x, basket.y, basket.width, basket.height);
     uint32_t done = views ? rubraview_pal_drag_out(app->window, views, p->count, allowed, right, drag_ready, &ctx) : 0u;
+    rubraview_pal_window_set_own_drop(app->window, false, 0.0, 0.0, 0.0, 0.0);
+    if (views && rubraview_pal_window_own_drop_taken(app->window)) {
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, p->count, sizeof(proven_u8str_view_t));
+        if (proven_is_ok(res.err)) {
+            app->basket_pending = (proven_u8str_view_t*)(void*)res.value.ptr;
+            for (size_t i = 0; i < p->count; ++i) app->basket_pending[i] = app_keep(app, views[i]);
+            app->basket_pending_count = p->count;
+            rubraview_pal_rect_t upper = picker_basket_rect(app, rubraview_pal_window_dpi_scale(app->window), (double)win_w, 1);
+            chooser_open_basket(app, false, basket.x, basket.y + basket.height, upper.y);
+        }
+        pick_free(p);
+        return;
+    }
     if (done & RUBRAVIEW_DROP_MOVE) {
         if (p->from_archive) { move_told(app, p); p = NULL; }
         else picker_navigate(app, app_keep(app, app->picker_dir));   /* moved away: listed again */

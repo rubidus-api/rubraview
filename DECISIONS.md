@@ -3413,3 +3413,23 @@ Do not store credentials, private infrastructure details, personal data, private
   spread as paired.
 - Evidence: VM, against 1.39.89 (T356): two pages, opened at p04, End, Next — p01 + p02 (1.39.89: p01 alone), Next
   p03 (1.39.89: p02).
+
+## 2026-11-06: D-282 Baskets in the open-file screen (W-20261106-0600)
+
+- Status: Accepted (owner 2026-11-06: "파일 복사/잘라내기 이후 붙이기를 할 때, 여러개 중 하나의 장바구니에 담는 기능을
+  넣으면 좋겠네요. 파일 관리자 우측 상단에 장바구니 버튼(그리고 그 아래에 추가 열기를 위한 아래 화살표)을 넣고 ... 들어간
+  파일들은 일단 위치만 저장되며 ... 옮기기/복사 중 어느 쪽인지는 장바구니 고르는 목록 위쪽에 옵션을 두어 고르게"; the plan's
+  answers: five baskets by number, a copy keeps the basket, for this run only, Copy here each time the list opens). RV-227,
+  plan archived.
+- Decision: `src/core/basket.c` keeps five baskets of UTF-8 paths in memory (a path once, as `rubraview_path_same`
+  compares); the open-file screen's Basket button (two parts: put in, the arrow to put here) opens a list in the
+  chooser (`CHOOSE_BASKET`): to put in, the five baskets; to put here, Copy here / Move here above them (a row that flips
+  and keeps the list open) and Empty basket N below. Putting here is the paste we had, made one function
+  (`paste_paths`, also Ctrl+V's): free names, folders into themselves skipped, one undo. A move takes out of the basket
+  exactly what arrived.
+- A drag onto the button: our window takes its own drag (RV-223 refused it) only over a zone the app names
+  (`rubraview_pal_window_set_own_drop`), shows Copy there, and on the drop does nothing to the files but notes it; the
+  app then opens the list for what was dragged. Only files on disk (an archive's entries have no path to keep: the
+  button says to extract first).
+- Not done: the plan's Show (a basket's paths listed one by one) — the row names how many and the first; a basket kept
+  past a restart (the owner's answer).
