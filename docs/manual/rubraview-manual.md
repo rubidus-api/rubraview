@@ -1733,17 +1733,20 @@ set or one whose files are locked only copies. The copies are kept in the
 system's temporary folder until the viewer closes; a copy not yet pasted
 then leaves the clipboard.
 
-**Baskets.** The Basket button at the top right gathers files from several
-folders before they go somewhere together. Pick files (or folders) and
-press its upper part, or drag them onto it, and choose one of five baskets:
+**Baskets.** The basket icon at the right end of the tool row gathers files
+from several folders before they go somewhere together. Pick files (or
+folders) and press it, or drag them onto it, and choose one of five baskets:
 their places are kept, the files stay where they are. Go to the folder they
-go into and press the arrow under it: choose Copy here or Move here at the
-top of the list (Copy here each time it opens), then the basket. A name
+go into and press the arrow icon beside it: choose Copy here or Move here at
+the top of the list (Copy here each time it opens), then the basket. A name
 already there gets -1, `Ctrl+Z` takes it back; a move takes the moved ones
 out of the basket, a copy leaves it as it was, so it can be copied
-elsewhere again. The same list empties a basket. The button counts what the
-baskets hold; they are emptied when the viewer closes. An archive's files
-go into a basket once extracted.
+elsewhere again. The arrow's list empties a basket. To see what a basket
+holds, press the basket icon with nothing picked (or Show basket N's files
+in either list): each file is listed with the folder it is in, and a click
+on one takes it out of the basket (the file stays where it is). The number
+on the icon counts what the baskets hold; they are emptied when the viewer
+closes. An archive's files go into a basket once extracted.
 
 Inside an archive the pictures show their thumbnails too (not those locked
 by a password, nor one deep inside a large solid 7z).
@@ -1770,7 +1773,9 @@ At the path bar's left end, ◀ goes back to the folder you were in
 before, ▲ up a folder and ▶ forward again (`Alt+Left`, `Alt+Up`,
 `Alt+Right`). The title bar stays over this screen, and the window's
 title is **Rubraview - <the folder>**. The tiles a row follow the
-window's width. `Ctrl+click` picks or lets go of one, `Shift+click` picks
+window's width. A click picks that file or folder alone, as in Explorer;
+a double click (or `Enter`) opens the file or enters the folder, a book's
+page too. `Ctrl+click` picks or lets go of one, `Shift+click` picks
 everything from the last one clicked.
 
 The row over the list picks without holding a key: the **All** box picks

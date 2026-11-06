@@ -3483,3 +3483,26 @@ Do not store credentials, private infrastructure details, personal data, private
   48 px (in a 420 px window its letters stood one under another).
 - Evidence: VM against 1.39.90 (T361): at 700, 560 and 420 px the chips and the filter's chip no longer overlap
   (1.39.90: the filter's chip over rv228, Users, C:); `…` at 560 px went to rv228, at 420 px to bx; 1100 px as before.
+
+## 2026-11-07: D-286 One click picks, two open; the details in plain text; the basket's icons in the tool row (RV-230)
+
+- Status: Accepted (owner 2026-11-07: "파일브라우저에서 확장자나 날짜 등이 흐린 글씨로 나오면 안되죠. 장바구니가 플로팅으로 떠서 다른 버튼을 가리니, 정식으로 잘 다듬어 주시고, 장바구니와 그 화살표는 가로로 나열된 그림 아이콘으로 만들어 주세요. 그리고 장바구니 버튼에서 누르면 그 안의 파일들 목록을 볼 수 있는 기능도 들어가야 합니다. 그리고 지금은 클릭 한번에 폴더나 파일이 바로 열리는데, 더블클릭해야 열리게 해야 합니다."; answers: the shortcut kept as it is (O, Ctrl+O), one click picks that one
+  alone, the icons at the tool row's right end, a basket's files seen and taken out one by one). RV-230.
+- Decision: in the open-file screen, with no picking mode on, a click on a tile picks it alone (the others let go, as
+  Explorer; `..` only takes the focus) and a double click or `Enter` opens the file or enters the folder (RV-213's two
+  taps, now the only way a click opens); a book's page opens on the second click too. Individual, Range, the check
+  boxes, `Ctrl` and `Shift` pick as before. The details view's cells and heads are drawn in the text's colour. The
+  basket button that stood over the path's and the places' rows is two icons at the tool row's right end, as high as
+  its chips (Segoe MDL2's cart with the count on its corner, and an arrow down); the tool row's chips stop before
+  them, the filter and Favourites chips go back to the right end. The basket with nothing picked lists the baskets to
+  see one's files; Show basket N's files in both lists; the files list shows each name and the folder it is in, a
+  click takes one out and the list stays open.
+- Evidence: VM against 1.39.90 (T362): one click on a2.png — new: picked, the screen stays ("Rubraview - A"); 1.39.90:
+  a2.png opened. One click on F picks it, a double click enters it, on a2.png opens it; in a book's pages one click
+  stays, a double click opens p02. Details: Type, dates and Resolution white (1.39.90 grey). The icons in the tool row,
+  covering nothing; a1 put in Basket 1, F dragged onto the icon into Basket 2, nothing picked → the baskets, Basket 1
+  → a1.png · A and a2.png · A, a click took a1.png out ("taken out of basket 1: a1.png", one left); the arrow's list,
+  Copy here into an empty folder: a1.png there.
+- Seen meanwhile, not changed: the screen sometimes drawn seconds late after a click (the state right, the picture
+  behind until the next input or the ten-second frame) — in 1.39.90 too (T362: Sort by's list missing 2 s after the
+  click, there at 6 s). Backlog.

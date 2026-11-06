@@ -3037,24 +3037,48 @@ void chooser_open_pickext(app_state_t *app, double x, double y, double above_y) 
 /* RV-227 (D-282): the baskets' list — to put the waiting paths in one (`put` false), or (`put`) with Copy here | Move
    here above it to put one's files here, and a row to empty each that holds any. Values: 0..4 a basket, -1 the
    choice of copy or move (the list stays open), -2-k empty basket k. */
-void chooser_open_basket(app_state_t *app, bool put, double x, double y, double above_y) {
+void chooser_open_basket(app_state_t *app, int mode, double x, double y, double above_y) {
     chooser_t *c = &app->chooser;
-    *c = (chooser_t){ .kind = CHOOSE_BASKET, .current = -1, .panel = put ? 1 : 0 };
-    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(put ? T("Put a basket's files here") : T("Put them in a basket")));
+    bool put = mode == BASKET_LIST_PUT_HERE, see = mode == BASKET_LIST_SEE;
+    *c = (chooser_t){ .kind = CHOOSE_BASKET, .current = -1, .panel = mode };
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(see ? T("Baskets: one shows its files") : put ? T("Put a basket's files here") : T("Put them in a basket")));
     if (put)
         chooser_word(c, -1.0, "{} {}   {} {}", PROVEN_ARG(app->basket_moving ? "\xE2\x97\x8B" : "\xE2\x97\x8F"), PROVEN_ARG(T("Copy here")),
                      PROVEN_ARG(app->basket_moving ? "\xE2\x97\x8F" : "\xE2\x97\x8B"), PROVEN_ARG(T("Move here")));
     for (int k = 0; k < RUBRAVIEW_BASKETS; ++k) {
         size_t n = rubraview_basket_count(&app->baskets, k);
-        if (n == 0) { chooser_word(c, (double)k, T("Basket {} \xE2\x80\x94 empty"), PROVEN_ARG(k + 1)); continue; }
+        double value = see ? -10.0 - (double)k : (double)k;   /* D-286: seen, its files */
+        if (n == 0) { chooser_word(c, value, T("Basket {} \xE2\x80\x94 empty"), PROVEN_ARG(k + 1)); continue; }
         proven_u8str_view_t first = rubraview_path_basename(rubraview_basket_path(&app->baskets, k, 0));
         int shown = (int)(first.size < 40 ? first.size : 40);
-        chooser_word(c, (double)k, T("Basket {} \xE2\x80\x94 {}: {}{}"), PROVEN_ARG(k + 1), PROVEN_ARG(n),
+        chooser_word(c, value, T("Basket {} \xE2\x80\x94 {}: {}{}"), PROVEN_ARG(k + 1), PROVEN_ARG(n),
                      PROVEN_ARG(rubraview_bytes_view(first.ptr, shown)), PROVEN_ARG(n > 1 ? " ..." : ""));
     }
+    if (!see)   /* D-286: each basket's files to see, from either list */
+        for (int k = 0; k < RUBRAVIEW_BASKETS; ++k)
+            if (rubraview_basket_count(&app->baskets, k) > 0) chooser_word(c, -10.0 - (double)k, T("Show basket {}'s files"), PROVEN_ARG(k + 1));
     if (put)
         for (int k = 0; k < RUBRAVIEW_BASKETS; ++k)
             if (rubraview_basket_count(&app->baskets, k) > 0) chooser_word(c, -2.0 - (double)k, T("Empty basket {}"), PROVEN_ARG(k + 1));
+    chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
+}
+
+/* D-286 (owner, 2026-11-07: "장바구니 버튼에서 누르면 그 안의 파일들 목록을 볼 수 있는 기능"; "보기 + 하나씩 빼기"): basket
+   `which`'s files, each its name and the folder it is in; a click takes that one out of the basket (the file stays where
+   it is) and the list stays open. */
+void chooser_open_basket_files(app_state_t *app, int which, double x, double y, double above_y) {
+    chooser_t *c = &app->chooser;
+    *c = (chooser_t){ .kind = CHOOSE_BASKET_FILES, .current = -1, .panel = which };
+    size_t n = rubraview_basket_count(&app->baskets, which);
+    rubraview_fmt(c->title, sizeof(c->title), T("Basket {}: {} \xE2\x80\x94 a click takes one out"), PROVEN_ARG(which + 1), PROVEN_ARG(n));
+    for (size_t i = 0; i < n && c->count < CHOOSE_MAX - 1; ++i) {
+        proven_u8str_view_t path = rubraview_basket_path(&app->baskets, which, i);
+        proven_u8str_view_t name = rubraview_path_basename(path);
+        proven_u8str_view_t folder = rubraview_path_basename(rubraview_path_dirname(path));
+        int nn = (int)(name.size < 48 ? name.size : 48), fn = (int)(folder.size < 24 ? folder.size : 24);
+        chooser_word(c, (double)i, "\xC3\x97  {}   \xC2\xB7 {}", PROVEN_ARG(rubraview_bytes_view(name.ptr, nn)), PROVEN_ARG(rubraview_bytes_view(folder.ptr, fn)));
+    }
+    if (n > c->count) chooser_word(c, -1.0, T("... and {} more"), PROVEN_ARG(n - c->count));
     chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
 }
 
@@ -3257,7 +3281,13 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             if (value == -1) {   /* copy or move: the list stays open */
                 app->basket_moving = !app->basket_moving;
                 c->open = true;
-                chooser_open_basket(app, true, f.x, f.y, f.y);
+                chooser_open_basket(app, BASKET_LIST_PUT_HERE, f.x, f.y, f.y);
+            } else if (value <= -10) {   /* D-286: its files to see */
+                int which = -10 - value;
+                app->basket_pending_count = 0;   /* what waited for a basket is not put in */
+                if (rubraview_basket_count(&app->baskets, which) == 0) { osd_say(app, TU8("that basket is empty")); break; }
+                c->open = true;
+                chooser_open_basket_files(app, which, f.x, f.y, f.y);
             } else if (value <= -2) {
                 rubraview_basket_empty(&app->baskets, -2 - value);
                 char line[64];
@@ -3266,6 +3296,21 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             } else {
                 basket_chosen(app, value);
             }
+            break;
+        }
+        case CHOOSE_BASKET_FILES: {   /* D-286: one taken out, the list stays open */
+            int value = (int)lround(c->values[index]), which = c->panel;
+            rubraview_rect_t f = c->layout.frame;
+            if (value < 0) { c->open = true; break; }
+            proven_u8str_view_t name = rubraview_path_basename(rubraview_basket_path(&app->baskets, which, (size_t)value));
+            char line[160];
+            rubraview_fmt(line, sizeof line, T("taken out of basket {}: {}"), PROVEN_ARG(which + 1),
+                          PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 100 ? name.size : 100))));
+            if (!rubraview_basket_remove(&app->baskets, which, (size_t)value)) break;
+            osd_say(app, cstr(line));
+            if (rubraview_basket_count(&app->baskets, which) == 0) break;
+            c->open = true;
+            chooser_open_basket_files(app, which, f.x, f.y, f.y);
             break;
         }
         case CHOOSE_SHAPE: {   /* RV-192: stays open, its counts new */

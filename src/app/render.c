@@ -823,12 +823,12 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
             if (cols.w[k] <= 0.0) continue;
             size_t n = 0;
             rubraview_text_align_t align = RUBRAVIEW_TEXT_LEFT;
-            uint32_t ink = COLOR_BOX_BORDER;
+            uint32_t ink = COLOR_TEXT;   /* D-286 (owner, 2026-11-07: "확장자나 날짜 등이 흐린 글씨로 나오면 안되죠") */
             switch ((rubraview_picker_sort_key_t)k) {
                 case RUBRAVIEW_PICKER_SORT_TYPE: n = up ? 0 : rubraview_picker_type_text(cellbuf, sizeof(cellbuf), entry->name, entry->is_directory); break;
                 case RUBRAVIEW_PICKER_SORT_SIZE:
                     n = no_file ? 0 : rubraview_picker_size_text(cellbuf, sizeof(cellbuf), entry->size_bytes);
-                    align = RUBRAVIEW_TEXT_RIGHT; ink = COLOR_TEXT;
+                    align = RUBRAVIEW_TEXT_RIGHT;
                     break;
                 case RUBRAVIEW_PICKER_SORT_CREATED: n = no_file ? 0 : picker_date_text(cellbuf, sizeof(cellbuf), entry->ctime); break;
                 case RUBRAVIEW_PICKER_SORT_MODIFIED: n = no_file ? 0 : picker_date_text(cellbuf, sizeof(cellbuf), entry->mtime); break;
@@ -933,7 +933,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                 rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cols.x[k], hy, cols.w[k], hh }, COLOR_TILE_FILL, 0.0);
             }
             if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)head, (size_t)n }, at, font,
-                                                      k == sorted ? COLOR_TEXT : COLOR_BOX_BORDER, right ? RUBRAVIEW_TEXT_RIGHT : RUBRAVIEW_TEXT_LEFT);
+                                                      COLOR_TEXT, right ? RUBRAVIEW_TEXT_RIGHT : RUBRAVIEW_TEXT_LEFT);   /* D-286: the sorted one has its arrow */
         }
         /* 1.24.0: the tool row over the heads — the all box, the ways of picking, sorting, the view */
         size_t rows = 0, on = 0;
@@ -944,7 +944,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         }
         for (int k = 0; k < PICKER_TOOL_COUNT; ++k) {
             rubraview_pal_rect_t t = picker_tool_rect(app, dpi, k);
-            if (t.x + t.width > win_w) break;
+            if (t.x + t.width > picker_tools_end(app, dpi, win_w)) break;
             bool lit = (k == PICKER_TOOL_INDIVIDUAL && app->picker.mode == RUBRAVIEW_PICK_INDIVIDUAL) ||
                        (k == PICKER_TOOL_RANGE && app->picker.mode == RUBRAVIEW_PICK_RANGE);
             bool over = pal_rect_has(t, app->pointer_x, app->pointer_y);
@@ -1023,23 +1023,28 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_render_stroke_rect(app->renderer, filter_chip, COLOR_BOX_BORDER, 1.0, 2.0);
         rubraview_pal_render_draw_text(app->renderer, filter_label, filter_chip, crumb_h * 0.32, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
-    /* RV-227: the basket button — how many are in the baskets above, the arrow that puts them here below */
+    /* RV-227, D-286: the basket's icon (how many are in the baskets at its corner) and the arrow that puts them here */
     if (picker_basket_shown(app)) {
-        rubraview_pal_rect_t whole = picker_basket_rect(app, dpi, win_w, 0), upper = picker_basket_rect(app, dpi, win_w, 1),
-                             arrow = picker_basket_rect(app, dpi, win_w, 2);
-        bool on_upper = pal_rect_has(upper, app->pointer_x, app->pointer_y), on_arrow = pal_rect_has(arrow, app->pointer_x, app->pointer_y);
-        rubraview_pal_render_fill_rect(app->renderer, whole, COLOR_TILE_FILL, 3.0);
-        if (on_upper) rubraview_pal_render_fill_rect(app->renderer, upper, 0x40FFFFFFu, 3.0);
-        if (on_arrow) rubraview_pal_render_fill_rect(app->renderer, arrow, 0x40FFFFFFu, 3.0);
-        rubraview_pal_render_stroke_rect(app->renderer, whole, COLOR_TEXT, 1.0, 3.0);
-        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ arrow.x + 6.0 * dpi, arrow.y, arrow.width - 12.0 * dpi, 1.0 }, COLOR_BOX_BORDER, 0.0);
-        char basket_buf[64];
+        rubraview_pal_rect_t icons[2] = { picker_basket_rect(app, dpi, win_w, 1), picker_basket_rect(app, dpi, win_w, 2) };
+        static const uint32_t ICON[2] = { RUBRAVIEW_ICON_BASKET, RUBRAVIEW_ICON_PUT_HERE };
+        static const char *const LETTER[2] = { "B", "\xE2\x86\x93" };
+        for (int k = 0; k < 2; ++k) {
+            rubraview_pal_rect_t t = icons[k];
+            bool over = pal_rect_has(t, app->pointer_x, app->pointer_y);
+            rubraview_pal_render_fill_rect(app->renderer, t, over ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
+            rubraview_pal_render_stroke_rect(app->renderer, t, COLOR_BOX_BORDER, 1.0, 3.0);
+            draw_sign(app->renderer, ICON[k], LETTER[k], t, t.height * 0.46, COLOR_TEXT);
+        }
         size_t in_baskets = basket_total(app);
-        int bn = in_baskets ? rubraview_fmt(basket_buf, sizeof basket_buf, "{} {}", PROVEN_ARG(T("Basket")), PROVEN_ARG(in_baskets))
-                            : rubraview_fmt(basket_buf, sizeof basket_buf, "{}", PROVEN_ARG(T("Basket")));
-        rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)basket_buf, .size = bn > 0 ? (size_t)bn : 0 },
-                                       upper, crumb_h * 0.30, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        rubraview_pal_render_draw_text(app->renderer, TU8("\xE2\x96\xBE"), arrow, crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        if (in_baskets > 0) {
+            char basket_buf[24];
+            int bn = rubraview_fmt(basket_buf, sizeof basket_buf, "{}", PROVEN_ARG(in_baskets));
+            double side = icons[0].height * 0.46;
+            rubraview_pal_rect_t badge = { icons[0].x + icons[0].width - side - 2.0 * dpi, icons[0].y + 2.0 * dpi, side, side * 0.8 };
+            rubraview_pal_render_fill_rect(app->renderer, badge, COLOR_TILE_CURRENT, side * 0.4);
+            rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)basket_buf, .size = bn > 0 ? (size_t)bn : 0 },
+                                           badge, side * 0.62, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
     }
     /* The rest of the bar takes a typed path (owner, 2026-09-28), and says so. */
     if (!app->rename_is_path && crumb_x + 200.0 * dpi < filter_chip.x) {

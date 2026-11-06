@@ -132,6 +132,8 @@ void rubraview_confirm_clear(rubraview_confirm_t *confirm);
 #define RUBRAVIEW_ICON_TOOLBAR    0xE80Au   /* a grid of buttons: the Floating Widget's F */
 #define RUBRAVIEW_ICON_MOVE       0xE7C2u   /* arrows four ways: T (its drag goes through files and folders), the box moved */
 #define RUBRAVIEW_ICON_MENU       0xE700u   /* three lines */
+#define RUBRAVIEW_ICON_BASKET     0xE7BFu   /* a shopping cart: the open-file screen's baskets (D-286) */
+#define RUBRAVIEW_ICON_PUT_HERE   0xE896u   /* an arrow down to a line: a basket's files put here */
 
 #ifdef __cplusplus
 }

@@ -387,7 +387,7 @@ typedef struct apply_all_job {
 
 /* 1.24.0 (owner, 2026-10-19): the list a one-of-many choice opens, in the window where it was pressed. */
 enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_ORDER, CHOOSE_LISTEXT, CHOOSE_LISTSORT, CHOOSE_SHAPE,
-       CHOOSE_PICKEXT /* RV-204 */, CHOOSE_BASKET /* RV-227 */ };
+       CHOOSE_PICKEXT /* RV-204 */, CHOOSE_BASKET /* RV-227 */, CHOOSE_BASKET_FILES /* D-286 */ };
 enum { SHAPE_FOR_PICKER = 1, SHAPE_FOR_LIST };   /* RV-192 */
 /* RV-202: what a reading of sizes and lengths is for: the shape's choice, the list sorted by length, the open-file
    screen sorted by length or by resolution */
@@ -2217,6 +2217,8 @@ void password_remember(app_state_t *app, proven_u8str_view_t password);
 bool path_is_listed_kind(proven_u8str_view_t path);
 bool path_is_playlist(proven_u8str_view_t path);
 void picker_activate(app_state_t *app, size_t index);
+int picker_taps(app_state_t *app, size_t index);
+void picker_pick_alone(app_state_t *app, size_t index);
 void picker_add_to_list(app_state_t *app);
 bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_item_t *out);
 void picker_button(app_state_t *app, picker_button_t button);
@@ -2243,8 +2245,9 @@ bool picker_enter_book(app_state_t *app, size_t index);
 rubraview_pal_rect_t picker_favwin_chip(const app_state_t *app, double dpi, double win_w);
 void picker_filter_begin(app_state_t *app);
 rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, double dpi, proven_u8str_view_t *out_label, char *buf, size_t cap);
-/* RV-227: the basket button at the top right — 0 all of it, 1 its upper part (put in), 2 its arrow (put here) */
+/* RV-227, D-286: the basket's two icons at the tool row's right end — 0 both, 1 the basket (put in, see), 2 the arrow (put here) */
 rubraview_pal_rect_t picker_basket_rect(const app_state_t *app, double dpi, double win_w, int part);
+double picker_tools_end(const app_state_t *app, double dpi, double win_w);
 size_t picker_crumbs_first(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double dpi, double win_w, bool *out_star);
 #define PICKER_CRUMBS_MORE "\xE2\x80\xA6"   /* RV-229: the chip standing for the crumbs left out */
 bool picker_basket_shown(const app_state_t *app);
@@ -2252,7 +2255,9 @@ void basket_add_picked(app_state_t *app, double x, double y, double above_y);
 void basket_put_open(app_state_t *app, double x, double y, double above_y);
 void basket_chosen(app_state_t *app, int which);   /* from the list: into it, or out of it here */
 size_t basket_total(const app_state_t *app);
-void chooser_open_basket(app_state_t *app, bool put, double x, double y, double above_y);
+enum { BASKET_LIST_PUT_IN = 0, BASKET_LIST_PUT_HERE, BASKET_LIST_SEE };   /* D-286: the last, a basket chosen to see its files */
+void chooser_open_basket(app_state_t *app, int mode, double x, double y, double above_y);
+void chooser_open_basket_files(app_state_t *app, int which, double x, double y, double above_y);
 size_t paste_paths(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving,
                    bool *moved, size_t *skipped, size_t *failed);
 void picker_filter_follow(app_state_t *app);
@@ -2274,6 +2279,7 @@ void picker_clip_paste(app_state_t *app);
 void picker_open(app_state_t *app);
 void picker_path_begin(app_state_t *app);
 size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out);
+size_t picker_picked_count(const app_state_t *app);
 void picker_recycle(app_state_t *app);
 void picker_select_everything(app_state_t *app);
 /* RV-192 (shapes.c) */

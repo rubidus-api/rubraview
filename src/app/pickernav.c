@@ -815,16 +815,24 @@ size_t basket_total(const app_state_t *app) {
 
 /* The basket button's upper part: what is picked waits for a basket chosen in the list. A drag let go on the button (dragout.c) sets the waiting paths itself. */
 void basket_add_picked(app_state_t *app, double x, double y, double above_y) {
-    if (picker_in_archive(app)) { osd_say(app, TU8("inside an archive: extract them first, then put them in a basket")); return; }
     rubraview_fs_entry_t *entries = NULL;
-    size_t n = picker_picked_entries(app, &entries);
-    if (n == 0) { osd_say(app, TU8("pick files first; the arrow under it puts a basket's files here")); return; }
+    size_t n = picker_in_archive(app) ? 0 : picker_picked_entries(app, &entries);
+    if (n == 0 && picker_in_archive(app) && picker_picked_count(app) > 0) {
+        osd_say(app, TU8("inside an archive: extract them first, then put them in a basket"));
+        return;
+    }
+    if (n == 0) {   /* D-286: nothing picked, the baskets to see */
+        if (basket_total(app) == 0) { osd_say(app, TU8("the baskets are empty: pick files, then the Basket button")); return; }
+        app->basket_pending_count = 0;
+        chooser_open_basket(app, BASKET_LIST_SEE, x, y, above_y);
+        return;
+    }
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n, sizeof(proven_u8str_view_t));
     if (!proven_is_ok(res.err)) return;
     app->basket_pending = (proven_u8str_view_t*)(void*)res.value.ptr;
     for (size_t i = 0; i < n; ++i) app->basket_pending[i] = app_keep(app, entries[i].path);
     app->basket_pending_count = n;
-    chooser_open_basket(app, false, x, y, above_y);
+    chooser_open_basket(app, BASKET_LIST_PUT_IN, x, y, above_y);
 }
 
 /* The arrow: a basket's files into the folder on screen. */
@@ -837,7 +845,7 @@ void basket_put_open(app_state_t *app, double x, double y, double above_y) {
     if (basket_total(app) == 0) { osd_say(app, TU8("the baskets are empty: pick files, then the Basket button")); return; }
     app->basket_pending_count = 0;
     app->basket_moving = false;   /* Copy here each time it opens (the owner's answer) */
-    chooser_open_basket(app, true, x, y, above_y);
+    chooser_open_basket(app, BASKET_LIST_PUT_HERE, x, y, above_y);
 }
 
 /* A basket chosen in the list: the waiting paths into it, or (from the arrow) its files here. */

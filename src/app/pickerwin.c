@@ -105,24 +105,31 @@ void favorites_save(app_state_t *app) {
     if (!written) osd_say(app, TU8("could not write favorites.ini"));
 }
 
-/* RV-227 (owner, 2026-11-06: "파일 관리자 우측 상단에 장바구니 버튼(그리고 그 아래에 추가 열기를 위한 아래 화살표)"): the
-   basket button at the top right, over the path's row and the places' row; its upper part puts what is picked in a
-   basket, its arrow puts a basket's files here. Not in a book's pages. */
-#define PICKER_BASKET_W 76.0
+/* RV-227 (owner, 2026-11-06: "파일 관리자 우측 상단에 장바구니 버튼(그리고 그 아래에 추가 열기를 위한 아래 화살표)"); D-286
+   (owner, 2026-11-07: "장바구니와 그 화살표는 가로로 나열된 그림 아이콘으로"; "도구 줄 오른쪽 끝"): the basket's icon and its
+   arrow side by side at the tool row's right end, as high as its chips; the basket puts what is picked in a basket
+   (or shows them), the arrow puts a basket's files here. Not in a book's pages. */
+#define PICKER_BASKET_ICON_W 48.0
 bool picker_basket_shown(const app_state_t *app) { return app->picker_open && !app->picker_in_book; }
 
 rubraview_pal_rect_t picker_basket_rect(const app_state_t *app, double dpi, double win_w, int part) {
-    double y = picker_top(app) + 6.0 * dpi, h = PICKER_HEADER_HEIGHT * dpi - 10.0 * dpi;
-    rubraview_pal_rect_t r = { win_w - (PICKER_BASKET_W + 8.0) * dpi, y, PICKER_BASKET_W * dpi, h };
-    double upper = h * 0.62;
-    if (part == 1) r.height = upper;
-    if (part == 2) { r.y += upper; r.height = h - upper; }
+    double y = picker_top(app) + PICKER_HEADER_HEIGHT * dpi + 4.0 * dpi, h = PICKER_TOOL_HEIGHT * dpi - 8.0 * dpi;
+    double w = PICKER_BASKET_ICON_W * dpi, gap = 4.0 * dpi;
+    rubraview_pal_rect_t r = { win_w - 8.0 * dpi - 2.0 * w - gap, y, 2.0 * w + gap, h };
+    if (part == 1) r.width = w;
+    if (part == 2) { r.x += w + gap; r.width = w; }
     return r;
 }
 
-/* What stands left of the basket button. */
+/* Where the tool row's chips stop: before the basket's icons. */
+double picker_tools_end(const app_state_t *app, double dpi, double win_w) {
+    return picker_basket_shown(app) ? picker_basket_rect(app, dpi, win_w, 0).x - 6.0 * dpi : win_w;
+}
+
+/* What stands at the path's and the places' right ends. */
 static double picker_right_edge(const app_state_t *app, double dpi, double win_w) {
-    return picker_basket_shown(app) ? win_w - (PICKER_BASKET_W + 14.0) * dpi : win_w;
+    (void)app; (void)dpi;
+    return win_w;
 }
 
 /* 1.24.0: the favourites window's chip at the places bar's right end; the places stop short of it. */
@@ -332,7 +339,7 @@ bool picker_is_up(const app_state_t *app, size_t index) {
            proven_u8str_view_eq(app->picker_listing.entries[index].name, PROVEN_LIT(".."));
 }
 
-static size_t picker_picked_count(const app_state_t *app) {
+size_t picker_picked_count(const app_state_t *app) {
     size_t n = 0;
     for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i) n += app->picker_selected[i] ? 1u : 0u;
     return n;
@@ -467,6 +474,30 @@ rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, do
     }
     double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
     return (rubraview_pal_rect_t){ picker_right_edge(app, dpi, win_w) - w - 8.0 * dpi, picker_top(app) + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
+}
+
+/* RV-213 (owner, 2026-10-31: "더블클릭하면 해당 파일 열기 또는 폴더 열기"): a click on tile `index` is its first (1) or,
+   quickly on the same one, its second (2); 0 when the first went into a folder and this one is not for what is there. */
+int picker_taps(app_state_t *app, size_t index) {
+    double now = rubraview_pal_time_now_seconds();
+    if (app->picker_tap_generation != app->picker_generation && now - app->picker_tap_at < PICKER_DOUBLE_TAP) {
+        app->picker_tap_at = 0.0;
+        return 0;
+    }
+    bool twice = index == app->picker_tap_index && app->picker_tap_generation == app->picker_generation &&
+                 now - app->picker_tap_at < PICKER_DOUBLE_TAP;
+    app->picker_tap_at = twice ? 0.0 : now;
+    app->picker_tap_index = index;
+    app->picker_tap_generation = app->picker_generation;
+    return twice ? 2 : 1;
+}
+
+/* D-286 (owner, 2026-11-07: "클릭 한번에 폴더나 파일이 바로 열리는데, 더블클릭해야 열리게"; "그것 하나만 고르기"): one
+   click picks that one alone, the others let go; `..` is only where the focus is. */
+void picker_pick_alone(app_state_t *app, size_t index) {
+    if (!app->picker_selected || index >= app->picker_listing.count || picker_is_up(app, index)) return;
+    for (size_t i = 0; i < app->picker_listing.count; ++i) app->picker_selected[i] = i == index;
+    app->picker_anchor = index;
 }
 
 /* RV-229: the first of the path's crumbs drawn — the last ones kept between the arrows and the filter's chip (the star

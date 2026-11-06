@@ -373,7 +373,7 @@ void picker_drag_out(app_state_t *app, size_t pressed, bool right) {
             for (size_t i = 0; i < p->count; ++i) app->basket_pending[i] = app_keep(app, views[i]);
             app->basket_pending_count = p->count;
             rubraview_pal_rect_t upper = picker_basket_rect(app, rubraview_pal_window_dpi_scale(app->window), (double)win_w, 1);
-            chooser_open_basket(app, false, basket.x, basket.y + basket.height, upper.y);
+            chooser_open_basket(app, BASKET_LIST_PUT_IN, basket.x, basket.y + basket.height, upper.y);
         }
         pick_free(p);
         return;

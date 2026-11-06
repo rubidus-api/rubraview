@@ -213,16 +213,16 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 if (titlebar_click(app, event->mouse.x, event->mouse.y)) break;
                 if (event->mouse.y < top) break;   /* the band holds nothing to press */
                 if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && scrollbar_press(app, RVSB_PICKER, event->mouse.x, event->mouse.y)) break;   /* RV-170 */
-                if (event->mouse.y < header_h && event->mouse.button == RUBRAVIEW_MOUSE_LEFT && picker_basket_shown(app)) {   /* RV-227: the basket button */
+                if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && picker_basket_shown(app)) {   /* RV-227, D-286: the basket's two icons */
                     int32_t bw = 0, bh = 0;
                     rubraview_pal_window_get_size(app->window, &bw, &bh);
-                    rubraview_pal_rect_t upper = picker_basket_rect(app, dpi, (double)bw, 1), arrow = picker_basket_rect(app, dpi, (double)bw, 2);
-                    if (pal_rect_has(upper, event->mouse.x, event->mouse.y)) {
-                        basket_add_picked(app, upper.x, arrow.y + arrow.height, upper.y);
+                    rubraview_pal_rect_t basket = picker_basket_rect(app, dpi, (double)bw, 1), arrow = picker_basket_rect(app, dpi, (double)bw, 2);
+                    if (pal_rect_has(basket, event->mouse.x, event->mouse.y)) {
+                        basket_add_picked(app, basket.x, basket.y + basket.height, basket.y);
                         break;
                     }
                     if (pal_rect_has(arrow, event->mouse.x, event->mouse.y)) {
-                        basket_put_open(app, arrow.x, arrow.y + arrow.height, upper.y);
+                        basket_put_open(app, arrow.x, arrow.y + arrow.height, arrow.y);
                         break;
                     }
                 }
@@ -322,7 +322,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 if (event->mouse.y < header_h + PICKER_TOOL_HEIGHT * dpi) {   /* 1.24.0: the tool row */
                     for (int k = 0; k < PICKER_TOOL_COUNT; ++k) {
                         rubraview_pal_rect_t t = picker_tool_rect(app, dpi, k);
-                        if (!pal_rect_has(t, event->mouse.x, event->mouse.y)) continue;
+                        if (!pal_rect_has(t, event->mouse.x, event->mouse.y) || t.x + t.width > picker_tools_end(app, dpi, (double)pw)) continue;
                         switch (k) {
                             case PICKER_TOOL_EXT:        chooser_open_pickext(app, t.x, t.y + t.height, t.y); break;   /* RV-204 */
                             case PICKER_TOOL_ALL:        picker_select_everything(app); break;
@@ -406,8 +406,11 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                     /* Right-click on an archive: inside it, not reading it yet. */
                     if (event->mouse.button == RUBRAVIEW_MOUSE_RIGHT && picker_enter_book(app, index)) break;
                     /* In a picking mode the tap picks; otherwise it opens. */
-                    /* In a book a tap always goes to the page, whatever mode was left on outside it. */
-                    if (app->picker_in_book || !rubraview_picker_tap(&app->picker, index)) picker_activate(app, index);
+                    /* In a book a tap goes to the page, whatever mode was left on outside it: D-286, on the second
+                       click (the first shows where it is). */
+                    if (app->picker_in_book) {
+                        if (event->mouse.button != RUBRAVIEW_MOUSE_LEFT || picker_taps(app, index) == 2) picker_activate(app, index);
+                    } else if (!rubraview_picker_tap(&app->picker, index)) picker_activate(app, index);
                 } else if (event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {
                     picker_context_here(app, event->mouse.x, event->mouse.y);   /* RV-207: past the last tile */
                 }
@@ -558,23 +561,13 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 app->picker_hold = false;
                 size_t index = app->picker_hold_index;
                 if (!app->picker_open || index >= app->picker_listing.count) break;
-                /* RV-213 (owner, 2026-10-31: "더블클릭하면 해당 파일 열기 또는 폴더 열기"): a second tap on the same one,
-                   quickly, opens the file or enters the folder in any mode; what the first tap picked is let go again */
-                double now = rubraview_pal_time_now_seconds();
-                if (app->picker_tap_generation != app->picker_generation && now - app->picker_tap_at < PICKER_DOUBLE_TAP) {
-                    app->picker_tap_at = 0.0;   /* the first tap went into a folder: the second is not for what is there */
-                    break;
-                }
-                bool twice = index == app->picker_tap_index && app->picker_tap_generation == app->picker_generation &&
-                             now - app->picker_tap_at < PICKER_DOUBLE_TAP;
-                app->picker_tap_at = twice ? 0.0 : now;
-                app->picker_tap_index = index;
-                app->picker_tap_generation = app->picker_generation;
-                if (twice) {
+                int taps = picker_taps(app, index);
+                if (taps == 0) break;
+                if (taps == 2) {
                     if (!app->picker_in_book) (void)rubraview_picker_tap(&app->picker, index);   /* the first tap undone (picking modes) */
                     picker_activate(app, index);
                 } else if (!rubraview_picker_tap(&app->picker, index)) {
-                    picker_activate(app, index);
+                    picker_pick_alone(app, index);   /* D-286: one click picks it alone, as Explorer; two open it */
                 }
                 break;
             }
