@@ -339,6 +339,12 @@ void rubraview_pal_clipboard_clear(rubraview_window_t *window);
 uint32_t rubraview_pal_drag_out(rubraview_window_t *window, const proven_u8str_view_t *paths, size_t count, uint32_t allowed,
                                 bool right, bool (*ready)(void *ctx), void *ctx);
 bool rubraview_pal_dragging_out(void);
+/** RV-226 (D-283): a target that takes the drop on a thread of its own (Explorer) makes rubraview_pal_drag_out return
+    RUBRAVIEW_DROP_PENDING at once; `finished` is then true once, with what it did, when it has finished; `forget` lets
+    one go unheard (a long wait, the viewer closing). */
+bool rubraview_pal_drag_out_pending(void);
+bool rubraview_pal_drag_out_finished(uint32_t *done);
+void rubraview_pal_drag_out_forget(void);
 /** RV-227 (D-282): while our own drag runs, the window takes it in x, y, w, h (client pixels) — the open-file
     screen's basket button — and nowhere else; a drop there is done nothing with by the window but noted, read once
     by rubraview_pal_window_own_drop_taken after the drag. `on` false: our own drag is taken nowhere, as before. */

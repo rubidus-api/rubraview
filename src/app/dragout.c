@@ -311,6 +311,10 @@ static void pending_poll(app_state_t *app, bool quitting) {
 
 /* ---- the drag ---- */
 
+/* RV-226 (D-283): a drop the target still takes on its own thread (Explorer), and since when. */
+static pick_t *g_async_pick;
+static double g_async_since;
+
 typedef struct drag_ctx { app_state_t *app; pick_t *pick; bool ok; } drag_ctx_t;
 
 static bool out_done(void *ctx, double *share) {
@@ -332,6 +336,20 @@ static bool drag_ready(void *ctx) {
     d->ok = out_end(d->app, j);
     rubraview_free(j);
     return d->ok;
+}
+
+/* What the target did with a drag, once it has said: a move out of an archive takes them out of it once they arrived;
+   on disk the folder is listed again. Frees `p` (or hands it on). */
+static void drag_done(app_state_t *app, pick_t *p, uint32_t done) {
+    if (done & RUBRAVIEW_DROP_MOVE) {
+        if (p->from_archive) { move_told(app, p); p = NULL; }
+        else if (app->picker_open) picker_navigate(app, app_keep(app, app->picker_dir));   /* moved away: listed again */
+    } else if (done && p->from_archive) {
+        char line[96];
+        rubraview_fmt(line, sizeof line, T("{} copied out of the archive"), PROVEN_ARG(p->count));
+        osd_say(app, cstr(line));
+    }
+    pick_free(p);
 }
 
 void picker_drag_out(app_state_t *app, size_t pressed, bool right) {
@@ -360,15 +378,12 @@ void picker_drag_out(app_state_t *app, size_t pressed, bool right) {
         pick_free(p);
         return;
     }
-    if (done & RUBRAVIEW_DROP_MOVE) {
-        if (p->from_archive) { move_told(app, p); p = NULL; }
-        else picker_navigate(app, app_keep(app, app->picker_dir));   /* moved away: listed again */
-    } else if (done && p->from_archive) {
-        char line[96];
-        rubraview_fmt(line, sizeof line, T("{} copied out of the archive"), PROVEN_ARG(p->count));
-        osd_say(app, cstr(line));
+    if (done & RUBRAVIEW_DROP_PENDING) {   /* RV-226: the target takes them on its own thread; the viewer goes on */
+        g_async_pick = p;
+        g_async_since = rubraview_pal_time_now_seconds();
+        return;
     }
-    pick_free(p);
+    drag_done(app, p, done);
 }
 
 /* ---- the clipboard ---- */
@@ -459,6 +474,18 @@ void dragout_poll(app_state_t *app, bool quitting) {
             clip_forget();   /* something else was copied since */
         }
     }
+    if (g_async_pick) {   /* RV-226: has the target said what it did? */
+        uint32_t done = 0;
+        if (!quitting && rubraview_pal_drag_out_finished(&done)) {
+            pick_t *p = g_async_pick;
+            g_async_pick = NULL;
+            drag_done(app, p, done);
+        } else if (quitting || rubraview_pal_time_now_seconds() - g_async_since > RUBRAVIEW_DRAGOUT_ASYNC_WAIT) {
+            rubraview_pal_drag_out_forget();   /* unheard: nothing taken out of an archive */
+            pick_free(g_async_pick);
+            g_async_pick = NULL;
+        }
+    }
     if (!g_cut) pending_poll(app, quitting);
     if (g_cut) {
         cut_job_t *c = g_cut;
@@ -495,11 +522,13 @@ bool dragout_undo(app_state_t *app) {
 
 /* The end: ours off the clipboard (never written out for it), our folders gone. An older run's: dragout_sweep. */
 void dragout_quit(app_state_t *app) {
+    /* RV-226: a target still copying out of our folders keeps them: dragout_sweep takes them a day later */
+    bool still_taken = g_async_pick != NULL;
     dragout_poll(app, true);
     clip_forget();
     rubraview_pal_clipboard_let_go();
     for (size_t i = 0; i < g_made_count; ++i) {
-        (void)rubraview_pal_fs_delete_tree(cstr(g_made[i]));
+        if (!still_taken) (void)rubraview_pal_fs_delete_tree(cstr(g_made[i]));
         rubraview_free(g_made[i]);
     }
     rubraview_free(g_made);

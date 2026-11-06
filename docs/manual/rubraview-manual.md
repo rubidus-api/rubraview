@@ -1718,7 +1718,8 @@ already gets -1; `Ctrl+Z` takes the paste back.
 Explorer window, the desktop or another program: a left drag copies, a
 right drag ends in Windows' own menu — Copy here, Move here (Create
 shortcuts here for files on disk), Cancel. A right click that does not
-move still opens this screen's own list.
+move still opens this screen's own list. While Explorer copies what you
+let go — or asks about a name already there — the viewer goes on.
 
 **Out of an archive.** Inside an archive the same works. A drag takes what
 is picked out of the archive when you let go over a place that takes it (a

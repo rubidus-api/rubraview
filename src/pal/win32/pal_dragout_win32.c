@@ -7,11 +7,18 @@
  * button is let go (`ready`) — or, for the clipboard, before it is set. Explorer then says what it did with
  * "Performed DropEffect" (an optimised move returns nothing from DoDragDrop and says move); "Paste Succeeded" did not
  * come. Every other format a target sets on the object is kept and given back, as a shell data object does.
+ *
+ * RV-226 (D-283, T357): the object also answers IDataObjectAsyncCapability. Explorer then takes the drop on a thread of
+ * its own — StartOperation, and DoDragDrop returns at once — and sets "Performed DropEffect" when it has finished (it
+ * never called EndOperation in 90 s): that, or EndOperation from another target, is the end the window learns by
+ * rubraview_pal_drag_out_finished. One such drop at a time; a drag while one is still taken goes the old way.
  */
 #define COBJMACROS
 #include <windows.h>
 #include <shlobj.h>
 #include <shellapi.h>
+#include <shldisp.h>
+#include <stddef.h>
 #include "rubraview/pal/pal_window.h"
 #include "rubraview/pal/pal_wide.h"
 #include "rubraview/dragout.h"
@@ -23,10 +30,14 @@ typedef struct { FORMATETC fe; HGLOBAL data; } kept_t;
 
 typedef struct out_data {
     IDataObject iface;
+    IDataObjectAsyncCapability async;   /* RV-226 */
     LONG refs;
     HGLOBAL hdrop;           /* what is handed over, built once */
     DWORD preferred;
     DWORD said;              /* "Performed DropEffect" as the target set it, 0 before */
+    BOOL async_mode;         /* offered (a drag), as the target left it */
+    bool started, finished, ended, ended_ok;   /* StartOperation; then Performed DropEffect set, or EndOperation */
+    DWORD ended_effect;
     kept_t kept[KEPT_MAX];
     int nkept;
 } out_data_t;
@@ -35,6 +46,7 @@ static CLIPFORMAT g_cf_preferred, g_cf_performed;
 static out_data_t *g_clip;           /* ours on the clipboard, while it is (one reference held here) */
 static volatile LONG g_clip_said;    /* the effect its last paste reported, until it is read */
 static bool g_dragging;
+static out_data_t *g_async;          /* RV-226: a drop the target still takes (one reference held here) */
 
 static void formats_register(void) {
     if (!g_cf_preferred) g_cf_preferred = (CLIPFORMAT)RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
@@ -105,6 +117,11 @@ static HRESULT STDMETHODCALLTYPE od_query(IDataObject *p, REFIID riid, void **ou
         IDataObject_AddRef(p);
         return S_OK;
     }
+    if (IsEqualIID(riid, &IID_IDataObjectAsyncCapability)) {   /* RV-226 */
+        *out = &((out_data_t *)p)->async;
+        IDataObject_AddRef(p);
+        return S_OK;
+    }
     *out = NULL;
     return E_NOINTERFACE;
 }
@@ -162,6 +179,7 @@ static HRESULT STDMETHODCALLTYPE od_setdata(IDataObject *p, FORMATETC *fe, STGME
         if (v) {
             d->said = *v;
             if (d == g_clip) InterlockedExchange(&g_clip_said, (LONG)*v);
+            if (d->started) d->finished = true;   /* RV-226: Explorer's end of a drop it took on its own thread */
             GlobalUnlock(copy);
         }
     }
@@ -196,6 +214,40 @@ static HRESULT STDMETHODCALLTYPE od_advise(IDataObject *p, FORMATETC *fe, DWORD 
 static HRESULT STDMETHODCALLTYPE od_unadvise(IDataObject *p, DWORD c) { (void)p; (void)c; return OLE_E_ADVISENOTSUPPORTED; }
 static HRESULT STDMETHODCALLTYPE od_enumadvise(IDataObject *p, IEnumSTATDATA **e) { (void)p; (void)e; return OLE_E_ADVISENOTSUPPORTED; }
 
+/* ---- IDataObjectAsyncCapability (RV-226): the target may take the drop on a thread of its own ---- */
+
+static out_data_t *of_async(IDataObjectAsyncCapability *a) { return (out_data_t *)(void *)((char *)a - offsetof(out_data_t, async)); }
+static HRESULT STDMETHODCALLTYPE oa_query(IDataObjectAsyncCapability *a, REFIID riid, void **out) { return od_query(&of_async(a)->iface, riid, out); }
+static ULONG STDMETHODCALLTYPE oa_addref(IDataObjectAsyncCapability *a) { return od_addref(&of_async(a)->iface); }
+static ULONG STDMETHODCALLTYPE oa_release(IDataObjectAsyncCapability *a) { return od_release(&of_async(a)->iface); }
+static HRESULT STDMETHODCALLTYPE oa_setmode(IDataObjectAsyncCapability *a, BOOL on) { of_async(a)->async_mode = on; return S_OK; }
+static HRESULT STDMETHODCALLTYPE oa_getmode(IDataObjectAsyncCapability *a, BOOL *on) {
+    if (!on) return E_POINTER;
+    *on = of_async(a)->async_mode;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE oa_start(IDataObjectAsyncCapability *a, IBindCtx *ctx) {
+    (void)ctx;
+    of_async(a)->started = true;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE oa_inop(IDataObjectAsyncCapability *a, BOOL *in) {
+    if (!in) return E_POINTER;
+    out_data_t *d = of_async(a);
+    *in = d->started && !d->finished;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE oa_end(IDataObjectAsyncCapability *a, HRESULT hr, IBindCtx *ctx, DWORD effects) {
+    (void)ctx;
+    out_data_t *d = of_async(a);
+    d->ended = true;
+    d->ended_ok = SUCCEEDED(hr);
+    d->ended_effect = effects;
+    d->finished = true;
+    return S_OK;
+}
+static IDataObjectAsyncCapabilityVtbl g_oa_vtbl = { oa_query, oa_addref, oa_release, oa_setmode, oa_getmode, oa_start, oa_inop, oa_end };
+
 static IDataObjectVtbl g_od_vtbl = { od_query, od_addref, od_release, od_getdata, od_getdatahere, od_querygetdata,
                                      od_canonical, od_setdata, od_enum, od_advise, od_unadvise, od_enumadvise };
 
@@ -204,6 +256,7 @@ static out_data_t *out_data_new(const proven_u8str_view_t *paths, size_t count, 
     out_data_t *d = rubraview_alloc_zero(1, sizeof *d);
     if (!d) return NULL;
     d->iface.lpVtbl = &g_od_vtbl;
+    d->async.lpVtbl = &g_oa_vtbl;
     d->refs = 1;
     d->preferred = preferred;
     d->hdrop = hdrop_make(paths, count);
@@ -275,14 +328,38 @@ uint32_t rubraview_pal_drag_out(rubraview_window_t *window, const proven_u8str_v
     out_data_t *d = out_data_new(paths, count, DROPEFFECT_COPY);   /* a left drag copies, onto the same drive too */
     if (!d) return 0;
     out_source_t s = { .iface = { &g_os_vtbl }, .refs = 1, .button = right ? MK_RBUTTON : MK_LBUTTON, .ready = ready, .ctx = ctx };
+    d->async_mode = g_async == NULL;   /* RV-226: one drop taken asynchronously at a time */
     DWORD effect = DROPEFFECT_NONE;
     g_dragging = true;
     HRESULT hr = DoDragDrop(&d->iface, &s.iface, allowed & (DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK), &effect);
     g_dragging = false;
     if (hr == DRAGDROP_S_CANCEL) swallow_escape();
-    uint32_t done = hr == DRAGDROP_S_DROP ? rubraview_dragout_performed((uint32_t)effect, (uint32_t)d->said) : 0u;
+    if (hr == DRAGDROP_S_DROP && d->started && !d->finished) {
+        g_async = d;   /* the target works on: our reference kept until it says it has finished */
+        return RUBRAVIEW_DROP_PENDING;
+    }
+    uint32_t done = hr != DRAGDROP_S_DROP ? 0u
+                  : d->started ? rubraview_dragout_async_result((uint32_t)d->said, d->ended, d->ended_ok, (uint32_t)d->ended_effect)
+                  : rubraview_dragout_performed((uint32_t)effect, (uint32_t)d->said);
     IDataObject_Release(&d->iface);
     return done;
+}
+
+bool rubraview_pal_drag_out_pending(void) { return g_async != NULL; }
+
+bool rubraview_pal_drag_out_finished(uint32_t *done) {
+    if (!g_async || !g_async->finished) return false;
+    out_data_t *d = g_async;
+    g_async = NULL;
+    if (done) *done = rubraview_dragout_async_result((uint32_t)d->said, d->ended, d->ended_ok, (uint32_t)d->ended_effect);
+    IDataObject_Release(&d->iface);
+    return true;
+}
+
+void rubraview_pal_drag_out_forget(void) {
+    if (!g_async) return;
+    IDataObject_Release(&g_async->iface);   /* the target's own reference keeps it while it still needs it */
+    g_async = NULL;
 }
 
 /* ---- the clipboard ---- */

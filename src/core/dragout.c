@@ -36,3 +36,9 @@ uint32_t rubraview_dragout_performed(uint32_t returned, uint32_t said) {
     uint32_t mask = RUBRAVIEW_DROP_COPY | RUBRAVIEW_DROP_MOVE | RUBRAVIEW_DROP_LINK;
     return (said & mask) ? (said & mask) : (returned & mask);
 }
+
+uint32_t rubraview_dragout_async_result(uint32_t said, bool ended, bool ended_ok, uint32_t ended_effect) {
+    uint32_t mask = RUBRAVIEW_DROP_COPY | RUBRAVIEW_DROP_MOVE | RUBRAVIEW_DROP_LINK;
+    if (said & mask) return said & mask;
+    return ended && ended_ok ? (ended_effect & mask) : 0u;
+}

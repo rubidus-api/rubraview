@@ -20,6 +20,8 @@ extern "C" {
 #define RUBRAVIEW_DROP_COPY 1u
 #define RUBRAVIEW_DROP_MOVE 2u
 #define RUBRAVIEW_DROP_LINK 4u
+/* RV-226 (D-283): the target took the drop on a thread of its own and has not said yet what it did. */
+#define RUBRAVIEW_DROP_PENDING 0x100u
 
 /** What a drag offers. A left drag copies (Explorer moves on the same drive whenever a move is allowed); a right drag
     offers copy, move and link for files on disk, and copy and, where the archive can be written again (`movable`),
@@ -36,6 +38,15 @@ size_t rubraview_dragout_path(proven_u8str_view_t dest, proven_u8str_view_t name
 
 /** What happened: what the target said ("Performed DropEffect"), else what the drag returned. */
 uint32_t rubraview_dragout_performed(uint32_t returned, uint32_t said);
+
+/** RV-226 (D-283): a drop the target took asynchronously (IDataObjectAsyncCapability's StartOperation) is over when it
+    sets "Performed DropEffect" after starting (Explorer: VM, T357) or calls EndOperation. What happened then: what it
+    said, else EndOperation's effect when it succeeded, else nothing. */
+uint32_t rubraview_dragout_async_result(uint32_t said, bool ended, bool ended_ok, uint32_t ended_effect);
+
+/** RV-226: how long a drop the target is still taking is waited for (seconds): a copy of many gigabytes, or a question
+    about a name left open, can take long; after it, nothing is taken out of an archive. */
+#define RUBRAVIEW_DRAGOUT_ASYNC_WAIT 1800.0
 
 #ifdef __cplusplus
 }

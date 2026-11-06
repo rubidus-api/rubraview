@@ -3433,3 +3433,26 @@ Do not store credentials, private infrastructure details, personal data, private
   button says to extract first).
 - Not done: the plan's Show (a basket's paths listed one by one) — the row names how many and the first; a basket kept
   past a restart (the owner's answer).
+
+## 2026-11-06: D-283 The viewer free while a target takes a drop (W-20261106-0700)
+
+- Status: Accepted (owner 2026-11-06: "1번 2번 진행해 주세요" — 2: D-278's known limit, the viewer waiting while
+  Explorer takes a drop; the plan's probe first, confirmed). RV-226, plan archived.
+- Measured first (VM, `tests/win/dragout_probe.c drag-async`, T357): with the data object answering
+  `IDataObjectAsyncCapability`, Explorer asks for it, reads GetAsyncMode, calls StartOperation and DoDragDrop returns at
+  once (60 ms after the button is let go; a move returns 0); it copies or moves on its own and sets "Performed
+  DropEffect" (1, 2) about 250 ms later; it never called EndOperation, nor let the object go, in 90 s.
+- Decision: the drag's data object answers the capability (asynchronous as it comes); a drop the target took that way
+  returns `RUBRAVIEW_DROP_PENDING` and its object is kept; it is over when "Performed DropEffect" is set after
+  StartOperation or EndOperation is called (`rubraview_dragout_async_result`), which `dragout_poll` reads each pass and
+  then does what a drag did before (a move out of an archive taken out once arrived). One such drop at a time: a drag
+  while one is taken offers the capability off and goes the old way. Unheard for 30 min, it is let go, nothing taken out
+  of an archive. The clipboard's object is not offered it (a paste goes as before).
+- A viewer closed while a target still takes a drop leaves our temporary folders (the target may still copy from them;
+  `dragout_sweep` takes them after a day) and the archive as it is. The plan's few seconds' wait at the close was not
+  built: nothing to wait for that the target would tell.
+- Evidence: VM against 1.39.89 (T359): with Explorer's question about data1.bin up, Backspace in the viewer went to the
+  folder above at once (1.39.89: nothing until the question was answered); Move here out of a ZIP took data1 out once
+  it arrived and Ctrl+Z brought it back; a left drag copied, the archive as it was — the same in both.
+- Known: a question answered by Esc (nothing copied) may leave the drop unheard until the 30 min pass; meanwhile drags
+  go the old way.
