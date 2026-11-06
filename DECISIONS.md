@@ -3456,3 +3456,17 @@ Do not store credentials, private infrastructure details, personal data, private
   it arrived and Ctrl+Z brought it back; a left drag copied, the archive as it was — the same in both.
 - Known: a question answered by Esc (nothing copied) may leave the drop unheard until the 30 min pass; meanwhile drags
   go the old way.
+
+## 2026-11-06: D-284 A folder moved to another drive comes back with Ctrl+Z (RV-228)
+
+- Status: Accepted (owner 2026-11-06: "다음 해야 할 것 뭐가 있을까요. 진행 바랍니다." — T358's checks not run, run
+  on 1.39.90; a fault they found, fixed as SPEC already says). RV-228.
+- Found (VM, T360): a folder and a file put in a basket, or cut with Ctrl+X, then moved into a folder on another drive
+  arrive whole (`paste_paths`: the folder copied whole, the one left recycled); Ctrl+Z brought the file back and left
+  the folder on the other drive, saying "undone" — the undo moved it back with `rubraview_pal_fs_move`, which Windows
+  refuses for a folder across drives, and stopped there, the folder's step left in the undo list.
+- Decision: Ctrl+Z of a move whose way back fails, when what is there is a folder, copies it back whole
+  (`rubraview_pal_fs_copy_tree`, never over a name there) and sends the one there to the recycle bin, as the move did
+  the other way (`triage_undo`). The copy recycled by the move stays in the recycle bin.
+- Evidence: VM against 1.39.90 (T360): the basket's Move here and Ctrl+X / Ctrl+V into a folder on D:, then Ctrl+Z —
+  new: the folder and the file back, the folder on D: empty; 1.39.90: the file back, the folder left on D:.

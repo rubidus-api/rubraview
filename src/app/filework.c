@@ -220,6 +220,12 @@ void triage_undo(app_state_t *app) {
             case RUBRAVIEW_FILE_OP_MOVE:
             case RUBRAVIEW_FILE_OP_RENAME:
                 ok = rubraview_pal_fs_move(action.target_path, action.source_path);
+                if (!ok && action.op == RUBRAVIEW_FILE_OP_MOVE) {   /* a folder moved to another drive (paste_paths): copied back whole, the one there to the recycle bin */
+                    rubraview_fs_entry_t there;
+                    if (rubraview_pal_fs_stat(app->arena, action.target_path, &there) && there.is_directory &&
+                        rubraview_pal_fs_copy_tree(action.target_path, action.source_path))
+                        ok = rubraview_pal_fs_recycle(action.target_path);
+                }
                 break;
             case RUBRAVIEW_FILE_OP_COPY:
                 /* Undoing a copy means removing the copy, not the original; a folder's copy whole (1.23.0). */
