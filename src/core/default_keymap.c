@@ -96,6 +96,9 @@ const char *rubraview_default_keymap(void) {
     "first_page = \"Home, Ctrl+Home\"\n"
     "last_page = \"End, Ctrl+End\"\n"
     "skip_forward = \"Ctrl+PageDown\"\n"   /* RV-214: Shift+arrows move the picture now */
+    /* RV-224 (owner, 2026-11-06): two pages paired one page later or earlier; a film's own 30 s are asked first ([playback]) */
+    "page_over_next = \"Shift+PageDown\"\n"
+    "page_over_back = \"Shift+PageUp\"\n"
     "skip_backward = \"Ctrl+PageUp\"\n"
     /* §3.7.2 gives "up to folder" Backspace and Alt+Up; Backspace turns a
        page (owner, 2026-09-09), Alt+Up moves the window and Ctrl+Up sizes

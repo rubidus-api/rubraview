@@ -681,6 +681,10 @@ void finish_open(app_state_t *app, size_t start_page) {
 
     if (start_page >= page_count(app)) start_page = 0;
     ensure_page_loaded(app, (int32_t)start_page);
+    /* the old source's spreads name none of these pages: two pages are paired from the page opened (RV-224) */
+    app->layout.count = 0;
+    app->spread_index = 0;
+    app->layout_opts.anchor = (int32_t)start_page;
     rebuild_layout(app);
 
     /* §3.8.5: let the archive's own manifest set the reading direction

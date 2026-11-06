@@ -3366,3 +3366,31 @@ Do not store credentials, private infrastructure details, personal data, private
   the archive (a copy too many, nothing lost); the viewer waits in the drag while the target takes what was dropped
   (Explorer copies before DoDragDrop returns, and its question about a name already there holds it) — an
   asynchronous drop (IDataObjectAsyncCapability) would free it, not built.
+
+## 2026-11-06: D-279 Two pages paired from the page chosen (W-20261106-0200)
+
+- Status: Accepted (owner 2026-11-06: "레이아웃에 따른 페이징이 골치아파요. 2장씩 보여주는데 어떤 파일들은 가로로 길기 때문에
+  1장씩 보인다면, 페이징을 어떻게 해야 할까요. book과 2장씩 보기를 구분하지 말고 꿀뷰처럼 그냥 2장씩 보기만 집어넣을까요?
+  ... 목록에서 어떤 파일을 선택하냐에 따라 어떤 2장을 보여줄지를 결정하게 할까요?" — "현재 파일 기준"; the shift on
+  Shift+PageDown / Shift+PageUp, the first page alone off as it comes; then "레이아웃에 이어 딱 한장만 이동하는 버튼이 2장보기
+  모드에서 새로 생기면 좋겠군요" and "그 버튼(강제 1장 다음 보기)에 단축키도 들어가야 되겠지요"). RV-224, plan archived.
+- Two pages pair from an anchor: forward from it as before, backward from the page before it down to the first page; a
+  page that stands alone (wide, a cover, a film, the first page alone) breaks a run and what is left at a run's start
+  stands alone. The table keeps its shape, so the page bar, the slide show, the read-ahead and the fade are unchanged.
+- The anchor: a page chosen by name, Home and a resumed page re-anchor at it (always, in two pages: a page left alone at
+  a run's start is the first of its spread yet would pair from itself — VM, Home showed page 1 alone). Next and Back walk
+  the table and never re-anchor, so Back retraces Next. Every relayout anchors at the first page on screen, or, for a
+  page alone with a pair after it, at that pair, so the spread on screen stays; only pages away from it can move.
+- One page over: `page_over_next` / `page_over_back` on Shift+PageDown / Shift+PageUp in `[navigation]`; a film's
+  `[playback]` 30 s seek is asked first and stays. The tile `+1 page` (Forward) follows Layout in the image and archive
+  toolboxes and is left out of the toolbox outside two pages; in another layout the keys are Next and Back. Only the
+  forward tile: the back shift is the key and a book's right-click list's (One page back; with First page alone; a
+  folder of pictures has no layout items there, and a tile's action is left out of the list).
+- The book layout is gone as a choice: `viewer.layout` is single | dual | dual-rtl | webtoon | comic | comic-rtl and
+  `viewer.first_page_alone` (off) makes a book. A file's `book` / `book-rtl` reads as dual / dual-rtl with the first page
+  alone unless the file names it; `layout_book*` actions stay for a keymap or boxes file of before. ComicInfo's manga
+  gives two pages right to left with the first page alone. A file written now read by an older version shows two pages
+  without the cover alone.
+- Known: two readers of one book can see different pairs (it depends where they started) — One page over is the answer.
+  Round again (Settings › Files › At the first and last) lands on the first spread as it is paired, which may be the
+  first page alone; Home re-pairs from it.

@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.39.88** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.88/rubraview-v1.39.88.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.88/rubraview-v1.39.88.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.88/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.39.89** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.89/rubraview-v1.39.89.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.89/rubraview-v1.39.89.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.89/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -112,6 +112,8 @@ ships with, so it cannot drift from them.
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |
 | `Ctrl+PageDown` | Ten pages on |
+| `Shift+PageDown` | Two pages: paired one page later, so the facing pages come right (in any other layout: the next page) |
+| `Shift+PageUp` | Two pages: paired one page earlier (in any other layout: the previous page) |
 | `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
 | `]` | Next folder or archive |
@@ -146,7 +148,7 @@ ships with, so it cannot drift from them.
 | `V` | Flip upside down |
 | `N` | Crisp scaling for pixel art |
 | `G` | Pixel grid past 400% |
-| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
+| `B` | Layout: one page, two pages, webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
 
 **Pages inside one file (a TIFF or an ICO of several pages)**
@@ -280,7 +282,7 @@ ships with, so it cannot drift from them.
 | Right click `Add to favourites` | Make the file on screen a favourite, or no longer one |
 | Right click `One page` | Layout: one page at a time |
 | Right click `Two pages` | Layout: two pages side by side |
-| Right click `Book` | Layout: the cover alone, then two pages side by side |
+| Right click `First page alone` | Two pages: the first page alone, as a book's cover |
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
 | Right click `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
@@ -335,11 +337,13 @@ These belong to their window and are not on the Keys page.
 
 ## Layouts
 
-`B`, the Toolbar's Layout button and a book's right click choose one of eight, and Settings > Viewer > Layout keeps it:
-**single** (one page), **dual** (two side by side), **book** (the cover alone, then two), **webtoon** (every page one
-under the other at one width, read as one long strip) and **comic** (one page, a wide scan as its two halves) — and
-**dual-rtl**, **book-rtl** and **comic-rtl**, each right after its own, read right to left as a Japanese comic is: the
-earlier page on the right, a wide scan's right half first, clicks and swipes turning the other way.
+`B`, the Toolbar's Layout button and a book's right click choose one of six, and Settings > Viewer > Layout keeps it:
+**single** (one page), **dual** (two side by side), **webtoon** (every page one under the other at one width, read as
+one long strip) and **comic** (one page, a wide scan as its two halves) — and **dual-rtl** and **comic-rtl**, each right
+after its own, read right to left as a Japanese comic is: the earlier page on the right, a wide scan's right half first,
+clicks and swipes turning the other way. In two pages the page you pick is always the first one shown; Settings >
+Viewer > "Two pages: the first page alone" makes a book with its cover by itself (a settings file's old `book` keeps
+it on), and `Shift+PageDown` / `Shift+PageUp` or the `+1 page` button after Layout move the pairing by one page.
 
 ## Explorer's right-click menu
 

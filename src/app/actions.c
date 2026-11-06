@@ -82,6 +82,8 @@ void toolbox_refresh(app_state_t *app) {
             /* D-123: and its Delay tile for the speed tile, while it runs. */
             if (p == 1 && parts[0] && proven_u8str_view_eq(tile->action, PROVEN_LIT("media_speed_cycle"))) continue;
             if (edit_panel_open(app) && edit_denies(tile->action)) continue;   /* RV-137: not while Edit is open */
+            /* RV-224 (owner, 2026-11-06: "2장보기 모드에서 새로 생기면"): one page over in two pages only */
+            if (proven_u8str_view_eq(tile->action, PROVEN_LIT("page_over_next")) && app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_DUAL) continue;
             if (((int32_t)p != last_part || tile->group != last_group) && groups < RUBRAVIEW_TOOLBOX_MAX_GROUPS) groups++;
             last_part = (int32_t)p;
             last_group = tile->group;
@@ -183,6 +185,7 @@ rubraview_action_facts_t action_facts(const app_state_t *app) {
         .layout = app->layout_opts.mode,
         .fit = app->fit_mode,
         .rtl = app->layout_opts.direction == RUBRAVIEW_READING_RTL,
+        .first_alone = app->layout_opts.first_alone,
         .playing = app->media ? !app->media_paused : (app->anim_active && !app->animation.paused),
     };
 }
@@ -359,8 +362,6 @@ const char *layout_said(rubraview_layout_choice_t choice) {
         T("single: one page at a time"),
         T("dual: two pages side by side, left to right"),
         T("dual-rtl: two pages side by side, right to left"),
-        T("book: the cover alone, then two pages, left to right"),
-        T("book-rtl: the cover alone, then two pages, right to left"),
         T("webtoon: every page one under the other, at one width"),
         T("comic: one page, a wide scan as its two halves, left first"),
         T("comic-rtl: one page, a wide scan as its two halves, the right one first") };
@@ -368,15 +369,9 @@ const char *layout_said(rubraview_layout_choice_t choice) {
 }
 
 void layout_set(app_state_t *app, rubraview_layout_choice_t choice, bool say) {
-    int32_t page = current_page_index(app);
-    if (page >= 0 && app->spread_index < app->layout.count) {
-        int32_t other = app->layout.spreads[app->spread_index].right_index;
-        if (other >= 0 && other < page) page = other;
-    }
     rubraview_settings_set(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("layout"), (double)(int)choice);
     settings_took_effect(app);
-    rebuild_layout(app);
-    if (page >= 0) app->spread_index = spread_index_for_page(app, page);
+    rebuild_layout(app);   /* two pages paired from the first page on screen (RV-224) */
     reset_view(app);
     menu_rebuild(app);
     sync_menubox_tiles(app);
@@ -550,7 +545,14 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         const char *const SAY[] = { T("analyser off"), T("analyser: spectrum"), T("analyser: oscilloscope") };
         osd_say(app, cstr(SAY[v]));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("first_page"))) {
-        go_to_spread(app, 0);
+        /* the first picture, two pages paired from it (RV-224) */
+        int32_t first = 0;
+        while ((size_t)first + 1 < page_count(app) && app->pages[first].skipped) first++;
+        go_to_spread(app, page_count(app) > 0 ? spread_for_chosen_page(app, first) : 0);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("page_over_next"))) {
+        page_over(app, true);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("page_over_back"))) {
+        page_over(app, false);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("last_page"))) {
         go_to_spread(app, app->layout.count > 0 ? app->layout.count - 1 : 0);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("fit_window"))) {
@@ -624,14 +626,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         zoom_step(app, false);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("rotate_cw")) || proven_u8str_view_eq(action, PROVEN_LIT("rotate_ccw")) ||
                proven_u8str_view_eq(action, PROVEN_LIT("flip_horizontal")) || proven_u8str_view_eq(action, PROVEN_LIT("flip_vertical"))) {
-        /* Turning changes which pages pair, so the spreads are made again
-           and the page that was on screen is found among them: of two,
-           the earlier one, whichever side it was on. */
-        int32_t page = current_page_index(app);
-        if (page >= 0) {
-            int32_t other = app->layout.spreads[app->spread_index].right_index;
-            if (other >= 0 && other < page) page = other;
-        }
+        /* Turning changes which pages pair, so the spreads are made again,
+           paired from the earlier page that was on screen (RV-224). */
         bool turn = true;
         if (proven_u8str_view_eq(action, PROVEN_LIT("rotate_cw"))) {
             app->orientation = rubraview_orientation_rotate_cw(app->orientation);
@@ -644,8 +640,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
             app->orientation = rubraview_orientation_flip_v(app->orientation);
             turn = false;
         }
-        rebuild_layout(app);
-        if (page >= 0) app->spread_index = spread_index_for_page(app, page);
+        rebuild_layout(app);   /* the spread on screen kept (RV-224) */
         if (turn) reset_view(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_pixel_grid"))) {
         app->pixel_grid = !app->pixel_grid;
@@ -679,10 +674,15 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_DUAL, false);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_dual_rtl"))) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL, false);
-    } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_book"))) {
-        layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_BOOK, false);
-    } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_book_rtl"))) {
-        layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_BOOK_RTL, false);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_book")) || proven_u8str_view_eq(action, PROVEN_LIT("layout_book_rtl"))) {
+        /* RV-224 (D-279): the book is two pages with the first page alone; a keymap or a boxes file of before still asks for it */
+        rubraview_settings_set(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("first_page_alone"), 1.0);
+        layout_set(app, proven_u8str_view_eq(action, PROVEN_LIT("layout_book")) ? RUBRAVIEW_LAYOUT_CHOICE_DUAL : RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL, false);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_first_page_alone"))) {
+        bool on = !app->layout_opts.first_alone;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("first_page_alone"), on ? 1.0 : 0.0);
+        settings_took_effect(app);
+        osd_say(app, on ? TU8("two pages: the first page alone") : TU8("two pages: the first page paired too"));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_webtoon"))) {
         layout_set(app, RUBRAVIEW_LAYOUT_CHOICE_WEBTOON, false);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_comic"))) {
@@ -1218,7 +1218,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         /* §3.17.1: the prompt is answered by opening the remembered page. */
         if (app->resume_offer) {
             app->resume_offer = false;
-            size_t target = spread_index_for_page(app, app->resume_page);
+            size_t target = spread_for_chosen_page(app, app->resume_page);
             go_to_spread(app, target);
             update_precache(app);
         }
@@ -1228,10 +1228,10 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         rubraview_pal_window_set_fullscreen(app->window,
                                             !rubraview_pal_window_is_fullscreen(app->window));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_layout"))) {
-        /* One page, two pages, a book (the cover alone), the webtoon strip,
-           comic (wide scans in halves) — two pages, the book and comic each
-           followed by itself read right to left — and round again (owner,
-           2026-10-09, 2026-10-11). */
+        /* One page, two pages, the webtoon strip, comic (wide scans in
+           halves) — two pages and comic each followed by itself read right
+           to left — and round again (owner, 2026-10-09, 2026-10-11; the book
+           is two pages with the first page alone since RV-224). */
         int now = (int)rubraview_layout_choice_of(app->layout_opts.mode, app->layout_opts.direction);
         layout_set(app, (rubraview_layout_choice_t)((now + 1) % (int)RUBRAVIEW_LAYOUT_CHOICE_COUNT), true);
     }
@@ -1547,7 +1547,7 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
        key meant to answer it walks straight past is not a prompt. */
     if (app->resume_offer && key_is(combo, "Enter")) {
         app->resume_offer = false;
-        size_t target = spread_index_for_page(app, app->resume_page);
+        size_t target = spread_for_chosen_page(app, app->resume_page);
         go_to_spread(app, target);
         update_precache(app);
         return true;

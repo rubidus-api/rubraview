@@ -802,7 +802,7 @@ void load_keymap(app_state_t *app);
 static void settings_apply_rest(app_state_t *app) {
     static bool first = true;
     static double last_fit = -1.0, last_layout = -1.0, last_grid = -1.0, last_color = -1.0,
-                  last_privacy = -1.0, last_keymap = -1.0, last_collapse = -1.0, last_details = -1.0, last_key_order = -1.0;
+                  last_privacy = -1.0, last_keymap = -1.0, last_collapse = -1.0, last_first_alone = -1.0, last_details = -1.0, last_key_order = -1.0;
     rubraview_settings_t *st = &app->settings;
     double dpi = rubraview_pal_window_dpi_scale(app->window);
 
@@ -848,6 +848,13 @@ static void settings_apply_rest(app_state_t *app) {
         app->strip_base_w = 0.0;
         if (!first) reset_view(app);
         last_layout = layout;
+    }
+    /* RV-224 (D-279): two pages with the first page alone, the book that was a layout of its own */
+    double alone = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("first_page_alone"));
+    if (alone != last_first_alone) {
+        app->layout_opts.first_alone = alone > 0.5;
+        app->needs_relayout = true;
+        last_first_alone = alone;
     }
     double collapse = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("portrait_collapse"));
     if (collapse != last_collapse) {

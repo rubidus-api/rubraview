@@ -18,8 +18,7 @@ extern "C" {
 
 typedef enum rubraview_page_layout {
     RUBRAVIEW_PAGE_LAYOUT_SINGLE = 0,
-    RUBRAVIEW_PAGE_LAYOUT_DUAL,
-    RUBRAVIEW_PAGE_LAYOUT_BOOK,
+    RUBRAVIEW_PAGE_LAYOUT_DUAL,      /* two pages, paired from the page chosen (RV-224, D-279: the book layout is DUAL with first_alone) */
     RUBRAVIEW_PAGE_LAYOUT_WEBTOON,
     RUBRAVIEW_PAGE_LAYOUT_COMIC,     /* one page at a time, a wide scan as its two halves (owner, 2026-10-09) */
     RUBRAVIEW_PAGE_LAYOUT_COUNT,
@@ -32,8 +31,9 @@ typedef enum rubraview_reading_dir {
 
 /*
  * What the reader chooses (owner, 2026-10-11): a layout and the way its
- * pages run are one choice — two pages, a book and comic each also come
- * right to left, for a book read from the back as a Japanese comic is.
+ * pages run are one choice — two pages and comic each also come right to
+ * left, for a book read from the back as a Japanese comic is. The book
+ * (the cover alone) is two pages with `first_alone` (RV-224, D-279).
  * The order here is the order they are offered and cycled in, and the
  * order of the `viewer.layout` setting's words.
  */
@@ -41,8 +41,6 @@ typedef enum rubraview_layout_choice {
     RUBRAVIEW_LAYOUT_CHOICE_SINGLE = 0,
     RUBRAVIEW_LAYOUT_CHOICE_DUAL,
     RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL,
-    RUBRAVIEW_LAYOUT_CHOICE_BOOK,
-    RUBRAVIEW_LAYOUT_CHOICE_BOOK_RTL,
     RUBRAVIEW_LAYOUT_CHOICE_WEBTOON,
     RUBRAVIEW_LAYOUT_CHOICE_COMIC,
     RUBRAVIEW_LAYOUT_CHOICE_COMIC_RTL,
@@ -81,6 +79,12 @@ typedef struct rubraview_layout_opts {
     double spread_ar_threshold;     /* width/height >= this counts as a pre-merged spread; RFC default 1.15 */
     double portrait_collapse_ar;    /* win_w/win_h below this forces effective SINGLE, except WEBTOON; RFC default 1.0 */
     bool   auto_split_wide_spreads; /* §3.3.7: bisect wide spreads into two virtual pages instead of showing them whole */
+    /* RV-224 (D-279), two pages only: the page the pairs start from — the first page shown of its spread; the
+       pages before it are paired back down to the first page (a page that stands alone breaks a run, and what is
+       left at the start of one stands alone). -1, or a page past the end: the first page. A page left out (D-98)
+       stands for the first page kept after it. */
+    int32_t anchor;
+    bool   first_alone;             /* the first page stands alone (a cover), "the first page alone" */
 } rubraview_layout_opts_t;
 
 /**

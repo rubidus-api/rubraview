@@ -189,7 +189,8 @@ void rubraview_comicinfo_apply(const rubraview_comicinfo_t *info,
     if (!info) return;
 
     if (opts && info->manga == RUBRAVIEW_MANGA_YES_RTL) {
-        opts->mode = RUBRAVIEW_PAGE_LAYOUT_BOOK;
+        opts->mode = RUBRAVIEW_PAGE_LAYOUT_DUAL;   /* the book: the cover alone (RV-224, D-279) */
+        opts->first_alone = true;
         opts->direction = RUBRAVIEW_READING_RTL;
     }
 

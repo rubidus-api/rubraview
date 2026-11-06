@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.39.88.exe              the viewer, as built
-dist/rubraview-v1.39.88/                 the release bundle
-dist/rubraview-v1.39.88.zip              that bundle, zipped — the download
+dist/rubraview-v1.39.89.exe              the viewer, as built
+dist/rubraview-v1.39.89/                 the release bundle
+dist/rubraview-v1.39.89.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -242,8 +242,9 @@ use) and the right click on a book choose how pages are laid out, and
 Settings › Viewer › Layout shows and keeps the same choice:
 
 - **Single** — one page at a time, a wide scan whole.
-- **Dual** — two pages side by side; a wide scan stands alone.
-- **Book** — the cover alone, then two pages side by side.
+- **Dual** — two pages side by side; a wide scan stands alone. Settings ›
+  Viewer › **Two pages: the first page alone** (off as it comes; also on a
+  book's right click) shows the first page by itself as a book's cover.
 - **Webtoon** — every page one under the other at the same width, read as
   one long strip: the wheel, a drag, or `PageDown` / `PageUp` (a window's
   worth) move through it, and zooming widens or narrows the strip.
@@ -257,15 +258,27 @@ the file list, the playlist, on the page bar, or by opening it — is still
 shown, alone, until you turn the page. In Single everything is shown in
 its turn. A folder with nothing but films plays them in any layout.
 
-Dual, Book and Comic each come a second time, read right to left
-(`dual-rtl`, `book-rtl`, `comic-rtl` — a book read from the back, as a
+Dual and Comic each come a second time, read right to left
+(`dual-rtl`, `comic-rtl` — a book read from the back, as a
 Japanese comic is): the earlier page stands on the right, Comic shows a
 wide scan's right half first, and a swipe turns the other way. A click
 does not: in every layout a click on the right part of the window goes to
 the next file and on the left part to the one before; the middle does
 nothing.
-`B` goes through all eight in that order: each of the three is followed
+`B` goes through all six in that order: each of the two is followed
 by its right-to-left form. There is no separate reading-order switch.
+
+In two pages the page you pick — by opening it, in a list, in the
+open-file screen, on the page bar, or `Home` — is always the first page
+shown, with the next one beside it; the pages before it are paired back
+to the first. A wide scan stands alone without moving the pages you are
+looking at, and the pages on screen stay put when the window is resized.
+When a book's facing pages come out wrong, **one page over** moves the
+pairing by a page: `Shift+PageDown` (later) and `Shift+PageUp` (earlier),
+or the Toolbar's `+1 page` button just after Layout, shown only in two
+pages (a book's right click has One page back). On a film `Shift+PageDown` / `Shift+PageUp` still jump 30 seconds;
+in the other layouts they turn a page. A settings file that said `book`
+opens as two pages with the first page alone.
 
 Two pages are shown at the same height, so a small scan beside a large one
 is not drawn small (at actual size, `4`, each keeps its own pixels).
@@ -1935,6 +1948,8 @@ listed under a later heading only means that while that is on screen.
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |
 | `Ctrl+PageDown` | Ten pages on |
+| `Shift+PageDown` | Two pages: paired one page later, so the facing pages come right (in any other layout: the next page) |
+| `Shift+PageUp` | Two pages: paired one page earlier (in any other layout: the previous page) |
 | `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
 | `]` | Next folder or archive |
@@ -1969,7 +1984,7 @@ listed under a later heading only means that while that is on screen.
 | `V` | Flip upside down |
 | `N` | Crisp scaling for pixel art |
 | `G` | Pixel grid past 400% |
-| `B` | Layout: one page, two pages, book (the cover alone), webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages, book and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
+| `B` | Layout: one page, two pages, webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
 
 **Pages inside one file (a TIFF or an ICO of several pages)**
@@ -2103,7 +2118,7 @@ listed under a later heading only means that while that is on screen.
 | Right click `Add to favourites` | Make the file on screen a favourite, or no longer one |
 | Right click `One page` | Layout: one page at a time |
 | Right click `Two pages` | Layout: two pages side by side |
-| Right click `Book` | Layout: the cover alone, then two pages side by side |
+| Right click `First page alone` | Two pages: the first page alone, as a book's cover |
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
 | Right click `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |

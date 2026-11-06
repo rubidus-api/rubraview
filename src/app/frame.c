@@ -96,8 +96,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
 
     if (app->needs_relayout) {
         int32_t page = current_page_index(app);
-        rebuild_layout(app);
-        if (page >= 0) app->spread_index = spread_index_for_page(app, page);
+        rebuild_layout(app);   /* the spread on screen kept (RV-224) */
         if (page >= 0 && current_page_index(app) != page) {
             /* D-98: the page that was on screen is left out now: the one in its place is prepared as a turn would. */
             animation_prepare(app);

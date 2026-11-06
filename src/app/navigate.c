@@ -7,7 +7,46 @@
 
 /* ---- layout ---- */
 
+/* The lower page of the spread on screen, the one two pages are paired from (RV-224); -1 with none. */
+static int32_t spread_first_page(const app_state_t *app) {
+    if (app->layout.count == 0 || app->spread_index >= app->layout.count) return -1;
+    const rubraview_spread_t *sp = &app->layout.spreads[app->spread_index];
+    int32_t page = sp->right_index >= 0 && sp->right_index < sp->left_index ? sp->right_index : sp->left_index;
+    return page >= 0 && (size_t)page < page_count(app) ? page : -1;
+}
+
+static void layout_compute(app_state_t *app);
+
+/* RV-224 (D-279): the layout laid out again with two pages paired from `anchor`, the spread on screen kept where
+   it was in the new table (the page chosen is then gone to, which fades from it). */
+static void layout_anchor_at(app_state_t *app, int32_t anchor) {
+    int32_t was = spread_first_page(app);
+    app->layout_opts.anchor = anchor;
+    layout_compute(app);
+    if (was >= 0) app->spread_index = spread_index_for_page(app, was);
+}
+
+/* Laid out again — a size learned, the window resized, the layout changed: two pages are paired from the first
+   page on screen, so what is shown stays as it is and only the pages away from it can move (RV-224, D-279). */
 void rebuild_layout(app_state_t *app) {
+    if (page_count(app) == 0) return;
+    int32_t first = spread_first_page(app);
+    if (first >= 0) {
+        app->layout_opts.anchor = first;
+        /* A page alone with a pair after it was left over when the pages before an anchor were paired back (or
+           stands alone anyway): paired from the pair after it, it stays alone, as on screen. */
+        const rubraview_spread_t *sp = &app->layout.spreads[app->spread_index];
+        if (sp->right_index < 0 && app->spread_index + 1 < app->layout.count) {
+            const rubraview_spread_t *next = &app->layout.spreads[app->spread_index + 1];
+            if (next->right_index >= 0) app->layout_opts.anchor = next->left_index < next->right_index ? next->left_index : next->right_index;
+        }
+    }   /* with nothing laid out yet, the page opened (finish_open) */
+    layout_compute(app);
+    int32_t at = first >= 0 ? first : app->layout_opts.anchor;
+    if (at >= 0) app->spread_index = spread_index_for_page(app, at);
+}
+
+static void layout_compute(app_state_t *app) {
     if (page_count(app) == 0) return;
 
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, page_count(app), sizeof(rubraview_page_info_t));
@@ -96,22 +135,50 @@ size_t spread_index_for_page(const app_state_t *app, int32_t page_index) {
     return before;
 }
 
-void rebuild_layout(app_state_t *app);
 bool is_media_path(proven_u8str_view_t path);
 
 /* The spread for a page the reader chose by name — in a list, on the page
    bar, by opening it. A film or an animation chosen so is shown whatever
-   the layout (D-98): it is the one exception, until another page is turned to. */
+   the layout (D-98): it is the one exception, until another page is turned to.
+   In two pages the page chosen is the first one shown, the pairs made from it
+   (RV-224, owner, 2026-11-06: "현재 파일 기준"). */
 size_t spread_for_chosen_page(app_state_t *app, int32_t page) {
-    if (page >= 0 && (size_t)page < page_count(app) && page != app->layout_exempt &&
+    if (page < 0 || (size_t)page >= page_count(app)) return spread_index_for_page(app, page);
+    bool relayout = false;
+    if (page != app->layout_exempt &&
         (app->pages[page].skipped ||
          (app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_SINGLE &&
           (is_media_path(app->source.pages[page].path) || is_text_path(app->source.pages[page].path) || app->pages[page].animated ||
            page_moves(app, (size_t)page, NULL))))) {   /* a GIF not read yet: its bytes say */
         app->layout_exempt = page;
-        rebuild_layout(app);
+        relayout = true;
     }
+    /* always: a page alone at the start of a run paired back (VM, T355: Home showed the first page alone) is the
+       first page of its spread, and paired from it would have its neighbour beside it */
+    if (app->layout_opts.mode == RUBRAVIEW_PAGE_LAYOUT_DUAL) relayout = true;
+    if (relayout) layout_anchor_at(app, page);
     return spread_index_for_page(app, page);
+}
+
+/* RV-224 (D-279; owner, 2026-11-06: "딱 한장만 이동하는 버튼"): two pages paired one page later or earlier, so a
+   printed book's facing pages can be put right — Shift+PageDown / Shift+PageUp and the tile after Layout. In any
+   other layout it is the next or the previous page. */
+void page_over(app_state_t *app, bool forward) {
+    if (app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_DUAL || app->layout.count == 0) {
+        if (forward) next_spread(app); else prev_spread(app);
+        return;
+    }
+    int32_t first = spread_first_page(app);
+    if (first < 0) return;
+    int32_t to = first;
+    do { to += forward ? 1 : -1; } while (to >= 0 && (size_t)to < page_count(app) && app->pages[to].skipped);
+    if (to < 0 || (size_t)to >= page_count(app)) {
+        osd_say(app, forward ? TU8("this is the last") : TU8("this is the first"));
+        return;
+    }
+    layout_anchor_at(app, to);
+    go_to_spread(app, spread_index_for_page(app, to));
+    update_precache(app);
 }
 
 int32_t current_page_index(const app_state_t *app) {

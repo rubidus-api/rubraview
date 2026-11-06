@@ -6,8 +6,6 @@ static const struct { rubraview_page_layout_t mode; rubraview_reading_dir_t dire
     [RUBRAVIEW_LAYOUT_CHOICE_SINGLE]    = { RUBRAVIEW_PAGE_LAYOUT_SINGLE,  RUBRAVIEW_READING_LTR },
     [RUBRAVIEW_LAYOUT_CHOICE_DUAL]      = { RUBRAVIEW_PAGE_LAYOUT_DUAL,    RUBRAVIEW_READING_LTR },
     [RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL]  = { RUBRAVIEW_PAGE_LAYOUT_DUAL,    RUBRAVIEW_READING_RTL },
-    [RUBRAVIEW_LAYOUT_CHOICE_BOOK]      = { RUBRAVIEW_PAGE_LAYOUT_BOOK,    RUBRAVIEW_READING_LTR },
-    [RUBRAVIEW_LAYOUT_CHOICE_BOOK_RTL]  = { RUBRAVIEW_PAGE_LAYOUT_BOOK,    RUBRAVIEW_READING_RTL },
     [RUBRAVIEW_LAYOUT_CHOICE_WEBTOON]   = { RUBRAVIEW_PAGE_LAYOUT_WEBTOON, RUBRAVIEW_READING_LTR },
     [RUBRAVIEW_LAYOUT_CHOICE_COMIC]     = { RUBRAVIEW_PAGE_LAYOUT_COMIC,   RUBRAVIEW_READING_LTR },
     [RUBRAVIEW_LAYOUT_CHOICE_COMIC_RTL] = { RUBRAVIEW_PAGE_LAYOUT_COMIC,   RUBRAVIEW_READING_RTL },
@@ -38,6 +36,8 @@ rubraview_layout_opts_t rubraview_layout_opts_default(rubraview_page_layout_t mo
         .spread_ar_threshold = 1.15,
         .portrait_collapse_ar = 1.0,
         .auto_split_wide_spreads = (mode == RUBRAVIEW_PAGE_LAYOUT_COMIC),
+        .anchor = -1,
+        .first_alone = false,
     };
 }
 
@@ -113,26 +113,66 @@ static void push_pair(proven_arena_t *arena, spread_buf_t *out, int32_t a, int32
     });
 }
 
-/* Walk pages [start, page_count) pairing consecutive non-wide pages, and
-   isolating (or splitting) wide pre-merged spreads. Used for DUAL (start=0)
-   and BOOK (start=1, after the cover has already been emitted alone). */
-static bool paginate_pairs(proven_arena_t *arena, spread_buf_t *out, const rubraview_page_info_t *pages, size_t page_count, size_t start, const rubraview_layout_opts_t *opts) {
-    size_t i = start;
-    while (i < page_count) {
-        if (stands_alone(&pages[i], opts->spread_ar_threshold)) {
-            bool wide = is_wide_spread(&pages[i], opts->spread_ar_threshold);
-            /* Splitting bisects a genuinely wide scan; a tagged cover is
-               one page and is shown whole. */
-            if (opts->auto_split_wide_spreads && wide) {
-                push_split(arena, out, (int32_t)i, opts->direction);
-            } else {
-                push_single(arena, out, (int32_t)i, wide);
+/* A page shown by itself: a wide scan whole or in its halves, any other page whole. */
+static void push_alone(proven_arena_t *arena, spread_buf_t *out, const rubraview_page_info_t *pages, size_t i, const rubraview_layout_opts_t *opts) {
+    bool wide = is_wide_spread(&pages[i], opts->spread_ar_threshold);
+    /* Splitting bisects a genuinely wide scan; a tagged cover is
+       one page and is shown whole. */
+    if (opts->auto_split_wide_spreads && wide) {
+        push_split(arena, out, (int32_t)i, opts->direction);
+    } else {
+        push_single(arena, out, (int32_t)i, wide);
+    }
+}
+
+/* Two pages (RV-224, D-279): what never pairs — a wide scan, a cover the
+   archive tagged, the first page when it stands alone. */
+static bool pairs_not(const rubraview_page_info_t *pages, size_t i, const rubraview_layout_opts_t *opts) {
+    return stands_alone(&pages[i], opts->spread_ar_threshold) || (opts->first_alone && i == 0);
+}
+
+/* Two pages paired from the anchor (RV-224, D-279): forward from it as a
+   reader turns them, and backward from the page before it down to the first
+   page, so the page chosen is always the first one shown. */
+static void paginate_pairs(proven_arena_t *arena, spread_buf_t *out, const rubraview_page_info_t *pages, size_t page_count, size_t anchor, const rubraview_layout_opts_t *opts) {
+    /* Backward: each run's starting page, last first; a pair's is its lower page. */
+    size_t units = 0;
+    for (size_t j = anchor; j > 0; ) {
+        size_t i = j - 1;
+        bool pair = !pairs_not(pages, i, opts) && i > 0 && !pairs_not(pages, i - 1, opts);
+        units++;
+        j = pair ? i - 1 : i;
+    }
+    if (units > 0) {
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, units, sizeof(size_t));
+        if (!proven_is_ok(res.err)) { anchor = 0; units = 0; }
+        else {
+            size_t *starts = (size_t*)(void*)res.value.ptr;
+            size_t n = 0;
+            for (size_t j = anchor; j > 0; ) {
+                size_t i = j - 1;
+                bool pair = !pairs_not(pages, i, opts) && i > 0 && !pairs_not(pages, i - 1, opts);
+                starts[n++] = pair ? i - 1 : i;
+                j = pair ? i - 1 : i;
             }
+            for (size_t k = n; k > 0; --k) {
+                size_t i = starts[k - 1];
+                size_t next_start = k > 1 ? starts[k - 2] : anchor;
+                if (next_start - i == 2) push_pair(arena, out, (int32_t)i, (int32_t)(i + 1), opts->direction);
+                else push_alone(arena, out, pages, i, opts);
+            }
+        }
+    }
+
+    size_t i = anchor;
+    while (i < page_count) {
+        if (pairs_not(pages, i, opts)) {
+            push_alone(arena, out, pages, i, opts);
             i += 1;
             continue;
         }
 
-        bool next_is_pairable = (i + 1 < page_count) && !stands_alone(&pages[i + 1], opts->spread_ar_threshold);
+        bool next_is_pairable = (i + 1 < page_count) && !pairs_not(pages, i + 1, opts);
         if (next_is_pairable) {
             push_pair(arena, out, (int32_t)i, (int32_t)(i + 1), opts->direction);
             i += 2;
@@ -141,7 +181,6 @@ static bool paginate_pairs(proven_arena_t *arena, spread_buf_t *out, const rubra
             i += 1;
         }
     }
-    return true;
 }
 
 static rubraview_layout_result_t layout_compute_all(proven_arena_t *arena, const rubraview_page_info_t *pages, size_t page_count, double win_w, double win_h, rubraview_layout_opts_t opts);
@@ -165,11 +204,15 @@ rubraview_layout_result_t rubraview_layout_compute(proven_arena_t *arena, const 
     if (!proven_is_ok(pr.err) || !proven_is_ok(ir.err)) return layout_compute_all(arena, pages, page_count, win_w, win_h, opts);
     rubraview_page_info_t *some = (rubraview_page_info_t*)(void*)pr.value.ptr;
     int32_t *index_of = (int32_t*)(void*)ir.value.ptr;
+    int32_t anchor = -1;   /* the first page kept at or after the anchor, counted among those kept */
     for (size_t i = 0, k = 0; i < page_count; ++i) {
         if (pages[i].skip) continue;
+        if (anchor < 0 && opts.anchor >= 0 && (int32_t)i >= opts.anchor) anchor = (int32_t)k;
         some[k] = pages[i];
         index_of[k++] = (int32_t)i;
     }
+    if (anchor < 0 && opts.anchor >= 0) anchor = (int32_t)kept - 1;   /* past the last kept: the last */
+    opts.anchor = anchor;
     rubraview_layout_result_t result = layout_compute_all(arena, some, kept, win_w, win_h, opts);
     for (size_t i = 0; i < result.count; ++i) {
         rubraview_spread_t *sp = &result.spreads[i];
@@ -212,15 +255,12 @@ static rubraview_layout_result_t layout_compute_all(proven_arena_t *arena, const
             }
             break;
 
-        case RUBRAVIEW_PAGE_LAYOUT_DUAL:
-            paginate_pairs(arena, &buf, pages, page_count, 0, &opts);
+        case RUBRAVIEW_PAGE_LAYOUT_DUAL: {
+            size_t anchor = opts.anchor > 0 ? (size_t)opts.anchor : 0;
+            if (anchor >= page_count) anchor = page_count - 1;
+            paginate_pairs(arena, &buf, pages, page_count, anchor, &opts);
             break;
-
-        case RUBRAVIEW_PAGE_LAYOUT_BOOK:
-            /* Cover Page 1 Exception: page 0 always stands alone. */
-            push_single(arena, &buf, 0, is_wide_spread(&pages[0], opts.spread_ar_threshold));
-            paginate_pairs(arena, &buf, pages, page_count, 1, &opts);
-            break;
+        }
 
         default:
             break;

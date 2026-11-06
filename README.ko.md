@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.39.88** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.88/rubraview-v1.39.88.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.88/rubraview-v1.39.88.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.88/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.39.89** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.89/rubraview-v1.39.89.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.39.89/rubraview-v1.39.89.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.39.89/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -111,6 +111,8 @@
 | `Home`, `Ctrl+Home` | 첫 장 |
 | `End`, `Ctrl+End` | 마지막 장 |
 | `Ctrl+PageDown` | 열 장 뒤로 |
+| `Shift+PageDown` | 두 장 보기: 한 장 뒤에서부터 짝짓기 — 마주 보는 쪽 맞추기 (다른 방식에서는 다음 장) |
+| `Shift+PageUp` | 두 장 보기: 한 장 앞에서부터 짝짓기 (다른 방식에서는 이전 장) |
 | `Ctrl+PageUp` | 열 장 앞으로 |
 | `Ctrl+Backspace` | 상위 폴더로 |
 | `]` | 다음 폴더 또는 압축 |
@@ -145,7 +147,7 @@
 | `V` | 위아래 뒤집기 |
 | `N` | 도트 그림용 또렷한 확대 |
 | `G` | 400% 넘으면 픽셀 격자 |
-| `B` | 보기 방식: 한 장 → 두 장 → 책(표지만 한 장) → 웹툰(세로로 이어 보기) → 코믹(가로로 긴 쪽은 반반) 순서로 바꾸기. 두 장·책·코믹 뒤에는 같은 방식의 오른쪽→왼쪽(rtl)이 이어짐 (툴바 버튼을 누르면 목록에서 고름) |
+| `B` | 보기 방식: 한 장 → 두 장 → 웹툰(세로로 이어 보기) → 코믹(가로로 긴 쪽은 반반) 순서로 바꾸기. 두 장·코믹 뒤에는 같은 방식의 오른쪽→왼쪽(rtl)이 이어짐 (툴바 버튼을 누르면 목록에서 고름) |
 | `Shift+B` | 펼침면 자동 인식 |
 
 **파일 안의 쪽 (여러 쪽이 든 TIFF·ICO)**
@@ -279,7 +281,7 @@
 | 오른쪽 클릭 `Add to favourites` | 화면의 파일을 즐겨찾기에 넣거나 빼기 |
 | 오른쪽 클릭 `One page` | 보기 방식: 한 장씩 |
 | 오른쪽 클릭 `Two pages` | 보기 방식: 두 장 나란히 |
-| 오른쪽 클릭 `Book` | 보기 방식: 표지만 한 장, 그다음부터 두 장씩 |
+| 오른쪽 클릭 `First page alone` | 두 장 보기: 첫 장은 한 장으로 (책 표지처럼) |
 | 오른쪽 클릭 `Webtoon` | 보기 방식: 모든 쪽을 세로로 이어서(웹툰) |
 | 오른쪽 클릭 `Choose subtitles` | 목록에서 자막 고르기 |
 | 오른쪽 클릭 `Take out of film` | Matroska 영상 안의 글자 자막을 영상 옆 파일로 빼내기(`film.kor.srt`, `film.eng.ass`) — 영상은 바꾸지 않음 |
@@ -333,11 +335,13 @@
 
 ## 보기 방식
 
-`B`, 툴바의 Layout 버튼, Menu > View > Layout에서 여덟 가지 중 하나를 고르고, Settings > Viewer > Layout에 그대로 저장됩니다:
-**single**(한 장), **dual**(두 장 나란히), **book**(표지만 한 장, 그다음부터 두 장), **webtoon**(모든 쪽을 같은 폭으로 세로로 이어
-하나의 긴 스트립으로)과 **comic**(한 장씩, 가로로 긴 쪽은 반반 나눠서). 그리고 dual, book, comic 바로 뒤에 각각
-**dual-rtl**, **book-rtl**, **comic-rtl**이 있습니다. 일본 만화책처럼 오른쪽에서 왼쪽으로 읽는 책을 위한 것으로, 앞 쪽이
-오른쪽에 놓이고, 가로로 긴 쪽은 오른쪽 절반부터 보이며, 클릭과 밀기로 넘기는 방향도 반대가 됩니다.
+`B`, 툴바의 Layout 버튼, 책에서의 우클릭으로 여섯 가지 중 하나를 고르고, Settings > Viewer > Layout에 그대로 저장됩니다:
+**single**(한 장), **dual**(두 장 나란히), **webtoon**(모든 쪽을 같은 폭으로 세로로 이어 하나의 긴 스트립으로)과
+**comic**(한 장씩, 가로로 긴 쪽은 반반 나눠서). 그리고 dual, comic 바로 뒤에 각각 **dual-rtl**, **comic-rtl**이 있습니다.
+일본 만화책처럼 오른쪽에서 왼쪽으로 읽는 책을 위한 것으로, 앞 쪽이 오른쪽에 놓이고, 가로로 긴 쪽은 오른쪽 절반부터
+보이며, 클릭과 밀기로 넘기는 방향도 반대가 됩니다. 두 장 보기에서는 고른 파일이 늘 첫 쪽으로 보입니다. Settings > Viewer >
+"Two pages: the first page alone"을 켜면 표지만 한 장으로 보는 책이 되고(예전 설정 파일의 `book`은 이것을 켭니다),
+`Shift+PageDown` / `Shift+PageUp`이나 Layout 바로 뒤의 `+1 page` 버튼은 짝을 한 쪽씩 밉니다.
 
 ## 탐색기 우클릭 메뉴
 

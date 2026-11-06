@@ -83,6 +83,9 @@ static const struct { const char *section, *key, *old_word, *new_word; } CHOICE_
     { "files", "sort_mode", "natural", "explorer" },
     { "files", "sort_mode", "lexical", "text" },
     { "files", "sort_mode", "date",    "modified" },
+    /* RV-224 (D-279): the book is two pages with the first page alone; the load below turns that on */
+    { "viewer", "layout", "book",      "dual" },
+    { "viewer", "layout", "book-rtl",  "dual-rtl" },
 };
 
 static bool choice_index_exact(const rubraview_setting_def_t *def, proven_u8str_view_t word, double *out);
@@ -147,6 +150,13 @@ rubraview_settings_t rubraview_settings_load(proven_arena_t *arena, proven_u8str
                 break;
             }
         }
+    }
+
+    /* RV-224 (D-279): a file from before keeps its book — two pages, the first page alone — unless it says otherwise. */
+    const proven_u8str_view_t *layout = rubraview_ini_get(&doc, PROVEN_LIT("viewer"), PROVEN_LIT("layout"));
+    if (layout && !rubraview_ini_get(&doc, PROVEN_LIT("viewer"), PROVEN_LIT("first_page_alone")) &&
+        (proven_u8str_view_eq_ascii_ci(*layout, PROVEN_LIT("book")) || proven_u8str_view_eq_ascii_ci(*layout, PROVEN_LIT("book-rtl")))) {
+        rubraview_settings_set(&settings, PROVEN_LIT("viewer"), PROVEN_LIT("first_page_alone"), 1.0);
     }
 
     return settings;

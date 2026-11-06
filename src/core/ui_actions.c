@@ -76,8 +76,6 @@ rubraview_action_state_t rubraview_action_state(proven_u8str_view_t action, cons
         [RUBRAVIEW_LAYOUT_CHOICE_SINGLE]    = { "layout_single",    "single" },
         [RUBRAVIEW_LAYOUT_CHOICE_DUAL]      = { "layout_dual",      "dual" },
         [RUBRAVIEW_LAYOUT_CHOICE_DUAL_RTL]  = { "layout_dual_rtl",  "dual-rtl" },
-        [RUBRAVIEW_LAYOUT_CHOICE_BOOK]      = { "layout_book",      "book" },
-        [RUBRAVIEW_LAYOUT_CHOICE_BOOK_RTL]  = { "layout_book_rtl",  "book-rtl" },
         [RUBRAVIEW_LAYOUT_CHOICE_WEBTOON]   = { "layout_webtoon",   "webtoon" },
         [RUBRAVIEW_LAYOUT_CHOICE_COMIC]     = { "layout_comic",     "comic" },
         [RUBRAVIEW_LAYOUT_CHOICE_COMIC_RTL] = { "layout_comic_rtl", "comic-rtl" },
@@ -85,6 +83,14 @@ rubraview_action_state_t rubraview_action_state(proven_u8str_view_t action, cons
     rubraview_layout_choice_t choice = rubraview_layout_choice_of(f->layout, f->rtl ? RUBRAVIEW_READING_RTL : RUBRAVIEW_READING_LTR);
     if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_layout"))) st.value = LAYOUTS[choice].value;
     if (proven_u8str_view_eq(action, proven_u8str_view_from_cstr(LAYOUTS[choice].action))) st.mark = RUBRAVIEW_MARK_CURRENT;
+    /* RV-224 (D-279): one page over and the first page alone are two pages' own. */
+    if (proven_u8str_view_eq(action, PROVEN_LIT("page_over_next")) || proven_u8str_view_eq(action, PROVEN_LIT("page_over_back"))) {
+        st.enabled = f->has_page && f->layout == RUBRAVIEW_PAGE_LAYOUT_DUAL;
+    }
+    if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_first_page_alone"))) {
+        st.enabled = f->layout == RUBRAVIEW_PAGE_LAYOUT_DUAL;
+        st.mark = f->first_alone ? RUBRAVIEW_MARK_ON : RUBRAVIEW_MARK_OFF;
+    }
     /* The shape the picture is shown in (owner, 2026-10-11). */
     rubraview_aspect_t aspect = rubraview_aspect_from_action(action);
     if (aspect != RUBRAVIEW_ASPECT_COUNT) {
@@ -169,6 +175,8 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
         { "media_stop", 0xE71A },            /* Stop */
         { "prev_page", 0xEB9E },             /* RV-180: ◁◁, a page or a file (owner: the shapes swapped with the folder's) */
         { "next_page", 0xEB9D },             /* ▷▷; the 5 s seeks say "-5 s" / "+5 s" in words, not to look the same */
+        { "page_over_next", 0xE72A },        /* Forward: two pages paired one page later (RV-224) */
+        { "page_over_back", 0xE72B },        /* Back */
         { "media_volume_down", 0xE993 },     /* Volume1 */
         { "media_volume_up", 0xE995 },       /* Volume3 */
         { "next_subtitle_track", 0xE7F0 },   /* ClosedCaption */
@@ -217,10 +225,9 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
     if (proven_u8str_view_eq(action, PROVEN_LIT("media_mute"))) return f->muted ? 0xE767 : 0xE74F;           /* Volume / Mute */
     if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_fullscreen"))) return f->fullscreen ? 0xE73F : 0xE740; /* BackToWindow / FullScreen */
     if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_layout"))) {
-        /* The layout it is in now: Page, TwoPage, ReadingMode (a book), ScrollUpDown (the strip). */
+        /* The layout it is in now: Page, TwoPage, ReadingMode (a book: the first page alone), ScrollUpDown (the strip). */
         switch (f->layout) {
-            case RUBRAVIEW_PAGE_LAYOUT_DUAL:    return 0xE89A;
-            case RUBRAVIEW_PAGE_LAYOUT_BOOK:    return 0xE736;
+            case RUBRAVIEW_PAGE_LAYOUT_DUAL:    return f->first_alone ? 0xE736 : 0xE89A;
             case RUBRAVIEW_PAGE_LAYOUT_WEBTOON: return 0xEC8F;
             case RUBRAVIEW_PAGE_LAYOUT_COMIC:   return 0xE8A1;   /* PreviewLink: a page cut down the middle */
             default:                            return 0xE7C3;
