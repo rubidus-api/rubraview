@@ -2512,6 +2512,7 @@ void log_close(app_state_t *app);
 void draw_log_window(app_state_t *app);
 size_t log_pump(app_state_t *app);
 bool filejob_start(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving, int basket, bool from_cut);   /* RV-258 */
+bool filejob_start_viewer(app_state_t *app, proven_u8str_view_t dir, proven_u8str_view_t path, bool moving, int32_t page, proven_u8str_view_t temp_dir);   /* RV-259 */
 bool filejob_busy(void);
 size_t filejob_pump(app_state_t *app);
 void filejob_shutdown(app_state_t *app);

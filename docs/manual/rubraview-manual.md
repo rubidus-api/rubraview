@@ -746,7 +746,7 @@ it to another (Settings › Files › The file on screen, to a folder; or
 (Copy to, Move to) and in the right click. A page inside an archive can be
 copied out with `Ctrl+Shift+C` — it is written as a file of its own — but not moved
 (to take it out of the archive as well, delete it there afterwards). Nothing in the folder is ever replaced: when
-the name is taken the file goes in as `name_2.jpg`, then `name_3.jpg`, and
+the name is taken the file goes in as `name (2).jpg`, then `name (3).jpg`, and
 so on. `Ctrl+Z` takes a copy away again or brings a moved file back.
 
 To send it somewhere else, `Alt+C` (copy) and `Alt+M` (move) — also
@@ -792,7 +792,7 @@ page saved into a ZIP or a 7z in place is packed with. Pictures and films
 hardly pack further, so a low level loses little. The book is written
 again in that format with the change in it and the old file — every
 volume of a split set — goes to the Recycle Bin. A file already holding
-the new name is never replaced: the book becomes `name_2.cbz`. The answer
+the new name is never replaced: the book becomes `name (2).cbz`. The answer
 is kept for that book until the program closes. A 7z needs free space
 beside the archive of about twice its unpacked size while it is written.
 
@@ -823,7 +823,7 @@ for it. Click a folder, or press its digit, and the picture on screen is
 set aside for it — nothing moves yet — and the next one comes. Look
 through them all, then press **Copy all set aside** or **Move all set
 aside**: every one goes to its folder at once, a name already there never
-replaced (`name_2.jpg`). `Ctrl+Z` undoes them one by one, the last 64.
+replaced (`name (2).jpg`). `Ctrl+Z` undoes them one by one, the last 64.
 **This one goes to ...** takes the picture on screen off the list;
 **Forget what is set aside** empties it.
 
@@ -919,7 +919,7 @@ waits for a key before it closes.
 | `--watermark=FILE,br,50` | A picture laid over each, at a corner (`br` `bl` `tr` `tl` `c`), at an opacity |
 | `{n}` `{n:3}` `{parent}` in `--name=`, `--start=7`, `--replace=IMG_,photo-` | A counter, padded; the folder's name; where it starts; words replaced in each name (`--replace=` again for more, in order) |
 | `{taken}` `{taken:yyyymmdd-hhmiss}` `{w}x{h}` in `--name=`, `--n-step=5`, `--case=lower\|upper`, `--no-spaces` | The date taken (else the file's), its parts yyyy yy mm dd hh mi ss; the size each file comes out at; the counter's step; the letters' case (not the extension's); spaces made `_` |
-| `--exists=replace\|skip\|number` | A name already there: replaced (as before), left, or the next free `name_2` |
+| `--exists=replace\|skip\|number` | A name already there: replaced (as before), left, or the next free `name (2)` |
 | `--keep-dates`, `--subfolders` | The results take their pictures' dates; with `--recursive`, the same folders under `--out` |
 | `--text="{name} {n:3},br,4,FFFFFF"`, `--text-font=` | Words on each, last of all: where, the letters' height as a percent of the shorter side, the colour; a soft shadow under them |
 | `--dpi=300` | The DPI written into each file (JPEG, PNG, TIFF, BMP) |
@@ -1401,13 +1401,13 @@ Move here first check every name in the folder. What clashes with nothing
 is copied or moved at once, in the background (the line at the top counts
 it); the names already there wait in **Rubraview - names already there**:
 for each, the one coming and the one there (size, date, folder) and two
-ticks. Both ticked keeps both (the one coming as `name_2.jpg`), only the
+ticks. Both ticked keeps both (the one coming as `name (2).jpg`), only the
 one coming replaces the one there (that one goes to the Recycle Bin), and
 otherwise it is left. **Apply the ticks** (`Enter`), or answer all at once:
 **Overwrite all**, **Keep both, all**, **Skip all**, **Only the same ones**
 (the same size and bytes: the one there is kept — a move's source goes to
 the Recycle Bin, a copy's is left or recycled as the last button says;
-others are kept as `name_2`). A folder already there is merged, its files
+others are kept as `name (2)`). A folder already there is merged, its files
 asked about the same way. Close the window and the questions wait;
 `Ctrl+Shift+K` opens it again. `Ctrl+Z` takes the whole copy or move back.
 A move to another drive is copied, compared and only then its source goes

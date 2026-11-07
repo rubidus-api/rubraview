@@ -666,7 +666,7 @@ void picker_recycle(app_state_t *app) {
 
 /* RV-207 (owner, 2026-11-01): Ctrl+C / Ctrl+X put what is picked (nothing picked, the tile in focus) on the
    clipboard as Explorer does, so Explorer pastes it too; Ctrl+V puts what is there — from here or from Explorer —
-   into the folder on screen: a name there already gets _2 (RV-258, D-310), a cut is then cleared, one undo takes all of it back. */
+   into the folder on screen: a name there already is asked about (RV-258, D-310), a cut is then cleared, one undo takes all of it back. */
 void picker_clip_put(app_state_t *app, bool moving) {
     if (picker_in_archive(app)) { picker_clip_put_archive(app, moving); return; }   /* RV-223 */
     rubraview_fs_entry_t *entries = NULL;

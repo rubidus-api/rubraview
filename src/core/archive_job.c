@@ -108,8 +108,8 @@ bool rubraview_archive_free_name(proven_u8str_view_t path, bool (*exists)(proven
     for (size_t i = 0; i < path.size; ++i) if (s[i] == '/' || s[i] == '\\') sep = i + 1;
     for (size_t i = path.size; i > sep; --i) if (s[i - 1] == '.') { dot = i - 1; break; }
     if (dot == sep) dot = path.size;   /* ".hidden" has no extension to keep */
-    for (unsigned k = 2; k < 100000; ++k) {   /* RV-258 (D-310): name_2.ext, _3 ... */
-        int w = rubraview_fmt(out, cap, "{}_{}{}", PROVEN_ARG(rubraview_bytes_view(s, (int)dot)), PROVEN_ARG((unsigned)k), PROVEN_ARG(rubraview_bytes_view(s + dot, (int)(path.size - dot))));
+    for (unsigned k = 2; k < 100000; ++k) {   /* RV-259 (D-311): "name (2).ext", (3) ... */
+        int w = rubraview_fmt(out, cap, "{} ({}){}", PROVEN_ARG(rubraview_bytes_view(s, (int)dot)), PROVEN_ARG((unsigned)k), PROVEN_ARG(rubraview_bytes_view(s + dot, (int)(path.size - dot))));
         if (w <= 0 || (size_t)w >= cap) return false;
         if (!exists((proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = (size_t)w })) return true;
     }
@@ -121,8 +121,8 @@ bool rubraview_archive_free_folder_name(proven_u8str_view_t path, bool (*exists)
     proven_sys_mem_copy(out, path.ptr, path.size);
     out[path.size] = '\0';
     if (!exists || !exists(path)) return true;
-    for (unsigned k = 2; k < 100000; ++k) {   /* RV-258 (D-310): folder_2, _3 ... */
-        int w = rubraview_fmt(out, cap, "{}_{}", PROVEN_ARG(rubraview_bytes_view((const char *)path.ptr, (int)path.size)), PROVEN_ARG((unsigned)k));
+    for (unsigned k = 2; k < 100000; ++k) {   /* RV-259 (D-311): "folder (2)", (3) ... */
+        int w = rubraview_fmt(out, cap, "{} ({})", PROVEN_ARG(rubraview_bytes_view((const char *)path.ptr, (int)path.size)), PROVEN_ARG((unsigned)k));
         if (w <= 0 || (size_t)w >= cap) return false;
         if (!exists((proven_u8str_view_t){ .ptr = (const proven_byte_t *)out, .size = (size_t)w })) return true;
     }

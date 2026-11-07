@@ -124,7 +124,7 @@ void triage_curate(app_state_t *app, int32_t digit) {
 /* ---- the file on screen, to its folder (owner, 2026-10-08) ----
    `copy_to_folder` and `move_to_folder`, each with a folder of its own from
    Settings > Files. A name already there is never replaced: the file goes
-   in as `name_2.ext`, `name_3.ext`, ... (D-310) A page inside an archive is not a
+   in as `name (2).ext`, `name (3).ext`, ... (D-311) A page inside an archive is not a
    file, so it can be copied out (its bytes written as a file) but not
    moved. */
 bool filing_exists(void *ctx, proven_u8str_view_t path) {
@@ -156,46 +156,31 @@ void filing_put_to(app_state_t *app, proven_u8str_view_t dir, bool moving) {
         osd_say(app, TU8("that folder could not be made"));
         return;
     }
-    proven_u8str_view_t target = rubraview_filing_target(app->arena, dir, name, filing_exists, NULL);
-    if (target.size == 0) {
-        osd_say(app, TU8("no free name left in that folder"));
-        return;
-    }
-    /* The same file onto itself would be a copy named -1 beside it: allowed;
-       a move into the folder it is already in is nothing to do. */
+    /* A move into the folder it is already in is nothing to do. */
     if (moving && rubraview_path_same(rubraview_path_dirname(path), dir)) {
         osd_say(app, TU8("it is already in that folder"));
         return;
     }
-
-    bool ok = false;
+    /* RV-259 (owner, 2026-11-08: "이것도 묻고 처리하게 해 주세요"): through the copy job, so a name already there is
+       asked about as Paste's are (D-310, D-311); a page inside an archive first written to a folder of its own in %TEMP% */
     if (in_archive) {
+        char temp[4096];
+        if (!arc_temp_path(temp, sizeof temp, "page", PROVEN_LIT("")) || !rubraview_pal_fs_make_dirs(cstr(temp))) {
+            osd_say(app, TU8("could not put the file there"));
+            return;
+        }
+        proven_u8str_view_t out = rubraview_path_join(app->arena, cstr(temp), name);
         void *mem = NULL;
         rubraview_page_bytes_t bytes = page_read_owned(&app->source, &app->source_lock, (size_t)page, &mem);
-        ok = bytes.ok && rubraview_pal_fs_write_file(target, bytes.data);
+        bool ok = out.size > 0 && bytes.ok && rubraview_pal_fs_write_file(out, bytes.data);
         rubraview_free(mem);
-    } else {
-        ok = moving ? rubraview_pal_fs_move(path, target) : rubraview_pal_fs_copy(path, target);
-    }
-    if (!ok) {
-        osd_say(app, TU8("could not put the file there"));
+        if (!ok || !filejob_start_viewer(app, dir, out, false, page, cstr(temp))) {
+            (void)rubraview_pal_fs_delete_tree(cstr(temp));
+            osd_say(app, TU8("could not put the file there"));
+        }
         return;
     }
-
-    rubraview_undo_push(&app->undo, (rubraview_file_action_t){
-        .op = moving ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
-        .source_path = path,
-        .target_path = target,
-        .playlist_index = (size_t)page,
-    });
-
-    /* Say the name it has there: it is not always the name it had. */
-    char said[sizeof(app->notice)];
-    proven_u8str_view_t put = rubraview_path_basename(target);
-    int n = rubraview_fmt(said, sizeof(said), "{}: {}", PROVEN_ARG(moving ? T("moved") : T("copied")), PROVEN_ARG(rubraview_bytes_view(put.ptr, (int)(put.size < 160 ? put.size : 160))));
-    osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = n > 0 ? (size_t)n : 0 });
-
-    if (moving) reopen_after_removal(app, (size_t)page);
+    if (!filejob_start_viewer(app, dir, path, moving, page, PROVEN_LIT(""))) osd_say(app, TU8("could not put the file there"));
 }
 
 void triage_undo(app_state_t *app) {
@@ -1226,7 +1211,7 @@ static void handle_drop_paths(app_state_t *app, const proven_u8str_view_t *paths
    A window of the nine curation folders. A click on one, or its digit,
    sets the picture on screen aside for it and goes on to the next; Copy
    all or Move all then puts every one in its folder at once, a name never
-   replaced (name_2.ext, D-310), each move undone with Ctrl+Z (the last 64). */
+   replaced ("name (2).ext", D-311), each move undone with Ctrl+Z (the last 64). */
 
 void classify_build(app_state_t *app) {
     static char words[13][192];

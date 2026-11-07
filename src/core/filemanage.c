@@ -220,20 +220,22 @@ proven_u8str_view_t rubraview_filing_target(proven_arena_t *arena, proven_u8str_
     if (target.size == 0 || !exists(ctx, target)) return target;
 
     /* The number goes before the extension; a name with none, or one that
-       only starts with a dot, takes it at its end. RV-258 (owner, 2026-11-08: "둘다 보존하게(... 끝에 접미사로 _2 _3 이렇게
-       붙여서 ...)"; asked, "모두 _2로 통일"): `_2`, `_3`, ... — one rule for every name kept beside another (D-310). */
+       only starts with a dot, takes it at its end. RV-258 (D-310): one rule for every name kept beside another; RV-259 (owner, 2026-11-08: "겹칠때 이름을 윈도 스타일로 (2) (3) ... (10) (11) 이렇게 하는게 더 좋아보여요"):
+       "name (2).ext", "(3)", ... (D-311). */
     size_t stem = rubraview_rename_stem_length(filename);
     for (uint32_t n = 2; n <= 9999; ++n) {
         char digits[8];
         size_t d = 0;
         for (uint32_t v = n; v > 0; v /= 10) digits[d++] = (char)('0' + v % 10);
-        proven_result_mem_mut_t res = proven_arena_alloc(arena, filename.size + d + 2);
+        proven_result_mem_mut_t res = proven_arena_alloc(arena, filename.size + d + 4);
         if (!proven_is_ok(res.err)) return none;
         char *name = (char*)res.value.ptr;
         size_t at = 0;
         proven_sys_mem_copy(name, filename.ptr, stem); at = stem;
-        name[at++] = '_';
+        name[at++] = ' ';   /* RV-259 (D-311): "name (2).ext", as Windows */
+        name[at++] = '(';
         while (d > 0) name[at++] = digits[--d];
+        name[at++] = ')';
         proven_sys_mem_copy(name + at, filename.ptr + stem, filename.size - stem); at += filename.size - stem;
         name[at] = '\0';
         target = rubraview_path_join(arena, dir, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = at });

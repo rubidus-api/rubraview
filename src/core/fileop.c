@@ -55,7 +55,8 @@ bool rubraview_fileop_suffix_name(const char *path, bool is_dir, unsigned n, cha
     proven_u8str_view_t b = base_of(path);
     size_t bstart = (size_t)((const char *)b.ptr - path), end = bstart + b.size, dot = end;
     if (!is_dir) for (size_t i = end; i > bstart + 1; --i) if (path[i - 1] == '.') { dot = i - 1; break; }   /* ".hidden" keeps no extension */
-    int w = rubraview_fmt(out, cap, "{}_{}{}", PROVEN_ARG(rubraview_bytes_view(path, (int)dot)), PROVEN_ARG(n),
+    /* RV-259 (owner, 2026-11-08: "겹칠때 이름을 윈도 스타일로 (2) (3) ... (10) (11) 이렇게 하는게 더 좋아보여요"): "name (2).ext", as Windows names one */
+    int w = rubraview_fmt(out, cap, "{} ({}){}", PROVEN_ARG(rubraview_bytes_view(path, (int)dot)), PROVEN_ARG(n),
                           PROVEN_ARG(rubraview_bytes_view(path + dot, (int)(len - dot))));
     return w > 0 && (size_t)w < cap;
 }

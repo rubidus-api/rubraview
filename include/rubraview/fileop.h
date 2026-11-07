@@ -46,7 +46,7 @@ typedef enum {
     RUBRAVIEW_FILEOP_ANSWER_NONE = 0,
     RUBRAVIEW_FILEOP_ANSWER_SKIP,        /* the one there kept, the one coming left where it is */
     RUBRAVIEW_FILEOP_ANSWER_OVERWRITE,   /* the one coming in its place; the one there to the Recycle Bin */
-    RUBRAVIEW_FILEOP_ANSWER_KEEP_BOTH,   /* the one coming as name_2.ext, _3 ... */
+    RUBRAVIEW_FILEOP_ANSWER_KEEP_BOTH,   /* the one coming as "name (2).ext", (3) ... */
     RUBRAVIEW_FILEOP_ANSWER_SAME_ONLY,   /* compared: the same — the one there kept (see same_recycles_copy);
                                             different — both kept, the one coming with a suffix */
 } rubraview_fileop_answer_t;
@@ -136,7 +136,7 @@ size_t rubraview_fileop_answer_all(rubraview_fileop_t *op, rubraview_fileop_answ
    the one coming alone (overwrite), the one there alone or neither (skip). */
 rubraview_fileop_answer_t rubraview_fileop_answer_of_checks(bool keep_coming, bool keep_there);
 
-/* RV-258 (owner, 2026-11-08: "_2 _3"): `path` with `_n` before its extension (a folder: at its end), into `out`. */
+/* RV-259 (owner, 2026-11-08: "윈도 스타일로 (2) (3)"): `path` with " (n)" before its extension (a folder: at its end), into `out`. */
 bool rubraview_fileop_suffix_name(const char *path, bool is_dir, unsigned n, char *out, size_t cap);
 
 /* Nothing pending and nothing parked. */

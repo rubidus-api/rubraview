@@ -53,10 +53,10 @@ size_t rubraview_archive_safe_part(proven_u8str_view_t part_view, char *out, siz
    "book.part1.rar" "book", "book.7z.001" "book". */
 size_t rubraview_archive_stem(proven_u8str_view_t archive_path, char *out, size_t cap);
 
-/* `path`, or the first of path_2.ext, path_3.ext ... that is not there (`exists` tells), into `out` (RV-258, D-310). */
+/* `path`, or the first of "path (2).ext", "path (3).ext" ... that is not there (`exists` tells), into `out` (RV-259, D-311). */
 bool rubraview_archive_free_name(proven_u8str_view_t path, bool (*exists)(proven_u8str_view_t path),
                                  char *out, size_t cap);
-/* The same for a folder: the number goes at the end, a dot in its name being no extension ("2024.10.31_2"). */
+/* The same for a folder: the number goes at the end, a dot in its name being no extension ("2024.10.31 (2)"). */
 bool rubraview_archive_free_folder_name(proven_u8str_view_t path, bool (*exists)(proven_u8str_view_t path),
                                         char *out, size_t cap);
 

@@ -19,6 +19,9 @@ typedef struct fj_job {
     uint32_t id;
     int      basket;    /* the basket it empties as it moves (0..4), or -1 */
     bool     from_cut;  /* a paste of a cut: the clipboard cleared after */
+    int32_t  viewer_page;   /* RV-259: the viewer's own Copy / Move to folder of the page on screen, or -1 */
+    char    *viewer_path;   /* that page's file, to know it is still the one on screen */
+    char    *temp_dir;      /* a page out of an archive, written there first: removed after */
     bool     prepared, finished, said_parked;
 } fj_job_t;
 
@@ -152,7 +155,10 @@ bool filejob_busy(void) {
 
 /* RV-258: a copy or a move of `sources` into `dir`, every name checked before anything is done; the clashes asked in
    the clashes window. `basket` (0..4, or -1) and `from_cut` say what is tidied when it ends. */
+static fj_job_t *g_last_started;   /* the job filejob_start just queued, for filejob_start_viewer (main thread) */
+
 bool filejob_start(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving, int basket, bool from_cut) {
+    g_last_started = NULL;
     if (n == 0 || dir.size == 0) return false;
     if (!ensure_worker()) { osd_say(app, TU8("the copy could not be started")); return false; }
     fj_job_t *job = (fj_job_t *)rubraview_alloc_zero(1, sizeof *job);
@@ -167,9 +173,10 @@ bool filejob_start(app_state_t *app, proven_u8str_view_t dir, const proven_u8str
     }
     job->basket = basket;
     job->from_cut = from_cut;
+    job->viewer_page = -1;
     AcquireSRWLockExclusive(&g.lock);
     bool room = g.njobs < FJ_JOBS;
-    if (room) { job->id = ++g.next_id; g.jobs[g.njobs++] = job; }
+    if (room) { job->id = ++g.next_id; g.jobs[g.njobs++] = job; g_last_started = job; }
     ReleaseSRWLockExclusive(&g.lock);
     if (!room) { rubraview_fileop_free(&job->op); rubraview_free(job); osd_say(app, TU8("too many copies at once: wait for one to end")); return false; }
     SetEvent(g.wake);
@@ -184,6 +191,20 @@ static void answer(uint32_t job, size_t index, bool all, rubraview_fileop_answer
     if (g.nanswers < FJ_ANSWERS) g.answers[g.nanswers++] = (fj_answer_t){ .job = job, .index = index, .all = all, .answer = a };
     ReleaseSRWLockExclusive(&g.lock);
     SetEvent(g.wake);
+}
+
+/* RV-259 (owner, 2026-11-08: "화면의 그림 하나를 \"폴더로 복사/이동\"하는 뷰어 자체 기능은 ... <- 이것도 묻고 처리하게 해 주세요"): the file on screen to a folder through the same check — a
+   name there is asked about; a page inside an archive is written to a folder of its own in %TEMP% first and copied
+   from there. When it ends, a move takes the page out of the list as before. */
+bool filejob_start_viewer(app_state_t *app, proven_u8str_view_t dir, proven_u8str_view_t path, bool moving, int32_t page, proven_u8str_view_t temp_dir) {
+    char *vp = rubraview_strndup_view(path), *td = temp_dir.size ? rubraview_strndup_view(temp_dir) : NULL;
+    if (!filejob_start(app, dir, &path, 1, moving, -1, false) || !g_last_started) { rubraview_free(vp); rubraview_free(td); return false; }
+    AcquireSRWLockExclusive(&g.lock);   /* a finished job is only ended by filejob_pump, on this thread: it is set in time */
+    g_last_started->viewer_page = page;
+    g_last_started->viewer_path = vp;
+    g_last_started->temp_dir = td;
+    ReleaseSRWLockExclusive(&g.lock);
+    return true;
 }
 
 /* A finished job, on the main thread: the undo, the basket, the clipboard, the words. */
@@ -231,6 +252,23 @@ static void job_ended(app_state_t *app, fj_job_t *job) {
     if (w > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)w });
     if (replaced > 0) app_log(app, "file", PROVEN_LIT("replaced files are in the Recycle Bin; Ctrl+Z takes the new ones away, not the old ones back"));
     if (app->picker_open) picker_navigate(app, app->picker_dir);   /* what arrived, listed */
+    if (job->viewer_page >= 0 && op->count > 0) {   /* RV-259: the viewer's own; its name there said, a move leaves the list */
+        const rubraview_fileop_item_t *it = &op->items[0];
+        if (it->state == RUBRAVIEW_FILEOP_DONE || it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE) {
+            char said[sizeof app->notice];
+            proven_u8str_view_t put = rubraview_path_basename(cstr(it->target));
+            int k = rubraview_fmt(said, sizeof said, "{}: {}", PROVEN_ARG(moving ? T("moved") : T("copied")), PROVEN_ARG(put));
+            if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)k < sizeof said ? (size_t)k : sizeof said - 1 });
+        }
+        bool gone = it->did == RUBRAVIEW_FILEOP_DID_MOVE || it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE;
+        int32_t now = current_page_index(app);
+        if (moving && gone && now >= 0 && (size_t)job->viewer_page < page_count(app) && job->viewer_path &&
+            rubraview_path_same(app->source.pages[job->viewer_page].path, cstr(job->viewer_path)))
+            reopen_after_removal(app, (size_t)job->viewer_page);
+    }
+    if (job->temp_dir) (void)rubraview_pal_fs_delete_tree(cstr(job->temp_dir));
+    rubraview_free(job->viewer_path);
+    rubraview_free(job->temp_dir);
 }
 
 /* ---- the clashes window ---- */
@@ -331,7 +369,7 @@ void draw_clash_window(app_state_t *app) {
                                                   (rubraview_pal_rect_t){ text_x, ry + 26.0 * dpi, (double)w - text_x - pad, 20.0 * dpi }, 12.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_LEFT);
     }
     /* the foot: what the boxes mean, the answers for all, the copy's same file */
-    rubraview_pal_render_draw_text(r, TU8("Both ticked: both kept (the one coming as name_2). Only the one coming: it replaces the one there (that one to the Recycle Bin). Otherwise: left as it is."),
+    rubraview_pal_render_draw_text(r, TU8("Both ticked: both kept (the one coming as \"name (2)\"). Only the one coming: it replaces the one there (that one to the Recycle Bin). Otherwise: left as it is."),
                                    (rubraview_pal_rect_t){ pad, foot + 4.0 * dpi, (double)w - 2 * pad, 20.0 * dpi }, 12.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_LEFT);
     const char *words[CW_BTNS] = { T("Apply the ticks"), T("Overwrite all"), T("Keep both, all"), T("Skip all"), T("Only the same ones"),
                                    g.same_recycles_copy ? T("A copy's same file: its source to the Recycle Bin") : T("A copy's same file: its source left") };
