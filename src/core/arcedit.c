@@ -443,6 +443,178 @@ done:
     return result;
 }
 
+/* RV-260: a file on the disk pulled as FultaArc writes it, through its random-access source; the job's progress and
+   Esc taken between reads. */
+typedef struct disk_reader {
+    fulta_arc_source_t src;
+    bool open;
+    uint64_t at;
+    rubraview_arcedit_job_t *job;
+} disk_reader_t;
+
+static fulta_arc_err_t disk_read(void *ctx, void *buf, size_t cap, size_t *got) {
+    disk_reader_t *d = (disk_reader_t *)ctx;
+    *got = 0;
+    if (atomic_load(&d->job->cancel)) return FULTA_ARC_ERR_CANCELLED;
+    if (d->at >= d->src.size) return FULTA_ARC_OK;
+    size_t n = 0;
+    fulta_arc_err_t err = d->src.read_at(d->src.ctx, d->at, buf, cap, &n);
+    if (err != FULTA_ARC_OK) return err;
+    d->at += n;
+    *got = n;
+    atomic_fetch_add(&d->job->done, (uint_fast64_t)n);
+    return FULTA_ARC_OK;
+}
+
+rubraview_arcedit_result_t rubraview_arcedit_add_files(rubraview_arcedit_job_t *job, const rubraview_arcedit_add_t *adds, size_t add_count) {
+    if (!job || !job->archive_path || !job->out_path || (!adds && add_count)) return RUBRAVIEW_ARCEDIT_UNREADABLE;
+    job->error = 0;
+    for (size_t k = 0; k < add_count; ++k) {
+        const char *nm = adds[k].name;
+        if (!adds[k].path || !nm || !nm[0] || nm[0] == '/' || nm[proven_cstr_len(nm) - 1] == '/') return RUBRAVIEW_ARCEDIT_BAD_NAME;
+        for (size_t j = 0; j < k; ++j) if (same_name(adds[j].name, nm)) return RUBRAVIEW_ARCEDIT_NAME_TAKEN;
+    }
+    if (!job_note_volume(job, job->archive_path)) return RUBRAVIEW_ARCEDIT_NO_MEMORY;
+    fulta_arc_t *arc = NULL;
+    fulta_arc_err_t err = open_at(job->archive_path, job->codepage, job, job, &arc);
+    if (err != FULTA_ARC_OK) { job->error = err; return result_of(err, false); }
+
+    rubraview_arcedit_result_t result = RUBRAVIEW_ARCEDIT_OK;
+    fulta_arc_edit_t *edit = NULL;
+    size_t count = fulta_arc_count(arc), want_count = 0;
+    bool *gone = (bool *)rubraview_alloc_zero(count + 1, sizeof(bool));
+    expect_t *want = (expect_t *)rubraview_alloc_zero(count + add_count + 1, sizeof(expect_t));
+    char **names = (char **)rubraview_alloc_zero(count + 1, sizeof(char *));
+    disk_reader_t *readers = (disk_reader_t *)rubraview_alloc_zero(add_count + 1, sizeof(disk_reader_t));
+    fulta_arc_format_t format = fulta_arc_format(arc);
+    fulta_arc_editable_t editable = fulta_arc_editable(arc);
+    fulta_arc_format_t out_format = job->target == RUBRAVIEW_ARCEDIT_ZIP ? FULTA_ARC_FORMAT_ZIP
+                                  : job->target == RUBRAVIEW_ARCEDIT_7Z ? FULTA_ARC_FORMAT_7Z : format;
+    bool in_place = out_format == format && editable == FULTA_ARC_EDIT_OK;
+    if (!gone || !want || !names || !readers) { result = RUBRAVIEW_ARCEDIT_NO_MEMORY; goto done; }
+    if (editable == FULTA_ARC_EDIT_ENCRYPTED) { result = RUBRAVIEW_ARCEDIT_REFUSED_ENCRYPTED; goto done; }
+    if (out_format != FULTA_ARC_FORMAT_ZIP && out_format != FULTA_ARC_FORMAT_7Z) { result = RUBRAVIEW_ARCEDIT_UNWRITABLE; goto done; }
+    for (size_t k = 0; job->entries && k < job->entry_count; ++k) {
+        if (job->entries[k] >= count) { result = RUBRAVIEW_ARCEDIT_UNREADABLE; goto done; }
+        gone[job->entries[k]] = true;
+    }
+    err = fulta_arc_edit_begin(arc, &edit);
+    if (err != FULTA_ARC_OK) { result = result_of(err, false); goto done; }
+    if (!in_place) {   /* the names as the viewer shows them, as rubraview_arcedit_run gives a converted archive */
+        enum { SCRATCH = 8192 };
+        uint8_t *scratch = (uint8_t *)rubraview_alloc(SCRATCH);
+        if (!scratch) { result = RUBRAVIEW_ARCEDIT_NO_MEMORY; goto done; }
+        for (size_t i = 0; i < count && result == RUBRAVIEW_ARCEDIT_OK; ++i) {
+            const fulta_arc_entry_t *en = fulta_arc_entry(arc, i);
+            if (!en || !en->name || gone[i]) continue;
+            proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = scratch, .size = SCRATCH });
+            proven_u8str_view_t shown = rubraview_page_source_entry_name(&arena, en, format, job->codepage);
+            if (shown.size == 0 || (shown.size == proven_cstr_len(en->name) && proven_sys_mem_cmp(shown.ptr, en->name, shown.size) == 0)) continue;
+            bool dir = (en->flags & FULTA_ARC_ENTRY_DIR) != 0, slash = shown.ptr[shown.size - 1] == '/';
+            names[i] = (char *)rubraview_alloc(shown.size + 2);
+            if (!names[i]) { result = RUBRAVIEW_ARCEDIT_NO_MEMORY; break; }
+            proven_sys_mem_copy(names[i], shown.ptr, shown.size);
+            names[i][shown.size] = '\0';
+            if (dir && !slash) { names[i][shown.size] = '/'; names[i][shown.size + 1] = '\0'; }
+            err = fulta_arc_edit_replace(edit, i, names[i], NULL);
+            if (err != FULTA_ARC_OK) result = result_of(err, false);
+        }
+        rubraview_free(scratch);
+        if (result != RUBRAVIEW_ARCEDIT_OK) goto done;
+    }
+    /* no add over a name that stays */
+    for (size_t i = 0; i < count; ++i) {
+        const fulta_arc_entry_t *en = fulta_arc_entry(arc, i);
+        if (!en || !en->name || gone[i] || (en->flags & FULTA_ARC_ENTRY_DIR)) continue;
+        for (size_t k = 0; k < add_count; ++k)
+            if (same_name(names[i] ? names[i] : en->name, adds[k].name)) { result = RUBRAVIEW_ARCEDIT_NAME_TAKEN; goto done; }
+    }
+    for (size_t i = 0; i < count && err == FULTA_ARC_OK; ++i) if (gone[i]) err = fulta_arc_edit_remove(edit, i);
+    uint64_t total = 0;
+    for (size_t k = 0; k < add_count && err == FULTA_ARC_OK; ++k) {
+        err = fulta_arc_source_file(adds[k].path, &readers[k].src);
+        if (err != FULTA_ARC_OK) break;
+        readers[k].open = true;
+        readers[k].job = job;
+        total += readers[k].src.size;
+        /* an empty file is given as one of unknown length (FultaArc's 0-length reader, as rubraview_arcedit_run) */
+        fulta_arc_reader_t reader = { .ctx = &readers[k], .read = disk_read, .size = readers[k].src.size > 0 ? readers[k].src.size : UINT64_MAX,
+                                      .mtime = (int64_t)time(NULL) };
+        err = fulta_arc_edit_add(edit, adds[k].name, &reader);
+        want[want_count++] = (expect_t){ .name = adds[k].name, .size = readers[k].src.size };
+    }
+    if (err != FULTA_ARC_OK) { job->error = err; result = err == FULTA_ARC_ERR_IO ? RUBRAVIEW_ARCEDIT_UNREADABLE : result_of(err, false); goto done; }
+    atomic_store(&job->total, (uint_fast64_t)total);
+    for (size_t i = 0; i < count; ++i) {
+        const fulta_arc_entry_t *en = fulta_arc_entry(arc, i);
+        if (!en || (en->flags & FULTA_ARC_ENTRY_DIR) || gone[i]) continue;
+        want[want_count++] = (expect_t){ .name = names[i] ? names[i] : en->name, .size = en->size, .crc = en->crc32,
+                                         .has_crc = (en->flags & FULTA_ARC_ENTRY_HAS_CRC32) != 0 };
+    }
+    fulta_arc_write_options_t opts = { .level = job->level < 0 ? 0 : job->level > 9 ? 9 : job->level };
+    err = fulta_arc_edit_write_file(edit, out_format, job->out_path, &opts);
+    if (err != FULTA_ARC_OK) {
+        job->error = err;
+        result = atomic_load(&job->cancel) ? RUBRAVIEW_ARCEDIT_CANCELLED : result_of(err, true);
+        goto done;
+    }
+    if (atomic_load(&job->cancel)) result = RUBRAVIEW_ARCEDIT_CANCELLED;
+    else if (!verify(job, want, want_count, NULL)) result = RUBRAVIEW_ARCEDIT_NOT_VERIFIED;
+
+done:
+    if (edit) fulta_arc_edit_free(edit);
+    for (size_t k = 0; readers && k < add_count; ++k) if (readers[k].open && readers[k].src.close) readers[k].src.close(readers[k].src.ctx);
+    fulta_arc_close(arc);
+    if (names) for (size_t i = 0; i < count; ++i) rubraview_free(names[i]);
+    rubraview_free(names);
+    rubraview_free(want);
+    rubraview_free(gone);
+    rubraview_free(readers);
+    if (result != RUBRAVIEW_ARCEDIT_OK) discard(job->out_path);
+    return result;
+}
+
+typedef struct cmp_sink { fulta_arc_source_t src; uint64_t at; bool same; uint8_t buf[65536]; } cmp_sink_t;
+
+static fulta_arc_err_t cmp_write(void *ctx, const void *data, size_t n) {
+    cmp_sink_t *c = (cmp_sink_t *)ctx;
+    const uint8_t *p = (const uint8_t *)data;
+    while (n > 0 && c->same) {
+        size_t want = n < sizeof c->buf ? n : sizeof c->buf, got = 0;
+        if (c->src.read_at(c->src.ctx, c->at, c->buf, want, &got) != FULTA_ARC_OK || got != want || proven_sys_mem_cmp(c->buf, p, got) != 0) {
+            c->same = false;
+            break;
+        }
+        c->at += got; p += got; n -= got;
+    }
+    return c->same ? FULTA_ARC_OK : FULTA_ARC_ERR_CHECKSUM;
+}
+
+int rubraview_arcedit_entry_same(const char *archive_path, rubraview_codepage_t codepage, size_t index, const char *path) {
+    if (!archive_path || !path) return -1;
+    cmp_sink_t *c = (cmp_sink_t *)rubraview_alloc_zero(1, sizeof *c);
+    if (!c) return -1;
+    if (fulta_arc_source_file(path, &c->src) != FULTA_ARC_OK) { rubraview_free(c); return -1; }
+    fulta_arc_t *arc = NULL;
+    int same = -1;
+    if (open_at(archive_path, codepage, NULL, NULL, &arc) == FULTA_ARC_OK) {
+        const fulta_arc_entry_t *en = fulta_arc_entry(arc, index);
+        if (en && !(en->flags & FULTA_ARC_ENTRY_DIR)) {
+            if (en->size != c->src.size) same = 0;
+            else {
+                c->same = true;
+                fulta_arc_sink_t sink = { .ctx = c, .write = cmp_write };
+                fulta_arc_err_t err = fulta_arc_extract(arc, index, &sink);
+                same = !c->same ? 0 : err == FULTA_ARC_OK && c->at == c->src.size ? 1 : -1;
+            }
+        }
+        fulta_arc_close(arc);
+    }
+    if (c->src.close) c->src.close(c->src.ctx);
+    rubraview_free(c);
+    return same;
+}
+
 void rubraview_arcedit_job_free(rubraview_arcedit_job_t *job) {
     if (!job) return;
     for (size_t i = 0; i < job->volume_count; ++i) rubraview_free(job->volumes[i]);

@@ -1396,6 +1396,14 @@ and **Delete the file...**, which first asks in a warning of Windows' own —
 No is the answer it starts on — and then moves the file to the recycle
 bin, from where it can be put back.
 
+**Into an archive.** While the open-file screen shows a folder inside a
+ZIP or a 7z, files and folders pasted there (`Ctrl+V`) or dropped on it
+go into that folder of the archive; a name already in it is asked about
+as below. A cut (`Ctrl+X`) moves them in, a copy and a drop copy them.
+`Ctrl+Z` brings the archive back as it was before the last writing. A
+RAR, ALZ or EGG cannot be written as it is: it asks to become a ZIP or a
+7z of its name (the old one goes to the Recycle Bin).
+
 **Names already there.** Paste, Move to, Copy to and a basket's Copy or
 Move here first check every name in the folder. What clashes with nothing
 is copied or moved at once, in the background (the line at the top counts

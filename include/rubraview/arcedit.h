@@ -117,6 +117,26 @@ typedef struct rubraview_arcedit_job {
  */
 rubraview_arcedit_result_t rubraview_arcedit_run(rubraview_arcedit_job_t *job);
 
+/* RV-260 (owner, 2026-11-08: "zip나 7z 같은 압축이 우리가 가능한 압축파일을 루브라뷰 탐색기에서 열고 그 안의 폴더를 보여주고 있을 때, 클립보드 붙이기나 드래그 앤 드롭으로 외부 파일이 들어가면 파일 추가 가능하게 해 주세요."): files from the disk into the archive, each under its full name inside it
+   ('/'-separated: a folder's files keep their places). */
+typedef struct rubraview_arcedit_add {
+    const char *path;   /* the file on the disk */
+    const char *name;   /* its name in the archive */
+} rubraview_arcedit_add_t;
+
+/**
+ * RV-260: the archive written again with `adds` in it, read from the disk as it is written (a large file is never
+ * held whole), and the entries `job->entries` (`entry_count`; NULL for none) taken out first — the ones an add
+ * replaces. A name another entry keeps, or two adds share, is RUBRAVIEW_ARCEDIT_NAME_TAKEN. Converted (`target`),
+ * written and checked as rubraview_arcedit_run is: every entry kept, every add with its size, nothing else.
+ * `job->op`, `name`, `data`, `size`, `entry_index` are not used.
+ */
+rubraview_arcedit_result_t rubraview_arcedit_add_files(rubraview_arcedit_job_t *job, const rubraview_arcedit_add_t *adds, size_t count);
+
+/** RV-260: whether entry `index` holds the same bytes as the file at `path` (its size first, then every byte as it
+    is unpacked): 1 yes, 0 no, -1 it could not be told. */
+int rubraview_arcedit_entry_same(const char *archive_path, rubraview_codepage_t codepage, size_t index, const char *path);
+
 /** Give back what a run allocated (`volumes`). */
 void rubraview_arcedit_job_free(rubraview_arcedit_job_t *job);
 

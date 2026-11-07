@@ -104,6 +104,7 @@
 #include "rubraview/filemanage.h"
 #include "rubraview/heldq.h"
 #include "rubraview/log.h"
+#include "rubraview/fileop.h"
 #include "rubraview/settings.h"
 #include "rubraview/settings_doc.h"
 #include "rubraview/ui_settings.h"
@@ -2514,6 +2515,22 @@ size_t log_pump(app_state_t *app);
 bool filejob_start(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving, int basket, bool from_cut);   /* RV-258 */
 bool filejob_start_viewer(app_state_t *app, proven_u8str_view_t dir, proven_u8str_view_t path, bool moving, int32_t page, proven_u8str_view_t temp_dir);   /* RV-259 */
 bool filejob_busy(void);
+bool filejob_same_recycles_copy(void);
+/* RV-260 (D-312): files into the archive the open-file screen shows */
+typedef struct arcadd_row { size_t index; const char *source, *archive, *name; uint64_t ssize, tsize; int64_t smtime, tmtime; } arcadd_row_t;
+void arcadd_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t n, bool moving);
+void arc_reopen_at(app_state_t *app, proven_u8str_view_t path, size_t page);
+size_t arcadd_rows(arcadd_row_t *out, size_t cap);
+uint32_t arcadd_version(void);
+bool arcadd_busy(void);
+void arcadd_answer(app_state_t *app, size_t index, rubraview_fileop_answer_t answer);
+void arcadd_answer_all(app_state_t *app, rubraview_fileop_answer_t answer);
+void arcadd_poll(app_state_t *app);
+void arcadd_quit(void);
+bool arcadd_asking(void);
+void arcadd_format_answer(app_state_t *app, int which);
+bool arcadd_press(app_state_t *app, double x, double y);
+void draw_arcadd_card(app_state_t *app, double win_w, double win_h, double dpi);
 size_t filejob_pump(app_state_t *app);
 void filejob_shutdown(app_state_t *app);
 void clashwin_show(app_state_t *app);

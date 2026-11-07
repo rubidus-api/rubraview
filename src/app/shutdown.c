@@ -23,6 +23,7 @@ void app_end(app_state_t *app) {
     log_close(app);   /* RV-256 */
     clashwin_close(app);     /* RV-258: the questions window */
     filejob_shutdown(app);   /* RV-258: the worker stopped after its item */
+    arcadd_quit();   /* RV-260: a writing into an archive stopped, the archive as it was */
     help_close(app);
     mini_close(app);
     takeout_end(app);

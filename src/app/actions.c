@@ -1653,6 +1653,11 @@ void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
         else if (key_is(combo, "Escape")) extract_done_answer(app, 2);
         return;
     }
+    if (arcadd_asking()) {   /* RV-260: a ZIP (Enter), a 7z, or leave it (Esc) */
+        if (key_is(combo, "Enter")) arcadd_format_answer(app, 0);
+        else if (key_is(combo, "Escape")) arcadd_format_answer(app, 2);
+        return;
+    }
     if (app->list_del_ask) {   /* RV-256: Y recycles the file; Enter, N and Esc keep it */
         if (key_is(combo, "Y")) list_delete_answer(app, true);
         else if (key_is(combo, "Enter") || key_is(combo, "N") || key_is(combo, "Escape")) list_delete_answer(app, false);

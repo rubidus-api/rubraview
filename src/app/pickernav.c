@@ -692,7 +692,8 @@ void picker_clip_put(app_state_t *app, bool moving) {
 
 void picker_clip_paste(app_state_t *app) {
     proven_u8str_view_t dir = app->picker_dir;
-    if (dir.size == 0 || rubraview_picker_is_places(dir) || rubraview_picker_is_recent(dir) || app->picker_in_book || picker_in_archive(app)) {
+    bool into_archive = picker_in_archive(app);   /* RV-260: into the archive shown (D-312) */
+    if (dir.size == 0 || rubraview_picker_is_places(dir) || rubraview_picker_is_recent(dir) || app->picker_in_book) {
         osd_say(app, TU8("nothing can be pasted here"));
         return;
     }
@@ -708,7 +709,8 @@ void picker_clip_paste(app_state_t *app) {
     const char *at = buf;
     for (size_t i = 0; i < count; ++i, at += proven_cstr_len(at) + 1) sources[i] = proven_u8str_view_from_cstr(at);
     /* RV-258 (D-310): every name checked first, the clashes asked in their window, the rest at once */
-    (void)filejob_start(app, dir, sources, count, moving, -1, moving);
+    if (into_archive) arcadd_paths(app, sources, count, moving);
+    else (void)filejob_start(app, dir, sources, count, moving, -1, moving);
     rubraview_free(buf);
 }
 

@@ -195,6 +195,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (extract_done_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-240 */
             if (playlist_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-255 */
             if (list_del_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-256 */
+            if (arcadd_press(app, event->mouse.x, event->mouse.y)) break;     /* RV-260 */
             if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)) &&
                 rename_box_press(app, event->mouse.x, event->mouse.y)) break;   /* 1.24.0: the box's buttons */
             if (app->picker_open && app->favwin.open && event->mouse.button == RUBRAVIEW_MOUSE_LEFT &&

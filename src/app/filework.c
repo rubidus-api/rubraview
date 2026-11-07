@@ -1051,7 +1051,7 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
    open-file screen alone holds nothing: it is a screen of the window's own (D-304). */
 bool window_taking_input(const app_state_t *app) {
     return app->rename_active || app->extract_done || app->pack_ask || app->playlist_ask || app->arc_ask != ARC_ASK_NONE ||
-           app->confirm_purge || app->list_del_ask || app->tmenu_open || app->chooser.open || app->volpop_typing || app->arc_job != NULL;
+           app->confirm_purge || app->list_del_ask || arcadd_asking() || app->tmenu_open || app->chooser.open || app->volpop_typing || app->arc_job != NULL;
 }
 
 static void heldq_said(app_state_t *app) {
@@ -1179,6 +1179,7 @@ static void handle_drop_paths(app_state_t *app, const proven_u8str_view_t *paths
     rubraview_drop_item_t items[16];
     if (count > 16) count = 16;
     if (count > 0) app_log(app, "drop", paths[0]);   /* RV-256 */
+    if (app->picker_open && picker_in_archive(app)) { arcadd_paths(app, paths, count, false); return; }   /* RV-260: into the archive shown */
     for (size_t i = 0; i < count; ++i) {
         items[i].path = paths[i];
         /* A directory has no extension and does list: asking the

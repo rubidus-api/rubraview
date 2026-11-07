@@ -13,6 +13,7 @@
 #include "rubraview/fileop.h"
 
 enum { FJ_JOBS = 16, FJ_ANSWERS = 1024 };
+#define FJ_ARCADD 0xFFFFFFFFu   /* RV-260: a row of a writing into an archive (arcadd.c), answered on this thread */
 
 typedef struct fj_job {
     rubraview_fileop_t op;
@@ -144,6 +145,13 @@ static bool ensure_worker(void) {
     if (!g.wake) return false;
     g.thread = CreateThread(NULL, 0, worker, NULL, 0, NULL);
     return g.thread != NULL;
+}
+
+bool filejob_same_recycles_copy(void) {
+    AcquireSRWLockShared(&g.lock);
+    bool v = g.same_recycles_copy;
+    ReleaseSRWLockShared(&g.lock);
+    return v;
 }
 
 bool filejob_busy(void) {
@@ -405,14 +413,15 @@ static void cw_press(app_state_t *app, double x, double y) {
             for (size_t i = 0; i < m_nrows; ++i) {
                 rubraview_fileop_answer_t a = rubraview_fileop_answer_of_checks(m_rows[i].keep_coming, m_rows[i].keep_there);
                 if (m_rows[i].kind_differs && a == RUBRAVIEW_FILEOP_ANSWER_OVERWRITE) a = RUBRAVIEW_FILEOP_ANSWER_SKIP;   /* never a file over a folder */
-                answer(m_rows[i].job, m_rows[i].index, false, a);
+                if (m_rows[i].job == FJ_ARCADD) arcadd_answer(app, m_rows[i].index, a);
+                else answer(m_rows[i].job, m_rows[i].index, false, a);
             }
             app_log(app, "clash", PROVEN_LIT("the ticks applied"));
             break;
-        case CW_BTN_OVERWRITE: answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_OVERWRITE); app_log(app, "clash", PROVEN_LIT("overwrite all")); break;
-        case CW_BTN_BOTH:      answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_KEEP_BOTH); app_log(app, "clash", PROVEN_LIT("keep both, all")); break;
-        case CW_BTN_SKIP:      answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_SKIP); app_log(app, "clash", PROVEN_LIT("skip all")); break;
-        case CW_BTN_SAME:      answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_SAME_ONLY); app_log(app, "clash", PROVEN_LIT("only the same ones")); break;
+        case CW_BTN_OVERWRITE: answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_OVERWRITE); arcadd_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_OVERWRITE); app_log(app, "clash", PROVEN_LIT("overwrite all")); break;
+        case CW_BTN_BOTH:      answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_KEEP_BOTH); arcadd_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_KEEP_BOTH); app_log(app, "clash", PROVEN_LIT("keep both, all")); break;
+        case CW_BTN_SKIP:      answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_SKIP); arcadd_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_SKIP); app_log(app, "clash", PROVEN_LIT("skip all")); break;
+        case CW_BTN_SAME:      answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_SAME_ONLY); arcadd_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_SAME_ONLY); app_log(app, "clash", PROVEN_LIT("only the same ones")); break;
         case CW_BTN_RECYCLE:
             AcquireSRWLockExclusive(&g.lock);
             g.same_recycles_copy = !g.same_recycles_copy;
@@ -454,16 +463,35 @@ size_t clash_pump(app_state_t *app) {
 
 /* Once a pass of the main loop: the worker's rows taken over (the ticks kept), new clashes shown, finished jobs
    brought home, a line now and then while it works. */
+static uint32_t m_aa_version;
+
 size_t filejob_pump(app_state_t *app) {
-    if (!g.thread) return 0;
+    if (!g.thread && arcadd_version() == m_aa_version) return 0;
     fj_job_t *ended[FJ_JOBS];
     size_t nended = 0;
     bool changed = false, grew = false;
     size_t total = 0, done = 0;
     AcquireSRWLockExclusive(&g.lock);
-    if (g.version != m_version) {
-        fj_row_t *rows = g.nrows ? (fj_row_t *)rubraview_alloc_zero(g.nrows, sizeof *rows) : NULL;
+    if (g.version != m_version || arcadd_version() != m_aa_version) {
+        size_t na = arcadd_rows(NULL, 0);
+        fj_row_t *rows = g.nrows + na ? (fj_row_t *)rubraview_alloc_zero(g.nrows + na, sizeof *rows) : NULL;
         size_t k = 0;
+        if (rows && na) {   /* RV-260: the names already in an archive being written into */
+            arcadd_row_t *ar = (arcadd_row_t *)rubraview_alloc_zero(na, sizeof *ar);
+            size_t got = ar ? arcadd_rows(ar, na) : 0;
+            for (size_t i = 0; i < got; ++i) {
+                char there[RUBRAVIEW_ARCHIVE_PATH * 2];
+                (void)rubraview_fmt(there, sizeof there, "{}/{}", PROVEN_ARG(cstr(ar[i].archive)), PROVEN_ARG(cstr(ar[i].name)));
+                rows[k] = (fj_row_t){ .job = FJ_ARCADD, .index = ar[i].index, .source = rubraview_strdup(ar[i].source), .target = rubraview_strdup(there),
+                                      .ssize = ar[i].ssize, .tsize = ar[i].tsize, .smtime = ar[i].smtime, .tmtime = ar[i].tmtime,
+                                      .keep_coming = true, .keep_there = true };
+                for (size_t o = 0; o < m_nrows; ++o)
+                    if (m_rows[o].job == FJ_ARCADD && m_rows[o].index == rows[k].index) { rows[k].keep_coming = m_rows[o].keep_coming; rows[k].keep_there = m_rows[o].keep_there; }
+                k++;
+            }
+            rubraview_free(ar);
+        }
+        m_aa_version = arcadd_version();
         for (size_t i = 0; rows && i < g.nrows; ++i) {
             rows[k] = g.rows[i];
             rows[k].source = rubraview_strdup(g.rows[i].source);
