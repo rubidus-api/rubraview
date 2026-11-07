@@ -782,7 +782,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     double action_h = PICKER_ACTION_HEIGHT * dpi;
 
     rubraview_pal_rect_t backdrop = { 0.0, 0.0, win_w, win_h };
-    rubraview_pal_render_fill_rect(app->renderer, backdrop, 0xF0101010u, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, backdrop, 0xFF101010u, 0.0);   /* RV-251: opaque, nothing behind shows */
 
     /* Virtualised grid: only the rows on screen are drawn. */
     rubraview_virtual_range_t visible = rubraview_picker_visible(&app->picker);
@@ -1531,9 +1531,12 @@ void render_frame(app_state_t *app) {
     }
     rubraview_pal_render_begin(app->renderer, COLOR_CANVAS);
 
-    draw_music_backdrop(app, win_w, win_h);
+    if (!app->picker_open) draw_music_backdrop(app, win_w, win_h);
 
-    if (text_active(app)) {
+    if (app->picker_open) {
+        /* RV-251 (owner, 2026-11-07: "파일 열기 모드에서는 배경에 반투명으로 보이지 않게 ... 가장 베이스 레이어 중의 하나로"):
+           the open-file screen is the window's own screen: nothing of the page is drawn under it */
+    } else if (text_active(app)) {
         draw_text_page(app, win_w, win_h);   /* RFC-0005 */
     } else if (page_count(app) == 0 && !app->media && !app->picker_open) {
         draw_logo(app, win_w, win_h);   /* 1.25.0 */
@@ -1577,8 +1580,10 @@ void render_frame(app_state_t *app) {
         }
     }
 
-    draw_music_words(app, win_w, win_h);
-    draw_music_extras(app, win_w, win_h);
+    if (!app->picker_open) {
+        draw_music_words(app, win_w, win_h);
+        draw_music_extras(app, win_w, win_h);
+    }
     {   /* RV-195: under a pinned title bar nothing of the page shows through (a strip scrolled up, a transition);
            a text page keeps its own margin there, in its paper */
         double top = content_top(app);

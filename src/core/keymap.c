@@ -285,6 +285,17 @@ size_t rubraview_keymap_mode_chain(rubraview_key_mode_t mode, bool slideshow_run
     return n;
 }
 
+proven_u8str_view_t rubraview_keymap_resolve_picker(const rubraview_keymap_t *keymap, rubraview_key_combo_t combo) {
+    if (!keymap || !keymap->bindings) return PROVEN_LIT("");
+    proven_u8str_view_t found = find_action_in_context(keymap, PROVEN_LIT(""), combo);
+    if (found.size > 0) return found;
+    found = find_action_in_context(keymap, PROVEN_LIT("file"), combo);
+    if (proven_u8str_view_eq(found, PROVEN_LIT("open_picker")) || proven_u8str_view_eq(found, PROVEN_LIT("open_folder")) ||
+        proven_u8str_view_eq(found, PROVEN_LIT("open_recent_list")))
+        return found;
+    return PROVEN_LIT("");
+}
+
 proven_u8str_view_t rubraview_keymap_resolve(const rubraview_keymap_t *keymap, rubraview_key_mode_t mode, bool slideshow_running,
                                              rubraview_key_combo_t combo) {
     proven_u8str_view_t chain[8];

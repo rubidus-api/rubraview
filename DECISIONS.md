@@ -3677,3 +3677,10 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: the owner: "파일 탐색기에서 파일을 열면 항상 새 창에서 루브라뷰가 관련 파일을 열게 해 주세요." Asked, the owner chose "기본값을 새 창으로" (keep the setting, off as it comes, settings saved on turned to a new window once) and kept the right-click actions as they are.
 - Decision: the setting is `general.reuse_window` ("Reuse the open window"), off as it comes; it replaces `general.single_instance` (on since D-100), which is no longer read, so a file that saved it on opens new windows as well. Explorer's right-click Rubraview actions still go to the open window; `--new-instance` and "Open in a new window" make a new one.
 - Consequences: each double-click in Explorer is a window; who wants one window turns Reuse the open window on in General. The old key stays in old files unread.
+
+## D-304: The Open-File Screen Is The Window's Own Screen (RV-251)
+
+- Date: 2026-11-07
+- Context: the owner: "파일 열기 모드에서는 배경에 반투명으로 보이지 않게 해줘요. 무엇보다 근본적으로, 파일 열기 모드는 다른 윈도우 위에 깔린게 아니라 윈도에 직접적으로 들어가 있는 메인 윈도우 혹은 가장 베이스 레이어 중의 하나로 취급되게 해 줘요." The screen was drawn over the page at 94 % and a key it did not take went on to the page's own (PgDn turned the page, Delete recycled the picture behind it).
+- Decision: while it is open the page is not drawn and the ground is opaque; a key it does not take resolves only in the common context and, of the file context, open_picker, open_folder and open_recent_list (`rubraview_keymap_resolve_picker`). A film or a song behind keeps playing; Esc still goes back to it.
+- Consequences: the file keys (Delete, F2/Ctrl+M, copy and move to folders ...) do nothing there until the screen gets its own; its right-click menu and buttons do that work.

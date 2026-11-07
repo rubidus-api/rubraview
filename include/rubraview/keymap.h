@@ -135,6 +135,11 @@ const rubraview_key_context_info_t *rubraview_keymap_context_info(proven_u8str_v
  */
 size_t rubraview_keymap_mode_chain(rubraview_key_mode_t mode, bool slideshow_running, proven_u8str_view_t *out, size_t cap);
 
+/** RV-251: the action `combo` means on the open-file screen, the window's own screen: the common context's, or one of
+    the file context's ways to open (open_picker, open_folder, open_recent_list); empty for anything else, so nothing
+    acts on the picture, film or file behind it. */
+proven_u8str_view_t rubraview_keymap_resolve_picker(const rubraview_keymap_t *keymap, rubraview_key_combo_t combo);
+
 /** The action `combo` means in `mode`: the first context of its chain that binds it; empty for none. */
 proven_u8str_view_t rubraview_keymap_resolve(const rubraview_keymap_t *keymap, rubraview_key_mode_t mode, bool slideshow_running,
                                              rubraview_key_combo_t combo);
