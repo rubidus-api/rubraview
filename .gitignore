@@ -19,6 +19,11 @@
 !/docs/
 /docs/*
 !/docs/manual/
+# RV-242: the web site GitHub Pages serves from main:/docs
+!/docs/index.html
+!/docs/en/
+!/docs/ko/
+!/docs/assets/
 !/scripts/
 /scripts/*
 !/scripts/package.sh
