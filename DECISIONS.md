@@ -3515,3 +3515,41 @@ Do not store credentials, private infrastructure details, personal data, private
   still `?` alone, as RV-211 left it, takes `F1` beside it at load (`rubraview_default_keymap_retired` holds that
   binding too, matched by action); one the reader changed stays.
 - Consequences: T303 allows F1 for the help only; `test_keymap` holds the move; T363 on the VM.
+
+## 2026-11-07: D-288 Where the file goes, from every kind of file's menu and the Toolbar (RV-232)
+
+- Status: Accepted (owner 2026-11-07: "동영상 모드 그리고 다른 파일 열때 해당 파일을 어디로 보낼지 결정하는 기능을 각종 메뉴나 툴바 등에서 찾을 수가 없어요."). RV-232.
+- Decision: the right-click list of a picture had the file's group (rename, copy and move to the folder set or
+  another, Classify, Show in Explorer, Delete); every other kind's had only Show in Explorer, and no Toolbar had any
+  of it. Now every kind's list holds the group (an archive's page: Rename, the two copies, Show in Explorer, Delete —
+  a page is copied out, not moved or set aside), so the title bar's ☰ has it too; and a Send tile (`send_file`,
+  E724) after Info in every profile but the slide show's lists the five ways over itself, naming the folders set
+  ("choose it" when none is), each row running the action it names. One tile rather than five keeps the Toolbar's
+  size; the wheel over it does nothing (a wheel step would copy or move). Measured on the VM: a playing film and a
+  playing song are moved as they play (Media Foundation shares the file for deleting), so nothing is closed first.
+- Consequences: T364; `test_boxes_doc` holds the group in every kind and the tile in every profile.
+
+## 2026-11-07: D-289 Menu words a reader knows; no Settings tile (RV-233)
+
+- Status: Accepted (owner 2026-11-07: "메뉴의 동영상에서 꺼내기는 뭔지 어려우니 자막 추출이 더 적당해 보여요. 오디오트랙 근처의 느리게 빠르게도 마찬가지. 툴바의 설정 버튼은 메뉴의 설정이 있으니 없애도 됩니다."). RV-233.
+- Decision: a film's right click says Extract subtitles (was Take out of film), Play slower, Play faster and Normal
+  play speed (were Slower, Faster, Normal speed). The Settings tile (back on the Toolbar since 2026-10-18) leaves
+  every profile: the title bar's gear and ☰ have Settings.
+- Consequences: T364.
+
+## 2026-11-07: D-290 The title bar: maximise on Shift+Enter, the name only shown, its icons; always on top to the Toolbar (RV-234)
+
+- Status: Accepted (owner 2026-11-07: "타이틀바 우상단의 최대화 또는 창모드에 단축키 지정해 주세요"; "크기조절 아이콘은 대각선으로
+  양방향 화살표가 있는, 윈도에서 창 드래그할 때 쓰는 그 아이콘이 더 낫겠어요"; "타이틀바의 전체 창 모드 아이콘이야말로 큰 사각형
+  테두리 안에 왼쪽 아래에 작은 꽉찬 사각형을 그리는 아이콘을 쓰도록 하죠"; "타이틀바의 파일명을 눌러도 파일 관리자 모드로 들어가지
+  않도록 합시다"; "항상 위 아이콘을 툴바의 설정 아이콘 있는 그룹에 보내요", asked and answered: out of the title bar). RV-234.
+- Decision: `toggle_maximize` on `Shift+Enter` (beside `Alt+Enter`'s full screen; free in every context) does what
+  the □ button does, and the button's tooltip names the key. The title bar's name is only drawn: a press there is the
+  caption's (moves the window, a double press maximises), no longer the open-file screen (`O`, `Ctrl+O` and ☰ open
+  it). Full screen takes E744 (a frame with a filled corner, the glyph resize had) and resize E740 (arrows out to two
+  corners: the diagonal two-headed arrow; U+2921 was tried and Segoe MDL2 Assets has no glyph for it), wherever the
+  resize icon is (the title bar, the Toolbar's grip, the small boxes, the lists). Always on top leaves the title
+  bar's row for the Toolbar's last group (On top, E81E, lit while on), where Settings stood.
+- Consequences: `test_ui_chrome`; T364. The owner also said the title bar's icons show no tooltip after a rest: on
+  the VM 1.39.91 shows one 0.6 s after the pointer stops on each (gear, always on top, resize, maximise), so nothing
+  was changed for it; asked when it does not.

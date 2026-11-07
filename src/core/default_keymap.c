@@ -19,6 +19,8 @@ const char *rubraview_default_keymap(void) {
     "toggle_toolbox_detach = \"Ctrl+T\"\n"
     /* Owner, 2026-09-15: always on top, one chord away as well as in the menu and the titlebar. */
     "toggle_always_on_top = \"Ctrl+Shift+T\"\n"
+    /* RV-234 (owner, 2026-11-07: "타이틀바 우상단의 최대화 또는 창모드에 단축키 지정해 주세요"): beside Alt+Enter's full screen. */
+    "toggle_maximize = \"Shift+Enter\"\n"
     /* Owner, 2026-09-29: I is the file's information; the status line moves to Shift+I. */
     "toggle_osd = \"Shift+I\"\n"
     /* Owner, 2026-10-16: the viewer once more, in a window of its own. */

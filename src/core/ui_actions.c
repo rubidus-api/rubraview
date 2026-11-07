@@ -9,7 +9,7 @@
 
 /* Actions that work on the picture on screen and do nothing without one. */
 static const char *const NEEDS_PAGE[] = {
-    "rename_file", "delete_file", "reveal_in_explorer", "print", "copy_to_folder", "move_to_folder", "toggle_file_list",
+    "rename_file", "delete_file", "reveal_in_explorer", "print", "copy_to_folder", "move_to_folder", "send_file", "toggle_file_list",
     "layout_single", "layout_dual", "layout_dual_rtl", "layout_book", "layout_book_rtl", "layout_webtoon",
     "layout_comic", "layout_comic_rtl", "toggle_layout",
     "toggle_spread_detect",
@@ -205,7 +205,7 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
         { "text_reload", 0xE72C },           /* Refresh: the text file read again (1.25.0) */
         { "quick_export", 0xE74E },          /* Save */
         { "toggle_playlist", 0xE8FD },       /* BulletedList */
-        { "toggle_always_on_top", 0xE718 },  /* Pin */
+        { "toggle_always_on_top", 0xE81E },  /* layers, as the title bar had it (RV-234) */
         { "toggle_titlebar_pin", 0xE840 },   /* Pinned: the title bar kept shown (1.20.0) */
         { "toggle_wheel_strip", 0xE8B9 },    /* Pictures: the wheel's thumbnails (1.22.0) */
         { "toggle_osd", 0xE7C3 },            /* Page: the information bar (1.20.0) */
@@ -216,6 +216,8 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
         { "copy_to_folder", 0xE8C8 },        /* Copy */
         { "toggle_classify", 0xE8EC },       /* Tag */
         { "move_to_folder", 0xE8DE },        /* MoveToFolder */
+        { "send_file", 0xE724 },             /* Send: where the file goes, a list (RV-232) */
+        { "toggle_maximize", 0xE922 },       /* Maximize (RV-234) */
         { "hide_boxes", RUBRAVIEW_ICON_HIDE },   /* RV-203: the Toolbar's last tile, as the title bar's H */
     };
     if (!f) return 0;

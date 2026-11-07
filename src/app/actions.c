@@ -431,7 +431,7 @@ bool edit_denies(proven_u8str_view_t action) {
         "toggle_slideshow", "interval_cycle", "open_picker", "open_folder", "up_to_folder", "open_batch", "print",
         "rename_file", "delete_file", "purge_file", "copy_to_folder", "move_to_folder", "copy_to_other_folder",
         "move_to_other_folder", "convert_archive", "toggle_miniplayer", "toggle_subtitle_window", "toggle_subtitles",
-        "next_audio_track", "next_subtitle_track", "toggle_classify",
+        "next_audio_track", "next_subtitle_track", "toggle_classify", "send_file",
     };
     for (size_t i = 0; i < sizeof(NO) / sizeof(NO[0]); ++i) if (proven_u8str_view_eq(action, proven_u8str_view_from_cstr(NO[i]))) return true;
     static const char *const PREFIX[] = { "media_", "anim_", "subpage_", "text_", "zoom_strip" };
@@ -804,6 +804,11 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         takeout_begin(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_classify"))) {
         classify_toggle(app);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("send_file"))) {
+        /* RV-232: a key or a menu asks where, over the picture; the Toolbar's tile lists the same over itself */
+        if (current_page_index(app) >= 0) chooser_open_tile(app, action, chooser_main_x(app), chooser_main_y(app), chooser_main_y(app));
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_maximize"))) {
+        rubraview_pal_window_toggle_maximize(app->window);   /* RV-234: the title bar's □ on a key */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("copy_to_folder"))) {
         filing_put(app, false);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("move_to_folder"))) {

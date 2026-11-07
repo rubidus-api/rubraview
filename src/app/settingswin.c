@@ -2832,6 +2832,22 @@ bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, d
             chooser_word(c, (double)i, "{}", PROVEN_ARG(rubraview_bytes_view(text.ptr, (int)text.size)));
         }
         if (c->count < 2) { osd_say(app, TU8("this file has only one sound track")); c->count = 0; return true; }
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("send_file"))) {
+        /* RV-232 (owner, 2026-11-07): where the file on screen goes, in every kind of file; the folders set are named */
+        title = T("Send");
+        bool page_of_archive = app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER;
+        proven_u8str_view_t cd = app->curation.copy_dir, md = app->curation.move_dir;
+        if (cd.size > 0) chooser_word(c, 0, T("Copy to {}"), PROVEN_ARG(rubraview_bytes_view(cd.ptr, (int)(cd.size < 120 ? cd.size : 120))));
+        else chooser_word(c, 0, "{}", PROVEN_ARG(T("Copy to folder (choose it)")));
+        if (!page_of_archive) {
+            if (md.size > 0) chooser_word(c, 1, T("Move to {}"), PROVEN_ARG(rubraview_bytes_view(md.ptr, (int)(md.size < 120 ? md.size : 120))));
+            else chooser_word(c, 1, "{}", PROVEN_ARG(T("Move to folder (choose it)")));
+        }
+        chooser_word(c, 2, "{}", PROVEN_ARG(T("Copy to another folder...")));
+        if (!page_of_archive) {
+            chooser_word(c, 3, "{}", PROVEN_ARG(T("Move to another folder...")));
+            chooser_word(c, 4, "{}", PROVEN_ARG(T("Classify...")));
+        }
     } else {
         return false;
     }
@@ -2888,12 +2904,17 @@ static void chooser_pick_tile(app_state_t *app, size_t i) {
         text_encoding_set(app, (rubraview_textenc_t)(int)v);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_audio_track"))) {
         audio_track_set(app, (int32_t)v);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("send_file"))) {
+        static const char *const SENT[] = { "copy_to_folder", "move_to_folder", "copy_to_other_folder", "move_to_other_folder", "toggle_classify" };
+        int k = (int)v;
+        if (k >= 0 && k < 5) handle_action(app, cstr(SENT[k]));
     }
 }
 
 /* 1.25.0: the wheel over a one-of-many tile: the choice before or after the one in force, round. */
 bool chooser_wheel_tile(app_state_t *app, proven_u8str_view_t action, double notches) {
-    if (proven_u8str_view_eq(action, PROVEN_LIT("next_audio_track")) || notches == 0.0) return false;   /* tracks: the list */
+    if (proven_u8str_view_eq(action, PROVEN_LIT("next_audio_track")) || proven_u8str_view_eq(action, PROVEN_LIT("send_file")) ||
+        notches == 0.0) return false;   /* tracks: the list; Send: never by the wheel (RV-232) */
     bool was_open = app->chooser.open;
     chooser_t keep = app->chooser;
     if (!chooser_open_tile(app, action, 0.0, 0.0, 0.0)) { app->chooser = keep; return false; }

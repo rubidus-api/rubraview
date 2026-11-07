@@ -131,9 +131,7 @@ bool titlebar_click(app_state_t *app, double x, double y) {
         case RUBRAVIEW_TITLEBAR_SETTINGS:   handle_action(app, PROVEN_LIT("open_settings")); return true;   /* 1.24.0 */
         case RUBRAVIEW_TITLEBAR_BARPIN:     handle_action(app, PROVEN_LIT("toggle_titlebar_pin")); return true;   /* 1.25.0 */
         case RUBRAVIEW_TITLEBAR_MENU:       app->tmenu_open = !app->tmenu_open; app->tmenu_focus = -1; return true;   /* 1.25.0 */
-        case RUBRAVIEW_TITLEBAR_NAME:       /* 1.25.0: the name opens the open-file screen (inside a book being read) */
-            if (!app->picker_open) handle_action(app, PROVEN_LIT("open_picker"));
-            return true;
+        case RUBRAVIEW_TITLEBAR_NAME:       /* RV-234: never hit; the name is the caption's */
         case RUBRAVIEW_TITLEBAR_OPEN:
         case RUBRAVIEW_TITLEBAR_SNAP_BOXES:
             (void)metrics;

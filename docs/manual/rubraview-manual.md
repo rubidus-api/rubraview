@@ -363,10 +363,14 @@ Settings. What the Toolbar on screen has a button for is left out of it
 the favourites and Batch, a picture's, a book's and an animation's
 Print... too. A book or an archive has the next and previous archive and
 the layouts; a film has play and stop, the subtitles (taking them out of
-the film too), the sound track, slower, faster and normal speed, copying
-and saving the frame and full screen; a song has
-the previous and next file, what the end does, the equaliser and the
-mini player. A row that cannot act now is grey. The arrow keys and
+the film too: Extract subtitles), the sound track, Play slower, Play
+faster and Normal play speed, copying and saving the frame and full
+screen; a song has the previous and next file, what the end does, the
+equaliser and the mini player. Every kind of file's list also has the
+file's own group: Rename, Copy to folder, Move to folder, Copy to another
+folder..., Move to another folder..., Classify..., Show in Explorer and
+Delete (a page inside an archive: Rename, the copies, Show in Explorer
+and Delete). A row that cannot act now is grey. The arrow keys and
 `Enter` choose, `Esc` or a click elsewhere closes it. The mouse's back and
 forward buttons turn the page, a middle click goes to real size and back,
 the wheel turns the page on a picture that fits the window (away from
@@ -1042,7 +1046,7 @@ While it does:
   goes on and leaves them. A SAMI caption has no end
   of its own: moved, it takes along the empty line that closes it, and one
   closed by the next caption only begins elsewhere. **Take out**, at the
-  window's top right (or Take out of film in the right click), writes the text
+  window's top right (or Extract subtitles in the right click), writes the text
   subtitles a Matroska film (`.mkv`) or an MP4 (its 3GPP text subtitles,
   as SubRip) holds inside as files beside it —
   `film.kor.srt`, `film.eng.ass`, named by their language, a SubStation
@@ -1150,13 +1154,15 @@ files, Batch, Print, Playlist, Settings and Help, and under them everything
 a right click on the picture, the film or the text would offer (also what
 the Toolbar has), as two columns of wide buttons. The arrow keys move
 between them and `Enter` presses one. After it comes the
-name of the file on screen (the folder's, in the open-file screen); a
-click on it opens the open-file screen. At the right are **Set**
+name of the file on screen (the folder's, in the open-file screen), only
+shown: pressed and dragged, it moves the window as the rest of the bar
+does. At the right are **Set**
 (Settings, `Ctrl+,`), **P** (the title bar stays shown, and the picture or
 the film is shown below it instead of under it), **H** (the title
-bar and the Floating Widget hidden until the picture is clicked), **T**
-(always on top), **F** (full screen), **_**, **[]** (maximise), **R**
-(drag it to size the window) and **X**. What is on is lit and bold;
+bar and the Floating Widget hidden until the picture is clicked), **R**
+(a diagonal two-headed arrow: drag it to size the window), **F** (full
+screen, a frame with a small filled square in its corner), **_**, **[]**
+(maximise, or back to a window: `Shift+Enter`) and **X**. What is on is lit and bold;
 resting the pointer on a button says what it does.
 
 A button that chooses one of several — zoom, fit, layout, speed, what the
@@ -1273,9 +1279,15 @@ turning, the layout and the slide show, opening, the lists and the
 information, editing and exporting; for a film, playing, 5 s back and on
 (held, those two offer steps up to 5 min), the sound and the subtitles.
 Ten on and back, zooming by steps, the single fits, the filmstrip and
-flipping are on keys (the help, `?`, lists them); renaming, copying and
-moving are in the right click; always on top and full screen are the title
-bar's, and Settings is its last group's. Its buttons come in the same
+flipping are on keys (the help, `?`, lists them); renaming is in the right
+click. **Send** (after Info) lists where the file on screen goes: Copy to
+the folder set for copies, Move to the one set for moves (or "choose it"
+when none is set), Copy to another folder..., Move to another folder...
+and Classify... — a page inside an archive only the copies; a film or a
+song playing is moved as it plays and the next file opens. **On top**
+(always on top) is in the last group, with the information bar and Hide;
+full screen is the title bar's, and Settings the title bar's and its
+menu's. Its buttons come in the same
 order of groups for every kind of page: going and playing, how it plays,
 sound, subtitles, view, turning, the file. Resting the pointer on a box's anchor, pin, grip
 or seek bar says what a click or a drag does there, and `Esc` folds an
@@ -1915,6 +1927,7 @@ listed under a later heading only means that while that is on screen.
 | `Shift+T` | Pin the Toolbar open |
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |
 | `Ctrl+Shift+T` | Always on top of other windows |
+| `Shift+Enter` | Maximise the window, or back to a window |
 | `Shift+I` | Information bar |
 | `Ctrl+N` | A new window: the viewer once more, nothing open |
 | `Ctrl+,` | Settings |
@@ -2100,6 +2113,7 @@ listed under a later heading only means that while that is on screen.
 | Toolbar `Centre` | The picture's middle on the window's, its size as it is (a double click does it too) |
 | Toolbar `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
 | Toolbar `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
+| Toolbar `Send` | Send: where the file on screen goes, in a list (copy or move to the folder set or another, or Classify) |
 | Toolbar `Hide` | Hide the title bar and the Floating Widget until the picture is clicked |
 | Toolbar `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
 | Toolbar `Wheel strip` | Thumbnails while the wheel turns pages |
@@ -2140,9 +2154,9 @@ listed under a later heading only means that while that is on screen.
 | Right click `First page alone` | Two pages: the first page alone, as a book's cover |
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
-| Right click `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
-| Right click `Slower` | Play slower |
-| Right click `Faster` | Play faster |
+| Right click `Extract subtitles` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
+| Right click `Play slower` | Play slower |
+| Right click `Play faster` | Play faster |
 | Title bar ☰ `Pin the title bar` | Keep the title bar shown |
 | Title bar ☰ `Align the Floating Widget` | The Floating Widget back in the bottom-right corner, over the information bar when it is shown |
 

@@ -197,9 +197,6 @@ void draw_titlebar(app_state_t *app, double win_w) {
     else app->titlebar.name_width = 0.0;
     rubraview_rect_t nr = rubraview_titlebar_button_rect(&app->titlebar, RUBRAVIEW_TITLEBAR_NAME, win_w);
     if (nr.width > 48.0 * dpi) {   /* RV-229: narrower, its letters stood one under another */
-        rubraview_pal_rect_t nb = { nr.x, nr.y + 4.0 * dpi, nr.width, nr.height - 8.0 * dpi };
-        if (rubraview_rect_contains(nr, app->pointer_x, app->pointer_y) && !app->picker_open)
-            rubraview_pal_render_fill_rect(app->renderer, nb, COLOR_TILE_FILL, 3.0 * dpi);
         char fit[1024];
         /* measured to fit: whole (the estimate files_fit_text makes would cut it); cut only when the row is short */
         proven_u8str_view_t shown = nr.width + 0.5 >= name_w + 20.0 * dpi ? name : files_fit_text(fit, sizeof(fit), name, nr.width - 20.0 * dpi, font);
@@ -208,20 +205,20 @@ void draw_titlebar(app_state_t *app, double win_w) {
     }
     place_font_end(app, before_font);
 
-    /* The right-hand row: Set, P, H, T, R, F, _, [], X (RV-218: Windows' three at the end); what is on is lit and bold (owner, 2026-10-20) */
+    /* The right-hand row: Set, P, H, R, F, _, [], X (RV-218: Windows' three at the end; RV-234: always on top the
+       Toolbar's); what is on is lit and bold (owner, 2026-10-20) */
     static const rubraview_titlebar_button_t BUTTONS[] = {
-        RUBRAVIEW_TITLEBAR_SETTINGS, RUBRAVIEW_TITLEBAR_BARPIN, RUBRAVIEW_TITLEBAR_HIDE, RUBRAVIEW_TITLEBAR_PIN,
+        RUBRAVIEW_TITLEBAR_SETTINGS, RUBRAVIEW_TITLEBAR_BARPIN, RUBRAVIEW_TITLEBAR_HIDE,
         RUBRAVIEW_TITLEBAR_FULLSCREEN, RUBRAVIEW_TITLEBAR_MINIMIZE, RUBRAVIEW_TITLEBAR_MAXIMIZE, RUBRAVIEW_TITLEBAR_RESIZE,
         RUBRAVIEW_TITLEBAR_CLOSE,
     };
-    const char *const GLYPHS[] = { T("Set"), "P", "H", "T", "F", "_", "[]", "R", "X" };   /* where the icons are missing */
-    const uint32_t ICONS[] = { RUBRAVIEW_ICON_SETTINGS, RUBRAVIEW_ICON_PIN, RUBRAVIEW_ICON_HIDE, RUBRAVIEW_ICON_ON_TOP, RUBRAVIEW_ICON_FULLSCREEN,
+    const char *const GLYPHS[] = { T("Set"), "P", "H", "F", "_", "[]", "R", "X" };   /* where the icons are missing */
+    const uint32_t ICONS[] = { RUBRAVIEW_ICON_SETTINGS, RUBRAVIEW_ICON_PIN, RUBRAVIEW_ICON_HIDE, RUBRAVIEW_ICON_WHOLE_SCREEN,
                                RUBRAVIEW_ICON_MINIMIZE, rubraview_pal_window_is_maximized(app->window) ? RUBRAVIEW_ICON_RESTORE : RUBRAVIEW_ICON_MAXIMIZE,
                                RUBRAVIEW_ICON_RESIZE, RUBRAVIEW_ICON_CLOSE };   /* RV-181 */
-    bool on[9] = { app->settings_open,
+    bool on[8] = { app->settings_open,
                    rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5,
                    app->chrome_hidden,
-                   rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("always_on_top")) > 0.5,
                    rubraview_pal_window_is_fullscreen(app->window),
                    false,
                    rubraview_pal_window_is_maximized(app->window),

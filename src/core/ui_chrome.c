@@ -196,7 +196,7 @@ static const rubraview_titlebar_button_t BUTTON_ORDER[] = {
     RUBRAVIEW_TITLEBAR_SETTINGS,
     RUBRAVIEW_TITLEBAR_BARPIN,
     RUBRAVIEW_TITLEBAR_HIDE,
-    RUBRAVIEW_TITLEBAR_PIN,
+    /* RV-234 (owner, 2026-11-07: "항상 위 아이콘을 툴바의 설정 아이콘 있는 그룹에 보내요"): always on top is the Toolbar's now */
     RUBRAVIEW_TITLEBAR_RESIZE,
     RUBRAVIEW_TITLEBAR_FULLSCREEN,
     RUBRAVIEW_TITLEBAR_MINIMIZE,
@@ -245,9 +245,8 @@ rubraview_titlebar_button_t rubraview_titlebar_hit(const rubraview_titlebar_t *b
     if (rubraview_rect_contains(rubraview_titlebar_button_rect(bar, RUBRAVIEW_TITLEBAR_MENU, window_width), x, y)) {
         return RUBRAVIEW_TITLEBAR_MENU;
     }
-    if (rubraview_rect_contains(rubraview_titlebar_button_rect(bar, RUBRAVIEW_TITLEBAR_NAME, window_width), x, y)) {
-        return RUBRAVIEW_TITLEBAR_NAME;
-    }
+    /* RV-234 (owner, 2026-11-07: "타이틀바의 파일명을 눌러도 파일 관리자 모드로 들어가지 않도록"): the name is only
+       shown; pressed, it moves the window as the empty bar does */
 
     for (int32_t i = 0; i < BUTTON_COUNT; ++i) {
         rubraview_rect_t r = rubraview_titlebar_button_rect(bar, BUTTON_ORDER[i], window_width);

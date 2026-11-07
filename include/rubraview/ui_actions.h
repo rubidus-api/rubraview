@@ -124,10 +124,13 @@ void rubraview_confirm_clear(rubraview_confirm_t *confirm);
 #define RUBRAVIEW_ICON_VIEW       0xE890u   /* an eye: a password shown (D-262) */
 #define RUBRAVIEW_ICON_ON_TOP     0xE81Eu   /* layers: always on top */
 #define RUBRAVIEW_ICON_FULLSCREEN 0xE740u   /* arrows out to two corners */
+/* RV-234 (owner, 2026-11-07: "큰 사각형 테두리 안에 왼쪽 아래에 작은 꽉찬 사각형"): the title bar's full screen, the
+   glyph the resize button had */
+#define RUBRAVIEW_ICON_WHOLE_SCREEN 0xE744u
 #define RUBRAVIEW_ICON_MINIMIZE   0xE921u
 #define RUBRAVIEW_ICON_MAXIMIZE   0xE922u
 #define RUBRAVIEW_ICON_RESTORE    0xE923u
-#define RUBRAVIEW_ICON_RESIZE     0xE744u   /* a square with its corner block: sizes it */
+#define RUBRAVIEW_ICON_RESIZE     0xE740u   /* RV-234 (owner, 2026-11-07): arrows out to two corners, the diagonal two-headed arrow a window is sized with */
 #define RUBRAVIEW_ICON_CLOSE      0xE8BBu
 #define RUBRAVIEW_ICON_TOOLBAR    0xE80Au   /* a grid of buttons: the Floating Widget's F */
 #define RUBRAVIEW_ICON_MOVE       0xE7C2u   /* arrows four ways: T (its drag goes through files and folders), the box moved */

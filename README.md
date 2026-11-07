@@ -60,6 +60,7 @@ ships with, so it cannot drift from them.
 | `Shift+T` | Pin the Toolbar open |
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |
 | `Ctrl+Shift+T` | Always on top of other windows |
+| `Shift+Enter` | Maximise the window, or back to a window |
 | `Shift+I` | Information bar |
 | `Ctrl+N` | A new window: the viewer once more, nothing open |
 | `Ctrl+,` | Settings |
@@ -245,6 +246,7 @@ ships with, so it cannot drift from them.
 | Toolbar `Centre` | The picture's middle on the window's, its size as it is (a double click does it too) |
 | Toolbar `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
 | Toolbar `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
+| Toolbar `Send` | Send: where the file on screen goes, in a list (copy or move to the folder set or another, or Classify) |
 | Toolbar `Hide` | Hide the title bar and the Floating Widget until the picture is clicked |
 | Toolbar `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
 | Toolbar `Wheel strip` | Thumbnails while the wheel turns pages |
@@ -285,9 +287,9 @@ ships with, so it cannot drift from them.
 | Right click `First page alone` | Two pages: the first page alone, as a book's cover |
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
-| Right click `Take out of film` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
-| Right click `Slower` | Play slower |
-| Right click `Faster` | Play faster |
+| Right click `Extract subtitles` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
+| Right click `Play slower` | Play slower |
+| Right click `Play faster` | Play faster |
 | Title bar ☰ `Pin the title bar` | Keep the title bar shown |
 | Title bar ☰ `Align the Floating Widget` | The Floating Widget back in the bottom-right corner, over the information bar when it is shown |
 
