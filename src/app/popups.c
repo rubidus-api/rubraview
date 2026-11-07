@@ -536,6 +536,7 @@ double name_scale(const app_state_t *app) {
 
 /* What Shape (or a sort by length) waits for, under the button pressed: how many of how many, a bar, Esc. */
 static void draw_pack_ask(app_state_t *app, double win_w, double win_h, double dpi);   /* D-267, below */
+static void draw_extract_done(app_state_t *app, double win_w, double win_h, double dpi);   /* RV-240, below */
 
 void draw_reading(app_state_t *app, double win_w, double win_h, double dpi) {
     size_t done = 0, count = 0;
@@ -568,6 +569,7 @@ void draw_reading(app_state_t *app, double win_w, double win_h, double dpi) {
 void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi) {
     draw_reading(app, win_w, win_h, chrome_dpi);
     draw_pack_ask(app, win_w, win_h, chrome_dpi);   /* D-267 */
+    draw_extract_done(app, win_w, win_h, chrome_dpi);   /* RV-240 */
     if (app->notice_seconds > 0.0 && app->notice_length > 0) {
         double k = name_scale(app);   /* 1.25.0 */
         int before = place_font_begin(app, PF_NAME, NULL);
@@ -752,6 +754,66 @@ static void draw_pack_ask(app_state_t *app, double win_w, double win_h, double d
                                    13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
 }
 
+/* RV-240: an extraction done, the card asks what next — the folder here, in Explorer, or nothing (the RV-238 card's look) */
+static void draw_extract_done(app_state_t *app, double win_w, double win_h, double dpi) {
+    if (!app->extract_done) return;
+    double cw = fmin(600.0 * dpi, win_w - 16.0 * dpi), ch = 196.0 * dpi, pad = 20.0 * dpi;
+    rubraview_pal_rect_t card = { (win_w - cw) * 0.5, (win_h - ch) * 0.45, cw, ch };
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, 0.0, win_w, win_h }, 0x90000000u, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ card.x + 3.0 * dpi, card.y + 5.0 * dpi, cw, ch }, 0x60000000u, 8.0 * dpi);
+    rubraview_pal_render_fill_rect(app->renderer, card, 0xFA242424u, 8.0 * dpi);
+    rubraview_pal_render_stroke_rect(app->renderer, card, COLOR_BOX_BORDER, 1.0 * dpi, 8.0 * dpi);
+    rubraview_pal_rect_t tr = { card.x + pad, card.y + pad - 4.0 * dpi, cw - 2.0 * pad, 30.0 * dpi };
+    proven_u8str_view_t title = TU8("Extracted");
+    rubraview_pal_render_draw_text(app->renderer, title, tr, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    rubraview_pal_render_draw_text(app->renderer, title, (rubraview_pal_rect_t){ tr.x + 0.6 * dpi, tr.y, tr.width, tr.height }, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    rubraview_pal_render_draw_text(app->renderer, cstr(app->extract_done_line), (rubraview_pal_rect_t){ tr.x, tr.y + 30.0 * dpi, tr.width, 22.0 * dpi },
+                                   14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    char fit[1200];
+    proven_u8str_view_t path = files_fit_text(fit, sizeof fit, cstr(app->extract_done_path), tr.width, 13.0 * dpi);
+    rubraview_pal_render_draw_text(app->renderer, path, (rubraview_pal_rect_t){ tr.x, tr.y + 54.0 * dpi, tr.width, 22.0 * dpi },
+                                   13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    const char *words[3] = { T("Open it here"), T("Show in Explorer"), T("Close") };
+    double bh = 38.0 * dpi, gap = 10.0 * dpi, bw[3], total = 0.0;
+    for (int i = 0; i < 3; ++i) {
+        double tw = 0.0;
+        (void)rubraview_pal_render_measure_text(app->renderer, cstr(words[i]), 14.0 * dpi, &tw);
+        bw[i] = fmax(104.0 * dpi, tw + 36.0 * dpi);
+        total += bw[i] + (i ? gap : 0.0);
+    }
+    double x = card.x + cw - pad - total, y = card.y + ch - pad - bh;
+    for (int i = 0; i < 3; ++i) {
+        rubraview_pal_rect_t b = { x, y, bw[i], bh };
+        app->extract_done_btn[i] = b;
+        bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
+        rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? COLOR_TILE_CURRENT : over ? 0x50FFFFFFu : COLOR_TILE_FILL, 5.0 * dpi);
+        if (i == 0 && over) rubraview_pal_render_fill_rect(app->renderer, b, 0x30FFFFFFu, 5.0 * dpi);
+        if (i > 0) rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 5.0 * dpi);
+        rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        x += bw[i] + gap;
+    }
+}
+
+void extract_done_answer(app_state_t *app, int which) {
+    if (!app->extract_done) return;
+    app->extract_done = false;
+    proven_u8str_view_t path = app_keep(app, cstr(app->extract_done_path));
+    if (which == 0) {   /* the folder in the open-file screen */
+        if (picker_in_archive(app)) picker_leave_archive(app);
+        if (!app->picker_open) handle_action(app, PROVEN_LIT("open_picker"));
+        picker_navigate(app, path);
+        app->picker.focus = 0;
+    } else if (which == 1) {   /* Windows' own Explorer */
+        if (!rubraview_pal_shell_open_folder(path, false)) osd_say(app, TU8("Explorer could not show the folder"));
+    }
+}
+
+bool extract_done_press(app_state_t *app, double x, double y) {
+    if (!app->extract_done) return false;
+    for (int i = 0; i < 3; ++i) if (pal_rect_has(app->extract_done_btn[i], x, y)) { extract_done_answer(app, i); return true; }
+    return true;   /* nothing under it while it asks */
+}
+
 bool pack_ask_press(app_state_t *app, double x, double y) {
     if (!app->pack_ask) return false;
     if (pal_rect_has(app->pack_ask_btn[0], x, y)) archwork_pack_ask_answer(app, true);
@@ -769,6 +831,11 @@ static void rename_card_words(const app_state_t *app, char *title, size_t capaci
     else if (app->rename_is_target) {
         t = app->target_moving ? T("Move to which folder?") : T("Copy to which folder?");
         *hint = T("Enter  ·  Ctrl+O browses  ·  a folder not there yet is made");
+    } else if (app->rename_is_extract) {   /* RV-240 */
+        t = T("Extract into which folder?");
+        *hint = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("extract_mode"))) == 1
+              ? T("A folder of the archive's name is made in it when it holds more than one thing  ·  Ctrl+O browses")
+              : T("A folder of the archive's name is made in it  ·  Ctrl+O browses");
     } else if (app->rename_is_extension) { t = T("Change extensions"); *hint = T("A new one for each  ·  Tab: the next row"); }
     else if (app->rename_is_password) {
         proven_u8str_view_t name = rubraview_path_basename((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->password_for, .size = app->password_for_len });
@@ -951,10 +1018,11 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
         } else {
             words[n] = app->rename_is_extension ? (app->ext_at + 1 < app->ext_n ? T("Next") : T("Apply"))
                      : app->rename_is_pack ? T("Compress")
+                     : app->rename_is_extract ? T("Extract")
                      : app->rename_is_password ? (app->password_for_extract ? T("Extract") : T("Open")) : app->rename_is_filter || app->rename_is_listfilter ? T("Done") : T("OK");
             kinds[n++] = RENAME_BTN_OK;
             if (app->rename_is_extension && app->ext_at + 1 < app->ext_n) { words[n] = T("Apply"); kinds[n++] = RENAME_BTN_OK + 100; }
-            if (app->rename_is_target) { words[n] = T("Browse..."); kinds[n++] = RENAME_BTN_BROWSE; }
+            if (app->rename_is_target || app->rename_is_extract) { words[n] = T("Browse..."); kinds[n++] = RENAME_BTN_BROWSE; }
             words[n] = T("Cancel"); kinds[n++] = RENAME_BTN_CANCEL;
         }
         double bw = (card ? 104.0 : 120.0) * dpi, bh = (card ? 38.0 : 48.0) * dpi, gap = 10.0 * dpi;   /* 1.25.0: roomier; RV-238: a card's */

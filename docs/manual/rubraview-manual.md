@@ -1156,10 +1156,8 @@ the Toolbar has), as two columns of wide buttons. The arrow keys move
 between them and `Enter` presses one. After it comes the
 name of the file on screen (the folder's, in the open-file screen), only
 shown: pressed and dragged, it moves the window as the rest of the bar
-does. At the right are **Set**
-(Settings, `Ctrl+,`), **P** (the title bar stays shown, and the picture or
-the film is shown below it instead of under it), **H** (the title
-bar and the Floating Widget hidden until the picture is clicked), **R**
+does. At the right are **P** (the title bar stays shown, and the picture or
+the film is shown below it instead of under it), **R**
 (a diagonal two-headed arrow: drag it to size the window), **F** (full
 screen, a frame with a small filled square in its corner), **_**, **[]**
 (maximise, or back to a window: `Shift+Enter`) and **X**. What is on is lit and bold;
@@ -1710,8 +1708,13 @@ greyed for it. The window keeps what you chose for the next time (Settings ›
 Files › Compressing), the password never. When parts of an older split archive
 of the same name are in the way, it asks to send them to the Recycle Bin and
 compress again. Maximum and Ultra with LZMA or LZMA2 pack as 7-Zip does: a large
-file may take about 1.5 GB or 3 GB of memory, and the window says so. The bar at the foot has **Extract** (the way Settings › Files ›
-Extracting says) and **Compress**, when they fit what is picked. **Look inside
+file may take about 1.5 GB or 3 GB of memory, and the window says so. The bar at the foot has **Extract** and
+**Compress**, when they fit what is picked. **Extract** (and Extract to...) first asks into which folder, the
+archive's own offered (**Browse...** or `Ctrl+O` picks another; one not there is made), and puts a folder of
+the archive's name in it as Settings › Files › Extracting says; when it is done a card offers **Open it here**
+(`Enter`), **Show in Explorer** and **Close** (`Esc`). Names an archive stores in the computer's own code page
+(a Korean Windows' CP949, without the Unicode flag) are read in that code page, in the list, in a book and in
+what is extracted. **Look inside
 (an archive)** (or `Shift+Enter`) lists all of an archive's folders and
 files, as a folder is listed. Opening an archive opens it that way too: a ZIP,
 7z, RAR, ALZ or EGG, from here, Explorer, a drop on the window, Open, Recent or

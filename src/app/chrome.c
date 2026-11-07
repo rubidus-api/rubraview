@@ -212,18 +212,16 @@ void draw_titlebar(app_state_t *app, double win_w) {
 
     /* The right-hand row: Set, P, H, R, F, _, [], X (RV-218: Windows' three at the end; RV-234: always on top the
        Toolbar's); what is on is lit and bold (owner, 2026-10-20) */
-    static const rubraview_titlebar_button_t BUTTONS[] = {
-        RUBRAVIEW_TITLEBAR_SETTINGS, RUBRAVIEW_TITLEBAR_BARPIN, RUBRAVIEW_TITLEBAR_HIDE,
+    static const rubraview_titlebar_button_t BUTTONS[] = {   /* RV-241: Settings and Hide no longer here */
+        RUBRAVIEW_TITLEBAR_BARPIN,
         RUBRAVIEW_TITLEBAR_FULLSCREEN, RUBRAVIEW_TITLEBAR_MINIMIZE, RUBRAVIEW_TITLEBAR_MAXIMIZE, RUBRAVIEW_TITLEBAR_RESIZE,
         RUBRAVIEW_TITLEBAR_CLOSE,
     };
-    const char *const GLYPHS[] = { T("Set"), "P", "H", "F", "_", "[]", "R", "X" };   /* where the icons are missing */
-    const uint32_t ICONS[] = { RUBRAVIEW_ICON_SETTINGS, RUBRAVIEW_ICON_PIN, RUBRAVIEW_ICON_HIDE, RUBRAVIEW_ICON_WHOLE_SCREEN,
+    const char *const GLYPHS[] = { "P", "F", "_", "[]", "R", "X" };   /* where the icons are missing */
+    const uint32_t ICONS[] = { RUBRAVIEW_ICON_PIN, RUBRAVIEW_ICON_WHOLE_SCREEN,
                                RUBRAVIEW_ICON_MINIMIZE, rubraview_pal_window_is_maximized(app->window) ? RUBRAVIEW_ICON_RESTORE : RUBRAVIEW_ICON_MAXIMIZE,
                                RUBRAVIEW_ICON_RESIZE, RUBRAVIEW_ICON_CLOSE };   /* RV-181 */
-    bool on[8] = { app->settings_open,
-                   rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5,
-                   app->chrome_hidden,
+    bool on[6] = { rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5,
                    rubraview_pal_window_is_fullscreen(app->window),
                    false,
                    rubraview_pal_window_is_maximized(app->window),

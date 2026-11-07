@@ -1471,6 +1471,7 @@ void memory_watch(app_state_t *app, double now) {
 
 /* The box given up: Esc, or its Cancel. */
 static void rename_cancel(app_state_t *app) {
+    if (app->rename_is_extract) { rename_end(app); archwork_extract_dest_dropped(app); return; }   /* RV-240 */
     if (app->rename_is_pack) { rename_end(app); archwork_pack_cancelled(app); osd_say(app, TU8("not compressed")); return; }   /* RV-207 */
     if (app->rename_is_password && app->password_for_extract) {
         rename_end(app);
@@ -1493,7 +1494,7 @@ bool rename_box_press(app_state_t *app, double x, double y) {
         switch (app->rename_btn_kind[i]) {
             case RENAME_BTN_OK:     rename_commit(app); break;
             case RENAME_BTN_CANCEL: rename_cancel(app); break;
-            case RENAME_BTN_BROWSE: target_browse(app); break;
+            case RENAME_BTN_BROWSE: if (app->rename_is_extract) archwork_extract_dest_browse(app); else target_browse(app); break;
             case RENAME_BTN_BACK:   text_find_step(app, false); break;
             case RENAME_BTN_EYE:    password_eye_toggle(app); break;   /* D-262 */
             case RENAME_BTN_OK + 100: rename_extension_apply(app); break;   /* Change extensions: all rows now */
@@ -1533,6 +1534,7 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         /* A password is never copied out of its box. */
         if (app->rename_is_password && (combo.modifiers & RUBRAVIEW_MOD_CTRL) && (key_is(combo, "C") || key_is(combo, "X"))) return true;
         if (app->rename_is_target && (combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "O")) { target_browse(app); return true; }
+        if (app->rename_is_extract && (combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "O")) { archwork_extract_dest_browse(app); return true; }
         if (password_plain_only(app) && (combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "V")) {   /* D-262: pasted, filtered */
             char pasted[1024];
             size_t n = rubraview_pal_clipboard_get_text(app->window, pasted, sizeof(pasted));
@@ -1629,6 +1631,11 @@ void audio_track_set(app_state_t *app, int32_t next) {
 void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     size_t reading_done = 0, reading_count = 0;
     bool reading_sizes = true;
+    if (app->extract_done) {   /* RV-240: Enter opens the folder here, Esc closes the card; nothing else meanwhile */
+        if (key_is(combo, "Enter")) extract_done_answer(app, 0);
+        else if (key_is(combo, "Escape")) extract_done_answer(app, 2);
+        return;
+    }
     if (app->pack_ask) {   /* D-267: Enter recycles the older parts and compresses, Esc gives up; nothing else meanwhile */
         if (key_is(combo, "Enter")) archwork_pack_ask_answer(app, true);
         else if (key_is(combo, "Escape")) archwork_pack_ask_answer(app, false);

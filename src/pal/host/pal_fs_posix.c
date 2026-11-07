@@ -154,6 +154,8 @@ bool rubraview_pal_fs_stat(proven_arena_t *arena, proven_u8str_view_t path, rubr
     return true;
 }
 
+uint32_t rubraview_pal_host_codepage(void) { return 0; }   /* RV-239: no code pages here */
+
 proven_u8str_view_t rubraview_pal_transcode_codepage(proven_arena_t *arena, proven_u8str_view_t bytes, uint32_t codepage_id) {
     (void)arena; (void)bytes; (void)codepage_id;
     /* The host build carries no legacy code-page tables — that is a

@@ -3597,3 +3597,32 @@ Do not store credentials, private infrastructure details, personal data, private
   the card's title and line now. Find and the playlist's filter are not dimmed and sit near the top. A press outside
   a dimmed card is spent, as a dialog's.
 - Consequences: T366.
+
+## 2026-11-07: D-295 Archive names in the machine's code page everywhere (RV-239)
+
+- Status: Accepted (owner 2026-11-07: "압축파일을 윈도 탐색기에서 클릭해서 루브라뷰에서 열면 파일 이름이 깨져보여요. 여기에 뭔가 잘못된 메모리 참조 같은 에러가 있을 듯하니 잘 확인바랍닌다."). RV-239.
+- Decision: the garbled names were not a dangling reference. A ZIP whose names are stored in CP949 without the
+  Unicode flag was read by FultaArc in ZIP's default CP437; only the book's page names were read again in the
+  machine's code page (`ps_display_name`), so the open-file screen's archive tree — what Explorer's click opens —
+  and every extraction wrote CP437 mojibake. FultaArc's `auto_codepage` option now carries the machine's code page
+  (`GetACP` mapped to FultaArc's) into every open, so one reading serves the tree, the book, extraction and edits.
+  An LHA archive (FultaArc's default CP932) is read in the machine's code page too; a reader's Shift+N choice still
+  wins.
+- Consequences: `test_archive_job`; T367.
+
+## 2026-11-07: D-296 Extracting asks where, and offers the folder after (RV-240)
+
+- Status: Accepted (owner 2026-11-07: "그리고 압축 풀기 버튼을 누르면 바로 그 압축 파일이 풀리는데 원래 이런 동작이면 안됩니다. 어디 저장할지 묻고, 저장하고 나면 그 폴더를 열거나, 외부 윈도 기본 탐색기에서 그 폴더를 열거나 하는 동작이 있어야 겠지요."). RV-240.
+- Decision: the open-file screen's Extract and Extract to... ask into which folder in the RV-238 card (the archive's
+  folder offered, Browse... for Windows' folder dialog, a new folder made); the context list's two that name the
+  place (a folder of its name, here) stay at once. Any extraction that wrote files ends in a card: Open it here
+  (Enter), Show in Explorer, Close (Esc).
+- Consequences: T367.
+
+## 2026-11-07: D-297 The title bar without Settings and Hide; the menus without fit, real size and turning (RV-241)
+
+- Status: Accepted (owner 2026-11-07: "타이틀바에 플로팅 박스 숨기기랑 설정 아이콘 없애주세요."; "메인메뉴에 창에 맞춤 회전 반대로회전 실제크기 항목 없애주세요. 이건 툴바에서 해야 할 일입니다."; "R키가 현재 회전인데, Shift+R은 반시계 회전으로 해 주세요. R은 시계방향으로."). RV-241.
+- Decision: the title bar keeps P, resize, full screen and Windows' three; Settings stays in ☰ and on `Ctrl+,`, Hide
+  on the Toolbar and `H`. The context lists drop Fit to window, Real size, Rotate and Rotate back. `R` / `Shift+R`
+  were already clockwise / counterclockwise (measured on the VM in 1.39.92), so the keys are unchanged.
+- Consequences: `test_ui_chrome`; T367.

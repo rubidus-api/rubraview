@@ -115,6 +115,9 @@ proven_u8str_view_t rubraview_pal_fs_read_file(proven_arena_t *arena, proven_u8s
  */
 proven_u8str_view_t rubraview_pal_transcode_codepage(proven_arena_t *arena, proven_u8str_view_t bytes, uint32_t codepage_id);
 
+/** RV-239: the host's active code page number (949 on a Korean Windows), 0 where there is none (the host build). */
+uint32_t rubraview_pal_host_codepage(void);
+
 /**
  * RFC-0005 §2: a text file's bytes in a Windows code page, as UTF-8,
  * malloc'd and NUL-terminated (a character that does not decode becomes

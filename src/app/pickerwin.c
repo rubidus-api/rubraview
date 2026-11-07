@@ -755,7 +755,7 @@ void picker_button(app_state_t *app, picker_button_t button) {
         if (button == PICKER_BTN_OPEN) { if (app->picker.focus < app->picker_listing.count) picker_activate(app, app->picker.focus); return; }
         if (button == PICKER_BTN_EXTRACT) {
             archwork_extract_inside(app, (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("extract_mode"))) == 1
-                                         ? RUBRAVIEW_EXTRACT_SMART : RUBRAVIEW_EXTRACT_FOLDER, false);
+                                         ? RUBRAVIEW_EXTRACT_SMART : RUBRAVIEW_EXTRACT_FOLDER, true);   /* RV-240: where, asked */
             return;
         }
         if (button != PICKER_BTN_INDIVIDUAL && button != PICKER_BTN_RANGE && button != PICKER_BTN_SAME_TYPE && button != PICKER_BTN_MEDIA &&
@@ -765,7 +765,7 @@ void picker_button(app_state_t *app, picker_button_t button) {
         }
     } else if (button == PICKER_BTN_EXTRACT) {
         archwork_extract(app, (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("extract_mode"))) == 1
-                              ? RUBRAVIEW_EXTRACT_SMART : RUBRAVIEW_EXTRACT_FOLDER, false);
+                              ? RUBRAVIEW_EXTRACT_SMART : RUBRAVIEW_EXTRACT_FOLDER, true);   /* RV-240: where, asked */
         return;
     } else if (button == PICKER_BTN_COMPRESS) {
         archwork_compress_ask(app);

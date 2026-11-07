@@ -193,9 +193,9 @@ static const rubraview_titlebar_button_t BUTTON_ORDER[] = {
     /* First in the order is leftmost on screen. RV-218 (owner, 2026-10-31: "오른쪽 끝부터 종료, 최대화/창으로, 최소화,
        전체화면, 크기조절... 윈도 기본 창 타이틀바 버튼 순서를 따라서"): Windows' three at the right end as Windows has
        them — close, maximise / restore, minimise — then full screen and resize, then the rest as before. */
-    RUBRAVIEW_TITLEBAR_SETTINGS,
+    /* RV-241 (owner, 2026-11-07: "타이틀바에 플로팅 박스 숨기기랑 설정 아이콘 없애주세요"): Settings is ☰'s and Ctrl+,,
+       Hide the Toolbar's and H */
     RUBRAVIEW_TITLEBAR_BARPIN,
-    RUBRAVIEW_TITLEBAR_HIDE,
     /* RV-234 (owner, 2026-11-07: "항상 위 아이콘을 툴바의 설정 아이콘 있는 그룹에 보내요"): always on top is the Toolbar's now */
     RUBRAVIEW_TITLEBAR_RESIZE,
     RUBRAVIEW_TITLEBAR_FULLSCREEN,

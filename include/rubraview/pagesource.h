@@ -183,6 +183,11 @@ proven_u8str_view_t rubraview_page_source_first_volume(const rubraview_page_sour
 proven_u8str_view_t rubraview_page_source_entry_name(proven_arena_t *arena, const fulta_arc_entry_t *entry,
                                          fulta_arc_format_t format, rubraview_codepage_t override_choice);
 fulta_arc_codepage_t rubraview_page_source_fulta_codepage(rubraview_codepage_t choice);
+/* RV-239: FultaArc's code page for a Windows code page number (949 -> CP_949 ...), AUTO when it has none; and the
+   one for this machine, every archive's `auto_codepage`: names stored without saying they are Unicode are read in
+   the machine's code page, as Windows' own ZIP folders and the archivers read them, not in CP437. */
+fulta_arc_codepage_t rubraview_fulta_codepage_of(uint32_t windows_codepage);
+fulta_arc_codepage_t rubraview_fulta_auto_codepage(void);
 
 /**
  * How large an arena rubraview_page_source_read needs for this page (RV-085:

@@ -178,6 +178,7 @@ static fulta_arc_err_t open_at(const char *path, rubraview_codepage_t codepage, 
         .name = path,
         .volume = run_volume, .volume_ctx = job,
         .codepage = rubraview_page_source_fulta_codepage(codepage),
+        .auto_codepage = rubraview_fulta_auto_codepage(),   /* RV-239 */
         .cancel = cancel_of ? run_cancelled : NULL, .cancel_ctx = cancel_of,
     };
     return fulta_arc_open(&src, &opt, out);

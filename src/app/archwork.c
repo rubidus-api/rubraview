@@ -149,17 +149,61 @@ static size_t given_paths(const proven_u8str_view_t *paths, size_t n, char ***ou
 
 /* ---- extracting ---- */
 
+/* RV-240 (owner, 2026-11-07: "압축 풀기 버튼을 누르면 바로 그 압축 파일이 풀리는데 ... 어디 저장할지 묻고, 저장하고 나면 그
+   폴더를 열거나, 외부 윈도 기본 탐색기에서 그 폴더를 열거나"): the folder asked in a card, the archive's own offered */
+static archwork_t *g_dest_wait;   /* the work kept while its folder is asked */
+static void extract_go(app_state_t *app, archwork_t *w);
+
 static void extract_start(app_state_t *app, archwork_t *w, int mode, bool choose_folder) {
     if (w->count == 0) { work_free(w); osd_say(app, TU8("pick an archive first")); return; }
     w->mode = (rubraview_extract_mode_t)mode;
     if (choose_folder) {
-        rubraview_file_dialog_opts_t opts = { .title = T("Extract into which folder"), .folder_mode = true,
-                                              .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
-        rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
-        if (!picked.accepted || picked.count == 0 || picked.paths[0].size >= sizeof w->dest) { work_free(w); return; }
-        proven_sys_mem_copy(w->dest, picked.paths[0].ptr, picked.paths[0].size);
-        w->dest[picked.paths[0].size] = '\0';
+        if (g_dest_wait) work_free(g_dest_wait);
+        g_dest_wait = w;
+        proven_u8str_view_t beside = rubraview_path_dirname(proven_u8str_view_from_cstr(w->archives[0]));
+        if (app->rename_active) rename_end(app);
+        app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+        rubraview_textedit_set(&app->rename_edit, beside.size < sizeof(app->rename_buffer) ? beside : PROVEN_LIT(""));
+        rubraview_textedit_select_all(&app->rename_edit);
+        app->rename_active = true;
+        app->rename_is_extract = true;
+        app->rename_composing_length = 0;
+        rubraview_pal_window_text_input(app->window, true);
+        return;
     }
+    extract_go(app, w);
+}
+
+void archwork_extract_dest_typed(app_state_t *app) {
+    archwork_t *w = g_dest_wait;
+    if (!w) { rename_end(app); return; }
+    proven_u8str_view_t typed = rubraview_target_folder_trim(rubraview_textedit_text(&app->rename_edit));
+    proven_u8str_view_t base = rubraview_path_dirname(proven_u8str_view_from_cstr(w->archives[0]));
+    proven_u8str_view_t path = typed.size ? rubraview_picker_typed_path(app->arena, typed, base) : base;
+    rubraview_fs_entry_t found;
+    if (path.size == 0 || path.size >= sizeof w->dest) { osd_say(app, TU8("that folder could not be made")); return; }
+    if (rubraview_pal_fs_stat(app->arena, path, &found) && !found.is_directory) { osd_say(app, TU8("that is a file, not a folder - put it right, or Esc")); return; }
+    if (!rubraview_pal_fs_exists(path) && !rubraview_pal_fs_make_dirs(path)) { osd_say(app, TU8("that folder could not be made")); return; }
+    proven_sys_mem_copy(w->dest, path.ptr, path.size);
+    w->dest[path.size] = '\0';
+    g_dest_wait = NULL;
+    rename_end(app);
+    extract_go(app, w);
+}
+
+void archwork_extract_dest_dropped(app_state_t *app) {
+    if (g_dest_wait) { work_free(g_dest_wait); g_dest_wait = NULL; osd_say(app, TU8("not extracted")); }
+}
+
+void archwork_extract_dest_browse(app_state_t *app) {
+    rubraview_file_dialog_opts_t opts = { .title = T("Extract into which folder"), .folder_mode = true,
+                                          .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
+    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
+    if (picked.accepted && picked.count > 0 && picked.paths[0].size < sizeof(app->rename_buffer))
+        rubraview_textedit_set(&app->rename_edit, picked.paths[0]);   /* in the box, for Enter */
+}
+
+static void extract_go(app_state_t *app, archwork_t *w) {
     /* the passwords that worked this session first */
     if (app->password_count > 0 && rubraview_archive_wants_password(w->archives[0], app->archive_codepage) == 1)
         rubraview_fmt(w->password, sizeof w->password, "{}", PROVEN_ARG(rubraview_bytes_view(app->passwords[app->password_count - 1], (int)app->password_lens[app->password_count - 1])));
@@ -629,6 +673,11 @@ void archwork_poll(app_state_t *app, bool quitting) {
         else if (w->skipped) rubraview_fmt(line, sizeof line, T("extracted {} files into {} ({} left out)"), PROVEN_ARG((unsigned)w->written), PROVEN_ARG(rubraview_bytes_view((const char *)where.ptr, (int)where.size)), PROVEN_ARG((unsigned)w->skipped));
         else rubraview_fmt(line, sizeof line, T("extracted {} files into {}"), PROVEN_ARG((unsigned)w->written), PROVEN_ARG(rubraview_bytes_view((const char *)where.ptr, (int)where.size)));
         if (w->password[0]) password_remember(app, proven_u8str_view_from_cstr(w->password));
+        if (w->written > 0 && w->last_root[0]) {   /* RV-240: what next, asked */
+            rubraview_fmt(app->extract_done_line, sizeof app->extract_done_line, "{}", PROVEN_ARG(line));
+            rubraview_fmt(app->extract_done_path, sizeof app->extract_done_path, "{}", PROVEN_ARG(w->last_root));
+            app->extract_done = true;
+        }
     } else {
         rubraview_fmt(line, sizeof line, "{}{}{}", PROVEN_ARG(rubraview_archive_result_text(r)), PROVEN_ARG(w->ex.why[0] ? "  -  " : ""), PROVEN_ARG(w->ex.why));
     }

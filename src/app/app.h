@@ -1170,6 +1170,11 @@ typedef struct app_state {
     bool                   rename_is_password;
     bool                   rename_is_pack;          /* RV-207: the Compress box (the new archive's place) */
     bool                   password_for_extract;    /* the password box asks for an archive being extracted */
+    bool                   rename_is_extract;       /* RV-240: the box asks where an extraction goes */
+    bool                   extract_done;            /* RV-240: an extraction ended; its card asks what next */
+    char                   extract_done_line[512];  /* what it said */
+    char                   extract_done_path[RUBRAVIEW_ARCHIVE_PATH];   /* the folder it wrote */
+    rubraview_pal_rect_t   extract_done_btn[3];
     bool                   password_shown;          /* D-262: the eye: an unpacking password shown, any letter taken */
     int32_t                pack_level;              /* the Compress window's level step: 0 store ... 5 ultra (D-260) */
     int32_t                pack_method;             /* its codec (rubraview_pack_method_t; DEFAULT = the format's first) */
@@ -2112,6 +2117,12 @@ void archwork_pack_set_format(app_state_t *app, bool sevenz);
 rubraview_pack_method_t archwork_pack_method(const app_state_t *app, bool sevenz);
 bool pack_window_press(app_state_t *app, double x, double y);   /* D-260: a chip of the Compress window */
 void archwork_pack_ask_answer(app_state_t *app, bool yes);     /* D-267 */
+/* RV-240: where an extraction goes, asked in a card; what to do when it is done */
+void archwork_extract_dest_typed(app_state_t *app);
+void archwork_extract_dest_dropped(app_state_t *app);
+void archwork_extract_dest_browse(app_state_t *app);
+void extract_done_answer(app_state_t *app, int which);
+bool extract_done_press(app_state_t *app, double x, double y);
 bool pack_ask_press(app_state_t *app, double x, double y);
 bool archwork_password_box(app_state_t *app, bool entered, proven_u8str_view_t typed);
 void filmcache_for(app_state_t *app, proven_u8str_view_t path);   /* RV-216 (D-249): the cache's settings for a film about to open */

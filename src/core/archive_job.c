@@ -221,6 +221,7 @@ static fulta_arc_err_t open_archive(const char *path, rubraview_codepage_t codep
         .name = path, .volume = ex_volume,
         .password = job ? ex_password : NULL, .password_ctx = job,
         .codepage = rubraview_page_source_fulta_codepage(codepage),
+        .auto_codepage = rubraview_fulta_auto_codepage(),   /* RV-239: the machine's, not CP437 */
         .cancel = job ? ex_cancel : NULL, .cancel_ctx = job,
     };
     return fulta_arc_open(&src, &opt, out);
@@ -321,7 +322,8 @@ rubraview_archive_result_t rubraview_archive_index_read(const char *archive, rub
     if (err != FULTA_ARC_OK) return RUBRAVIEW_ARCHIVE_CANNOT_READ;
     ix_ctx_t x = { password };
     fulta_arc_options_t opt = { .name = archive, .volume = ex_volume, .password = ix_password, .password_ctx = &x,
-                                .codepage = rubraview_page_source_fulta_codepage(codepage) };
+                                .codepage = rubraview_page_source_fulta_codepage(codepage),
+                                .auto_codepage = rubraview_fulta_auto_codepage() };   /* RV-239: the machine's, not CP437 */
     fulta_arc_t *arc = NULL;
     err = fulta_arc_open(&src, &opt, &arc);
     if (err != FULTA_ARC_OK) return result_of(err);

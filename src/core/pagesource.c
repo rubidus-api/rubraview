@@ -442,6 +442,7 @@ rubraview_page_source_t rubraview_page_source_from_archive_password(proven_arena
         .volume = ps_volume_open, .volume_ctx = io,
         .password = ps_password, .password_ctx = io,
         .codepage = ps_codepage(override_choice),
+        .auto_codepage = rubraview_fulta_auto_codepage(),   /* RV-239 */
         .max_dictionary = 0,                                  /* FultaArc's own bound, 1 GiB */
         .cancel = ps_cancelled, .cancel_ctx = io,
     };
@@ -538,6 +539,25 @@ proven_u8str_view_t rubraview_page_source_entry_name(proven_arena_t *arena, cons
 
 fulta_arc_codepage_t rubraview_page_source_fulta_codepage(rubraview_codepage_t choice) {
     return ps_codepage(choice);
+}
+
+fulta_arc_codepage_t rubraview_fulta_codepage_of(uint32_t windows_codepage) {
+    switch (windows_codepage) {
+        case 949:   return FULTA_ARC_CP_949;
+        case 932:   return FULTA_ARC_CP_932;
+        case 936:   return FULTA_ARC_CP_936;
+        case 950:   return FULTA_ARC_CP_950;
+        case 1252:  return FULTA_ARC_CP_1252;
+        case 437:   return FULTA_ARC_CP_437;
+        case 866:   return FULTA_ARC_CP_866;
+        case 1251:  return FULTA_ARC_CP_1251;
+        case 65001: return FULTA_ARC_CP_UTF8;
+        default:    return FULTA_ARC_CP_AUTO;   /* FultaArc's own reading, the format's */
+    }
+}
+
+fulta_arc_codepage_t rubraview_fulta_auto_codepage(void) {
+    return rubraview_fulta_codepage_of(rubraview_pal_host_codepage());
 }
 
 void rubraview_page_source_close(rubraview_page_source_t *source) {

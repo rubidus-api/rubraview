@@ -245,6 +245,8 @@ bool rubraview_pal_fs_stat(proven_arena_t *arena, proven_u8str_view_t path, rubr
     return true;
 }
 
+uint32_t rubraview_pal_host_codepage(void) { return (uint32_t)GetACP(); }   /* RV-239 */
+
 proven_u8str_view_t rubraview_pal_transcode_codepage(proven_arena_t *arena, proven_u8str_view_t bytes, uint32_t codepage_id) {
     proven_u8str_view_t empty = PROVEN_LIT("");
     if (!arena || bytes.size == 0 || !bytes.ptr || bytes.size > (size_t)INT32_MAX) return empty;
