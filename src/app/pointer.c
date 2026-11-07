@@ -111,6 +111,26 @@ void chrome_hide(app_state_t *app, bool hide) {
 }
 
 
+/* RV-257: the release of a press on X, _, [] or full screen: carried out when it is over the same button. True
+   when a press was armed (the release is the title bar's either way). */
+bool titlebar_release(app_state_t *app, double x, double y) {
+    rubraview_titlebar_button_t armed = app->titlebar_armed;
+    if (armed == RUBRAVIEW_TITLEBAR_NONE) return false;
+    app->titlebar_armed = RUBRAVIEW_TITLEBAR_NONE;
+    int32_t win_w = 0, win_h = 0;
+    rubraview_pal_window_get_size(app->window, &win_w, &win_h);
+    switch (rubraview_titlebar_released(&app->titlebar, armed, x, y, (double)win_w)) {
+        case RUBRAVIEW_TITLEBAR_CLOSE:      if (subs_may_leave(app)) rubraview_pal_window_request_close(app->window); break;
+        case RUBRAVIEW_TITLEBAR_MINIMIZE:   rubraview_pal_window_minimize(app->window); break;
+        case RUBRAVIEW_TITLEBAR_MAXIMIZE:   rubraview_pal_window_toggle_maximize(app->window); break;
+        case RUBRAVIEW_TITLEBAR_FULLSCREEN:
+            rubraview_pal_window_set_fullscreen(app->window, !rubraview_pal_window_is_fullscreen(app->window));
+            break;
+        default: break;   /* slid off it: given up */
+    }
+    return true;
+}
+
 /* §3.21.3: the titlebar's controls take precedence while it is shown,
    over the viewer and over the picker alike. True when it took the click. */
 bool titlebar_click(app_state_t *app, double x, double y) {
@@ -119,13 +139,10 @@ bool titlebar_click(app_state_t *app, double x, double y) {
     rubraview_tile_metrics_t metrics = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
 
     rubraview_titlebar_button_t button = rubraview_titlebar_hit(&app->titlebar, x, y, (double)win_w);
+    /* RV-257: X, _, [] and full screen are only armed by the press; the release over them carries them out
+       (titlebar_release), so the window is still there to take it and nothing falls to the window under it */
+    if (rubraview_titlebar_acts_on_release(button)) { app->titlebar_armed = button; return true; }
     switch (button) {
-        case RUBRAVIEW_TITLEBAR_CLOSE:      if (subs_may_leave(app)) rubraview_pal_window_request_close(app->window); return true;
-        case RUBRAVIEW_TITLEBAR_MINIMIZE:   rubraview_pal_window_minimize(app->window); return true;
-        case RUBRAVIEW_TITLEBAR_MAXIMIZE:   rubraview_pal_window_toggle_maximize(app->window); return true;
-        case RUBRAVIEW_TITLEBAR_FULLSCREEN:
-            rubraview_pal_window_set_fullscreen(app->window, !rubraview_pal_window_is_fullscreen(app->window));
-            return true;
         case RUBRAVIEW_TITLEBAR_PIN:        handle_action(app, PROVEN_LIT("toggle_always_on_top")); return true;
         case RUBRAVIEW_TITLEBAR_HIDE:       handle_action(app, PROVEN_LIT("hide_boxes")); return true;
         case RUBRAVIEW_TITLEBAR_SETTINGS:   handle_action(app, PROVEN_LIT("open_settings")); return true;   /* 1.24.0 */

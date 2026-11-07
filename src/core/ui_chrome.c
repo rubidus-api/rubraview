@@ -238,6 +238,17 @@ rubraview_rect_t rubraview_titlebar_button_rect(const rubraview_titlebar_t *bar,
     return (rubraview_rect_t){0};
 }
 
+bool rubraview_titlebar_acts_on_release(rubraview_titlebar_button_t button) {
+    return button == RUBRAVIEW_TITLEBAR_CLOSE || button == RUBRAVIEW_TITLEBAR_MINIMIZE ||
+           button == RUBRAVIEW_TITLEBAR_MAXIMIZE || button == RUBRAVIEW_TITLEBAR_FULLSCREEN;
+}
+
+rubraview_titlebar_button_t rubraview_titlebar_released(const rubraview_titlebar_t *bar, rubraview_titlebar_button_t armed,
+                                                        double x, double y, double window_width) {
+    if (!rubraview_titlebar_acts_on_release(armed)) return RUBRAVIEW_TITLEBAR_NONE;
+    return rubraview_titlebar_hit(bar, x, y, window_width) == armed ? armed : RUBRAVIEW_TITLEBAR_NONE;
+}
+
 rubraview_titlebar_button_t rubraview_titlebar_hit(const rubraview_titlebar_t *bar,
                                                    double x, double y, double window_width) {
     if (!bar || !bar->shown) return RUBRAVIEW_TITLEBAR_NONE;

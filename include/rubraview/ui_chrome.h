@@ -140,6 +140,18 @@ rubraview_titlebar_button_t rubraview_titlebar_hit(const rubraview_titlebar_t *b
                                                    double x, double y, double window_width);
 
 /**
+ * RV-257 (owner, 2026-11-08: "타이틀바의 X를 눌러 종료하면, 그 클릭이 그 밑의 화면에 전달되어 그 다음 앱까지 같이 닫힘. 이렇게 동작하는지 확인하고 처리 바람."): the buttons that put the window away or change its size — X, minimise,
+ * maximise, full screen — act when the button is let go over the one that was pressed, as Windows' own do: acting
+ * on the press, the window went and the release fell to the window under it. True for those four.
+ */
+bool rubraview_titlebar_acts_on_release(rubraview_titlebar_button_t button);
+
+/** The button a release at (x, y) carries out, `armed` being the one pressed: it, when the release is over it;
+    NONE when the pointer left it (the press given up) or nothing was armed. */
+rubraview_titlebar_button_t rubraview_titlebar_released(const rubraview_titlebar_t *bar, rubraview_titlebar_button_t armed,
+                                                        double x, double y, double window_width);
+
+/**
  * A press on the caption at `now_seconds`: true when it is the second of a
  * double press (within `interval` seconds and `slop` pixels of the first),
  * which toggles maximise and restore as a system title bar does. A double

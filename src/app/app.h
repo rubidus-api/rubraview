@@ -512,6 +512,7 @@ typedef struct app_state {
     rubraview_box_t       *box_sizing;        /* a box whose grip is being dragged (owner, 2026-09-29) */
     rubraview_titlebar_button_t titlebar_held;  /* the caption or Resize pressed, until the pointer moves or lets go */
     double                 titlebar_held_x, titlebar_held_y;
+    rubraview_titlebar_button_t titlebar_armed;     /* RV-257: X, _, [] or full screen pressed, carried out on its release */
     /* The playlist window (owner, 2026-09-29): what is open, floating over the picture. */
     rubraview_listwin_t    listwin;
     /* The owner (2026-10-17): the recent files in a list window of their own */
@@ -2628,6 +2629,7 @@ void tick_timers(app_state_t *app, double dt);
 void tiles_reset(app_state_t *app);
 void tiles_take_all(app_state_t *app);
 bool titlebar_click(app_state_t *app, double x, double y);
+bool titlebar_release(app_state_t *app, double x, double y);   /* RV-257 */
 bool tmenu_key(app_state_t *app, rubraview_key_combo_t combo);
 bool tmenu_press(app_state_t *app, double x, double y);
 int32_t tmenu_win_w(const app_state_t *app);

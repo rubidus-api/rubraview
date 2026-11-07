@@ -186,6 +186,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
         }
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
+            app->titlebar_armed = RUBRAVIEW_TITLEBAR_NONE;   /* RV-257: a new press; titlebar_click arms it again if it is X, _, [] */
             if (chooser_press(app, CHOOSE_IN_MAIN, event->mouse.x, event->mouse.y)) break;   /* 1.24.0 */
             if (volpop_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-237 */
             if (tmenu_press(app, event->mouse.x, event->mouse.y)) break;   /* 1.25.0: the ☰ pull-down */
@@ -554,6 +555,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
         }
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+            if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && titlebar_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-257 */
             if (volpop_release(app)) break;   /* RV-237 */
             if (app->picker_rhold && event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {   /* RV-223: a right click, not a drag */
                 app->picker_rhold = false;
