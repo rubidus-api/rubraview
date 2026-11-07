@@ -1006,6 +1006,8 @@ void picker_activate(app_state_t *app, size_t index) {
    program Windows opens it with, never a program itself. */
 void picker_open_file(app_state_t *app, proven_u8str_view_t path) {
     proven_u8str_view_t name = rubraview_path_basename(path);
+    /* RV-255: a playlist asks how: as text, added to the list, or in place of it */
+    if (rubraview_shell_kind_of(rubraview_path_ext(name)) == RUBRAVIEW_SHELL_PLAYLISTS) { playlist_ask_open(app, path); return; }
     if (picker_viewer_opens(name)) { app->picker_open = false; open_path(app, path); return; }
     if (rubraview_shell_runs_program(name)) { osd_say(app, TU8("a program is not run from here")); return; }
     bool dangerous = false;

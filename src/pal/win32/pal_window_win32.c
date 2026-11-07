@@ -1685,7 +1685,7 @@ static int icon_for_ext(const WCHAR *ext) {
         { 3, L".txt.text.md.log.nfo.ini.csv.json.xml.srt.ass.smi.vtt." },
         { 4, L".jpg.jpeg.jpe.jfif.png.apng.gif.webp.bmp.dib.tif.tiff.avif.heic.heif.jxl.ico.tga.psd.svg.dds.qoi." },
         { 5, L".cbz.cbr.cb7.cbt.zip.rar.7z.tar.alz.egg.azo.epub.pdf." },
-        { 6, L".mp3.flac.wav.ogg.oga.opus.m4a.aac.wma.ape.wv.mka.aiff.aif." },   /* RV-189 */
+        { 6, L".mp3.flac.wav.ogg.oga.opus.m4a.aac.wma.ape.wv.mka.aiff.aif.m3u8.m3u.pls.rvlist." },   /* RV-189; RV-254 the playlists */
     };
     WCHAR probe[72];
     size_t n = rubraview_wlen(ext);
@@ -2001,6 +2001,24 @@ bool rubraview_pal_shell_open_file(proven_u8str_view_t path, bool *dangerous) {
     /* the default verb, as a double click; no association asks "Open with" */
     SHELLEXECUTEINFOW info = { .cbSize = sizeof(info), .fMask = SEE_MASK_INVOKEIDLIST, .lpFile = wide, .nShow = SW_SHOWNORMAL };
     return ShellExecuteExW(&info) != FALSE;
+}
+
+bool rubraview_pal_shell_edit_text(proven_u8str_view_t path) {
+    WCHAR wide[MAX_PATH * 2], quoted[MAX_PATH * 2 + 4];
+    if (path.size == 0 || path.size > INT_MAX) return false;
+    int n = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)path.ptr, (int)path.size, wide, (int)(sizeof(wide) / sizeof(wide[0])) - 1);
+    if (n <= 0) return false;
+    wide[n] = L'\0';
+    for (int i = 0; i < n; ++i) if (wide[i] == L'/') wide[i] = L'\\';
+    DWORD at = GetFileAttributesW(wide);
+    if (at == INVALID_FILE_ATTRIBUTES || (at & FILE_ATTRIBUTE_DIRECTORY)) return false;
+    SHELLEXECUTEINFOW edit = { .cbSize = sizeof(edit), .fMask = SEE_MASK_FLAG_NO_UI, .lpVerb = L"edit", .lpFile = wide, .nShow = SW_SHOWNORMAL };
+    if (ShellExecuteExW(&edit)) return true;
+    quoted[0] = L'"';
+    for (int i = 0; i < n; ++i) quoted[i + 1] = wide[i];
+    quoted[n + 1] = L'"';
+    quoted[n + 2] = L'\0';
+    return (INT_PTR)ShellExecuteW(NULL, L"open", L"notepad.exe", quoted, NULL, SW_SHOWNORMAL) > 32;
 }
 
 void rubraview_pal_shell_open_default_apps(void) {

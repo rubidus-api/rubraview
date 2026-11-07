@@ -478,7 +478,8 @@ typedef struct folder_files {
 /* Settings > Files > Show and Only names like: the kinds listed, and the names among them. */
 static bool folder_lists(const app_state_t *app, proven_u8str_view_t name, bool filtered) {
     char kinds_buf[1024];
-    const char *const KINDS[] = { (const char *)kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER).ptr, IMAGE_FILTER, VIDEO_FILTER, AUDIO_FILTER };
+    const char *const KINDS[] = { (const char *)kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER).ptr, IMAGE_FILTER, VIDEO_FILTER, AUDIO_FILTER,
+                                  TEXT_FILTER };   /* RV-253: a text opened brings the texts */
     name = rubraview_path_basename(name);
     if (!filtered) return rubraview_glob_match_list(name, cstr(KINDS[0]));
     int show = (int)rubraview_folder_show_for((int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("show"))),
@@ -616,12 +617,14 @@ static proven_u8str_view_t playlist_text_utf8(app_state_t *app, proven_u8str_vie
     return kept;
 }
 
-void open_playlist(app_state_t *app, proven_u8str_view_t path) {
+/* RV-255: a playlist's files (and stations) as entries, its order kept; NULL, said, when there are none. */
+static rubraview_fs_entry_t *playlist_gather(app_state_t *app, proven_u8str_view_t path, size_t *out_n, size_t *out_missing, size_t *out_stations) {
+    *out_n = *out_missing = *out_stations = 0;
     proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, path, 8u * 1024u * 1024u);
-    if (text.size == 0) { osd_say(app, TU8("the playlist is empty or could not be read")); return; }
+    if (text.size == 0) { osd_say(app, TU8("the playlist is empty or could not be read")); return NULL; }
     rubraview_playlist_t list = rubraview_playlist_parse_named(app->arena, rubraview_path_basename(path), playlist_text_utf8(app, text));
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, list.count ? list.count : 1, sizeof(rubraview_fs_entry_t));
-    if (list.count == 0 || !proven_is_ok(res.err)) { osd_say(app, TU8("the playlist names no file")); return; }
+    if (list.count == 0 || !proven_is_ok(res.err)) { osd_say(app, TU8("the playlist names no file")); return NULL; }
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
     proven_u8str_view_t dir = rubraview_path_dirname(path);
     size_t n = 0, missing = 0, stations = 0;
@@ -647,7 +650,32 @@ void open_playlist(app_state_t *app, proven_u8str_view_t path) {
         entry.name = rubraview_path_basename(entry.path);
         entries[n++] = entry;
     }
-    if (n == 0) { osd_say(app, TU8("none of the playlist's files is there")); return; }
+    if (n == 0) { osd_say(app, TU8("none of the playlist's files is there")); return NULL; }
+    *out_n = n;
+    *out_missing = missing;
+    *out_stations = stations;
+    return entries;
+}
+
+/* RV-255: "Add to the current list": a playlist's files after those being read (stations cannot be added). */
+void playlist_add(app_state_t *app, proven_u8str_view_t path) {
+    size_t n = 0, missing = 0, stations = 0;
+    rubraview_fs_entry_t *entries = playlist_gather(app, path, &n, &missing, &stations);
+    if (!entries) return;
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n, sizeof(proven_u8str_view_t));
+    if (!proven_is_ok(res.err)) return;
+    proven_u8str_view_t *paths = (proven_u8str_view_t*)(void*)res.value.ptr;
+    size_t k = 0;
+    for (size_t i = 0; i < n; ++i) if (!is_station_path(entries[i].path)) paths[k++] = entries[i].path;
+    if (k == 0) { osd_say(app, TU8("the playlist holds only stations: open it in place of the list")); return; }
+    list_add_paths(app, paths, k, false);
+}
+
+void open_playlist(app_state_t *app, proven_u8str_view_t path) {
+    size_t n = 0, missing = 0, stations = 0;
+    rubraview_fs_entry_t *entries = playlist_gather(app, path, &n, &missing, &stations);
+    if (!entries) return;
+    proven_u8str_view_t dir = rubraview_path_dirname(path);
     char line[128];
     if (stations > 0 && missing > 0) rubraview_fmt(line, sizeof(line), T("playlist: {} files and stations ({} stations), {} not found"), PROVEN_ARG((size_t)n), PROVEN_ARG((size_t)stations), PROVEN_ARG((size_t)missing));
     else if (stations > 0) rubraview_fmt(line, sizeof(line), T("playlist: {} files and stations ({} stations)"), PROVEN_ARG((size_t)n), PROVEN_ARG((size_t)stations));
@@ -776,7 +804,8 @@ void open_path(app_state_t *app, proven_u8str_view_t path) {
         proven_u8str_view_t base = rubraview_path_basename(entry.path);
         app->folder_opened_kind = rubraview_glob_match_list(base, PROVEN_LIT(IMAGE_FILTER)) ? 1
                                 : rubraview_glob_match_list(base, PROVEN_LIT(VIDEO_FILTER)) ? 2
-                                : rubraview_glob_match_list(base, PROVEN_LIT(AUDIO_FILTER)) ? 3 : 0;
+                                : rubraview_glob_match_list(base, PROVEN_LIT(AUDIO_FILTER)) ? 3
+                                : rubraview_glob_match_list(base, PROVEN_LIT(TEXT_FILTER)) ? 4 : 0;   /* RV-253 */
         opened = open_folder_keeping(app, folder, entry.path);
         key = folder;
     }

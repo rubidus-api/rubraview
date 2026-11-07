@@ -1200,6 +1200,10 @@ static size_t shell_chosen_words(app_state_t *app, bool menu, char *out, size_t 
         { "log",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_log")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_log")) > 0.5 },
         { "nfo",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_nfo")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_nfo")) > 0.5 },
         { "md",   rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_md")) > 0.5,   rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_md")) > 0.5 },
+        { "m3u8", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_m3u8")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_m3u8")) > 0.5 },   /* RV-254 */
+        { "m3u", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_m3u")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_m3u")) > 0.5 },   /* RV-254 */
+        { "pls", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_pls")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_pls")) > 0.5 },   /* RV-254 */
+        { "rvlist", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_rvlist")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_rvlist")) > 0.5 },   /* RV-254 */
         { "zip",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_zip")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_zip")) > 0.5 },
         { "7z",   rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_7z")) > 0.5,   rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_7z")) > 0.5 },
         { "rar",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_rar")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_rar")) > 0.5 },
@@ -1287,7 +1291,7 @@ static void shell_types_action(app_state_t *app, proven_u8str_view_t name) {
     bool types = rubraview_settings_get(&app->settings, PROVEN_LIT("shell"), PROVEN_LIT("open_with")) > 0.5;
     bool menu = rubraview_settings_get(&app->settings, PROVEN_LIT("shell"), PROVEN_LIT("menu")) > 0.5;
 
-    char words[256], menu_words[256];
+    char words[512], menu_words[512];   /* RV-254: the playlists' too */
     size_t words_len = shell_chosen_words(app, false, words, sizeof(words));
     size_t menu_len = shell_chosen_words(app, true, menu_words, sizeof(menu_words));
     /* A column with no box ticked is that part taken back (RV-120). */

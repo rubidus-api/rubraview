@@ -822,7 +822,7 @@ bool path_is_listed_kind(proven_u8str_view_t path) {
    file added to the list goes": end, or sorted with the rest). `show`
    turns to the first of them — what a file opened from Explorer asks —
    and without it the reader stays on the page being read. */
-static void list_add_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, bool show) {
+void list_add_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, bool show) {
     bool files_open = page_count(app) > 0 && app->source.archive_path.size == 0;
     if (!files_open) {
         open_paths_as_set(app, paths, count, count == 1 ? T("file opened as a list") : T("files opened as a list"));

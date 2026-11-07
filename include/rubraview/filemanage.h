@@ -260,11 +260,13 @@ proven_u8str_view_t rubraview_shell_extensions(void);
 #define RUBRAVIEW_SHELL_ARCHIVES 16u
 /* RV-123 (RFC-0005 §9): .txt .log .nfo .md, offered both columns, off as they come. */
 #define RUBRAVIEW_SHELL_TEXT     32u
+/* RV-254 (owner 2026-11-08): .m3u8 .m3u .pls .rvlist, a file type of ours as they come. */
+#define RUBRAVIEW_SHELL_PLAYLISTS 256u
 /* RV-207 (D-252): menu items only, no extension list: any file at all, and folders. */
 #define RUBRAVIEW_SHELL_ANY_FILE 64u
 #define RUBRAVIEW_SHELL_FOLDERS  128u
 /* D-277: the kinds that may become a file type of ours (double click), each when chosen. */
-#define RUBRAVIEW_SHELL_FILE_TYPES (RUBRAVIEW_SHELL_ALL | RUBRAVIEW_SHELL_TEXT | RUBRAVIEW_SHELL_ARCHIVES)
+#define RUBRAVIEW_SHELL_FILE_TYPES (RUBRAVIEW_SHELL_ALL | RUBRAVIEW_SHELL_TEXT | RUBRAVIEW_SHELL_PLAYLISTS | RUBRAVIEW_SHELL_ARCHIVES)
 
 /** The extensions of the kinds in `groups`, `;`-separated; empty for none. */
 proven_u8str_view_t rubraview_shell_extensions_for(proven_arena_t *arena, uint32_t groups);

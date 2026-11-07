@@ -342,6 +342,35 @@ description = "Text"
 logo = "menu/types/text.png"
 target = "file:App"
 
+# RV-254: the playlists, opened as the list they hold.
+[assoc.Playlist_m3u8]
+extension = ".m3u8"
+prog-id = "Rubraview.Playlist"
+description = "Playlist"
+logo = "menu/types/music.png"
+target = "file:App"
+
+[assoc.Playlist_m3u]
+extension = ".m3u"
+prog-id = "Rubraview.Playlist"
+description = "Playlist"
+logo = "menu/types/music.png"
+target = "file:App"
+
+[assoc.Playlist_pls]
+extension = ".pls"
+prog-id = "Rubraview.Playlist"
+description = "Playlist"
+logo = "menu/types/music.png"
+target = "file:App"
+
+[assoc.Playlist_rvlist]
+extension = ".rvlist"
+prog-id = "Rubraview.Playlist"
+description = "Playlist"
+logo = "menu/types/music.png"
+target = "file:App"
+
 # Explorer's right-click menu (RV-113 (3)): the items of MENU_ITEMS in
 # src/core/shellreq.c, each on the extensions of its kinds (SHELL_GROUPS in
 # src/core/filemanage.c; scripts/check-store.py compares them). One run with
@@ -359,7 +388,8 @@ on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".cbz", ".cb7", ".cbr", ".mp4",
     ".mkv", ".webm", ".avi", ".mov", ".wmv", ".asf", ".mpg", ".mpeg",
-    ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a", ".txt", ".log", ".nfo", ".md", ".zip", ".7z", ".rar", ".alz", ".egg",
+    ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a", ".txt", ".log", ".nfo", ".md", ".m3u8", ".m3u", ".pls", ".rvlist",
+    ".zip", ".7z", ".rar", ".alz", ".egg",
 ]
 text = "Open"
 text-ko = "열기"
@@ -374,7 +404,8 @@ on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".cbz", ".cb7", ".cbr", ".mp4",
     ".mkv", ".webm", ".avi", ".mov", ".wmv", ".asf", ".mpg", ".mpeg",
-    ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a", ".txt", ".log", ".nfo", ".md", ".zip", ".7z", ".rar", ".alz", ".egg",
+    ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a", ".txt", ".log", ".nfo", ".md", ".m3u8", ".m3u", ".pls", ".rvlist",
+    ".zip", ".7z", ".rar", ".alz", ".egg",
 ]
 text = "Open in a new window"
 text-ko = "새 창에서 열기"

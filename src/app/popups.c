@@ -537,6 +537,7 @@ double name_scale(const app_state_t *app) {
 /* What Shape (or a sort by length) waits for, under the button pressed: how many of how many, a bar, Esc. */
 static void draw_pack_ask(app_state_t *app, double win_w, double win_h, double dpi);   /* D-267, below */
 static void draw_extract_done(app_state_t *app, double win_w, double win_h, double dpi);   /* RV-240, below */
+static void draw_playlist_ask(app_state_t *app, double win_w, double win_h, double dpi);   /* RV-255, below */
 
 void draw_reading(app_state_t *app, double win_w, double win_h, double dpi) {
     size_t done = 0, count = 0;
@@ -570,6 +571,7 @@ void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi
     draw_reading(app, win_w, win_h, chrome_dpi);
     draw_pack_ask(app, win_w, win_h, chrome_dpi);   /* D-267 */
     draw_extract_done(app, win_w, win_h, chrome_dpi);   /* RV-240 */
+    draw_playlist_ask(app, win_w, win_h, chrome_dpi);   /* RV-255 */
     if (app->notice_seconds > 0.0 && app->notice_length > 0) {
         double k = name_scale(app);   /* 1.25.0 */
         int before = place_font_begin(app, PF_NAME, NULL);
@@ -869,6 +871,76 @@ void extract_done_answer(app_state_t *app, int which) {
 bool extract_done_press(app_state_t *app, double x, double y) {
     if (!app->extract_done) return false;
     for (int i = 0; i < 3; ++i) if (pal_rect_has(app->extract_done_btn[i], x, y)) { extract_done_answer(app, i); return true; }
+    return true;   /* nothing under it while it asks */
+}
+
+/* RV-255 (owner, 2026-11-08: "자체 탐색기에서 재생목록 파일을 열려고 하면, 텍스트 에디터로 열기 / 현재 재생목록에 추가하기 / 이 재생목록으로 교체 이렇게 선택하도록 하자."): a playlist chosen in the open-file screen asks how it is opened — as
+   text in Windows' editor, its files added to the list being read, or in place of that list; Esc leaves it. The
+   card's look is RV-240's; its buttons wrap to a second line in a narrow window. */
+void playlist_ask_open(app_state_t *app, proven_u8str_view_t path) {
+    if (path.size == 0 || path.size >= sizeof app->playlist_ask_path) return;
+    proven_sys_mem_copy(app->playlist_ask_path, path.ptr, path.size);
+    app->playlist_ask_path[path.size] = '\0';
+    app->playlist_ask = true;
+}
+
+static void draw_playlist_ask(app_state_t *app, double win_w, double win_h, double dpi) {
+    if (!app->playlist_ask) return;
+    double cw = fmin(640.0 * dpi, win_w - 16.0 * dpi), pad = 20.0 * dpi, bh = 38.0 * dpi, gap = 10.0 * dpi;
+    const char *words[4] = { T("Edit it as text"), T("Add to the current list"), T("Open in place of the list"), T("Cancel") };
+    double bw[4];
+    for (int i = 0; i < 4; ++i) {
+        double tw = 0.0;
+        (void)rubraview_pal_render_measure_text(app->renderer, cstr(words[i]), 14.0 * dpi, &tw);
+        bw[i] = fmin(fmax(96.0 * dpi, tw + 32.0 * dpi), cw - 2.0 * pad);
+    }
+    uint32_t line_of[4];
+    double x_of[4];
+    size_t lines = rubraview_flow_inline(bw, 4, gap, cw - 2.0 * pad, line_of, x_of);   /* RV-248's flow */
+    double ch = pad + 30.0 * dpi + 26.0 * dpi + 14.0 * dpi + (double)lines * (bh + gap) - gap + pad;
+    rubraview_pal_rect_t card = { (win_w - cw) * 0.5, (win_h - ch) * 0.45, cw, ch };
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, 0.0, win_w, win_h }, 0x90000000u, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ card.x + 3.0 * dpi, card.y + 5.0 * dpi, cw, ch }, 0x60000000u, 8.0 * dpi);
+    rubraview_pal_render_fill_rect(app->renderer, card, 0xFA242424u, 8.0 * dpi);
+    rubraview_pal_render_stroke_rect(app->renderer, card, COLOR_BOX_BORDER, 1.0 * dpi, 8.0 * dpi);
+    rubraview_pal_rect_t tr = { card.x + pad, card.y + pad - 4.0 * dpi, cw - 2.0 * pad, 30.0 * dpi };
+    proven_u8str_view_t title = TU8("A playlist: how is it opened?");
+    rubraview_pal_render_draw_text(app->renderer, title, tr, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    rubraview_pal_render_draw_text(app->renderer, title, (rubraview_pal_rect_t){ tr.x + 0.6 * dpi, tr.y, tr.width, tr.height }, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    char fit[1200];
+    proven_u8str_view_t name = files_fit_text(fit, sizeof fit, rubraview_path_basename(cstr(app->playlist_ask_path)), tr.width, 13.0 * dpi);
+    rubraview_pal_render_draw_text(app->renderer, name, (rubraview_pal_rect_t){ tr.x, tr.y + 30.0 * dpi, tr.width, 22.0 * dpi },
+                                   13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    double y0 = tr.y + 30.0 * dpi + 26.0 * dpi + 14.0 * dpi;
+    for (int i = 0; i < 4; ++i) {
+        rubraview_pal_rect_t b = { card.x + pad + x_of[i], y0 + (double)line_of[i] * (bh + gap), bw[i], bh };
+        app->playlist_ask_btn[i] = b;
+        bool over = pal_rect_has(b, app->pointer_x, app->pointer_y), main = i == 2;   /* Enter's: in place of the list */
+        rubraview_pal_render_fill_rect(app->renderer, b, main ? COLOR_TILE_CURRENT : over ? 0x50FFFFFFu : COLOR_TILE_FILL, 5.0 * dpi);
+        if (main && over) rubraview_pal_render_fill_rect(app->renderer, b, 0x30FFFFFFu, 5.0 * dpi);
+        if (!main) rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 5.0 * dpi);
+        rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+}
+
+void playlist_ask_answer(app_state_t *app, int which) {
+    if (!app->playlist_ask) return;
+    app->playlist_ask = false;
+    proven_u8str_view_t path = app_keep(app, cstr(app->playlist_ask_path));
+    if (which == 0) {
+        if (!rubraview_pal_shell_edit_text(path)) osd_say(app, TU8("no text editor could be started"));
+    } else if (which == 1) {
+        app->picker_open = false;
+        playlist_add(app, path);
+    } else if (which == 2) {
+        app->picker_open = false;
+        open_path(app, path);
+    }
+}
+
+bool playlist_ask_press(app_state_t *app, double x, double y) {
+    if (!app->playlist_ask) return false;
+    for (int i = 0; i < 4; ++i) if (pal_rect_has(app->playlist_ask_btn[i], x, y)) { playlist_ask_answer(app, i); return true; }
     return true;   /* nothing under it while it asks */
 }
 

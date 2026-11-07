@@ -251,7 +251,7 @@ size_t rubraview_picker_type_text(char *buf, size_t cap, proven_u8str_view_t nam
  * RV-168, RV-169 (D-201): which of Settings > Files > Show's kinds (0 all, 1 pictures, 2 films, 3 music) a folder is
  * listed with when something of it is opened. `opened_kind` is the file's kind in the same numbers (0 for a folder);
  * with `same_kind` on and Show "all", a file brings its own kind only. A Show the reader chose stays. Out of range
- * is "all".
+ * is "all". RV-253: 4 is a text, which brings the texts (a kind of its own here, not one of Show's).
  */
 int32_t rubraview_folder_show_for(int32_t show, int32_t opened_kind, bool same_kind);
 

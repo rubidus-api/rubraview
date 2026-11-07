@@ -59,9 +59,15 @@ place of what was open.
 | Show the file that was added | on | off: it joins the list and the page being read stays |
 | The first file brings its folder | on | off: the first file is alone, and later ones join it |
 
-A playlist file (`.m3u8`, `.m3u`, or `.rvlist`: one path a line) opens
+A playlist file (`.m3u8`, `.m3u`, `.pls` or `.rvlist`: one path a line) opens
 as the files it names, in its order; a path that is not whole is taken
 from the playlist's folder, and a file that is not there is left out.
+Playlists open in Rubraview from Explorer as they come (Settings ›
+Explorer › Playlists). Chosen in the open-file screen, a playlist asks:
+**Edit it as text** (Windows' editor for it, or Notepad), **Add to the
+current list**, or **Open in place of the list** (`Enter`); `Esc` leaves
+it. A file opened brings only its folder's files of its own kind —
+pictures, films, music or texts.
 
 **Internet radio.** A playlist can also name radio stations by their
 address, each with its own title, and then it is a list of stations to

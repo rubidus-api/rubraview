@@ -328,11 +328,11 @@ proven_u8str_view_t rubraview_shell_progid(proven_arena_t *arena, proven_u8str_v
 }
 
 proven_u8str_view_t rubraview_shell_extensions(void) {
-    return PROVEN_LIT("jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;avif;jxl;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;wmv;asf;mpg;mpeg;mp3;flac;wav;ogg;opus;m4a;txt;log;nfo;md");
+    return PROVEN_LIT("jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;avif;jxl;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;wmv;asf;mpg;mpeg;mp3;flac;wav;ogg;opus;m4a;txt;log;nfo;md;m3u8;m3u;pls;rvlist");
 }
 
 proven_u8str_view_t rubraview_shell_extensions_all(void) {
-    return PROVEN_LIT("jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;avif;jxl;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;wmv;asf;mpg;mpeg;mp3;flac;wav;ogg;opus;m4a;txt;log;nfo;md;zip;7z;rar;alz;egg");
+    return PROVEN_LIT("jpg;jpeg;png;apng;gif;bmp;tif;tiff;webp;avif;jxl;ico;cbz;cb7;cbr;mp4;mkv;webm;avi;mov;wmv;asf;mpg;mpeg;mp3;flac;wav;ogg;opus;m4a;txt;log;nfo;md;m3u8;m3u;pls;rvlist;zip;7z;rar;alz;egg");
 }
 
 static const struct { uint32_t group; const char *word; const char *extensions; } SHELL_GROUPS[] = {
@@ -341,6 +341,7 @@ static const struct { uint32_t group; const char *word; const char *extensions; 
     { RUBRAVIEW_SHELL_VIDEO,    "video",    "mp4;mkv;webm;avi;mov;wmv;asf;mpg;mpeg" },
     { RUBRAVIEW_SHELL_MUSIC,    "music",    "mp3;flac;wav;ogg;opus;m4a" },
     { RUBRAVIEW_SHELL_TEXT,     "text",     "txt;log;nfo;md" },
+    { RUBRAVIEW_SHELL_PLAYLISTS, "playlists", "m3u8;m3u;pls;rvlist" },   /* RV-254 */
     /* D-86: the right-click menu; D-277: a file type of ours only when named. */
     { RUBRAVIEW_SHELL_ARCHIVES, "archives", "zip;7z;rar;alz;egg" },
 };
@@ -427,7 +428,8 @@ size_t rubraview_shell_type_name(proven_u8str_view_t extension, char *out, size_
     uint32_t kind = rubraview_shell_kind_of(extension);
     const char *word = kind == RUBRAVIEW_SHELL_PICTURES ? "Picture" : kind == RUBRAVIEW_SHELL_COMICS ? "Comic book"
                      : kind == RUBRAVIEW_SHELL_VIDEO ? "Video" : kind == RUBRAVIEW_SHELL_MUSIC ? "Music"
-                     : kind == RUBRAVIEW_SHELL_TEXT ? "Text" : kind == RUBRAVIEW_SHELL_ARCHIVES ? "Archive" : "File";
+                     : kind == RUBRAVIEW_SHELL_TEXT ? "Text" : kind == RUBRAVIEW_SHELL_PLAYLISTS ? "Playlist"
+                     : kind == RUBRAVIEW_SHELL_ARCHIVES ? "Archive" : "File";
     size_t n = proven_cstr_len(word), len = extension.size + 1 + n;
     if (!out || cap <= len) return len;
     for (size_t i = 0; i < extension.size; ++i) {

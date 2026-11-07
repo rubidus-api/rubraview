@@ -290,6 +290,10 @@ bool rubraview_pal_shell_open_folder(proven_u8str_view_t path, bool make);
  *  Windows itself calls dangerous (AssocIsDangerous) is not opened either, `*dangerous` set. False when not opened. */
 bool rubraview_pal_shell_open_file(proven_u8str_view_t path, bool *dangerous);
 
+/** RV-255: a text file in Windows' editor for it — its type's Edit verb, or Notepad when it has none. False when
+ *  neither started. */
+bool rubraview_pal_shell_edit_text(proven_u8str_view_t path);
+
 /** Windows' own Default apps page, where a type's default is chosen. */
 void rubraview_pal_shell_open_default_apps(void);
 

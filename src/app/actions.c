@@ -1648,6 +1648,13 @@ void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
         else if (key_is(combo, "Escape")) extract_done_answer(app, 2);
         return;
     }
+    if (app->playlist_ask) {   /* RV-255: Enter opens it in place of the list, Esc leaves it; 1 2 3 the buttons */
+        if (key_is(combo, "Enter") || key_is(combo, "3")) playlist_ask_answer(app, 2);
+        else if (key_is(combo, "Escape")) playlist_ask_answer(app, 3);
+        else if (key_is(combo, "1")) playlist_ask_answer(app, 0);
+        else if (key_is(combo, "2")) playlist_ask_answer(app, 1);
+        return;
+    }
     if (app->pack_ask) {   /* D-267: Enter recycles the older parts and compresses, Esc gives up; nothing else meanwhile */
         if (key_is(combo, "Enter")) archwork_pack_ask_answer(app, true);
         else if (key_is(combo, "Escape")) archwork_pack_ask_answer(app, false);
