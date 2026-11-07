@@ -69,10 +69,20 @@ static bool box_anchor_wheel(app_state_t *app, double x, double y, double notche
     }
     rubraview_anchor_half_t half = rubraview_box_anchor_half_at(&app->toolbox, &metrics, x, y);
     if (half == RUBRAVIEW_ANCHOR_NONE) return false;
-    if (half == RUBRAVIEW_ANCHOR_CLICK && !(modifiers & RUBRAVIEW_MOD_ALT)) {   /* RV-171: F, the file before or after */
-        if (page_count(app) < 2) return true;
-        apply_intent(app, notches > 0.0 ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE);
-        strip_peek(app);   /* shown or not as Settings › Viewer says */
+    if (half == RUBRAVIEW_ANCHOR_CLICK && !(modifiers & RUBRAVIEW_MOD_ALT)) {
+        /* RV-236 (owner, 2026-11-07: "플로팅 위젯 왼쪽 버튼 위에서 휠을 돌리면 플로팅 버튼 크기가 변하게 ... 현재 마우스 커서 위치에
+           왼쪽 버튼의 중앙이 오게 ... 동작 끝나면 화면 가장자리 바깥에 벗어나지 못하게 재조정"): F sizes the Floating Widget as R
+           does (RV-171's file before or after is the picture's wheel's), F's centre kept under the pointer while the
+           wheel turns; boxes_place brings it inside 0.8 s after the last notch */
+        double size = rubraview_box_widget_size_step(rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_size")), notches);
+        rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_size"), size);
+        g_widget_scale = size / 100.0;
+        double a = tile_metrics(rubraview_pal_window_dpi_scale(app->window)).anchor_size;
+        b->anchor_x = x - a * 0.5;
+        b->anchor_y = y - a * 0.5;
+        app->widget_wheel_until = rubraview_pal_time_now_seconds() + 0.8;
+        n = rubraview_fmt(line, sizeof(line), T("Floating Widget size {}%"), PROVEN_ARG((int)lround(size)));
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         note_activity(app);
         return true;
     }
@@ -1589,6 +1599,7 @@ void render_frame(app_state_t *app) {
         draw_sub_list(app);   /* D-33: on top of every box */
         draw_ctxmenu(app);    /* RV-116 */
         draw_slidepop(app);
+        draw_volpop(app);     /* RV-237 */
         draw_hint(app, (double)win_w, (double)win_h);
         draw_seekfan(app, app->renderer, false);
         draw_chrome_answers(app, (double)win_w, (double)win_h);
@@ -1696,6 +1707,10 @@ uint64_t scene_signature(const app_state_t *app) {
     if (app->tmenu_open) { SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y); }   /* RV-205: the hovered button */
     SIG(&h, app->chooser.open); SIG(&h, app->chooser.focus); SIG(&h, app->chooser.layout.first);   /* 1.24.0 */
     SIG(&h, app->ctx_open); SIG(&h, app->ctx_focus); SIG(&h, app->slidepop_open); SIG(&h, app->slidepop_typing);
+    SIG(&h, app->volpop_open); SIG(&h, app->volpop_typing); SIG(&h, app->volpop_len);   /* RV-237 */
+    SIG(&h, rubraview_pal_time_now_seconds() < app->vol_flash_until);
+    SIG(&h, (int64_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume"))));
+    if (app->volpop_open) { SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y); }
     if (app->ctx_open || app->slidepop_open) {   /* RV-116: a row or a button lights under the pointer */
         SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y);
         SIG(&h, app->slidepop_len); SIG(&h, (int64_t)lround(app->slideshow.interval_seconds * 10.0));

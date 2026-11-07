@@ -59,6 +59,25 @@ rubraview_slidepop_part_t rubraview_slidepop_part_at(rubraview_rect_t frame, dou
 /** − and +: half a second from the delay, to the next half second, no less than half a second. */
 double rubraview_slidepop_step(double seconds, int direction);
 
+/*
+ * RV-237 (owner, 2026-11-07): the volume's own bar, by the Toolbar's volume button — a level bar along, the
+ * percent at its right end (a press there types it). Over the button when there is room, else under it, inside
+ * the window. Sizes at a scale of 1, multiplied by `scale`.
+ */
+typedef enum rubraview_volpop_part {
+    RUBRAVIEW_VOLPOP_NONE = -1,
+    RUBRAVIEW_VOLPOP_BAR = 0,      /* the level: pressed or dragged, the volume where the pointer is */
+    RUBRAVIEW_VOLPOP_FIELD,        /* "75%": a press types the percent */
+} rubraview_volpop_part_t;
+
+rubraview_rect_t rubraview_volpop_frame(rubraview_rect_t button, double window_width, double window_height, double scale);
+rubraview_rect_t rubraview_volpop_part(rubraview_rect_t frame, double scale, rubraview_volpop_part_t part);
+rubraview_volpop_part_t rubraview_volpop_part_at(rubraview_rect_t frame, double scale, double x, double y);
+/** The volume, 0..100 in whole percent, for a point along the bar (past either end: its end). */
+double rubraview_volpop_value_at(rubraview_rect_t bar, double x);
+/** A typed percent ("75", "75%", " 7.5 "), rounded and held in 0..100; false when it is no number. */
+bool rubraview_volpop_parse(proven_u8str_view_t text, double *out_percent);
+
 #ifdef __cplusplus
 }
 #endif

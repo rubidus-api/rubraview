@@ -269,8 +269,9 @@ static const char *const PARTS[] = {
 "\n",
 "page audio \"Audio\"\n"
 "  section \"Volume\"\n"
-"  int    audio.volume             \"Volume\"                  0..100 step 5 unit \"%\" = 100 wired\n"
+"  int    audio.volume             \"Volume\"                  0..100 step 1 unit \"%\" = 100 wired\n"
 "  toggle audio.mute               \"Mute\"                    = false wired\n"
+"  path   audio.output_device      \"This app's sound output\" hidden wired\n"
 "  section \"Playback\"\n"
 "  choice audio.at_end             \"When a file ends\"        stop | next | one | all | shuffle = next wired\n"
 "  toggle audio.gapless            \"Gapless playback\"        = true wired\n"

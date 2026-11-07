@@ -14,6 +14,11 @@ static const struct { const char *words, *action; } TMENU[] = {
     { N_("Recent files..."), "open_recent_list" },
     { N_("Batch"), "open_batch" },
     { N_("Print..."), "print" },
+    /* RV-235 (owner, 2026-11-07: "특정 폴더로 복사/이동 항목을 타이틀바 왼쪽 메인메뉴에 항목으로 넣어주세요") */
+    { N_("Copy to folder"), "copy_to_folder" },
+    { N_("Move to folder"), "move_to_folder" },
+    { N_("Copy to another folder..."), "copy_to_other_folder" },
+    { N_("Move to another folder..."), "move_to_other_folder" },
     { N_("Playlist"), "toggle_playlist" },
     { N_("Settings"), "open_settings" },
     { N_("Help"), "toggle_help" },

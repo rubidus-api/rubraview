@@ -347,6 +347,7 @@ bool popups_press(app_state_t *app, double x, double y, bool right) {
 
 /* Keys while either is open: the arrows and Enter in the list, typing in the delay, Esc. */
 bool popups_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (volpop_key(app, combo)) return true;   /* RV-237 */
     if (app->slidepop_open) {
         if (app->slidepop_typing) {
             if (key_is(combo, "Escape")) { slidepop_type_end(app, false); return true; }
@@ -1531,4 +1532,177 @@ void draw_text_weight(app_state_t *app, proven_u8str_view_t text, rubraview_pal_
     rubraview_pal_render_draw_text(app->renderer, text, r, size, argb, RUBRAVIEW_TEXT_CENTER);
     if (bold) rubraview_pal_render_draw_text(app->renderer, text, (rubraview_pal_rect_t){ r.x + size * 0.06, r.y, r.width, r.height },
                                              size, argb, RUBRAVIEW_TEXT_CENTER);
+}
+
+/* ---- RV-237 (owner, 2026-11-07): the volume's bar ----
+   A press on the Toolbar's volume button opens a bar by it: the level along it (pressed or dragged), the percent at
+   its right end, which a press turns into a box to type the percent in. The wheel over the button sets the volume
+   at once and shows only the percent by the button for a moment. */
+int volume_percent(const app_state_t *app) {
+    return (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume")));
+}
+
+static void volume_set(app_state_t *app, double percent) {
+    if (percent < 0.0) percent = 0.0;
+    if (percent > 100.0) percent = 100.0;
+    rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume"), percent);
+    rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute"), 0.0);   /* as Up and Down: a level set unmutes */
+    settings_took_effect(app);
+    note_activity(app);
+}
+
+static rubraview_rect_t volpop_frame(app_state_t *app) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    return rubraview_volpop_frame(app->volpop_button, (double)w, (double)h, rubraview_pal_window_dpi_scale(app->window));
+}
+
+void volpop_open_at(app_state_t *app, rubraview_rect_t button) {
+    ctx_close(app);
+    slidepop_close(app);
+    app->volpop_open = true;
+    app->volpop_typing = app->volpop_drag = false;
+    app->volpop_button = button;
+}
+
+void volpop_open_main(app_state_t *app) {   /* from a key, the menu or a Toolbar of its own: by the window's foot */
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    double s = rubraview_pal_window_dpi_scale(app->window);
+    volpop_open_at(app, (rubraview_rect_t){ (double)w * 0.5 - 18.0 * s, (double)h - 80.0 * s, 36.0 * s, 36.0 * s });
+}
+
+static void volpop_type_end(app_state_t *app, bool keep) {
+    if (!app->volpop_typing) return;
+    app->volpop_typing = false;
+    double percent = 0.0;
+    if (!keep) return;
+    if (rubraview_volpop_parse((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->volpop_text, .size = app->volpop_len }, &percent))
+        volume_set(app, percent);
+    else
+        osd_say(app, TU8("the volume is a percent, 0 to 100"));
+}
+
+void volpop_close(app_state_t *app) {
+    volpop_type_end(app, true);
+    app->volpop_open = app->volpop_drag = false;
+}
+
+void draw_volpop(app_state_t *app) {
+    double s = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_renderer_t *r = app->renderer;
+    if (rubraview_pal_time_now_seconds() < app->vol_flash_until) {   /* the wheel's percent, by the button */
+        char line[16];
+        int n = rubraview_fmt(line, sizeof(line), "{}%", PROVEN_ARG(volume_percent(app)));
+        rubraview_rect_t b = app->vol_flash_at;
+        rubraview_pal_rect_t box = { b.x + b.width * 0.5 - 30.0 * s, b.y - 34.0 * s, 60.0 * s, 28.0 * s };
+        if (box.y < 0.0) box.y = b.y + b.height + 6.0 * s;
+        if (box.x < 0.0) box.x = 0.0;
+        rubraview_pal_render_fill_rect(r, box, 0xF0303030u, 3.0 * s);
+        rubraview_pal_render_stroke_rect(r, box, COLOR_BOX_BORDER, 1.0 * s, 3.0 * s);
+        rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 },
+                                       box, 14.0 * s, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+    if (!app->volpop_open) return;
+    rubraview_rect_t f = volpop_frame(app);
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, 0xF6202020u, 5.0 * s);
+    rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, COLOR_TILE_CURRENT, 1.5 * s, 5.0 * s);
+    rubraview_rect_t bar = rubraview_volpop_part(f, s, RUBRAVIEW_VOLPOP_BAR);
+    double level = (double)volume_percent(app) / 100.0;
+    bool muted = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute")) > 0.5;
+    double mid = bar.y + bar.height * 0.5, track = 6.0 * s;
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ bar.x, mid - track * 0.5, bar.width, track }, 0x40FFFFFFu, track * 0.5);
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ bar.x, mid - track * 0.5, bar.width * level, track },
+                                   muted ? 0xFF808080u : COLOR_TILE_CURRENT, track * 0.5);
+    double knob = 14.0 * s;
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ bar.x + bar.width * level - knob * 0.5, mid - knob * 0.5, knob, knob }, COLOR_TEXT, knob * 0.5);
+    rubraview_rect_t fr = rubraview_volpop_part(f, s, RUBRAVIEW_VOLPOP_FIELD);
+    rubraview_pal_rect_t field = { fr.x, fr.y, fr.width, fr.height };
+    char line[16];
+    proven_u8str_view_t text;
+    if (app->volpop_typing) {
+        text = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->volpop_text, .size = app->volpop_len };
+    } else {
+        int n = rubraview_fmt(line, sizeof(line), "{}%", PROVEN_ARG(volume_percent(app)));
+        text = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 };
+    }
+    bool hover = rubraview_rect_contains(fr, app->pointer_x, app->pointer_y);
+    rubraview_pal_render_fill_rect(r, field, app->volpop_typing ? 0xFF101010u : hover ? 0x50FFFFFFu : 0x28FFFFFFu, 3.0 * s);
+    rubraview_pal_render_stroke_rect(r, field, app->volpop_typing ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, 1.0 * s, 3.0 * s);
+    rubraview_pal_render_draw_text(r, text, field, 14.0 * s, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+}
+
+bool volpop_press(app_state_t *app, double x, double y) {
+    if (!app->volpop_open) return false;
+    double s = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_rect_t f = volpop_frame(app);
+    rubraview_volpop_part_t part = rubraview_volpop_part_at(f, s, x, y);
+    if (part != RUBRAVIEW_VOLPOP_FIELD) volpop_type_end(app, true);
+    if (part == RUBRAVIEW_VOLPOP_FIELD) {
+        if (!app->volpop_typing) {
+            int n = rubraview_fmt(app->volpop_text, sizeof(app->volpop_text), "{}", PROVEN_ARG(volume_percent(app)));
+            app->volpop_len = n > 0 ? (size_t)n : 0;
+            app->volpop_typing = true;
+        }
+        return true;
+    }
+    if (part == RUBRAVIEW_VOLPOP_BAR) {
+        app->volpop_drag = true;
+        volume_set(app, rubraview_volpop_value_at(rubraview_volpop_part(f, s, RUBRAVIEW_VOLPOP_BAR), x));
+        return true;
+    }
+    if (!rubraview_rect_contains(f, x, y)) volpop_close(app);   /* a press away closes it, and is spent */
+    return true;
+}
+
+bool volpop_motion(app_state_t *app, double x, double y) {
+    (void)y;
+    if (!app->volpop_open || !app->volpop_drag) return false;
+    double s = rubraview_pal_window_dpi_scale(app->window);
+    volume_set(app, rubraview_volpop_value_at(rubraview_volpop_part(volpop_frame(app), s, RUBRAVIEW_VOLPOP_BAR), x));
+    return true;
+}
+
+bool volpop_release(app_state_t *app) {
+    if (!app->volpop_drag) return false;
+    app->volpop_drag = false;
+    return true;
+}
+
+bool volpop_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (!app->volpop_open) return false;
+    if (app->volpop_typing) {
+        if (key_is(combo, "Escape")) { volpop_type_end(app, false); return true; }
+        if (key_is(combo, "Enter")) { volpop_type_end(app, true); return true; }
+        if (key_is(combo, "Backspace")) { if (app->volpop_len > 0) app->volpop_len--; return true; }
+        char c = combo.key_name.size == 1 ? (char)combo.key_name.ptr[0] :
+                 combo.key_name.size == 7 && proven_sys_mem_cmp(combo.key_name.ptr, "Numpad", 6) == 0 ? (char)combo.key_name.ptr[6] : 0;
+        if (c >= '0' && c <= '9' && app->volpop_len + 1 < sizeof(app->volpop_text)) app->volpop_text[app->volpop_len++] = c;
+        return true;   /* while typing, the viewer's keys wait */
+    }
+    if (key_is(combo, "Escape") || key_is(combo, "Enter")) { volpop_close(app); return true; }
+    return false;
+}
+
+/* The volume button under the pointer in the docked Toolbar; its place in `at`. */
+static bool volume_tile_at(app_state_t *app, double x, double y, rubraview_rect_t *at) {
+    if (app->toolbox.state == RUBRAVIEW_BOX_COLLAPSED || app->toolbox.state == RUBRAVIEW_BOX_DETACHED) return false;
+    rubraview_tile_metrics_t m = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
+    int32_t tile = rubraview_box_tile_at(&app->toolbox, &m, x, y);
+    if (tile < 0 || tile >= app->toolbox_tile_count || !proven_u8str_view_eq(app->toolbox_tiles[tile].action, PROVEN_LIT("media_volume")))
+        return false;
+    *at = rubraview_box_tile_rect(&app->toolbox, &m, tile);
+    return true;
+}
+
+bool volume_tile_wheel(app_state_t *app, double x, double y, double notches) {
+    rubraview_rect_t at = {0};
+    bool on_bar = app->volpop_open && rubraview_rect_contains(volpop_frame(app), x, y);
+    if (notches == 0.0 || (!on_bar && !volume_tile_at(app, x, y, &at))) return false;
+    volume_set(app, (double)volume_percent(app) + (notches > 0.0 ? 5.0 : -5.0));
+    if (!on_bar) {
+        app->vol_flash_at = at;
+        app->vol_flash_until = rubraview_pal_time_now_seconds() + 1.2;
+    }
+    return true;
 }

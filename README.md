@@ -237,6 +237,8 @@ ships with, so it cannot drift from them.
 | Where | What it does |
 |---|---|
 | Toolbar `Stop`, Right click `Stop` | Stop, and back to the beginning |
+| Toolbar `Volume` | Volume: a bar by the button to set it, its percent typed at the end; the wheel over the button sets it at once |
+| Toolbar `Output` | Sound output: Windows' default for every app, or this app's sound alone to another device |
 | Toolbar `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time; a tap on its button lists them to choose from |
 | Toolbar `A-B` | A-B repeat: from here, to here, off |
 | Toolbar `EQ` | The equaliser's next preset; a tap on its button lists them to choose from |
@@ -288,8 +290,6 @@ ships with, so it cannot drift from them.
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
 | Right click `Extract subtitles` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
-| Right click `Play slower` | Play slower |
-| Right click `Play faster` | Play faster |
 | Title bar ☰ `Pin the title bar` | Keep the title bar shown |
 | Title bar ☰ `Align the Floating Widget` | The Floating Widget back in the bottom-right corner, over the information bar when it is shown |
 

@@ -878,6 +878,10 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute"), 0.0);   /* turning it up or down unmutes */
         settings_took_effect(app);
         media_say_volume(app);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_volume"))) {
+        if (app->volpop_open) volpop_close(app); else volpop_open_main(app);   /* RV-237: a key or the menu; the tile opens it by itself */
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("audio_device"))) {
+        chooser_open_tile(app, action, chooser_main_x(app), chooser_main_y(app), chooser_main_y(app));   /* RV-237 */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_mute"))) {
         bool muted = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute")) > 0.5;
         rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute"), muted ? 0.0 : 1.0);

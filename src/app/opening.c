@@ -91,6 +91,9 @@ void boxes_place(app_state_t *app) {
     for (int i = 0; i < 2; ++i) {
         rubraview_box_t *box = boxes[i];
         if (box->state == RUBRAVIEW_BOX_DETACHED || app->box_drag == box || box->headless) continue;
+        /* RV-236: while the wheel over F sizes it, F's centre stays under the pointer even past the edge; after, it is
+           brought inside as a box let go is */
+        if (i == 0 && rubraview_pal_time_now_seconds() < app->widget_wheel_until) continue;
         rubraview_rect_t anchor = rubraview_box_anchor_rect(box, &metrics);
         if (!app->box_share_known[i] || box->anchor_x != app->box_put[i][0] || box->anchor_y != app->box_put[i][1]) {
             app->box_share[i][0] = rubraview_box_share_of(box->anchor_x, (double)win_w, anchor.width, margin);

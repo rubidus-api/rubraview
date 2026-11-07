@@ -502,6 +502,7 @@ typedef struct app_state {
        and where that last put them: an anchor found elsewhere was moved by hand. */
     double                 box_share[2][2], box_put[2][2];
     bool                   box_share_known[2];
+    double                 widget_wheel_until;  /* RV-236: sized by the wheel over F, kept under the pointer until then */
     double                 box_press_x, box_press_y;
     bool                   box_drag_moved;
     bool                   nav_drag;          /* 1.25.0: a press on T: dragged, it turns files (up/down) or folders (sideways) */
@@ -721,6 +722,13 @@ typedef struct app_state {
     double                     hint_since;         /* when the pointer came to rest on it */
     double                     slidepop_x, slidepop_y;
     char                       slidepop_text[16];
+    /* RV-237: the volume's bar by the Toolbar's volume button, and the percent shown a moment by it after a wheel */
+    bool                       volpop_open, volpop_typing, volpop_drag;
+    rubraview_rect_t           volpop_button;
+    char                       volpop_text[8];
+    size_t                     volpop_len;
+    double                     vol_flash_until;
+    rubraview_rect_t           vol_flash_at;
     size_t                     slidepop_len;
     int32_t                    subs_frame[4];
     rubraview_listwin_t        subs_list;
@@ -2451,6 +2459,17 @@ void skip_dirs_table_rows(app_state_t *app);
 void skip_dirs_take_old(app_state_t *app);
 bool slide_ready(const app_state_t *app);
 void slidepop_close(app_state_t *app);
+/* RV-237: the volume's bar */
+void volpop_open_at(app_state_t *app, rubraview_rect_t button);
+void volpop_open_main(app_state_t *app);
+void volpop_close(app_state_t *app);
+void draw_volpop(app_state_t *app);
+bool volpop_press(app_state_t *app, double x, double y);
+bool volpop_motion(app_state_t *app, double x, double y);
+bool volpop_release(app_state_t *app);
+bool volpop_key(app_state_t *app, rubraview_key_combo_t combo);
+bool volume_tile_wheel(app_state_t *app, double x, double y, double notches);
+int volume_percent(const app_state_t *app);
 void slides_follow_screen(app_state_t *app);
 void source_close(app_state_t *app);
 void speed_set(app_state_t *app, double speed);

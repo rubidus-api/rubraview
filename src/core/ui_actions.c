@@ -179,6 +179,7 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
         { "page_over_back", 0xE72B },        /* Back */
         { "media_volume_down", 0xE993 },     /* Volume1 */
         { "media_volume_up", 0xE995 },       /* Volume3 */
+        { "media_volume", 0xE767 },          /* Volume: its bar (RV-237) */
         { "next_subtitle_track", 0xE7F0 },   /* ClosedCaption */
         { "toggle_subtitles", 0xE7F0 },      /* ClosedCaption: the Sub tile (D-33) */
         { "next_audio_track", 0xE8D6 },      /* Audio */
@@ -217,6 +218,7 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
         { "toggle_classify", 0xE8EC },       /* Tag */
         { "move_to_folder", 0xE8DE },        /* MoveToFolder */
         { "send_file", 0xE724 },             /* Send: where the file goes, a list (RV-232) */
+        { "audio_device", 0xE7F5 },          /* Speakers: where the sound goes (RV-237) */
         { "toggle_maximize", 0xE922 },       /* Maximize (RV-234) */
         { "hide_boxes", RUBRAVIEW_ICON_HIDE },   /* RV-203: the Toolbar's last tile, as the title bar's H */
     };

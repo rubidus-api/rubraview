@@ -100,6 +100,12 @@ void tick_timers(app_state_t *app, double dt) {
                 /* the fit it is in, in words (owner, 2026-10-15), and its keys */
                 hint = hint_with_keys(app, cstr(fit_action_of(app->fit_mode)), rubraview_fit_tile_hint(app->fit_mode), hint_scratch, sizeof(hint_scratch));
             }
+            if (tile >= 0 && tile < app->toolbox_tile_count && proven_u8str_view_eq(app->toolbox_tiles[tile].action, PROVEN_LIT("media_volume"))) {
+                /* RV-237: resting on the volume says it */
+                bool muted = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute")) > 0.5;
+                int n = rubraview_fmt(hint_scratch, sizeof(hint_scratch), muted ? T("Volume {}% (muted)") : T("Volume {}%"), PROVEN_ARG(volume_percent(app)));
+                if (n > 0) hint = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)hint_scratch, .size = (size_t)n };
+            }
             if (hint.size == 0 && tile >= 0 && tile < app->toolbox_tile_count) {
                 const char *said = rubraview_action_hint(app->toolbox_tiles[tile].action);
                 hint = hint_with_keys(app, app->toolbox_tiles[tile].action, said, hint_scratch, sizeof(hint_scratch));

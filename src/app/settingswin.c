@@ -905,6 +905,16 @@ static void settings_apply_rest(app_state_t *app) {
     app->archive_codepage = cp >= 0 && cp <= (int)RUBRAVIEW_CODEPAGE_WESTERN ? (rubraview_codepage_t)cp : RUBRAVIEW_CODEPAGE_AUTO;
 
     /* Audio */
+    {   /* RV-237: this app's own output device, applied when it changes (a change moves what plays) */
+        static char applied_device[256] = "\x01";
+        proven_u8str_view_t dev = rubraview_settings_get_text(st, PROVEN_LIT("audio"), PROVEN_LIT("output_device"));
+        char now[256] = "";
+        if (dev.size < sizeof(now)) { proven_sys_mem_copy(now, dev.ptr, dev.size); now[dev.size] = '\0'; }
+        if (!proven_u8str_view_eq(proven_u8str_view_from_cstr(now), proven_u8str_view_from_cstr(applied_device))) {
+            rubraview_pal_audio_use_device(now);
+            proven_sys_mem_copy(applied_device, now, sizeof(now));
+        }
+    }
     rubraview_pal_audio_set_latency_ms((uint32_t)lround(rubraview_settings_get(st, PROVEN_LIT("audio"), PROVEN_LIT("wasapi_latency_ms"))));
 
     picker_columns_read(rubraview_settings_get_text(st, PROVEN_LIT("files"), PROVEN_LIT("picker_columns")));   /* 1.25.0 */
@@ -2754,6 +2764,11 @@ static int32_t chooser_nearest(const chooser_t *c, double value) {
 }
 
 /* A tile that chooses one of several: its list instead of the next one. False for any other tile. */
+/* RV-237: the output devices as the list showed them, for the row picked */
+#define AUDIO_DEVICES_MAX 16
+static rubraview_audio_device_t audio_devices[AUDIO_DEVICES_MAX];
+static size_t audio_devices_count;
+
 bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, double y, double above_y) {
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_TILE, .current = -1 };
@@ -2832,6 +2847,20 @@ bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, d
             chooser_word(c, (double)i, "{}", PROVEN_ARG(rubraview_bytes_view(text.ptr, (int)text.size)));
         }
         if (c->count < 2) { osd_say(app, TU8("this file has only one sound track")); c->count = 0; return true; }
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("audio_device"))) {
+        /* RV-237 (owner, 2026-11-07): where the sound goes — Windows' default for every app, or this app alone */
+        title = T("Sound output");
+        audio_devices_count = rubraview_pal_audio_devices(audio_devices, AUDIO_DEVICES_MAX);
+        proven_u8str_view_t mine = rubraview_settings_get_text(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("output_device"));
+        for (size_t i = 0; i < audio_devices_count; ++i)
+            chooser_word(c, 100.0 + (double)i, T("{} Every app (Windows): {}"), PROVEN_ARG(audio_devices[i].is_default ? "\xE2\x97\x8F" : "\xE2\x97\x8B"),
+                         PROVEN_ARG(audio_devices[i].name));
+        chooser_word(c, 200.0, T("{} This app only: as Windows"), PROVEN_ARG(mine.size == 0 ? "\xE2\x97\x8F" : "\xE2\x97\x8B"));
+        for (size_t i = 0; i < audio_devices_count; ++i) {
+            bool on = mine.size > 0 && proven_u8str_view_eq(mine, proven_u8str_view_from_cstr(audio_devices[i].id));
+            chooser_word(c, 201.0 + (double)i, T("{} This app only: {}"), PROVEN_ARG(on ? "\xE2\x97\x8F" : "\xE2\x97\x8B"), PROVEN_ARG(audio_devices[i].name));
+        }
+        if (audio_devices_count == 0) { osd_say(app, TU8("Windows has no sound output on")); c->count = 0; return true; }
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("send_file"))) {
         /* RV-232 (owner, 2026-11-07): where the file on screen goes, in every kind of file; the folders set are named */
         title = T("Send");
@@ -2904,6 +2933,26 @@ static void chooser_pick_tile(app_state_t *app, size_t i) {
         text_encoding_set(app, (rubraview_textenc_t)(int)v);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_audio_track"))) {
         audio_track_set(app, (int32_t)v);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("audio_device"))) {
+        int k = (int)lround(v);
+        char line[200];
+        int n = 0;
+        if (k >= 100 && k < 100 + (int)audio_devices_count) {
+            const rubraview_audio_device_t *d = &audio_devices[k - 100];
+            bool ok = rubraview_pal_audio_set_system_default(d->id);
+            n = ok ? rubraview_fmt(line, sizeof(line), T("Windows' sound output: {}"), PROVEN_ARG(d->name))
+                   : rubraview_fmt(line, sizeof(line), "{}", PROVEN_ARG(T("Windows did not take that sound output")));
+        } else if (k == 200) {
+            rubraview_settings_set_text(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("output_device"), PROVEN_LIT(""));
+            settings_took_effect(app);
+            n = rubraview_fmt(line, sizeof(line), "{}", PROVEN_ARG(T("this app's sound goes where Windows' does")));
+        } else if (k > 200 && k <= 200 + (int)audio_devices_count) {
+            const rubraview_audio_device_t *d = &audio_devices[k - 201];
+            rubraview_settings_set_text(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("output_device"), app_keep(app, proven_u8str_view_from_cstr(d->id)));
+            settings_took_effect(app);
+            n = rubraview_fmt(line, sizeof(line), T("this app's sound: {}"), PROVEN_ARG(d->name));
+        }
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("send_file"))) {
         static const char *const SENT[] = { "copy_to_folder", "move_to_folder", "copy_to_other_folder", "move_to_other_folder", "toggle_classify" };
         int k = (int)v;
@@ -2914,6 +2963,7 @@ static void chooser_pick_tile(app_state_t *app, size_t i) {
 /* 1.25.0: the wheel over a one-of-many tile: the choice before or after the one in force, round. */
 bool chooser_wheel_tile(app_state_t *app, proven_u8str_view_t action, double notches) {
     if (proven_u8str_view_eq(action, PROVEN_LIT("next_audio_track")) || proven_u8str_view_eq(action, PROVEN_LIT("send_file")) ||
+        proven_u8str_view_eq(action, PROVEN_LIT("audio_device")) ||
         notches == 0.0) return false;   /* tracks: the list; Send: never by the wheel (RV-232) */
     bool was_open = app->chooser.open;
     chooser_t keep = app->chooser;

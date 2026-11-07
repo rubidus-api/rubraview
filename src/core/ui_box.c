@@ -767,7 +767,7 @@ proven_u8str_view_t rubraview_box_hint(const rubraview_box_t *box, const rubravi
     if (half == RUBRAVIEW_ANCHOR_CLICK) {
         text = menu ? T("Click: open the menu and keep it open (again: close). Drag: move it")
                     : T("Floating Widget - Click: open or fold its toolbar. Drag: move it; past the window's edge it "
-                      "becomes a window of its own. Wheel: the file before or after; Alt+wheel: see-through");
+                      "becomes a window of its own. Wheel: the Floating Widget's size, this button under the pointer; Alt+wheel: see-through");
     } else if (half == RUBRAVIEW_ANCHOR_HOVER) {
         text = menu ? T("Rest the pointer here: the menu opens, and folds when the pointer leaves")
                     : T("Toolbar - Rest the pointer here: the toolbar opens, and folds when the pointer leaves "

@@ -86,6 +86,43 @@ static _Atomic uint32_t volume_generation = 1;
 
 static _Atomic uint32_t speed_permille = 1000;
 
+/* RV-237: the device chosen for this app's sound (empty: Windows' default), and a generation each output thread
+   compares with the one it opened under. */
+static SRWLOCK device_lock = SRWLOCK_INIT;
+static WCHAR device_chosen[256];
+static _Atomic uint32_t device_generation = 1;
+static INIT_ONCE device_env_once = INIT_ONCE_STATIC_INIT;
+
+static BOOL CALLBACK device_from_env(PINIT_ONCE once, PVOID param, PVOID *context) {
+    (void)once; (void)param; (void)context;
+    WCHAR id[256];
+    DWORD n = GetEnvironmentVariableW(L"RUBRAVIEW_AUDIO_DEVICE", id, 256);
+    if (n > 0 && n < 256) {
+        AcquireSRWLockExclusive(&device_lock);
+        lstrcpynW(device_chosen, id, 256);
+        ReleaseSRWLockExclusive(&device_lock);
+    }
+    return TRUE;
+}
+
+static void device_chosen_copy(WCHAR out[256]) {
+    InitOnceExecuteOnce(&device_env_once, device_from_env, NULL, NULL);
+    AcquireSRWLockShared(&device_lock);
+    lstrcpynW(out, device_chosen, 256);
+    ReleaseSRWLockShared(&device_lock);
+}
+
+void rubraview_pal_audio_use_device(const char *id) {
+    InitOnceExecuteOnce(&device_env_once, device_from_env, NULL, NULL);
+    WCHAR wide[256] = {0};
+    if (id && id[0]) MultiByteToWideChar(CP_UTF8, 0, id, -1, wide, 256);
+    AcquireSRWLockExclusive(&device_lock);
+    lstrcpynW(device_chosen, wide, 256);
+    ReleaseSRWLockExclusive(&device_lock);
+    SetEnvironmentVariableW(L"RUBRAVIEW_AUDIO_DEVICE", wide[0] ? wide : NULL);   /* the FFmpeg child started next */
+    atomic_fetch_add_explicit(&device_generation, 1, memory_order_release);
+}
+
 void rubraview_pal_audio_set_speed(double speed) {
     if (!(speed >= 0.25)) speed = 0.25;
     if (speed > 4.0) speed = 4.0;
@@ -109,6 +146,7 @@ struct rubraview_audio_out {
     uint32_t rate, channels;
     rubraview_pcm_ring_t *ring;
     bool opened;                  /* written by the thread before `ready` */
+    bool switching;               /* RV-237: the output thread's own: left the device for another, try it at once */
 
     _Atomic bool quit;
     _Atomic bool playing;
@@ -172,6 +210,9 @@ typedef struct device {
     IAudioClock *clock;           /* where the device is playing; NULL where not given */
     UINT64 clock_frequency;
     UINT32 buffer_frames;
+    WCHAR id[256];                /* RV-237: the endpoint it opened */
+    bool follows_default;         /* opened as Windows' default: moves when the default does */
+    uint32_t generation;          /* device_generation when it was opened */
 } device_t;
 
 static void close_device(device_t *d) {
@@ -212,8 +253,21 @@ static bool open_device(rubraview_audio_out_t *out, device_t *d) {
                                   &RV_IID_IMMDeviceEnumerator, (void**)&d->enumerator);
     bool ok = step_ok(hr, "CoCreateInstance(MMDeviceEnumerator)") && d->enumerator;
     if (ok) {
-        hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(d->enumerator, eRender, eConsole, &d->device);
-        ok = step_ok(hr, "GetDefaultAudioEndpoint") && d->device;
+        WCHAR chosen[256];
+        device_chosen_copy(chosen);
+        d->generation = atomic_load_explicit(&device_generation, memory_order_acquire);
+        /* RV-237: this app's own device when one is chosen and still there; else Windows' default */
+        if (chosen[0] && SUCCEEDED(IMMDeviceEnumerator_GetDevice(d->enumerator, chosen, &d->device)) && d->device) {
+            DWORD state = 0;
+            if (FAILED(IMMDevice_GetState(d->device, &state)) || state != DEVICE_STATE_ACTIVE) { IMMDevice_Release(d->device); d->device = NULL; }
+        }
+        d->follows_default = !d->device;
+        if (!d->device) {
+            hr = IMMDeviceEnumerator_GetDefaultAudioEndpoint(d->enumerator, eRender, eConsole, &d->device);
+            ok = step_ok(hr, "GetDefaultAudioEndpoint") && d->device;
+        }
+        LPWSTR id = NULL;
+        if (ok && SUCCEEDED(IMMDevice_GetId(d->device, &id)) && id) { lstrcpynW(d->id, id, 256); CoTaskMemFree(id); }
     }
     if (ok) {
         hr = IMMDevice_Activate(d->device, &RV_IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&d->client);
@@ -288,11 +342,27 @@ static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
     if (!chain) { rubraview_free(scratch); return false; }
     rubraview_audio_chain_init(chain, (double)out->rate, out->channels);
     LONG chain_seen = 0;
+    double next_device_check = rubraview_pal_time_now_seconds() + 1.0;
     publish(out, base);
 
     while (!atomic_load_explicit(&out->quit, memory_order_acquire)) {
         apply_volume(volume, &volume_applied);   /* before the wait: a new output starts at the right level */
         WaitForSingleObject(out->wake, 50);
+
+        /* RV-237: another device chosen, or Windows' default moved under one that follows it: open it there */
+        if (atomic_load_explicit(&device_generation, memory_order_acquire) != d->generation) { lost = true; out->switching = true; break; }
+        double now_check = rubraview_pal_time_now_seconds();
+        if (d->follows_default && now_check >= next_device_check) {
+            next_device_check = now_check + 1.0;
+            IMMDevice *def = NULL;
+            LPWSTR id = NULL;
+            bool moved = false;
+            if (SUCCEEDED(IMMDeviceEnumerator_GetDefaultAudioEndpoint(d->enumerator, eRender, eConsole, &def)) && def) {
+                if (SUCCEEDED(IMMDevice_GetId(def, &id)) && id) { moved = lstrcmpW(id, d->id) != 0; CoTaskMemFree(id); }
+                IMMDevice_Release(def);
+            }
+            if (moved) { lost = true; out->switching = true; break; }
+        }
 
         uint64_t request = atomic_load_explicit(&out->flush_request, memory_order_acquire);
         if (request != atomic_load_explicit(&out->flush_ack, memory_order_relaxed)) {
@@ -408,7 +478,8 @@ static bool run_silent(rubraview_audio_out_t *out, device_t *d, double *io_base)
     enum { CHUNK = 4096 };
     float scratch[CHUNK];
     double base = *io_base, used = 0.0, carry = 0.0;
-    double last = rubraview_pal_time_now_seconds(), next_try = last + 1.0;
+    double last = rubraview_pal_time_now_seconds(), next_try = out->switching ? last : last + 1.0;   /* RV-237: a switch at once */
+    out->switching = false;
     publish(out, base);
     while (!atomic_load_explicit(&out->quit, memory_order_acquire)) {
         WaitForSingleObject(out->wake, 10);
@@ -576,3 +647,89 @@ bool rubraview_pal_audio_drained(rubraview_audio_out_t *out) {
 }
 
 #endif /* _WIN32 */
+
+/* ---- RV-237: the output devices, and Windows' default ---- */
+static const PROPERTYKEY RV_PKEY_Device_FriendlyName = { {0xA45C254E, 0xDF1C, 0x4EFD, {0x80, 0x20, 0x67, 0xD1, 0x46, 0xA8, 0x50, 0xE0}}, 14 };
+
+size_t rubraview_pal_audio_devices(rubraview_audio_device_t *out, size_t max) {
+    if (!out || max == 0) return 0;
+    bool com = SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED));
+    IMMDeviceEnumerator *e = NULL;
+    IMMDeviceCollection *all = NULL;
+    size_t n = 0;
+    WCHAR def_id[256] = {0};
+    if (SUCCEEDED(CoCreateInstance(&RV_CLSID_MMDeviceEnumerator, NULL, CLSCTX_ALL, &RV_IID_IMMDeviceEnumerator, (void**)&e)) && e) {
+        IMMDevice *def = NULL;
+        LPWSTR id = NULL;
+        if (SUCCEEDED(IMMDeviceEnumerator_GetDefaultAudioEndpoint(e, eRender, eConsole, &def)) && def) {
+            if (SUCCEEDED(IMMDevice_GetId(def, &id)) && id) { lstrcpynW(def_id, id, 256); CoTaskMemFree(id); }
+            IMMDevice_Release(def);
+        }
+        UINT count = 0;
+        if (SUCCEEDED(IMMDeviceEnumerator_EnumAudioEndpoints(e, eRender, DEVICE_STATE_ACTIVE, &all)) && all &&
+            SUCCEEDED(IMMDeviceCollection_GetCount(all, &count))) {
+            for (UINT i = 0; i < count && n < max; ++i) {
+                IMMDevice *dev = NULL;
+                if (FAILED(IMMDeviceCollection_Item(all, i, &dev)) || !dev) continue;
+                rubraview_audio_device_t *d = &out[n];
+                *d = (rubraview_audio_device_t){0};
+                LPWSTR wid = NULL;
+                if (SUCCEEDED(IMMDevice_GetId(dev, &wid)) && wid) {
+                    WideCharToMultiByte(CP_UTF8, 0, wid, -1, d->id, (int)sizeof(d->id), NULL, NULL);
+                    d->is_default = lstrcmpW(wid, def_id) == 0;
+                    CoTaskMemFree(wid);
+                }
+                IPropertyStore *props = NULL;
+                if (SUCCEEDED(IMMDevice_OpenPropertyStore(dev, STGM_READ, &props)) && props) {
+                    PROPVARIANT v;
+                    PropVariantInit(&v);
+                    if (SUCCEEDED(IPropertyStore_GetValue(props, &RV_PKEY_Device_FriendlyName, &v)) && v.vt == VT_LPWSTR && v.pwszVal)
+                        WideCharToMultiByte(CP_UTF8, 0, v.pwszVal, -1, d->name, (int)sizeof(d->name), NULL, NULL);
+                    PropVariantClear(&v);
+                    IPropertyStore_Release(props);
+                }
+                if (!d->name[0]) lstrcpynA(d->name, d->id, (int)sizeof(d->name));
+                IMMDevice_Release(dev);
+                if (d->id[0]) n++;
+            }
+        }
+    }
+    if (all) IMMDeviceCollection_Release(all);
+    if (e) IMMDeviceEnumerator_Release(e);
+    if (com) CoUninitialize();
+    return n;
+}
+
+/* Windows' sound settings set the default through IPolicyConfig: not in the SDK, the same on Windows 7 to 11, and
+   what every program that switches the output uses. Only SetDefaultEndpoint is called; the slots before it are
+   kept for their place in the table. */
+typedef struct rv_policy_config rv_policy_config_t;
+typedef struct rv_policy_config_vtbl {
+    HRESULT (STDMETHODCALLTYPE *QueryInterface)(rv_policy_config_t *, REFIID, void **);
+    ULONG (STDMETHODCALLTYPE *AddRef)(rv_policy_config_t *);
+    ULONG (STDMETHODCALLTYPE *Release)(rv_policy_config_t *);
+    void *GetMixFormat, *GetDeviceFormat, *ResetDeviceFormat, *SetDeviceFormat, *GetProcessingPeriod,
+         *SetProcessingPeriod, *GetShareMode, *SetShareMode, *GetPropertyValue, *SetPropertyValue;
+    HRESULT (STDMETHODCALLTYPE *SetDefaultEndpoint)(rv_policy_config_t *, LPCWSTR, ERole);
+    void *SetEndpointVisibility;
+} rv_policy_config_vtbl_t;
+struct rv_policy_config { const rv_policy_config_vtbl_t *lpVtbl; };
+static const GUID RV_CLSID_PolicyConfigClient = {0x870AF99C, 0x171D, 0x4F9E, {0xAF, 0x0D, 0xE6, 0x3D, 0xF4, 0x0C, 0x2B, 0xC9}};
+static const GUID RV_IID_IPolicyConfig = {0xF8679F50, 0x850A, 0x41CF, {0x9C, 0x72, 0x43, 0x0F, 0x29, 0x02, 0x90, 0xC8}};
+
+bool rubraview_pal_audio_set_system_default(const char *id) {
+    if (!id || !id[0]) return false;
+    WCHAR wide[256] = {0};
+    if (!MultiByteToWideChar(CP_UTF8, 0, id, -1, wide, 256)) return false;
+    bool com = SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED));
+    rv_policy_config_t *policy = NULL;
+    bool ok = SUCCEEDED(CoCreateInstance(&RV_CLSID_PolicyConfigClient, NULL, CLSCTX_ALL, &RV_IID_IPolicyConfig, (void**)&policy)) && policy;
+    if (ok) {
+        ok = SUCCEEDED(policy->lpVtbl->SetDefaultEndpoint(policy, wide, eConsole)) &&
+             SUCCEEDED(policy->lpVtbl->SetDefaultEndpoint(policy, wide, eMultimedia));
+        (void)policy->lpVtbl->SetDefaultEndpoint(policy, wide, eCommunications);
+        policy->lpVtbl->Release(policy);
+    }
+    if (com) CoUninitialize();
+    return ok;
+}

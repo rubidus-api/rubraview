@@ -252,7 +252,9 @@ bool handle_chrome_click(app_state_t *app, double x, double y) {
         if (tile < app->toolbox_tile_count) {
             bool enabled = true;
             (void)toolbox_caption(app, &app->toolbox_tiles[tile], &enabled);
-            if (enabled && proven_u8str_view_eq(app->toolbox_tiles[tile].action, PROVEN_LIT("toggle_subtitles"))) {
+            if (enabled && proven_u8str_view_eq(app->toolbox_tiles[tile].action, PROVEN_LIT("media_volume"))) {
+                volpop_open_at(app, rubraview_box_tile_rect(&app->toolbox, &metrics, tile));   /* RV-237: the bar by it */
+            } else if (enabled && proven_u8str_view_eq(app->toolbox_tiles[tile].action, PROVEN_LIT("toggle_subtitles"))) {
                 /* D-33: a tap toggles, a double tap or a hold chooses —
                    so this tile is decided on release, not on the press. */
                 sub_tile_result(app, rubraview_tap_press(&app->sub_tap, rubraview_pal_time_now_seconds()));

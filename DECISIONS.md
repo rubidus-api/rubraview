@@ -3553,3 +3553,36 @@ Do not store credentials, private infrastructure details, personal data, private
 - Consequences: `test_ui_chrome`; T364. The owner also said the title bar's icons show no tooltip after a rest: on
   the VM 1.39.91 shows one 0.6 s after the pointer stops on each (gear, always on top, resize, maximise), so nothing
   was changed for it; asked when it does not.
+
+## 2026-11-07: D-291 Sending in the title bar's menu (RV-235)
+
+- Status: Accepted (owner 2026-11-07: "특정 폴더로 복사/이동 항목을 타이틀바 왼쪽 메인메뉴에 항목으로 넣어주세요."). RV-235.
+- Decision: TMENU's own rows gain Copy to folder, Move to folder, Copy to another folder..., Move to another folder...
+  after Print..., so they stand in the same place whatever is on screen (a row with no file to act on is grey).
+- Consequences: T365.
+
+## 2026-11-07: D-292 The wheel over F sizes the Floating Widget; the speed out of the menus (RV-236)
+
+- Status: Accepted (owner 2026-11-07: "플로팅 위젯 왼쪽 버튼 위에서 휠을 돌리면 플로팅 버튼 크기가 변하게 해 주세요. 이 동작 중에는 현재 마우스 커서 위치에 왼쪽 버튼의 중앙이 오게 해 주세요. 동작 끝나면 화면 가장자리 바깥에 벗어나지 못하게 재조정됨."; "메인메뉴의 느리게 빠르게 보통속도는 여기에 불필요한 항목 같아요. 툴바에서 해결해야죠."). RV-236.
+- Decision: the plain wheel over F steps `ui.widget_size` (as over R) and sets the anchor so F's centre is under the
+  pointer; `boxes_place` skips the Toolbar's anchor until 0.8 s after the last notch, then takes its share, which
+  brings it inside the window. D-204's file before or after on F goes (the picture's wheel does it). A film's
+  context list loses Play slower / Play faster / Normal play speed; `media_speed_up` / `_down` become INTERNAL
+  (`Ctrl+]` / `Ctrl+[` are the slide show's and a text's in their contexts; the film's keys are the speed tile's list).
+- Consequences: T365.
+
+## 2026-11-07: D-293 The volume's own group: a bar, typed percent, wheel; the sound output (RV-237)
+
+- Status: Accepted (owner 2026-11-07: "툴바에서, 음량 조절 및 음소거 버튼 3개는 독립되어야 해요. 네비 그룹 바로 다음에 음량 버튼과 음소거 버튼, 출력 장치 선택을 넣은 그룹을 달고, 이걸 누르면 가로 슬라이드 팝업 막대가 현재 버튼 근처에 떠야 해요. ... 팝업 슬라이드 막대의 우측 또는 아래 끝에는 음량 퍼센트가 있어야 하고 이걸 누르면 텍스트로 직접 음량 퍼센트를 입력 가능해야 해요. 음량 버튼 위에서 휠을 돌리면 음량 조절이 바로 되어야 해요. 이때는 퍼센트만 버튼 근처에 텍스트로 바로 보여줘요. 음량 위에 호버링하면 현재 음량 퍼센트로 보여줘요. 출력 장치 선택 버튼을 누르면 어떤 장치에 출력할지 정할 수 있어요. 윈도 전체 설정을 바꾸게 하는게 기본이고, 만약 가능하다면 이 앱의 출력만 따로 다른 장치에 보낼 수 있으면 좋겠네요."; asked: the output list in two groups, the video, music and picture
+  Toolbars, a horizontal bar — all three as recommended). RV-237.
+- Decision: Volume, Mute and Output follow the going group in those three Toolbars; Vol - / Vol + leave the
+  Toolbars. The bar is drawn by the viewer from `rubraview_volpop_*` (core, tested on the host). `audio.volume` steps
+  by 1 (a typed 42 had been held at 40). Windows' default for every app is set through IPolicyConfig — the interface
+  Windows' own sound settings use, not in the SDK, stable from Windows 7 to 11 — on the console, multimedia and
+  communications roles. This app's own device is `audio.output_device` (hidden, an endpoint id): each WASAPI output
+  opens it when it is there and active, else the default; a generation counter makes playing outputs reopen at
+  once on a new choice; an output following the default checks it once a second and moves. The FFmpeg child gets
+  the choice through the environment it inherits (`RUBRAVIEW_AUDIO_DEVICE`, set by `use_device`), so the media host's
+  messages are unchanged; a film already playing through FFmpeg keeps its device until reopened.
+- Consequences: `test_ui_slidepop`, `test_boxes_doc`, `test_settings_doc`; T365. Not measured: two devices (the VM
+  has only its remote-audio endpoint), the every-app switch.

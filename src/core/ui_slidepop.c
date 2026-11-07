@@ -78,3 +78,67 @@ double rubraview_slidepop_step(double seconds, int direction) {
     if (next > 600.0) next = 600.0;
     return next / 2.0;
 }
+
+/* ---- RV-237: the volume's bar ---- */
+#define VOL_WIDTH  248.0
+#define VOL_HEIGHT 40.0
+#define VOL_PAD    12.0
+#define VOL_FIELD  56.0
+
+rubraview_rect_t rubraview_volpop_frame(rubraview_rect_t button, double window_width, double window_height, double scale) {
+    double w = VOL_WIDTH * scale, h = VOL_HEIGHT * scale, gap = 6.0 * scale;
+    double left = button.x + button.width * 0.5 - w * 0.5;
+    double top = button.y - gap - h;
+    if (top < 0.0) top = button.y + button.height + gap;
+    if (left + w > window_width) left = window_width - w;
+    if (top + h > window_height) top = window_height - h;
+    if (left < 0.0) left = 0.0;
+    if (top < 0.0) top = 0.0;
+    return (rubraview_rect_t){ left, top, w, h };
+}
+
+rubraview_rect_t rubraview_volpop_part(rubraview_rect_t f, double s, rubraview_volpop_part_t part) {
+    if (part == RUBRAVIEW_VOLPOP_FIELD)
+        return (rubraview_rect_t){ f.x + f.width - (VOL_PAD + VOL_FIELD) * s, f.y + 6.0 * s, VOL_FIELD * s, f.height - 12.0 * s };
+    if (part == RUBRAVIEW_VOLPOP_BAR)
+        return (rubraview_rect_t){ f.x + VOL_PAD * s, f.y + 6.0 * s, f.width - (3.0 * VOL_PAD + VOL_FIELD) * s, f.height - 12.0 * s };
+    return (rubraview_rect_t){0};
+}
+
+rubraview_volpop_part_t rubraview_volpop_part_at(rubraview_rect_t f, double s, double x, double y) {
+    for (int p = RUBRAVIEW_VOLPOP_BAR; p <= RUBRAVIEW_VOLPOP_FIELD; ++p) {
+        rubraview_rect_t r = rubraview_volpop_part(f, s, (rubraview_volpop_part_t)p);
+        if (x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height) return (rubraview_volpop_part_t)p;
+    }
+    return RUBRAVIEW_VOLPOP_NONE;
+}
+
+double rubraview_volpop_value_at(rubraview_rect_t bar, double x) {
+    if (!(bar.width > 0.0)) return 0.0;
+    double t = (x - bar.x) / bar.width;
+    if (!(t > 0.0)) t = 0.0;
+    if (t > 1.0) t = 1.0;
+    return round(t * 100.0);
+}
+
+bool rubraview_volpop_parse(proven_u8str_view_t text, double *out_percent) {
+    double value = 0.0, scale = 0.0;
+    bool digits = false;
+    for (size_t i = 0; i < text.size; ++i) {
+        char c = (char)text.ptr[i];
+        if (c >= '0' && c <= '9') {
+            digits = true;
+            if (scale > 0.0) { value += (c - '0') * scale; scale *= 0.1; }
+            else value = value * 10.0 + (c - '0');
+            if (value > 1e6) value = 1e6;
+        } else if ((c == '.' || c == ',') && scale == 0.0) {
+            scale = 0.1;
+        } else if (c != ' ' && c != '%') {
+            return false;
+        }
+    }
+    if (!digits || !out_percent) return false;
+    value = round(value);
+    *out_percent = value > 100.0 ? 100.0 : value;
+    return true;
+}

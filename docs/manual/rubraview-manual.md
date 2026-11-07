@@ -1189,10 +1189,10 @@ bar while it shows; ☰ › Align the Floating Widget puts it back there):
 
 - **F** — a click opens or folds the **Toolbar** (it never pins it);
   dragged, the widget moves, and past the window's edge the Toolbar gets
-  a window of its own. The wheel over F goes to the file before or
-  after, as the wheel over the picture does (the thumbnails come up
-  below as **Wheel strip** says); `Alt` + wheel how see-through the
-  widget and the Toolbar are (never below 30 %).
+  a window of its own. The wheel over F makes the whole widget bigger or
+  smaller, F staying under the pointer while the wheel turns; a moment
+  after, the widget is brought back inside the window. `Alt` + wheel how
+  see-through the widget and the Toolbar are (never below 30 %).
 - **T** — rest the pointer on it and the Toolbar opens, folding again
   when the pointer leaves. Dragged up or down it goes through the files,
   a step every few millimetres; sideways, through the folders (or the
@@ -1280,7 +1280,15 @@ information, editing and exporting; for a film, playing, 5 s back and on
 (held, those two offer steps up to 5 min), the sound and the subtitles.
 Ten on and back, zooming by steps, the single fits, the filmstrip and
 flipping are on keys (the help, `?`, lists them); renaming is in the right
-click. **Send** (after Info) lists where the file on screen goes: Copy to
+click. A film's, a song's and a picture's Toolbar have the volume's group
+right after the going buttons: **Volume** opens a bar beside it — press or
+drag along it; the percent at its right end, pressed, takes a typed
+percent (`Enter` keeps it, `Esc` drops it) — and the wheel over Volume
+sets it at once, showing the percent by the button; resting on it says
+the percent. **Mute**, and **Output**: the sound devices Windows has on,
+twice — under "Every app (Windows)" a device becomes Windows' default for
+every program; under "This app only" Rubraview alone plays there (or as
+Windows does), the rest left as it is. ● marks what is in force. **Send** (after Info) lists where the file on screen goes: Copy to
 the folder set for copies, Move to the one set for moves (or "choose it"
 when none is set), Copy to another folder..., Move to another folder...
 and Classify... — a page inside an archive only the copies; a film or a
@@ -2104,6 +2112,8 @@ listed under a later heading only means that while that is on screen.
 | Where | What it does |
 |---|---|
 | Toolbar `Stop`, Right click `Stop` | Stop, and back to the beginning |
+| Toolbar `Volume` | Volume: a bar by the button to set it, its percent typed at the end; the wheel over the button sets it at once |
+| Toolbar `Output` | Sound output: Windows' default for every app, or this app's sound alone to another device |
 | Toolbar `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time; a tap on its button lists them to choose from |
 | Toolbar `A-B` | A-B repeat: from here, to here, off |
 | Toolbar `EQ` | The equaliser's next preset; a tap on its button lists them to choose from |
@@ -2155,8 +2165,6 @@ listed under a later heading only means that while that is on screen.
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
 | Right click `Extract subtitles` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
-| Right click `Play slower` | Play slower |
-| Right click `Play faster` | Play faster |
 | Title bar ☰ `Pin the title bar` | Keep the title bar shown |
 | Title bar ☰ `Align the Floating Widget` | The Floating Widget back in the bottom-right corner, over the information bar when it is shown |
 

@@ -36,6 +36,24 @@ rubraview_audio_out_t *rubraview_pal_audio_open(uint32_t sample_rate, uint32_t c
 
 void rubraview_pal_audio_close(rubraview_audio_out_t *out);
 
+/*
+ * RV-237 (owner, 2026-11-07): where the sound goes. The output devices Windows has on; Windows' default set for
+ * every app (its own settings' choice, through the interface Windows' sound settings use); or this app's sound
+ * alone sent to one device, the rest of Windows left as it is. An output following Windows' default moves when
+ * the default does. The child that plays through FFmpeg inherits the choice (RUBRAVIEW_AUDIO_DEVICE).
+ */
+typedef struct rubraview_audio_device {
+    char id[256];     /* Windows' endpoint id, UTF-8 */
+    char name[160];   /* "Speakers (Realtek(R) Audio)" */
+    bool is_default;  /* Windows' default for every app */
+} rubraview_audio_device_t;
+
+size_t rubraview_pal_audio_devices(rubraview_audio_device_t *out, size_t max);
+/** Windows' default output for every app; true when Windows took it. */
+bool rubraview_pal_audio_set_system_default(const char *id);
+/** This app's sound to the device `id`; NULL or "" follows Windows' default. Playing outputs move at once. */
+void rubraview_pal_audio_use_device(const char *id);
+
 void rubraview_pal_audio_set_playing(rubraview_audio_out_t *out, bool playing);
 
 /**

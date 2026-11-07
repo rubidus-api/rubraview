@@ -46,6 +46,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             break;
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+            if (volpop_motion(app, event->mouse.x, event->mouse.y)) break;   /* RV-237: the volume's bar dragged */
             if (scrollbar_motion(app, app->window, event->mouse.x, event->mouse.y)) break;   /* RV-170: a list's bar held */
             if (app->text && app->text->selecting) { text_drag(app, event->mouse.x, event->mouse.y); break; }
             if (!app->seekfan_detached) seekfan_pointer(app, event->mouse.x, event->mouse.y);
@@ -186,6 +187,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
             if (chooser_press(app, CHOOSE_IN_MAIN, event->mouse.x, event->mouse.y)) break;   /* 1.24.0 */
+            if (volpop_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-237 */
             if (tmenu_press(app, event->mouse.x, event->mouse.y)) break;   /* 1.25.0: the ☰ pull-down */
             if (arc_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-212: the archive's Delete question */
             if (pack_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* D-267 */
@@ -549,6 +551,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
         }
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+            if (volpop_release(app)) break;   /* RV-237 */
             if (app->picker_rhold && event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {   /* RV-223: a right click, not a drag */
                 app->picker_rhold = false;
                 if (app->picker_open && app->picker_rhold_index < app->picker_listing.count)
@@ -672,6 +675,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                                                         (picker_details(app) ? 3.0 : 0.5));
                 break;
             }
+            if (volume_tile_wheel(app, event->mouse.x, event->mouse.y, event->mouse.wheel_delta)) break;   /* RV-237 */
             if (box_wheel_opacity(app, event->mouse.x, event->mouse.y, event->mouse.wheel_delta, event->mouse.modifiers)) break;
             {   /* 1.25.0: over the toolbar's bar or its name, the wheel sizes the name and the messages */
                 rubraview_tile_metrics_t wm = tile_metrics(rubraview_pal_window_dpi_scale(app->window));
