@@ -3670,3 +3670,10 @@ Do not store credentials, private infrastructure details, personal data, private
   `docs/en/`, `docs/ko/`, `docs/assets/`.
 - Consequences: the site appears once main is pushed and Pages is set to main:/docs; rubidus-api.github.io's entry for
   Rubraview can then point its title at it (that site's own change).
+
+## D-303: A File From Explorer Opens A Window Of Its Own (RV-247)
+
+- Date: 2026-11-07
+- Context: the owner: "파일 탐색기에서 파일을 열면 항상 새 창에서 루브라뷰가 관련 파일을 열게 해 주세요." Asked, the owner chose "기본값을 새 창으로" (keep the setting, off as it comes, settings saved on turned to a new window once) and kept the right-click actions as they are.
+- Decision: the setting is `general.reuse_window` ("Reuse the open window"), off as it comes; it replaces `general.single_instance` (on since D-100), which is no longer read, so a file that saved it on opens new windows as well. Explorer's right-click Rubraview actions still go to the open window; `--new-instance` and "Open in a new window" make a new one.
+- Consequences: each double-click in Explorer is a window; who wants one window turns Reuse the open window on in General. The old key stays in old files unread.

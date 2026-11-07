@@ -53,7 +53,7 @@ place of what was open.
 
 | Setting | As it comes | What it does |
 |---|---|---|
-| Reuse the open window | on | off: every file opened is a window of its own |
+| Reuse the open window | off | on: a file opened from Explorer goes to the window already open; off, each opens a window of its own (Explorer's right-click actions go to the open window either way) |
 | A file given to the open window | `add` | `folder`: opened in place of the list, with its folder; `only`: in place of it, alone |
 | A file added to the list goes | `end` | `sorted`: the whole list is sorted again as Settings › Files says |
 | Show the file that was added | on | off: it joins the list and the page being read stays |

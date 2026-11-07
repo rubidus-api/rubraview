@@ -150,7 +150,10 @@ bool run_command_line(proven_arena_t *arena, int *exit_code) {
                lives now ([general]) and where older files put it — and
                what it is when no file says (D-99: a window each). */
             rubraview_settings_t loaded = rubraview_settings_load(arena, settings);
-            bool single_instance = rubraview_settings_get(&loaded, PROVEN_LIT("general"), PROVEN_LIT("single_instance")) > 0.5;
+            /* RV-247 (owner, 2026-11-07: "파일 탐색기에서 파일을 열면 항상 새 창에서 루브라뷰가 관련 파일을 열게"): a window each
+               unless Reuse the open window is turned on; the key is new (general.reuse_window, off), so a file that
+               saved the old one (single_instance, on as it came) opens new windows too */
+            bool single_instance = rubraview_settings_get(&loaded, PROVEN_LIT("general"), PROVEN_LIT("reuse_window")) > 0.5;
             /* What the menu asks is for the window that is open (the
                classic menu starts this once a selected file). */
             if (cli.shell_verb != RUBRAVIEW_SHELL_VERB_NONE) single_instance = true;

@@ -23,7 +23,7 @@ static const char *const PARTS[] = {
 "  toggle general.always_on_top    \"Always on top\"           = false wired\n"
 "  toggle general.frameless        \"Frameless window\"        = true wired\n"
 "  section \"Opening a file from Explorer\"\n"
-"  toggle general.single_instance  \"Reuse the open window\"   = true wired\n"
+"  toggle general.reuse_window     \"Reuse the open window\"   = false wired\n"
 "  choice general.explorer_open    \"A file given to the open window\" add | folder | only = add wired\n"
 "  choice general.added_order      \"A file added to the list goes\" end | sorted = end wired\n"
 "  toggle general.added_shows      \"Show the file that was added\" = true wired\n"
@@ -485,7 +485,7 @@ static const char *const PARTS[] = {
 "  note   \"Alt green, with two or more of them purple. Click a key for what it does.\"\n"
 "  table  keymap\n",
 /* The owner (2026-10-17): a fuller explanation on each harder setting's name. */
-"help general.single_instance \"On: a file opened from Explorer goes to the window already open instead of starting a second viewer. Off: every file opens its own window.\"\n"
+"help general.reuse_window \"On: a file opened from Explorer goes to the window already open instead of starting a second viewer. Off: every file opens its own window.\"\n"
 "help general.explorer_open \"What the open window does with a file sent from Explorer: add it to the list being viewed, open its whole folder instead, or show only that file.\"\n"
 "help general.first_with_folder \"On: the first file opened brings the other pictures of its folder with it, so the arrows go through the folder. Off: only that file is opened.\"\n"
 "help general.native_dialog \"On: Ctrl+O opens Windows' own Open dialog. Off: it opens Rubraview's own file screen with thumbnails, Recent and favourites.\"\n"
