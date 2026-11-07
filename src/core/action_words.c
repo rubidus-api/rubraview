@@ -98,6 +98,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "media_volume", "Volume: a bar by the button to set it, its percent typed at the end; the wheel over the button sets it at once" },
     { "media_volume_down", "Volume down 5%" },
     { "media_volume_up", "Volume up 5%" },
+    { "minimize_mute", "Esc: closes what is open; with nothing open, the sound off and the window down at once" },
     { "move_to_folder", "Move the file on screen to the folder set for it" },
     { "move_to_other_folder", "Move the file on screen to a folder typed or browsed; one not there yet is made" },
     { "new_window", "A new window: the viewer once more, nothing open" },

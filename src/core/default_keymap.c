@@ -33,7 +33,10 @@ const char *rubraview_default_keymap(void) {
     "toggle_info = \"I, Ctrl+I\"\n"
     /* §3.14.6 (owner, 2026-09-24): the music in a window of its own — a song's, or the one behind the pictures. */
     "toggle_miniplayer = \"Shift+P\"\n"
-    "quit = \"Escape\"\n"
+    /* RV-245 (owner, 2026-11-07: "ESC 대신에 Ctrl+Q로 종료하게 해 줘요. ESC는 그냥 최소화+Mute 까지만"): Esc closes what is
+       open, and with nothing open puts the window down and the sound off at once */
+    "quit = \"Ctrl+Q\"\n"
+    "minimize_mute = \"Escape\"\n"
     /* D-16 (owner, 2026-09-15): Ctrl + arrows size the window, Alt +
        arrows move it — everywhere, whatever is on screen. */
     "window_narrower = \"Ctrl+Left\"\n"
@@ -244,6 +247,7 @@ const char *rubraview_default_keymap(void) {
 const char *rubraview_default_keymap_retired(void) {
     return
     "[common]\n"
+    "quit = \"Escape\"\n"   /* RV-245: Esc minimises and mutes now; Ctrl+Q quits */
     "toggle_fullscreen = \"F, F11, Alt+Enter\"\n"
     "open_settings = \"F10, Ctrl+Comma\"\n"
     "toggle_help = \"F1\"\n"

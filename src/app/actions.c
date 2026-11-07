@@ -488,7 +488,12 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
     if (app->arc_ask == ARC_ASK_FORMAT && !proven_u8str_view_eq(action, PROVEN_LIT("quit"))) panel_close(app);
 
     if (proven_u8str_view_eq(action, PROVEN_LIT("quit"))) {
-        /* Esc closes what is open before it closes the program. */
+        /* RV-245: Ctrl+Q ends the program; a subtitle not saved is still asked about */
+        if (!subs_may_leave(app)) return;
+        rubraview_pal_window_request_close(app->window);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("minimize_mute"))) {
+        /* Esc closes what is open first; with nothing open (RV-245, owner 2026-11-07: "ESC는 그냥 최소화+Mute
+           까지만 ... 즉각적으로 반응하게") the sound goes off at once and the window down. */
         if (archwork_busy(app)) { (void)archwork_stop(app); return; }   /* RV-207 */
         if (dragout_stop(app)) return;   /* RV-223 */
         if (app->arc_job && !atomic_load(&app->arc_job->job.cancel)) {
@@ -515,8 +520,10 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
             }
             if (folded) { rubraview_menu_reset(&app->menu); sync_menubox_tiles(app); return; }
         }
-        if (!subs_may_leave(app)) return;
-        rubraview_pal_window_request_close(app->window);
+        rubraview_pal_audio_set_volume(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume")) / 100.0, true);   /* now, before anything else */
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute"), 1.0);
+        settings_took_effect(app);
+        rubraview_pal_window_minimize(app->window);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_page")) && cue_step(app, +1)) {
         /* a `.cue`'s next track, in the same file (owner, 2026-09-30) */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("prev_page")) && cue_step(app, -1)) {

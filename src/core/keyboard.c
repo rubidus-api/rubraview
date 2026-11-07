@@ -7,8 +7,11 @@
 
 #include <string.h>
 
-#define NAV 15.25f   /* the editing keys and the arrows */
-#define PAD 18.5f    /* the number pad */
+/* RV-244 (owner, 2026-11-07: "키패드랑 이동키 등은 메인 키보드 영역 아래로 배치해서 더 좁은 폭에서 스크롤하며 볼 수 있게"):
+   the editing keys, the arrows and the number pad under the main block, so the keyboard is narrower and taller */
+#define NAV 0.0f     /* the editing keys and the arrows, at the left under the main block */
+#define PAD 4.5f     /* the number pad beside them */
+#define LOW 6.0f     /* how far below the rows they had beside the main block */
 
 static const rubraview_keycap_t CAPS[] = {
     /* the function row */
@@ -46,19 +49,19 @@ static const rubraview_keycap_t CAPS[] = {
     { NULL, "Alt", 10, 5.5f, 1.25f, 1 }, { NULL, "Win", 11.25f, 5.5f, 1.25f, 1 }, { NULL, "Menu", 12.5f, 5.5f, 1.25f, 1 },
     { NULL, "Ctrl", 13.75f, 5.5f, 1.25f, 1 },
     /* the editing keys and the arrows */
-    { "Insert", "Ins", NAV, 1.5f, 1, 1 }, { "Home", "Home", NAV + 1, 1.5f, 1, 1 }, { "PageUp", "PgUp", NAV + 2, 1.5f, 1, 1 },
-    { "Delete", "Del", NAV, 2.5f, 1, 1 }, { "End", "End", NAV + 1, 2.5f, 1, 1 }, { "PageDown", "PgDn", NAV + 2, 2.5f, 1, 1 },
-    { "Up", "\xE2\x86\x91", NAV + 1, 4.5f, 1, 1 },
-    { "Left", "\xE2\x86\x90", NAV, 5.5f, 1, 1 }, { "Down", "\xE2\x86\x93", NAV + 1, 5.5f, 1, 1 }, { "Right", "\xE2\x86\x92", NAV + 2, 5.5f, 1, 1 },
+    { "Insert", "Ins", NAV, LOW + 1.5f, 1, 1 }, { "Home", "Home", NAV + 1, LOW + 1.5f, 1, 1 }, { "PageUp", "PgUp", NAV + 2, LOW + 1.5f, 1, 1 },
+    { "Delete", "Del", NAV, LOW + 2.5f, 1, 1 }, { "End", "End", NAV + 1, LOW + 2.5f, 1, 1 }, { "PageDown", "PgDn", NAV + 2, LOW + 2.5f, 1, 1 },
+    { "Up", "\xE2\x86\x91", NAV + 1, LOW + 3.75f, 1, 1 },
+    { "Left", "\xE2\x86\x90", NAV, LOW + 4.75f, 1, 1 }, { "Down", "\xE2\x86\x93", NAV + 1, LOW + 4.75f, 1, 1 }, { "Right", "\xE2\x86\x92", NAV + 2, LOW + 4.75f, 1, 1 },
     /* the number pad */
-    { NULL, "Num", PAD, 1.5f, 1, 1 }, { "NumpadDivide", "/", PAD + 1, 1.5f, 1, 1 },
-    { "NumpadMultiply", "*", PAD + 2, 1.5f, 1, 1 }, { "NumpadSubtract", "-", PAD + 3, 1.5f, 1, 1 },
-    { "Numpad7", "7", PAD, 2.5f, 1, 1 }, { "Numpad8", "8", PAD + 1, 2.5f, 1, 1 }, { "Numpad9", "9", PAD + 2, 2.5f, 1, 1 },
-    { "NumpadAdd", "+", PAD + 3, 2.5f, 1, 2 },
-    { "Numpad4", "4", PAD, 3.5f, 1, 1 }, { "Numpad5", "5", PAD + 1, 3.5f, 1, 1 }, { "Numpad6", "6", PAD + 2, 3.5f, 1, 1 },
-    { "Numpad1", "1", PAD, 4.5f, 1, 1 }, { "Numpad2", "2", PAD + 1, 4.5f, 1, 1 }, { "Numpad3", "3", PAD + 2, 4.5f, 1, 1 },
-    { "NumpadEnter", "Ent", PAD + 3, 4.5f, 1, 2 },
-    { "Numpad0", "0", PAD, 5.5f, 2, 1 }, { "NumpadDecimal", ".", PAD + 2, 5.5f, 1, 1 },
+    { NULL, "Num", PAD, LOW + 1.5f, 1, 1 }, { "NumpadDivide", "/", PAD + 1, LOW + 1.5f, 1, 1 },
+    { "NumpadMultiply", "*", PAD + 2, LOW + 1.5f, 1, 1 }, { "NumpadSubtract", "-", PAD + 3, LOW + 1.5f, 1, 1 },
+    { "Numpad7", "7", PAD, LOW + 2.5f, 1, 1 }, { "Numpad8", "8", PAD + 1, LOW + 2.5f, 1, 1 }, { "Numpad9", "9", PAD + 2, LOW + 2.5f, 1, 1 },
+    { "NumpadAdd", "+", PAD + 3, LOW + 2.5f, 1, 2 },
+    { "Numpad4", "4", PAD, LOW + 3.5f, 1, 1 }, { "Numpad5", "5", PAD + 1, LOW + 3.5f, 1, 1 }, { "Numpad6", "6", PAD + 2, LOW + 3.5f, 1, 1 },
+    { "Numpad1", "1", PAD, LOW + 4.5f, 1, 1 }, { "Numpad2", "2", PAD + 1, LOW + 4.5f, 1, 1 }, { "Numpad3", "3", PAD + 2, LOW + 4.5f, 1, 1 },
+    { "NumpadEnter", "Ent", PAD + 3, LOW + 4.5f, 1, 2 },
+    { "Numpad0", "0", PAD, LOW + 5.5f, 2, 1 }, { "NumpadDecimal", ".", PAD + 2, LOW + 5.5f, 1, 1 },
 };
 
 const rubraview_keycap_t *rubraview_keyboard_caps(size_t *count) {
@@ -67,8 +70,8 @@ const rubraview_keycap_t *rubraview_keyboard_caps(size_t *count) {
 }
 
 void rubraview_keyboard_extent(double *width, double *height) {
-    if (width) *width = PAD + 4.0;
-    if (height) *height = 6.5;
+    if (width) *width = 15.0;          /* the main block's */
+    if (height) *height = LOW + 6.5;   /* RV-244: the pad's last row under it */
 }
 
 static bool same_name(proven_u8str_view_t a, const char *b) {

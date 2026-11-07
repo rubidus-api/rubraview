@@ -1148,12 +1148,15 @@ its own in paragraphs mode. The information bar (`Shift+I`) says the
 encoding and how far through the file you are.
 ## The title bar and the Floating Widget
 
-The title bar starts with **☰**, a list of what the window does: Pin the
-title bar, Align the Floating Widget, New window, Open file, Recent
-files, Batch, Print, Playlist, Settings and Help, and under them everything
-a right click on the picture, the film or the text would offer (also what
-the Toolbar has), as two columns of wide buttons. The arrow keys move
-between them and `Enter` presses one. After it comes the
+The title bar starts with **☰**, a list of what the window does: Align
+the Floating Widget, New window, Open file, Recent files, Batch, Print, the
+copies and moves to a folder, Playlist, Settings and Help, under them
+everything a right click on the picture, the film or the text would offer
+(also what the Toolbar has), and Quit last, as two columns of wide buttons,
+each with its key in small print at its right. The arrow keys move between
+them and `Enter` presses one. `Esc` closes what is open — a list, a panel,
+a box, the Toolbar — and with nothing open turns the sound off and puts the
+window down at once; `Ctrl+Q` quits. After it comes the
 name of the file on screen (the folder's, in the open-file screen), only
 shown: pressed and dragged, it moves the window as the rest of the bar
 does. At the right are **P** (the title bar stays shown, and the picture or
@@ -1948,7 +1951,8 @@ listed under a later heading only means that while that is on screen.
 | `Shift+/`, `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `Shift+P` | Mini player |
-| `Esc` | Quit |
+| `Ctrl+Q` | Quit |
+| `Esc` | Esc: closes what is open; with nothing open, the sound off and the window down at once |
 | `Ctrl+Left` | Window narrower |
 | `Ctrl+Right` | Window wider |
 | `Ctrl+Up` | Window shorter |
@@ -2171,7 +2175,6 @@ listed under a later heading only means that while that is on screen.
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
 | Right click `Extract subtitles` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
-| Title bar ☰ `Pin the title bar` | Keep the title bar shown |
 | Title bar ☰ `Align the Floating Widget` | The Floating Widget back in the bottom-right corner, over the information bar when it is shown |
 
 <!-- keys:end -->

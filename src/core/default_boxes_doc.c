@@ -440,7 +440,6 @@ static const char *const PARTS[] = {
 "  item save_frame               \"Save frame\"\n"
 "  group\n"
 "  item toggle_info              \"Info\"\n"
-"  item toggle_fullscreen        \"Full screen\"\n"
 "  group\n"
 "  item rename_file              \"Rename\"\n"
 "  item copy_to_folder           \"Copy to folder\"\n"

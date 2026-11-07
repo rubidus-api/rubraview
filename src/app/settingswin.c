@@ -69,7 +69,7 @@ void settings_read_file(app_state_t *app) {
 typedef struct { size_t binding, combo; } key_combo_row_t;
 static bool g_keys_by_key;
 static bool g_keys_layout;                       /* RV-217: the keyboard drawn, a dot a kind of binding on each key */
-#define KEYS_LAYOUT_ROWS 16                       /* 13 for the keyboard (two rows a key), the dots' key, what is not on it */
+#define KEYS_LAYOUT_ROWS 33                       /* RV-244: 29 for the keyboard (12.5 key units, 2.3 rows a key), the dots' key, what is not on it */
 static bool keys_layout_click(app_state_t *app, double px, double py);
 static int32_t g_key_row[KEY_ROWS_MAX];          /* by function: a binding, or -(context + 1) for a heading */
 static key_combo_row_t g_key_combo[KEY_ROWS_MAX];  /* by key: every key of every binding, sorted (RV-193) */
@@ -3534,11 +3534,17 @@ static keys_layout_box_t keys_layout_box(app_state_t *app) {
     double cw = app->settings_cell_w, ch = app->settings_cell_h, w = 0, h = 0;
     rubraview_keyboard_extent(&w, &h);
     double room = cw * (double)(v->cols - v->content_col - 2);
-    b.unit = room / w < ch * 2.0 ? room / w : ch * 2.0;
+    b.unit = room / w < ch * 2.3 ? room / w : ch * 2.3;   /* RV-244: a little bigger, the pad and the arrows under it */
     b.x = cw * v->content_col;
     b.y = ch * (double)(at - first + 1);   /* table row 1's top, wherever the page is scrolled */
     b.ok = b.unit > 4.0;
     return b;
+}
+
+/* RV-244: where a key's dots sit, apart enough to click one */
+static double keys_dot_step(double cap_width, double dot) {
+    double room = cap_width * 0.94 / RUBRAVIEW_KEYMARK_KINDS;
+    return dot * 1.25 < room ? dot * 1.25 : room;
 }
 
 static void keys_layout_draw(app_state_t *app) {
@@ -3550,7 +3556,7 @@ static void keys_layout_draw(app_state_t *app) {
     double top = ch * RUBRAVIEW_SETTINGS_TOP_ROWS, bottom = ch * (RUBRAVIEW_SETTINGS_TOP_ROWS + rubraview_settings_view_visible_rows(v));
     size_t count = 0;
     const rubraview_keycap_t *caps = rubraview_keyboard_caps(&count);
-    double gap = b.unit * 0.08, dot = b.unit * 0.13;
+    double gap = b.unit * 0.08, dot = b.unit * 0.2;   /* RV-244: dots large enough to click */
     for (size_t i = 0; i < count; ++i) {
         const rubraview_keycap_t *k = &caps[i];
         rubraview_pal_rect_t cap = { b.x + b.unit * k->x + gap / 2, b.y + b.unit * k->y + gap / 2, b.unit * k->w - gap, b.unit * k->h - gap };
@@ -3558,13 +3564,13 @@ static void keys_layout_draw(app_state_t *app) {
         uint32_t marks = k->name ? rubraview_keyboard_marks(&app->keymap, proven_u8str_view_from_cstr(k->name)) : 0;
         rubraview_pal_render_fill_rect(r, cap, k->name ? 0xFF2E3640u : 0xFF22282Eu, b.unit * 0.12);
         rubraview_pal_render_stroke_rect(r, cap, marks ? 0xFF6A7685u : 0xFF3A434Du, 1.0, b.unit * 0.12);
-        rubraview_pal_rect_t words = { cap.x, cap.y + cap.height * 0.06, cap.width, cap.height * 0.55 };
+        rubraview_pal_rect_t words = { cap.x, cap.y + cap.height * 0.04, cap.width, cap.height * 0.5 };
         rubraview_pal_render_draw_text(r, proven_u8str_view_from_cstr(k->label), words, b.unit * 0.30,
                                        k->name ? (marks ? SETTINGS_TEXT : SETTINGS_DIM) : 0xFF59626Du, RUBRAVIEW_TEXT_CENTER);
-        double step = dot * 1.6 < cap.width * 0.9 / RUBRAVIEW_KEYMARK_KINDS ? dot * 1.6 : cap.width * 0.9 / RUBRAVIEW_KEYMARK_KINDS;
+        double step = keys_dot_step(cap.width, dot);
         for (int m = 0; m < RUBRAVIEW_KEYMARK_KINDS; ++m) {   /* five places along the foot, each kind its own */
             if (!(marks & (1u << m))) continue;
-            double cx = cap.x + cap.width / 2 + (m - 2) * step, cy = cap.y + cap.height - dot * 1.2;
+            double cx = cap.x + cap.width / 2 + (m - 2) * step, cy = cap.y + cap.height - dot * 0.9;
             rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cx - dot / 2, cy - dot / 2, dot, dot }, KEYMARK_COLOR[m], dot / 2);
         }
     }
@@ -3591,6 +3597,20 @@ static bool keys_layout_click(app_state_t *app, double px, double py) {
     if (at < 0) return false;
     size_t count = 0;
     const rubraview_keycap_t *k = &rubraview_keyboard_caps(&count)[at];
+    /* RV-244 (owner, 2026-11-07: "각 색깔의 원 크기를 좀 더 크게 키워서 클릭할 수 있게"): a click on a dot names only that
+       kind of binding (alone, Shift, Ctrl, Alt, two or more); elsewhere on the key, all of them */
+    uint32_t only = 0;
+    {
+        double gap = b.unit * 0.08, dot = b.unit * 0.2;
+        double cx0 = b.x + b.unit * k->x + gap / 2, cw = b.unit * k->w - gap;
+        double cy = b.y + b.unit * k->y + gap / 2 + (b.unit * k->h - gap) - dot * 0.9, step = keys_dot_step(cw, dot);
+        uint32_t marks = k->name ? rubraview_keyboard_marks(&app->keymap, proven_u8str_view_from_cstr(k->name)) : 0;
+        for (int m = 0; m < RUBRAVIEW_KEYMARK_KINDS; ++m) {
+            if (!(marks & (1u << m))) continue;
+            double cx = cx0 + cw / 2 + (m - 2) * step;
+            if ((px - cx) * (px - cx) + (py - cy) * (py - cy) <= dot * dot * 0.64) only = 1u << m;   /* a finger's slack round it */
+        }
+    }
     char said[sizeof(app->settings_message)];
     int n = rubraview_fmt(said, sizeof said, "{}:", PROVEN_ARG(k->label));
     bool any = false;
@@ -3598,6 +3618,7 @@ static bool keys_layout_click(app_state_t *app, double px, double py) {
         const rubraview_key_binding_t *bd = &app->keymap.bindings[i];
         for (size_t c = 0; c < bd->combo_count && (size_t)n < sizeof said; ++c) {
             if (!proven_u8str_view_eq_ascii_ci(bd->combos[c].key_name, proven_u8str_view_from_cstr(k->name))) continue;
+            if (only && !(rubraview_keyboard_mark_of(bd->combos[c]) & only)) continue;   /* RV-244: the dot's kind only */
             char combo[64];
             proven_u8str_view_t keys = rubraview_key_combo_format(combo, sizeof combo, bd->combos[c]);
             n += rubraview_fmt(said + n, sizeof said - (size_t)n, "{} {} {}", PROVEN_ARG(any ? ";" : ""), PROVEN_ARG(rubraview_bytes_view((const char *)keys.ptr, (int)keys.size)),

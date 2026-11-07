@@ -66,7 +66,8 @@
 | `Shift+/`, `F1` | 이 도움말(별도 창) |
 | `I`, `Ctrl+I` | 파일 정보(용량, 픽셀 크기, 코덱, EXIF) — 드래그해서 복사 |
 | `Shift+P` | 미니 플레이어 |
-| `Esc` | 끝내기 |
+| `Ctrl+Q` | 끝내기 |
+| `Esc` | Esc: 열린 것을 닫고, 열린 것이 없으면 즉시 소리를 끄고 창을 최소화 |
 | `Ctrl+Left` | 창 좁게 |
 | `Ctrl+Right` | 창 넓게 |
 | `Ctrl+Up` | 창 낮게 |
@@ -289,7 +290,6 @@
 | 오른쪽 클릭 `Webtoon` | 보기 방식: 모든 쪽을 세로로 이어서(웹툰) |
 | 오른쪽 클릭 `Choose subtitles` | 목록에서 자막 고르기 |
 | 오른쪽 클릭 `Extract subtitles` | Matroska 영상 안의 글자 자막을 영상 옆 파일로 빼내기(`film.kor.srt`, `film.eng.ass`) — 영상은 바꾸지 않음 |
-| 제목 표시줄 ☰ `Pin the title bar` | 제목 표시줄 고정 |
 | 제목 표시줄 ☰ `Align the Floating Widget` | 플로팅 위젯을 오른쪽 아래 구석으로 (정보 바가 있으면 그 위로) |
 
 <!-- keys:end -->

@@ -3626,3 +3626,35 @@ Do not store credentials, private infrastructure details, personal data, private
   on the Toolbar and `H`. The context lists drop Fit to window, Real size, Rotate and Rotate back. `R` / `Shift+R`
   were already clockwise / counterclockwise (measured on the VM in 1.39.92), so the keys are unchanged.
 - Consequences: `test_ui_chrome`; T367.
+
+## 2026-11-07: D-298 The Toolbar fits its window (RV-243)
+
+- Status: Accepted (owner 2026-11-07: "툴바의 가로폭은 창 가로크기를 넘지 못하게 하고, 그거에 맞춰서 그리는 방식 재조정되게 해 줘요."; "창 크기가 변하면 툴바 크기랑 가로폭이랑 그에 맞춰 세로폭도 변하게요"). RV-243.
+- Decision: the fit lives in `rubraview_box_metrics`, which every layout, hit test and drawing of the Toolbar goes
+  through, so they agree: fewer buttons a row until the strip is no wider than the window, then, while it is taller
+  than the window, buttons 10 % smaller (to 55 %). Nothing the reader set is changed; the fit is worked out again
+  from it each time.
+- Consequences: `test_ui_box`.
+
+## 2026-11-07: D-299 The keyboard narrower, its dots to click (RV-244)
+
+- Status: Accepted (owner 2026-11-07: "키 배치 보기에서 각 색깔의 원 크기를 좀 더 크게 키워서 클릭할 수 있게 해 줘요. 키보드 배치에서 키패드랑 이동키 등은 메인 키보드 영역 아래로 배치해서 더 좁은 폭에서 스크롤하며 볼 수 있게 해줘요. 대신 키보드 버튼 크기를 조금만 늘리죠."). RV-244.
+- Decision: the keyboard's caps keep their names and shapes; the editing keys, arrows and pad move under the main
+  block (15 × 12.5 units, the Keys page's rows 33 for it); a unit is at most 2.3 rows; dots 0.2 of a unit; a click
+  within a dot (its radius and a little more) lists only that kind.
+- Consequences: `test_keyboard`.
+
+## 2026-11-07: D-300 Esc minimises and mutes; Ctrl+Q quits (RV-245)
+
+- Status: Accepted (owner 2026-11-07: "그리고 ESC 대신에 Ctrl+Q로 종료하게 해 줘요. ESC는 그냥 최소화+Mute 까지만 합시다."; "최소화+mute(즉각적으로 반응하게) 기능도 따로 넣어야 되겠네요. 이건 그냥 단축키하고 기능만 넣읍시다."; "버튼이나 메뉴는 불필요함."). RV-245.
+- Decision: Esc's closing what is open first stays (it was `quit`'s); its last step is now the mute and the minimise,
+  the mute applied to the audio session before the setting is stored, so the sound stops before the window moves.
+  `quit` on `Ctrl+Q` (free in every context). A keymap.ini still holding `quit = Escape` takes the new keys.
+- Consequences: `test_default_keymap`, `test_keymap`.
+
+## 2026-11-07: D-301 ☰ without Full screen and the title bar's pin; Quit last; keys shown (RV-246)
+
+- Status: Accepted (owner 2026-11-07: "메인메뉴에서 전체화면 끔이랑 제목표시줄고정 끔은 없애고 대신 맨 마지막에 종료 항목 넣어줘요. 그리고 각 항목 옆에 작은 글씨로 단축키 넣어줘요."). RV-246.
+- Decision: the pin row leaves TMENU (the P button stays), Full screen leaves the film's context list (the title bar's
+  button, `F`, `Alt+Enter`), Quit is appended last; each row draws its first key at the right in 72 % of the row's size.
+- Consequences: `test_boxes_doc`.

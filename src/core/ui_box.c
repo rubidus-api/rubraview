@@ -45,6 +45,33 @@ rubraview_tile_metrics_t rubraview_box_metrics(const rubraview_box_t *box, const
         if (box->kind == RUBRAVIEW_BOX_TOOLBOX) m.strip_columns = box->columns;
         else m.columns = box->columns;
     }
+    /* RV-243 (owner, 2026-11-07: "툴바의 가로폭은 창 가로크기를 넘지 못하게 하고 ... 창 크기가 변하면 툴바 크기랑 가로폭이랑 그에
+       맞춰 세로폭도 변하게"): the Toolbar in the window is never wider than it: fewer buttons a row (its groups wrap,
+       so it grows taller), and when even that is taller than the window, smaller buttons. The reader's own row length
+       and size stay what they chose; a wider window gives them back. A Toolbar in a window of its own is left alone. */
+    if (box->kind == RUBRAVIEW_BOX_TOOLBOX && box->state != RUBRAVIEW_BOX_DETACHED && box->view_width > 0.0 && box->view_height > 0.0) {
+        rubraview_toolbox_shape_t shape = rubraview_box_toolbox_shape(box);
+        double room_w = box->view_width - 2.0 * base->padding, room_h = box->view_height - base->anchor_size - 3.0 * base->gutter;
+        int32_t want = m.strip_columns > 0 ? m.strip_columns : 8;
+        double shrink = 1.0;
+        for (int round = 0; round < 8; ++round) {
+            rubraview_tile_metrics_t t = m;
+            t.tile_size = m.tile_size * shrink;
+            t.button_size = m.button_size * shrink;
+            int32_t c = want;
+            rubraview_toolbox_layout_t l = {0};
+            for (; c >= 2; --c) {
+                t.strip_columns = c;
+                l = rubraview_toolbox_layout_shaped(&t, &shape);
+                if (l.width <= room_w) break;
+            }
+            if (c < 2) c = 2;
+            t.strip_columns = c;
+            l = rubraview_toolbox_layout_shaped(&t, &shape);
+            if ((l.width <= room_w && l.height <= room_h) || shrink <= 0.55) { m = t; break; }
+            shrink *= 0.9;   /* still too tall or too wide: smaller buttons, then fit the row again */
+        }
+    }
     m.sized = true;
     return m;
 }

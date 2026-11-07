@@ -7,7 +7,8 @@
 /* ---- 1.25.0: the title bar's ☰ pull-down (owner, 2026-10-20: "타이틀바 고정(Pin), 정렬align, 새 창 열기,
    파일 열기, 최근 파일, 일괄 처리, 인쇄, 재생목록Playlist, 설정Settings, 도움말Help") ---- */
 static const struct { const char *words, *action; } TMENU[] = {
-    { N_("Pin the title bar"), "toggle_titlebar_pin" },
+    /* RV-246 (owner, 2026-11-07: "메인메뉴에서 전체화면 끔이랑 제목표시줄고정 끔은 없애고 대신 맨 마지막에 종료 항목 넣어줘요. 그리고
+       각 항목 옆에 작은 글씨로 단축키"): the title bar's pin is its P button; Quit is the last row (tmenu_rows) */
     { N_("Align the Floating Widget"), "align_widget" },
     { N_("New window"), "new_window" },
     { N_("Open file"), "open_picker" },
@@ -29,7 +30,7 @@ static const struct { const char *words, *action; } TMENU[] = {
    가로로 길쭉한 버튼으로"): its own rows, then the right click's list for what is on screen, all of it (the
    right click leaves out what the Toolbar has; this does not), less what its own rows already do; in two
    columns of wide buttons, each group on lines of its own (rubraview_gridmenu_*). */
-#define TMENU_MAX (TMENU_COUNT + RUBRAVIEW_CONTEXT_MAX_ITEMS)
+#define TMENU_MAX (TMENU_COUNT + RUBRAVIEW_CONTEXT_MAX_ITEMS + 1)
 typedef struct tmenu_row { proven_u8str_view_t words, action; int32_t group; } tmenu_row_t;
 
 static size_t tmenu_rows(const app_state_t *app, tmenu_row_t *rows) {
@@ -45,7 +46,18 @@ static size_t tmenu_rows(const app_state_t *app, tmenu_row_t *rows) {
         if (own) continue;
         rows[n++] = (tmenu_row_t){ rubraview_tr_ctx_u8("menu", item->caption), item->action, item->group + 1 };
     }
+    if (n < TMENU_MAX) rows[n] = (tmenu_row_t){ TU8("Quit"), PROVEN_LIT("quit"), (n ? rows[n - 1].group : 0) + 1 }, n++;   /* RV-246: last */
     return n;
+}
+
+/* RV-246: an action's first key, as the Keys page names it ("Ctrl+Q"), for the menu's small print. */
+static proven_u8str_view_t tmenu_key_of(const app_state_t *app, proven_u8str_view_t action, char *buffer, size_t capacity) {
+    for (size_t b = 0; b < app->keymap.count; ++b) {
+        const rubraview_key_binding_t *binding = &app->keymap.bindings[b];
+        if (!proven_u8str_view_eq(binding->action, action) || binding->combo_count == 0) continue;
+        return rubraview_key_combo_format(buffer, capacity, binding->combos[0]);
+    }
+    return PROVEN_LIT("");
 }
 
 typedef struct tmenu_layout {
@@ -138,6 +150,15 @@ static void draw_tmenu_in(app_state_t *app) {
         int k = rubraview_fmt(line, sizeof(line), "{}{}", PROVEN_ARG(rubraview_bytes_view((const char *)text.ptr, (int)text.size)), PROVEN_ARG(on ? "  \xE2\x9C\x93" : ""));
         proven_u8str_view_t shown = k > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k < sizeof(line) ? (size_t)k : sizeof(line) - 1 } : text;
         rubraview_pal_rect_t words = { r.x + 12.0 * dpi, r.y, r.width - 16.0 * dpi, r.height };
+        char keybuf[48];
+        proven_u8str_view_t key = tmenu_key_of(app, L.rows[i].action, keybuf, sizeof keybuf);
+        if (key.size > 0) {   /* RV-246: its key in small print at the right */
+            double ks = size * 0.72, kw = 0.0;
+            (void)rubraview_pal_render_measure_text(app->renderer, key, ks, &kw);
+            rubraview_pal_rect_t kr = { r.x + r.width - kw - 12.0 * dpi, r.y, kw + 4.0 * dpi, r.height };
+            rubraview_pal_render_draw_text(app->renderer, key, kr, ks, L.enabled[i] ? 0xA0F0F0F0u : 0x50F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+            words.width -= kw + 16.0 * dpi;
+        }
         rubraview_pal_render_draw_text(app->renderer, shown, words, size, L.enabled[i] ? COLOR_TEXT : 0x60F0F0F0u, RUBRAVIEW_TEXT_LEFT);
         if (on) rubraview_pal_render_draw_text(app->renderer, shown, (rubraview_pal_rect_t){ words.x + 0.9, words.y, words.width, words.height },
                                                size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
