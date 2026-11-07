@@ -124,7 +124,7 @@ void triage_curate(app_state_t *app, int32_t digit) {
 /* ---- the file on screen, to its folder (owner, 2026-10-08) ----
    `copy_to_folder` and `move_to_folder`, each with a folder of its own from
    Settings > Files. A name already there is never replaced: the file goes
-   in as `name-1.ext`, `name-2.ext`, ... A page inside an archive is not a
+   in as `name_2.ext`, `name_3.ext`, ... (D-310) A page inside an archive is not a
    file, so it can be copied out (its bytes written as a file) but not
    moved. */
 bool filing_exists(void *ctx, proven_u8str_view_t path) {
@@ -1226,7 +1226,7 @@ static void handle_drop_paths(app_state_t *app, const proven_u8str_view_t *paths
    A window of the nine curation folders. A click on one, or its digit,
    sets the picture on screen aside for it and goes on to the next; Copy
    all or Move all then puts every one in its folder at once, a name never
-   replaced (name-1.ext), each move undone with Ctrl+Z (the last 64). */
+   replaced (name_2.ext, D-310), each move undone with Ctrl+Z (the last 64). */
 
 void classify_build(app_state_t *app) {
     static char words[13][192];

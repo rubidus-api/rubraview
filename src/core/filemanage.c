@@ -220,9 +220,10 @@ proven_u8str_view_t rubraview_filing_target(proven_arena_t *arena, proven_u8str_
     if (target.size == 0 || !exists(ctx, target)) return target;
 
     /* The number goes before the extension; a name with none, or one that
-       only starts with a dot, takes it at its end. */
+       only starts with a dot, takes it at its end. RV-258 (owner, 2026-11-08: "둘다 보존하게(... 끝에 접미사로 _2 _3 이렇게
+       붙여서 ...)"; asked, "모두 _2로 통일"): `_2`, `_3`, ... — one rule for every name kept beside another (D-310). */
     size_t stem = rubraview_rename_stem_length(filename);
-    for (uint32_t n = 1; n <= 9999; ++n) {
+    for (uint32_t n = 2; n <= 9999; ++n) {
         char digits[8];
         size_t d = 0;
         for (uint32_t v = n; v > 0; v /= 10) digits[d++] = (char)('0' + v % 10);
@@ -231,7 +232,7 @@ proven_u8str_view_t rubraview_filing_target(proven_arena_t *arena, proven_u8str_
         char *name = (char*)res.value.ptr;
         size_t at = 0;
         proven_sys_mem_copy(name, filename.ptr, stem); at = stem;
-        name[at++] = '-';
+        name[at++] = '_';
         while (d > 0) name[at++] = digits[--d];
         proven_sys_mem_copy(name + at, filename.ptr + stem, filename.size - stem); at += filename.size - stem;
         name[at] = '\0';

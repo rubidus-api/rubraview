@@ -157,8 +157,8 @@ bool rubraview_curation_advances(const rubraview_curation_t *curation);
 /**
  * Where a file named `filename` goes in `dir` without replacing what is
  * there (owner, 2026-10-08): the name itself when it is free, else the
- * name with `-1` before its extension, `-2` when that is taken, and so on
- * (`page.jpg`, `page-1.jpg`, `page-2.jpg`). `exists` answers for a full
+ * name with `_2` before its extension, `_3` when that is taken, and so on
+ * (`page.jpg`, `page_2.jpg`, `page_3.jpg`; RV-258, D-310: it was -1, -2). `exists` answers for a full
  * path. Empty when no free name was found in 9999 tries or the arena is
  * full.
  */
