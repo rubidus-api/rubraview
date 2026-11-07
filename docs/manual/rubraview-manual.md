@@ -1700,9 +1700,11 @@ Compress... (a window: the place and name — its ending, .zip or .7z, says
 which — then **Format** ZIP or 7z, **Level** Store, Fastest, Fast, Normal,
 Maximum or Ultra, **Codec** (ZIP: Deflate, which Windows opens too; 7z: LZMA2,
 LZMA, PPMd, BZip2 or Deflate), **Solid** or file by file for a 7z, and
-**Split** (7z as `name.7z.001, .002 ...`, ZIP as `name.z01 ... name.zip`;
-open the first, or any: the viewer finds the rest), **Password** and **Again** (typed twice, shown as dots; `Tab` or
-a click moves between the name and them; empty for none) and **Names**
+**Split** (a size typed — `700M`, `4G`, `5m`, `7Kb`, `10,000,000`: K, M, G, T
+and P in either case count by 1024, commas are ignored, 64K at least; empty for
+none; the 10 MB ... 4 GB chips fill one in. 7z as `name.7z.001, .002 ...`, ZIP
+as `name.z01 ... name.zip`; open the first, or any: the viewer finds the rest), **Password** and **Again** (typed twice, shown as dots; `Tab` or
+a click moves between the name, them and the split size; empty for none) and **Names**
 readable or hidden by the password (7z: then it is not even listed without
 it); `Enter` compresses. A new archive's
 password takes English letters, digits and symbols only (Hangul and other

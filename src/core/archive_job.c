@@ -740,6 +740,65 @@ int rubraview_pack_level_of(int step) {
     return LEVELS[step >= 0 && step < RUBRAVIEW_PACK_LEVEL_STEPS ? step : RUBRAVIEW_PACK_LEVEL_NORMAL];
 }
 
+bool rubraview_pack_split_parse(proven_u8str_view_t text, uint64_t *out_bytes) {
+    if (out_bytes) *out_bytes = 0;
+    size_t i = 0, n = text.size;
+    const proven_byte_t *s = text.ptr;
+    uint64_t whole = 0, frac = 0, frac_div = 1;
+    bool any = false, point = false;
+    for (; i < n; ++i) {
+        char c = (char)s[i];
+        if (c == ',' || c == ' ') continue;
+        if (c == '.' && !point) { point = true; continue; }
+        if (c < '0' || c > '9') break;
+        any = true;
+        if (point) {
+            if (frac_div < 1000000u) { frac = frac * 10u + (uint64_t)(c - '0'); frac_div *= 10u; }
+        } else {
+            if (whole > (UINT64_C(1) << 62) / 10u) return false;
+            whole = whole * 10u + (uint64_t)(c - '0');
+        }
+    }
+    int shift = 0;
+    if (i < n) {
+        switch (rubraview_ascii_tolower((unsigned char)s[i])) {
+            case 'k': shift = 10; break;
+            case 'm': shift = 20; break;
+            case 'g': shift = 30; break;
+            case 't': shift = 40; break;
+            case 'p': shift = 50; break;
+            default:  shift = -1; break;
+        }
+        if (shift > 0) ++i;
+        else shift = 0;
+        if (shift > 0 && i < n && rubraview_ascii_tolower((unsigned char)s[i]) == 'i') ++i;
+        if (i < n && rubraview_ascii_tolower((unsigned char)s[i]) == 'b') ++i;
+        while (i < n && s[i] == ' ') ++i;
+        if (i < n) return false;
+    }
+    if (!any) {
+        for (size_t k = 0; k < n; ++k) if (s[k] != ' ') return false;   /* empty: no split */
+        return true;
+    }
+    if (whole > ((UINT64_C(1) << 62) >> shift)) return false;
+    uint64_t bytes = (whole << shift) + (((frac << shift) + frac_div / 2u) / frac_div);
+    if (bytes > (UINT64_C(1) << 62)) return false;
+    if (out_bytes) *out_bytes = bytes;
+    return true;
+}
+
+size_t rubraview_pack_split_text(char *buf, size_t cap, uint64_t bytes) {
+    if (!buf || cap == 0) return 0;
+    buf[0] = '\0';
+    if (bytes == 0) return 0;
+    static const char UNIT[] = "KMGTP";
+    int k = 5;
+    while (k > 0 && (bytes & ((UINT64_C(1) << (10 * k)) - 1u)) != 0) --k;
+    int n = k > 0 ? rubraview_fmt(buf, cap, "{}{}", PROVEN_ARG(bytes >> (10 * k)), PROVEN_ARG(rubraview_bytes_view(&UNIT[k - 1], 1)))
+                  : rubraview_fmt(buf, cap, "{}", PROVEN_ARG(bytes));
+    return n > 0 ? ((size_t)n < cap ? (size_t)n : cap - 1) : 0;
+}
+
 bool rubraview_pack_split_supported(rubraview_pack_format_t format) {
     (void)format;
     return true;   /* D-263: FultaArc 1bc526c writes 7z's name.7z.001... and ZIP's name.z01...name.zip */

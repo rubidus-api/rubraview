@@ -1179,20 +1179,21 @@ typedef struct app_state {
     int32_t                pack_level;              /* the Compress window's level step: 0 store ... 5 ultra (D-260) */
     int32_t                pack_method;             /* its codec (rubraview_pack_method_t; DEFAULT = the format's first) */
     bool                   pack_solid_off;          /* 7z: one block a file */
-    int32_t                pack_split;              /* its split size's place (0 none); none is written yet */
+    char                   pack_split[32];          /* RV-248: its split size as typed ("700M", "10,000,000"; empty none) */
+    size_t                 pack_split_len;
 #define PACK_CHIPS_MAX 32   /* D-260: the Compress window's chips */
     rubraview_pal_rect_t   pack_chip[PACK_CHIPS_MAX];
     int32_t                pack_chip_kind[PACK_CHIPS_MAX];
     bool                   pack_chip_off[PACK_CHIPS_MAX];
     int32_t                pack_chip_n;
     rubraview_pal_rect_t   pack_panel;              /* the window's rows: a press there is its own */
-    int32_t                pack_focus;              /* D-261: the field typed in: 0 the name, 1 the password, 2 it again */
+    int32_t                pack_focus;              /* D-261: the field typed in: 0 the name, 1 the password, 2 it again, 3 the split size (RV-248) */
     char                   pack_name[1024];         /* the name while a password is typed */
     size_t                 pack_name_len;
     char                   pack_pw[2][256];         /* the password and its repeat: memory only, wiped when done */
     size_t                 pack_pw_len[2];
     bool                   pack_names_hidden;       /* 7z: its names behind the password (not written yet) */
-    rubraview_pal_rect_t   pack_field[3];           /* the name box, the password's, the repeat's */
+    rubraview_pal_rect_t   pack_field[4];           /* the name box, the password's, the repeat's, the split size's */
     bool                   pack_ask;                /* D-267: an older split set's parts in the way: recycle them? */
     size_t                 pack_ask_parts;
     char                   pack_ask_set[RUBRAVIEW_ARCHIVE_PATH];

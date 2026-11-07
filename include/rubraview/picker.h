@@ -111,6 +111,11 @@ rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(proven_u8str_view_t path);
  */
 size_t rubraview_picker_crumbs_first(const double *widths, size_t n, double gap, double room, double more_w);
 
+/** RV-248: items laid left to right as a line of inline words wraps: one that does not fit what is left of its line
+    starts the next (one wider than the whole room stands alone on its own). row_of[i] gets each item's line, x_of[i]
+    its left within the room; either may be NULL. The number of lines, 0 for no items. */
+size_t rubraview_flow_inline(const double *widths, size_t n, double gap, double room, uint32_t *row_of, double *x_of);
+
 /*
  * How a tap picks (owner, 2026-09-23: "쉬프트나 컨트롤 입력 없이"). A mode
  * is turned on by its own button and stays on until it is turned off, so

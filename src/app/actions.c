@@ -1535,7 +1535,7 @@ static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         if (key_is(combo, "Enter")) { rename_commit(app); return true; }
         if (key_is(combo, "Escape")) { rename_cancel(app); return true; }
         if (app->rename_is_pack && key_is(combo, "Tab")) {   /* D-261: the name, the password, it again */
-            archwork_pack_focus(app, (app->pack_focus + ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) ? 2 : 1)) % 3);
+            archwork_pack_focus(app, (app->pack_focus + ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) ? 3 : 1)) % 4);   /* RV-248: the split size too */
             return true;
         }
         if (app->rename_is_extension && key_is(combo, "Tab")) {   /* 1.24.0: the next row, or with Shift the one before */

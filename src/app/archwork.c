@@ -363,15 +363,17 @@ static void pack_choices_load(app_state_t *app) {
     app->pack_method = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_method")));
     if (app->pack_method < RUBRAVIEW_PACK_METHOD_DEFAULT || app->pack_method > RUBRAVIEW_PACK_METHOD_ZSTD) app->pack_method = RUBRAVIEW_PACK_METHOD_DEFAULT;
     app->pack_solid_off = rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_solid")) > 0.5;
-    app->pack_split = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_split")));
-    if (app->pack_split < 0 || app->pack_split > 4) app->pack_split = 0;
+    double split = rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_split_bytes"));   /* RV-248 */
+    app->pack_split_len = rubraview_pack_split_text(app->pack_split, sizeof app->pack_split, split > 0.0 ? (uint64_t)split : 0u);
     app->pack_names_hidden = rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_names")) > 0.5;
 }
 
 static void pack_choices_save(app_state_t *app) {
-    static const char *const KEYS[] = { "pack_format", "pack_level", "pack_method", "pack_solid", "pack_split", "pack_names" };
+    static const char *const KEYS[] = { "pack_format", "pack_level", "pack_method", "pack_solid", "pack_split_bytes", "pack_names" };
+    uint64_t split = 0;   /* RV-248: a size that does not read is not kept */
+    (void)rubraview_pack_split_parse((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_split, .size = app->pack_split_len }, &split);
     double v[] = { archwork_pack_is_7z(app) ? 1.0 : 0.0, app->pack_level, app->pack_method, app->pack_solid_off ? 1.0 : 0.0,
-                   app->pack_split, app->pack_names_hidden ? 1.0 : 0.0 };
+                   (double)split, app->pack_names_hidden ? 1.0 : 0.0 };
     for (size_t i = 0; i < sizeof KEYS / sizeof *KEYS; ++i)
         rubraview_settings_set(&app->settings, PROVEN_LIT("archive"), proven_u8str_view_from_cstr(KEYS[i]), v[i]);
     settings_write_if_changed(app, false);
@@ -447,6 +449,9 @@ static void pack_field_keep(app_state_t *app) {
     if (app->pack_focus == 0) {
         app->pack_name_len = t.size < sizeof app->pack_name ? t.size : sizeof app->pack_name - 1;
         proven_sys_mem_copy(app->pack_name, t.ptr, app->pack_name_len);
+    } else if (app->pack_focus == 3) {   /* RV-248 */
+        app->pack_split_len = t.size < sizeof app->pack_split ? t.size : sizeof app->pack_split - 1;
+        proven_sys_mem_copy(app->pack_split, t.ptr, app->pack_split_len);
     } else {
         int k = app->pack_focus - 1;
         app->pack_pw_len[k] = t.size < sizeof app->pack_pw[k] ? t.size : sizeof app->pack_pw[k] - 1;
@@ -454,18 +459,20 @@ static void pack_field_keep(app_state_t *app) {
     }
 }
 
-/* D-261: the box moves to the name, the password or its repeat (Tab, or a click on the field). */
+/* D-261: the box moves to the name, the password or its repeat (Tab, or a click on the field); RV-248: or the split size. */
 void archwork_pack_focus(app_state_t *app, int32_t to) {
-    if (!app->rename_is_pack || to < 0 || to > 2 || to == app->pack_focus) return;
+    if (!app->rename_is_pack || to < 0 || to > 3 || to == app->pack_focus) return;
     pack_field_keep(app);
     secure_wipe(rubraview_mem_mut(app->rename_buffer, sizeof app->rename_buffer));
     secure_wipe(rubraview_mem_mut(app->rename_composing, sizeof app->rename_composing));
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof app->rename_buffer);
     proven_u8str_view_t v = to == 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len }
+                          : to == 3 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_split, .size = app->pack_split_len }
                                     : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_pw[to - 1], .size = app->pack_pw_len[to - 1] };
     rubraview_textedit_set(&app->rename_edit, v);
+    if (to == 3) rubraview_textedit_select_all(&app->rename_edit);   /* RV-248: a new size types over the old */
     app->pack_focus = to;
-    app->rename_is_password = to > 0;   /* dots, never copied out, wiped when it ends */
+    app->rename_is_password = to == 1 || to == 2;   /* dots, never copied out, wiped when it ends */
     rubraview_pal_window_text_ime(app->window, to == 0);   /* D-262: a new archive's password in plain letters */
 }
 
@@ -501,14 +508,20 @@ bool pack_window_press(app_state_t *app, double x, double y) {
                 break;
             }
             case PACK_ROW_SOLID:  app->pack_solid_off = k == 1; break;
-            case PACK_ROW_SPLIT:  app->pack_split = k; break;
+            case PACK_ROW_SPLIT: {   /* RV-248: a chip writes its size into the field */
+                static const uint64_t PRESET_MIB[] = { 0, 10, 100, 700, 4095 };
+                if (app->pack_focus == 3) archwork_pack_focus(app, 0);
+                app->pack_split_len = rubraview_pack_split_text(app->pack_split, sizeof app->pack_split,
+                                                                k > 0 && k < 5 ? PRESET_MIB[k] << 20 : 0u);
+                break;
+            }
             case PACK_ROW_NAMES:  app->pack_names_hidden = k == 1; break;
             default:              break;
         }
         pack_choices_save(app);   /* D-266 */
         return true;
     }
-    for (int32_t f = 0; f < 3; ++f) if (pal_rect_has(app->pack_field[f], x, y)) { archwork_pack_focus(app, f); return true; }   /* D-261 */
+    for (int32_t f = 0; f < 4; ++f) if (pal_rect_has(app->pack_field[f], x, y)) { archwork_pack_focus(app, f); return true; }   /* D-261, RV-248 */
     return pal_rect_has(app->pack_panel, x, y);   /* between the chips: nothing under it is pressed */
 }
 
@@ -523,6 +536,17 @@ void archwork_pack_typed(app_state_t *app) {
     if (app->pack_pw_len[0] != app->pack_pw_len[1] || proven_sys_mem_cmp(app->pack_pw[0], app->pack_pw[1], app->pack_pw_len[0]) != 0) {
         osd_say(app, TU8("the two passwords differ: type it again"));
         archwork_pack_focus(app, app->pack_pw_len[0] ? 2 : 1);
+        return;
+    }
+    uint64_t split_bytes = 0;   /* RV-248: the size as typed, read before anything is done */
+    if (!rubraview_pack_split_parse((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_split, .size = app->pack_split_len }, &split_bytes)) {
+        osd_say(app, TU8("the split size is a number with K, M, G, T or P: 700M, 4G, 10,000,000"));
+        archwork_pack_focus(app, 3);
+        return;
+    }
+    if (split_bytes > 0 && split_bytes < 65536u) {   /* FULTA_ARC_VOLUME_MIN: said, not made larger unasked */
+        osd_say(app, TU8("a split part is 64K at least"));
+        archwork_pack_focus(app, 3);
         return;
     }
     pack_choices_save(app);   /* D-266: the format the name's ending says, too */
@@ -551,10 +575,7 @@ void archwork_pack_typed(app_state_t *app) {
     if (w) {
         bool sevenz = ends_with_ci(w->output, ".7z");
         w->pk.names_hidden = sevenz && pw[0] && app->pack_names_hidden;
-        /* D-263: the window's split sizes in MiB, 4 GB as FAT32's largest file allows */
-        static const uint64_t SPLIT_MIB[] = { 0, 10, 100, 700, 4095 };
-        int32_t k = app->pack_split;
-        w->pk.volume_bytes = k > 0 && k < (int32_t)(sizeof SPLIT_MIB / sizeof *SPLIT_MIB) ? SPLIT_MIB[k] << 20 : 0;
+        w->pk.volume_bytes = split_bytes;   /* D-263, RV-248: as typed; the 4 GB chip is 4095M, as FAT32's largest file allows */
         pack_start(app, w, sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP, rubraview_pack_level_of(app->pack_level),
                    archwork_pack_method(app, sevenz), sevenz && app->pack_solid_off, pw);
     }

@@ -151,6 +151,16 @@ enum { RUBRAVIEW_PACK_LEVEL_STEPS = 6, RUBRAVIEW_PACK_LEVEL_NORMAL = 3 };
 int rubraview_pack_level_of(int step);
 /* Split volumes: FultaArc writes none yet (asked for, D-260), so no format splits; a job asking is refused. */
 bool rubraview_pack_split_supported(rubraview_pack_format_t format);
+
+/** RV-248 (owner, 2026-11-07: "그리고 분할은 1000000 10,000,000 10G 5m 4k 7Kb 이런 식으로 대소문자 상관 없이, kmgtp 접두사 사용해서, 중간 쉼표는 무시해서 용량 텍스트로 입력할 수 있게 해 주세요."): a split size as typed — digits (commas and spaces among them ignored, one
+    decimal point allowed), then K, M, G, T or P in either case, 1024 each step as the Split chips, and an optional
+    B or iB: "1000000", "10,000,000", "10G", "5m", "4k", "7Kb", " 700 MB ", "1.5g". Empty, or 0, is no split (0).
+    False for anything else or a size past 2^62. */
+bool rubraview_pack_split_parse(proven_u8str_view_t text, uint64_t *out_bytes);
+
+/** The size written back as short as it is exact: "700M", "4G", "64K", or the bytes ("10000000"); "" for 0. The
+    length, at most cap - 1. */
+size_t rubraview_pack_split_text(char *buf, size_t cap, uint64_t bytes);
 /* D-261: a 7z's names hidden behind its password (7-Zip's -mhe): FultaArc writes no encrypted header yet (asked for);
    ZIP has no standard way. A job asking is refused. */
 bool rubraview_pack_names_hidden_supported(rubraview_pack_format_t format);

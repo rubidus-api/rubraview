@@ -228,7 +228,7 @@ static const char *const PARTS[] = {
 "  choice archive.pack_level       \"Level\"                   store | fastest | fast | normal | maximum | ultra = normal wired\n"
 "  choice archive.pack_method      \"Codec\"                   first | deflate | bzip2 | lzma | lzma2 | ppmd | zstd = first wired\n"
 "  choice archive.pack_solid       \"7z blocks\"               solid | file = solid wired\n"
-"  choice archive.pack_split       \"Split\"                   none | 10mb | 100mb | 700mb | 4gb = none wired\n"
+"  int    archive.pack_split_bytes \"Split\"                   0..4611686018427387904 step 1 = 0 wired\n"
 "  choice archive.pack_names       \"7z names with a password\" readable | encrypted = readable wired\n"
 "  note \"Kept from the last Compress window, and offered in the next; the password never is. Codec first is the format's own: ZIP Deflate, 7z LZMA2.\"\n"
 "  section \"An archive written again\"\n"

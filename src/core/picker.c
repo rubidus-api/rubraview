@@ -176,6 +176,19 @@ size_t rubraview_picker_crumbs_first(const double *widths, size_t n, double gap,
     return first < n ? first : n - 1;
 }
 
+size_t rubraview_flow_inline(const double *widths, size_t n, double gap, double room, uint32_t *row_of, double *x_of) {
+    if (!widths || n == 0) return 0;
+    uint32_t row = 0;
+    double x = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        if (x > 0.0 && x + widths[i] > room) { ++row; x = 0.0; }
+        if (row_of) row_of[i] = row;
+        if (x_of) x_of[i] = x;
+        x += widths[i] + gap;
+    }
+    return (size_t)row + 1u;
+}
+
 rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(proven_u8str_view_t path) {
     rubraview_breadcrumbs_t crumbs = {0};
     if (!path.ptr || path.size == 0) return crumbs;
