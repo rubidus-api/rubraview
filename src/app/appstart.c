@@ -55,6 +55,8 @@ bool app_start(app_state_t *app, rubraview_mem_t *mem) {
        other one still gets its turn when this one cannot. */
     app->media_preferred = preferred_backend(arena);
     history_load(app);
+    app_log_start(app);   /* RV-256: this window's log, its cap from the settings just read */
+    app_log(app, "start", cstr(RUBRAVIEW_VERSION_STRING));
     load_keymap(app);   /* after history_load: it settles portable or AppData, and so where keymap.ini is */
     /* history_load read settings.ini from wherever it lives (beside the
        program or in AppData); the decoder choice comes from that, not

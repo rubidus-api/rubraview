@@ -58,6 +58,9 @@ static const char *const PARTS[] = {
 "  int    general.size_settings    \"  its size\"              60..200 step 10 unit \"%\" = 100 wired\n"
 "  int    general.settings_spacing \"  its line spacing\"      100..200 step 10 unit \"%\" = 100 wired\n"
 "  note   \"This window's face is best one whose letters are all one width (Consolas, D2Coding).\"\n"
+"  section \"Log\"\n"   /* RV-256 */
+"  int    general.log_limit_mb     \"Log size limit\"          1..64 step 1 unit \"MB\" = 1 wired\n"
+"  note \"This window's log (Ctrl+Shift+L, ☰ › Log): kept in memory apart from the rest, the oldest lines dropped past this; written only when saved from its window.\"\n"
 "\n",
 "page explorer \"Explorer\"\n"
 "  section \"What Rubraview is given\"\n"

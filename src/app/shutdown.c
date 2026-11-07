@@ -20,6 +20,7 @@ void app_end(app_state_t *app) {
     batch_window_close(app);   /* RV-194: and its names window */
     if (app->panel.open || app->edit_window) panel_close(app);
     info_close(app);
+    log_close(app);   /* RV-256 */
     help_close(app);
     mini_close(app);
     takeout_end(app);
@@ -63,6 +64,8 @@ void app_end(app_state_t *app) {
     arc_job_poll(app, true);    /* D-88: an archive being written again is stopped; the old one stands */
     archwork_poll(app, true);   /* RV-207: an extracting or a compressing stopped; nothing half-written stays */
     dragout_quit(app);
+    rubraview_heldq_free(&app->heldq);
+    rubraview_log_free(&app->log);   /* RV-256: never written unless saved */   /* RV-256: what still waited is not acted on */
     rubraview_baskets_free(&app->baskets);   /* RV-227: for this run only */          /* RV-223: ours off the clipboard, our folders gone */
     arc_undo_drop(app);         /* D-89: the kept file of the last edit goes with the program */
     print_temp_drop(app);

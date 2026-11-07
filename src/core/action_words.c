@@ -111,6 +111,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "open_favorites", "The favourites, files and folders, in a list window: open, reorder, remove" },
     { "open_folder", "Open a folder" },
     { "open_keys", "Settings, opened on its Keys page" },
+    { "open_log", "This window's log: what it did, kept in memory; save it as text from its window" },
     { "open_picker", "Open a file" },
     { "open_recent_list", "The recent files in a list window: when each was opened, its size and folder; take files off the list" },
     { "open_settings", "Settings" },

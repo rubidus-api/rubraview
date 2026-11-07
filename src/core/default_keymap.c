@@ -31,6 +31,8 @@ const char *rubraview_default_keymap(void) {
     "toggle_help = \"Shift+Slash, F1\"\n"
     /* Owner, 2026-09-29: the file's size, pixels, codec, EXIF — in a window whose text can be copied. */
     "toggle_info = \"I, Ctrl+I\"\n"
+    /* RV-256 (owner, 2026-11-08: "내부 로그 창도 있으면 좋겠어요"; asked, "Ctrl+Shift+L과 ☰ › 로그"): this window's log */
+    "open_log = \"Ctrl+Shift+L\"\n"
     /* §3.14.6 (owner, 2026-09-24): the music in a window of its own — a song's, or the one behind the pictures. */
     "toggle_miniplayer = \"Shift+P\"\n"
     /* RV-245 (owner, 2026-11-07: "ESC 대신에 Ctrl+Q로 종료하게 해 줘요. ESC는 그냥 최소화+Mute 까지만"): Esc closes what is

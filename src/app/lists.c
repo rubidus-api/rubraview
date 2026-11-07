@@ -392,24 +392,37 @@ static void list_add_picked(app_state_t *app, rubraview_window_t *owner) {
     osd_say(app, TU8("pick what to add, then Add to the list"));
 }
 
-/* RV-117: a file of the list to the recycle bin — warned and asked first, in a
-   question of Windows' own over the window it was asked from; No is the default. */
+/* RV-117: a file of the list to the recycle bin — warned and asked first. RV-256 (D-308): asked on a card of the
+   main window's own, not in a question of Windows' that stopped the program until it was answered; No is still the
+   default (Enter, Esc, N), Y or its button recycles it. */
 void list_delete_row(app_state_t *app, size_t row, rubraview_window_t *owner) {
+    (void)owner;
     size_t count = page_count(app);
     if (row >= count || !list_editable(app)) return;
-    char path[1024];
     proven_u8str_view_t from = app->source.pages[row].path;
-    if (from.size == 0 || from.size >= sizeof(path)) return;
-    proven_sys_mem_copy(path, from.ptr, from.size);                       /* the list it points into is made again below */
-    path[from.size] = '\0';
-    proven_u8str_view_t name = rubraview_path_basename((proven_u8str_view_t){ .ptr = (const proven_byte_t *)path, .size = from.size });
-    char text[1400];
-    int n = rubraview_fmt(text, sizeof(text), T("Move this file to the recycle bin?\n\n{}\n\nIt leaves the list and its folder; the recycle bin can give it back."), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 600 ? name.size : 600))));
-    WCHAR wide[1500];
-    if (n <= 0 || MultiByteToWideChar(CP_UTF8, 0, text, -1, wide, 1500) <= 0) return;
-    int answer = MessageBoxW((HWND)rubraview_pal_window_native_handle(owner), wide, L"Rubraview - delete a file",
-                             MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
-    if (answer != IDYES) { osd_say(app, TU8("not deleted")); return; }
+    if (from.size == 0 || from.size >= sizeof(app->list_del_path)) return;
+    proven_sys_mem_copy(app->list_del_path, from.ptr, from.size);   /* the list it points into is made again below */
+    app->list_del_path[from.size] = '\0';
+    app->list_del_row = row;
+    app->list_del_ask = true;
+    HWND main = (HWND)rubraview_pal_window_native_handle(app->window);   /* asked from the files window: the card is here */
+    if (main) { if (IsIconic(main)) ShowWindow(main, SW_RESTORE); SetForegroundWindow(main); }
+}
+
+void list_delete_answer(app_state_t *app, bool yes) {
+    if (!app->list_del_ask) return;
+    app->list_del_ask = false;
+    if (!yes) { osd_say(app, TU8("not deleted")); return; }
+    size_t row = app->list_del_row;
+    char path[1024];
+    size_t plen = proven_cstr_len(app->list_del_path);
+    proven_sys_mem_copy(path, app->list_del_path, plen + 1);
+    if (row >= page_count(app) || !rubraview_path_same(app->source.pages[row].path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)path, .size = plen })) {
+        osd_say(app, TU8("not deleted: the list changed meanwhile"));
+        return;
+    }
+    proven_u8str_view_t from = { .ptr = (const proven_byte_t *)path, .size = plen };
+    proven_u8str_view_t name = rubraview_path_basename(from);
     if (app->media && app->media_page == (int32_t)row) media_close(app);   /* a film playing holds its file */
     proven_u8str_view_t gone = { .ptr = (const proven_byte_t *)path, .size = from.size };
     if (!rubraview_pal_fs_recycle(gone)) {

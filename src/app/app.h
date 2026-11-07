@@ -102,6 +102,8 @@
 #include "rubraview/edit.h"
 #include "rubraview/ui_panel.h"
 #include "rubraview/filemanage.h"
+#include "rubraview/heldq.h"
+#include "rubraview/log.h"
 #include "rubraview/settings.h"
 #include "rubraview/settings_doc.h"
 #include "rubraview/ui_settings.h"
@@ -422,7 +424,7 @@ typedef struct app_state {
     /* RFC-0006: a window that opens and closes is made, with its renderer, in a block of the
        windows pool, given back when it closes. */
     struct window_block { void *block; proven_arena_t arena; } mini_block, toolbox_block, info_block, help_block, files_block, fontpick_block, subs_block, edit_block,
-                                                               batch_block, names_block;
+                                                               batch_block, names_block, log_block;
     rubraview_window_t *window;
     rubraview_renderer_t *renderer;
     rubraview_keymap_t keymap;
@@ -1400,6 +1402,25 @@ typedef struct app_state {
     double                 picker_rhold_x, picker_rhold_y;
     /* RV-227 (D-282): five baskets of paths, for this run; what a tap or a drag is about to put in one */
     rubraview_baskets_t    baskets;
+    rubraview_heldq_t      heldq;
+    /* RV-256 (D-308): this window's log, a ring on the heap of its own, and the window that shows it */
+    rubraview_log_t        log;
+    double                 log_t0;
+    bool                   log_open, log_dirty, log_follow;
+    rubraview_window_t    *log_window;
+    rubraview_renderer_t  *log_renderer;
+    int32_t                log_frame[4];
+    double                 log_font, log_cell_w, log_cell_h, log_px, log_py;
+    int32_t                log_scroll;
+    char                  *log_text;                /* the log as text, made again when it grew */
+    proven_u8str_view_t   *log_rows;
+    size_t                 log_row_count, log_built;
+    char                   log_message[160];
+    rubraview_pal_rect_t   log_btn[3];
+    bool                   list_del_ask;            /* RV-256: a file of the list to the Recycle Bin? asked on a card */
+    size_t                 list_del_row;
+    char                   list_del_path[1024];
+    rubraview_pal_rect_t   list_del_btn[2];                   /* RV-256: requests waiting while the window asks or takes input */
     proven_u8str_view_t   *basket_pending;
     size_t                 basket_pending_count;
     bool                   basket_moving;            /* the list's Move here, Copy here each time it opens */
@@ -2152,6 +2173,8 @@ void list_button(rubraview_renderer_t *rr, double px, double py, rubraview_rect_
 void list_check_mark(rubraview_renderer_t *rr, rubraview_rect_t c, bool every, bool some);
 size_t list_checked_total(const app_state_t *app);
 void list_delete_row(app_state_t *app, size_t row, rubraview_window_t *owner);
+void list_delete_answer(app_state_t *app, bool yes);   /* RV-256 */
+bool list_del_press(app_state_t *app, double x, double y);
 bool list_editable(const app_state_t *app);
 bool list_ext_is_off(const app_state_t *app, proven_u8str_view_t ext);
 void list_filter_files_end(app_state_t *app);
@@ -2475,6 +2498,14 @@ int shell_remove(bool all_users);
 void shell_request_take(app_state_t *app, rubraview_shell_verb_t verb, bool whole, const proven_u8str_view_t *paths, size_t count);
 void shell_requests_flush(app_state_t *app);
 size_t shell_requests_pump(app_state_t *app);
+bool window_taking_input(const app_state_t *app);   /* RV-256: a card or a box up: requests wait */
+void app_log(app_state_t *app, const char *kind, proven_u8str_view_t text);   /* RV-256: a line in this window's log */
+void app_log_start(app_state_t *app);
+void app_log_limit(app_state_t *app);   /* general.log_limit_mb applied */
+void log_show(app_state_t *app);
+void log_close(app_state_t *app);
+void draw_log_window(app_state_t *app);
+size_t log_pump(app_state_t *app);
 int shell_wipe(bool all_users);
 void show_frame(app_state_t *app, size_t frame_index);
 void skip_dirs_table_rows(app_state_t *app);

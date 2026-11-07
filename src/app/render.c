@@ -1715,6 +1715,7 @@ uint64_t scene_signature(const app_state_t *app) {
     SIG(&h, app->volpop_open); SIG(&h, app->volpop_typing); SIG(&h, app->volpop_len);   /* RV-237 */
     SIG(&h, app->extract_done);   /* RV-240 */
     SIG(&h, app->playlist_ask);   /* RV-255 */
+    SIG(&h, app->list_del_ask);   /* RV-256 */
     SIG(&h, rubraview_pal_time_now_seconds() < app->vol_flash_until);
     SIG(&h, (int64_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume"))));
     if (app->volpop_open) { SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y); }

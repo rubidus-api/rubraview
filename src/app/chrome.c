@@ -22,6 +22,7 @@ static const struct { const char *words, *action; } TMENU[] = {
     { N_("Move to another folder..."), "move_to_other_folder" },
     { N_("Playlist"), "toggle_playlist" },
     { N_("Settings"), "open_settings" },
+    { N_("Log"), "open_log" },   /* RV-256 */
     { N_("Help"), "toggle_help" },
 };
 #define TMENU_COUNT ((int32_t)(sizeof(TMENU) / sizeof(TMENU[0])))

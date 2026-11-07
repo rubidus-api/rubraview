@@ -995,6 +995,7 @@ void ui_font_apply_all(app_state_t *app) {
 
 void settings_took_effect(app_state_t *app) {
     ui_font_apply_all(app);
+    app_log_limit(app);   /* RV-256 */
     {   /* RFC-0007: plug-ins on or off, or another folder: looked for again */
         size_t before = g_plugin_count;
         plugins_from_settings(app);

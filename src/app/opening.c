@@ -761,6 +761,7 @@ void open_path(app_state_t *app, proven_u8str_view_t path) {
     /* The path may be a picker listing's, which goes two folders later;
        the source keeps it (its folder, its archive's path). */
     path = app_keep(app, path);
+    app_log(app, "open", path);   /* RV-256 */
     app->names_codepage = -1;   /* a code page chosen for one archive's names stays with it */
     if (rubraview_glob_match_list(rubraview_path_basename(path), PROVEN_LIT("*.cue"))) {
         proven_u8str_view_t audio = cue_audio_path(app, path);

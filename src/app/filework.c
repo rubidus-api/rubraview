@@ -52,6 +52,7 @@ void reopen_on_path(app_state_t *app, proven_u8str_view_t path, size_t fallback)
 }
 
 void osd_say(app_state_t *app, proven_u8str_view_t text) {
+    app_log(app, "say", text);   /* RV-256 */
     size_t n = text.size < sizeof(app->notice) - 1 ? text.size : sizeof(app->notice) - 1;
     proven_sys_mem_copy(app->notice, text.ptr, n);
     app->notice[n] = '\0';
@@ -999,6 +1000,12 @@ static void explorer_open(app_state_t *app, const proven_u8str_view_t *paths, si
 
 static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, const proven_u8str_view_t *paths, size_t count) {
     if (count == 0) return;
+    {   /* RV-256 */
+        char line[160];
+        int n = rubraview_fmt(line, sizeof line, "verb {}, {} path(s), the first:", PROVEN_ARG((int)verb), PROVEN_ARG(count));
+        if (n > 0) app_log(app, "explorer", (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
+        app_log(app, "explorer", paths[0]);
+    }
     switch (verb) {
         case RUBRAVIEW_SHELL_VERB_NONE:
         case RUBRAVIEW_SHELL_VERB_OPEN:
@@ -1052,6 +1059,48 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
     }
 }
 
+/* RV-256 (owner, 2026-11-08: "뭔가 다른 입력을 받고 있거나 할 때 이렇게 메인 쓰레드에 작업이 오면 잠시 스택 같은데 쌓이면서
+   보류하고 현재 작업 마무리 다음에 차근차근 처리할 수 있게 하자"; asked, "먼저 온 것부터"): while the window asks or takes
+   input — a text box or a card, the ☰ pull-down, a chooser, the volume typed, an archive being written — a request
+   from Explorer, another launch or a drop waits, and is worked through one a pass once it is free (D-308). The
+   open-file screen alone holds nothing: it is a screen of the window's own (D-304). */
+bool window_taking_input(const app_state_t *app) {
+    return app->rename_active || app->extract_done || app->pack_ask || app->playlist_ask || app->arc_ask != ARC_ASK_NONE ||
+           app->confirm_purge || app->list_del_ask || app->tmenu_open || app->chooser.open || app->volpop_typing || app->arc_job != NULL;
+}
+
+static void heldq_said(app_state_t *app) {
+    char line[96];
+    int n = rubraview_fmt(line, sizeof line, T("{} waiting: they open when this is done"), PROVEN_ARG(rubraview_heldq_count(&app->heldq)));
+    if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
+}
+
+static void handle_drop_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count);
+
+/* RV-256: the oldest request waiting, acted on, once the window is free; one a pass. */
+static bool heldq_pump(app_state_t *app) {
+    if (rubraview_heldq_count(&app->heldq) == 0 || window_taking_input(app)) return false;
+    rubraview_heldq_item_t it;
+    if (!rubraview_heldq_pop(&app->heldq, &it)) return false;
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, it.count ? it.count : 1, sizeof(proven_u8str_view_t));
+    proven_result_mem_mut_t text = proven_arena_alloc(app->arena, it.text_len ? it.text_len : 1);
+    if (proven_is_ok(res.err) && proven_is_ok(text.err)) {
+        char *copy = (char *)(void *)text.value.ptr;   /* the paths where they outlive the item */
+        proven_sys_mem_copy(copy, it.text, it.text_len);
+        rubraview_heldq_item_t view = it;
+        view.text = copy;
+        proven_u8str_view_t *paths = (proven_u8str_view_t *)(void *)res.value.ptr;
+        size_t n = rubraview_heldq_item_paths(&view, paths, it.count);
+        if (n > 0) {
+            app_log(app, "released", paths[0]);
+            if (it.kind == RUBRAVIEW_HELDQ_DROP) handle_drop_paths(app, paths, n);
+            else shell_request_act(app, (rubraview_shell_verb_t)it.verb, paths, n);
+        }
+    }
+    rubraview_heldq_item_free(&it);
+    return true;
+}
+
 /* What was gathered, acted on: the paths copied where they outlive it. */
 void shell_requests_flush(app_state_t *app) {
     rubraview_shellreq_collector_t *c = &app->shell_requests;
@@ -1070,7 +1119,13 @@ void shell_requests_flush(app_state_t *app) {
         }
     }
     rubraview_shellreq_clear(c);
-    if (paths) shell_request_act(app, verb, paths, count);
+    if (!paths) return;
+    if (window_taking_input(app) || rubraview_heldq_count(&app->heldq) > 0) {   /* RV-256: after what waits already */
+        if (rubraview_heldq_push(&app->heldq, RUBRAVIEW_HELDQ_SHELL, (uint32_t)verb, false, paths, count)) { app_log(app, "held", paths[0]); heldq_said(app); }
+        else osd_say(app, TU8("too much is waiting: that request was dropped"));
+        return;
+    }
+    shell_request_act(app, verb, paths, count);
 }
 
 /* One request into the gathering; one with another verb waiting goes first. */
@@ -1106,11 +1161,11 @@ size_t shell_requests_pump(app_state_t *app) {
         shell_requests_flush(app);
         handled++;
     }
+    if (heldq_pump(app)) handled++;   /* RV-256 */
     return handled;
 }
 
 void handle_drop(app_state_t *app, const rubraview_window_event_t *event) {
-    rubraview_drop_item_t items[16];
     size_t count = event->drop.count < 16 ? event->drop.count : 16;
     if (count == 0) return;   /* nothing was dropped: there is no first item to open */
 
@@ -1124,8 +1179,23 @@ void handle_drop(app_state_t *app, const rubraview_window_event_t *event) {
         return;
     }
 
+    proven_u8str_view_t given[16];
+    for (size_t i = 0; i < count; ++i) given[i] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event->drop.paths[i], .size = event->drop.path_lengths[i] };
+    if (window_taking_input(app) || rubraview_heldq_count(&app->heldq) > 0) {   /* RV-256: it waits its turn */
+        if (rubraview_heldq_push(&app->heldq, RUBRAVIEW_HELDQ_DROP, 0, false, given, count)) { app_log(app, "held", given[0]); heldq_said(app); }
+        else osd_say(app, TU8("too much is waiting: that request was dropped"));
+        return;
+    }
+    handle_drop_paths(app, given, count);
+}
+
+/* A drop's paths opened: one file or folder in place, several as a set of exactly those (§3.19.2). */
+static void handle_drop_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count) {
+    rubraview_drop_item_t items[16];
+    if (count > 16) count = 16;
+    if (count > 0) app_log(app, "drop", paths[0]);   /* RV-256 */
     for (size_t i = 0; i < count; ++i) {
-        items[i].path = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event->drop.paths[i], .size = event->drop.path_lengths[i] };
+        items[i].path = paths[i];
         /* A directory has no extension and does list: asking the
            filesystem is cheaper than guessing from the name. */
         rubraview_fs_listing_t probe = rubraview_pal_fs_list_dir(app->arena, items[i].path);

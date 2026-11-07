@@ -1396,6 +1396,16 @@ and **Delete the file...**, which first asks in a warning of Windows' own —
 No is the answer it starts on — and then moves the file to the recycle
 bin, from where it can be put back.
 
+`Ctrl+Shift+L` (or ☰ › Log) opens this window's log: each thing it did —
+files opened, actions, its messages, what Explorer sent, what was dropped,
+and what waited — one line each with the seconds since the window opened.
+**Save as text...** (`Ctrl+S`) writes it to a file, **Copy all** (`Ctrl+C`)
+puts it on the clipboard, **Clear** empties it. It is kept in memory only
+and ends with the window; past its size (Settings › General › Log, 1 MB as
+it comes) the oldest lines go. A file, a drop or an Explorer menu item that
+arrives while the window is asking something or taking typed input waits
+("2 waiting"), and opens after it, in the order they came.
+
 `I` (or `Ctrl+I`, the Info button, or Info in the right click) opens the file's information: its
 size, dates, pixels and format, and for a photo what the camera wrote —
 camera and lens, when it was taken (with the time zone), exposure, aperture,
@@ -1958,6 +1968,7 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+,` | Settings |
 | `Shift+/`, `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
+| `Ctrl+Shift+L` | This window's log: what it did, kept in memory; save it as text from its window |
 | `Shift+P` | Mini player |
 | `Ctrl+Q` | Quit |
 | `Esc` | Esc: closes what is open; with nothing open, the sound off and the window down at once |

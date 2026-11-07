@@ -538,6 +538,7 @@ double name_scale(const app_state_t *app) {
 static void draw_pack_ask(app_state_t *app, double win_w, double win_h, double dpi);   /* D-267, below */
 static void draw_extract_done(app_state_t *app, double win_w, double win_h, double dpi);   /* RV-240, below */
 static void draw_playlist_ask(app_state_t *app, double win_w, double win_h, double dpi);   /* RV-255, below */
+static void draw_list_del(app_state_t *app, double win_w, double win_h, double dpi);       /* RV-256, below */
 
 void draw_reading(app_state_t *app, double win_w, double win_h, double dpi) {
     size_t done = 0, count = 0;
@@ -572,6 +573,7 @@ void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi
     draw_pack_ask(app, win_w, win_h, chrome_dpi);   /* D-267 */
     draw_extract_done(app, win_w, win_h, chrome_dpi);   /* RV-240 */
     draw_playlist_ask(app, win_w, win_h, chrome_dpi);   /* RV-255 */
+    draw_list_del(app, win_w, win_h, chrome_dpi);       /* RV-256 */
     if (app->notice_seconds > 0.0 && app->notice_length > 0) {
         double k = name_scale(app);   /* 1.25.0 */
         int before = place_font_begin(app, PF_NAME, NULL);
@@ -941,6 +943,43 @@ void playlist_ask_answer(app_state_t *app, int which) {
 bool playlist_ask_press(app_state_t *app, double x, double y) {
     if (!app->playlist_ask) return false;
     for (int i = 0; i < 4; ++i) if (pal_rect_has(app->playlist_ask_btn[i], x, y)) { playlist_ask_answer(app, i); return true; }
+    return true;   /* nothing under it while it asks */
+}
+
+/* RV-256 (D-308): RV-117's question about a file of the list, on a card of the window's own (D-267's look); No is
+   the default. */
+static void draw_list_del(app_state_t *app, double win_w, double win_h, double dpi) {
+    if (!app->list_del_ask) return;
+    double box_w = fmin(640.0 * dpi, win_w - 16.0 * dpi), box_h = 196.0 * dpi;
+    rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, (win_h - box_h) * 0.5, box_w, box_h };
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, 0.0, win_w, win_h }, 0x90000000u, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+    rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_CLOSE_HOVER, 2.0, 3.0);
+    rubraview_pal_render_draw_text(app->renderer, TU8("Move this file to the recycle bin?"),
+                                   (rubraview_pal_rect_t){ box.x + 12.0 * dpi, box.y + 12.0 * dpi, box.width - 24.0 * dpi, 28.0 * dpi },
+                                   17.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    char fit[1200];
+    proven_u8str_view_t name = files_fit_text(fit, sizeof fit, rubraview_path_basename(cstr(app->list_del_path)), box.width - 24.0 * dpi, 14.0 * dpi);
+    rubraview_pal_render_draw_text(app->renderer, name, (rubraview_pal_rect_t){ box.x + 12.0 * dpi, box.y + 42.0 * dpi, box.width - 24.0 * dpi, 24.0 * dpi },
+                                   14.0 * dpi, 0xD0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+    const char *words[2] = { T("Recycle it  (Y)"), T("Keep it  (Esc)") };
+    double gap = 12.0 * dpi, bh = 48.0 * dpi, bw = (box.width - 3.0 * gap) / 2.0, by = box.y + 76.0 * dpi;
+    for (int i = 0; i < 2; ++i) {
+        rubraview_pal_rect_t b = { box.x + gap + (double)i * (bw + gap), by, bw, bh };
+        app->list_del_btn[i] = b;
+        bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
+        rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? (over ? COLOR_CLOSE_HOVER : 0xC0802030u) : over ? 0x50FFFFFFu : COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 3.0);
+        rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, 15.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+    rubraview_pal_render_draw_text(app->renderer, TU8("It leaves the list and its folder; the recycle bin can give it back."),
+                                   (rubraview_pal_rect_t){ box.x, by + bh + 12.0 * dpi, box.width, 26.0 * dpi },
+                                   13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+}
+
+bool list_del_press(app_state_t *app, double x, double y) {
+    if (!app->list_del_ask) return false;
+    for (int i = 0; i < 2; ++i) if (pal_rect_has(app->list_del_btn[i], x, y)) { list_delete_answer(app, i == 0); return true; }
     return true;   /* nothing under it while it asks */
 }
 

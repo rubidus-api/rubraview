@@ -465,6 +465,7 @@ static bool edit_turn(app_state_t *app, int dir, bool to_end) {
 }
 
 void handle_action(app_state_t *app, proven_u8str_view_t action) {
+    if (action.size > 0) app_log(app, "action", action);   /* RV-256 */
     if (text_action(app, action)) return;   /* RFC-0005 */
     if (action.size == 0) return;
     if (edit_panel_open(app) && edit_denies(action)) {
@@ -1015,6 +1016,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         listwin_toggle(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_info"))) {
         info_show(app);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_log"))) {   /* RV-256 */
+        log_show(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_miniplayer"))) {
         mini_show(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("boxes_opacity_100")) || proven_u8str_view_eq(action, PROVEN_LIT("boxes_opacity_80")) ||
@@ -1646,6 +1649,11 @@ void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (app->extract_done) {   /* RV-240: Enter opens the folder here, Esc closes the card; nothing else meanwhile */
         if (key_is(combo, "Enter")) extract_done_answer(app, 0);
         else if (key_is(combo, "Escape")) extract_done_answer(app, 2);
+        return;
+    }
+    if (app->list_del_ask) {   /* RV-256: Y recycles the file; Enter, N and Esc keep it */
+        if (key_is(combo, "Y")) list_delete_answer(app, true);
+        else if (key_is(combo, "Enter") || key_is(combo, "N") || key_is(combo, "Escape")) list_delete_answer(app, false);
         return;
     }
     if (app->playlist_ask) {   /* RV-255: Enter opens it in place of the list, Esc leaves it; 1 2 3 the buttons */
