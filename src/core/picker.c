@@ -269,6 +269,18 @@ void rubraview_picker_reveal_focus(rubraview_picker_t *picker) {
                                                             picker->viewport_extent, target);
 }
 
+void rubraview_picker_page(rubraview_picker_t *picker, bool down) {
+    if (!picker || !picker->listing || picker->listing->count == 0) return;
+    size_t count = picker->listing->count, columns = picker->columns > 0 ? (size_t)picker->columns : 1;
+    size_t rows = picker->tile_extent > 0.0 ? (size_t)(picker->viewport_extent / picker->tile_extent) : 1;
+    if (rows < 1) rows = 1;
+    size_t step = rows * columns;
+    if (picker->focus >= count) picker->focus = count - 1;
+    if (down) picker->focus = picker->focus + step < count ? picker->focus + step : count - 1;
+    else      picker->focus = picker->focus >= step ? picker->focus - step : picker->focus >= columns ? picker->focus % columns : 0;
+    rubraview_picker_reveal_focus(picker);
+}
+
 bool rubraview_picker_type_ahead(rubraview_picker_t *picker, char letter) {
     if (!picker || !picker->listing || picker->listing->count == 0) return false;
 

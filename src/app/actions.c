@@ -1338,6 +1338,11 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
+    /* RV-249: a screenful of rows through the list, not the picture behind it */
+    if ((key_is(combo, "PageDown") || key_is(combo, "PageUp")) && !(combo.modifiers & (RUBRAVIEW_MOD_CTRL | RUBRAVIEW_MOD_ALT))) {
+        rubraview_picker_page(&app->picker, key_is(combo, "PageDown"));
+        return true;
+    }
     /* The owner (2026-11-02: "열기 화면의 홈 엔드 키"): the first tile and the last, as Explorer. */
     if (key_is(combo, "Home") || key_is(combo, "End")) {
         app->picker.focus = key_is(combo, "Home") ? 0 : count - 1;

@@ -149,6 +149,10 @@ void rubraview_picker_scroll_by(rubraview_picker_t *picker, double delta);
 /** Scroll so the focused item is on screen. */
 void rubraview_picker_reveal_focus(rubraview_picker_t *picker);
 
+/** RV-249: PgDn (down) or PgUp moves the focus by the rows a screen holds (one at least), in its column; past the
+    end it stops on the last item, before the start on the first. The focus is then revealed. */
+void rubraview_picker_page(rubraview_picker_t *picker, bool down);
+
 /**
  * §3.15.4 point 1: pressing a letter jumps to the next entry starting
  * with it, wrapping around, so repeated presses cycle through matches.
