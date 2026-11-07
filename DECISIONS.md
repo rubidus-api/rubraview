@@ -3506,3 +3506,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Seen meanwhile, not changed: the screen sometimes drawn seconds late after a click (the state right, the picture
   behind until the next input or the ten-second frame) — in 1.39.90 too (T362: Sort by's list missing 2 s after the
   click, there at 6 s). Backlog.
+
+## 2026-11-07: D-287 F1 opens the help again, beside ? (RV-231)
+
+- Status: Accepted (owner 2026-11-07: "F1키는 예외적으로 허용해서, 도움말 키에 추가해 주세요"). RV-231.
+- Decision: D-242's rule keeps every other default off the function keys; `toggle_help` is `?` (Shift+/) and `F1`,
+  and the help window closes on `?`, `F1` or Esc (its head and foot say so in every language). A keymap.ini whose help is
+  still `?` alone, as RV-211 left it, takes `F1` beside it at load (`rubraview_default_keymap_retired` holds that
+  binding too, matched by action); one the reader changed stays.
+- Consequences: T303 allows F1 for the help only; `test_keymap` holds the move; T363 on the VM.

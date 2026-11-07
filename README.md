@@ -44,7 +44,7 @@ Rubraview is designed as a fast, bloat-free desktop tool that combines responsiv
 
 ## Keyboard shortcuts
 
-`?` opens this same list in a window of its own, which stays open while
+`?` or `F1` opens this same list in a window of its own, which stays open while
 you read. Every key here can be changed on the settings window's Keys
 page (`Ctrl+,`), and the table below is generated from the keys the viewer
 ships with, so it cannot drift from them.
@@ -63,7 +63,7 @@ ships with, so it cannot drift from them.
 | `Shift+I` | Information bar |
 | `Ctrl+N` | A new window: the viewer once more, nothing open |
 | `Ctrl+,` | Settings |
-| `Shift+/` | This help, in a window of its own |
+| `Shift+/`, `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `Shift+P` | Mini player |
 | `Esc` | Quit |
@@ -331,7 +331,7 @@ These belong to their window and are not on the Keys page.
 | The file picker (`O`) | Arrows move; `Enter` opens (`Shift+Enter` shows an archive's pages as tiles); `Backspace` goes up a folder; a letter or a digit jumps to the next name starting with it; `Ctrl+L` types a path; `Ctrl+D` stars the folder; `Esc` closes. Right-click an archive for its pages, a starred folder to rename it |
 | The file list window (`Ctrl+L`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End` choose a file and preview it; `Enter` or a click turns the viewer to it; `Esc` closes; every other key does what it does in the viewer |
 | Settings (`Ctrl+,`) | `Up` / `Down` move; `Left` / `Right` change a value (`PageUp` / `PageDown` by ten steps); `Enter` or `Space` switches or presses; `Tab` / `Shift+Tab` change the page; `Esc` closes |
-| Help (`?`), information (`I`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End` scroll; `Esc` closes |
+| Help (`?`, `F1`), information (`I`) | `Up` / `Down`, `PageUp` / `PageDown`, `Home` / `End` scroll; `Esc` closes |
 | The playlist (`P`) | A click goes to a file, the wheel scrolls, `Esc` closes |
 | Rename (`Ctrl+M`), a typed path, a password | `Enter` accepts, `Esc` gives up |
 

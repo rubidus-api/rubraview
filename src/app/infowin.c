@@ -867,7 +867,7 @@ void draw_help_window(app_state_t *app) {
 
     /* The bottom line says how to move and how to leave. */
     char foot[128];
-    int written = rubraview_fmt(foot, sizeof(foot), T(" {}{}keys, then the licences at the end   |   drag to mark, Ctrl+C copies   |   ? or Esc closes"),
+    int written = rubraview_fmt(foot, sizeof(foot), T(" {}{}keys, then the licences at the end   |   drag to mark, Ctrl+C copies   |   ?, F1 or Esc closes"),
                            PROVEN_ARG(app->help_message), PROVEN_ARG(app->help_message[0] ? "   |   " : ""));
     if (written > 0) {
         rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, (double)h - ch, (double)w, ch },
@@ -956,7 +956,8 @@ size_t help_pump(app_state_t *app) {
                     app->help_dirty = true;
                     break;
                 }
-                if (key_is(combo, "Escape") || ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && key_is(combo, "Slash"))) { help_close(app); return handled; }   /* ? again (RV-211) */
+                if (key_is(combo, "Escape") || key_is(combo, "F1") ||
+                    ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && key_is(combo, "Slash"))) { help_close(app); return handled; }   /* ? or F1 again (RV-211, RV-231) */
                 else if (key_is(combo, "Down")) help_scroll_by(app, 1);
                 else if (key_is(combo, "Up")) help_scroll_by(app, -1);
                 else if (key_is(combo, "PageDown") || key_is(combo, "Space")) help_scroll_by(app, help_rows(app) - 1);

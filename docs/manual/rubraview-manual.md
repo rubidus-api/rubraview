@@ -1846,12 +1846,13 @@ file in the viewer — ▲ and ▼ move it up or down, its X or the ticked ones'
 `Ctrl+M` renames the file, the extension included — correcting `.jgp` to
 `.jpg` is a rename like any other, and nothing is asked.
 
-`?` opens the help in a window of its own. Its first lines say the
+`?` or `F1` opens the help in a window of its own (`F1` is the one
+function key bound by default). Its first lines say the
 version and the day it was released, and give the project's page on
 GitHub as a link a click opens. It lists every key that is
 bound, grouped by where it works, and it stays open while you use the
 viewer, so you can try a key with the list in front of you. The wheel or
-`PageUp` / `PageDown` scrolls it, `?` or `Esc` closes it. The keys it
+`PageUp` / `PageDown` scrolls it, `?`, `F1` or `Esc` closes it. The keys it
 shows are the ones in force, so a key you change appears changed.
 
 `Ctrl+,` opens the settings window, a window of its own. A change
@@ -1917,7 +1918,7 @@ listed under a later heading only means that while that is on screen.
 | `Shift+I` | Information bar |
 | `Ctrl+N` | A new window: the viewer once more, nothing open |
 | `Ctrl+,` | Settings |
-| `Shift+/` | This help, in a window of its own |
+| `Shift+/`, `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `Shift+P` | Mini player |
 | `Esc` | Quit |

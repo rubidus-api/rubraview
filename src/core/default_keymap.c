@@ -24,9 +24,9 @@ const char *rubraview_default_keymap(void) {
     /* Owner, 2026-10-16: the viewer once more, in a window of its own. */
     "new_window = \"Ctrl+N\"\n"
     /* §3.22.1. RV-211 (owner, 2026-10-31: "펑션키 F1~F12 쓰는 단축키는 다른 키로 옮겨주세요"): no function keys —
-       the help on ? (Shift+/), as many programs have it. */
+       the help on ? (Shift+/), as many programs have it; F1 too, the one function key kept (owner, 2026-11-07, RV-231). */
     "open_settings = \"Ctrl+Comma\"\n"
-    "toggle_help = \"Shift+Slash\"\n"
+    "toggle_help = \"Shift+Slash, F1\"\n"
     /* Owner, 2026-09-29: the file's size, pixels, codec, EXIF — in a window whose text can be copied. */
     "toggle_info = \"I, Ctrl+I\"\n"
     /* §3.14.6 (owner, 2026-09-24): the music in a window of its own — a song's, or the one behind the pictures. */
@@ -263,6 +263,8 @@ const char *rubraview_default_keymap_retired(void) {
     "pan_up = \"Up\"\n"
     "pan_down = \"Down\"\n"
     "[navigation]\n"
+    /* RV-231: the help as RV-211 left it, before F1 came back beside ? (a retired binding is matched by action) */
+    "toggle_help = \"Shift+Slash\"\n"
     "next_page = \"PageDown, Space, Enter, Period\"\n"
     "prev_page = \"PageUp, Backspace, Shift+Space, Comma\"\n"
     "skip_forward = \"Shift+Right, Ctrl+PageDown\"\n"
