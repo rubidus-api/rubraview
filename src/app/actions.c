@@ -1505,6 +1505,7 @@ bool rename_box_press(app_state_t *app, double x, double y) {
         for (int32_t k = 0; k < app->ext_n; ++k) if (pal_rect_has(app->ext_row_rect[k], x, y)) { ext_switch(app, k); return true; }
     }
     if (app->rename_is_pack) return pack_window_press(app, x, y);   /* D-260 */
+    if (app->rename_card_modal) return true;   /* RV-238: the dimmed window under the card takes nothing */
     return false;
 }
 

@@ -759,58 +759,97 @@ bool pack_ask_press(app_state_t *app, double x, double y) {
     return true;   /* nothing under it while it asks */
 }
 
+/* RV-238 (owner, 2026-11-07: "파일이름이나 텍스트를 입력받을 때 모양이 조금 성의가 없어요. 잘 다듬어진 팝업창을 띄우거나 해서 좀
+   다듬어 주세요"): what the box is for, as its card's title and the line under it. */
+static void rename_card_words(const app_state_t *app, char *title, size_t capacity, const char **hint) {
+    const char *t = T("Rename");
+    *hint = T("The whole name, its extension too  ·  Enter renames  ·  Esc leaves it");
+    if (app->rename_is_find) { t = T("Find"); *hint = T("Enter or Ctrl+G the next  ·  Shift+Enter back  ·  Esc closes"); }
+    else if (app->rename_is_listfilter) { t = T("Filter the list"); *hint = T("The list shows the names holding this  ·  Esc shows them all"); }
+    else if (app->rename_is_target) {
+        t = app->target_moving ? T("Move to which folder?") : T("Copy to which folder?");
+        *hint = T("Enter  ·  Ctrl+O browses  ·  a folder not there yet is made");
+    } else if (app->rename_is_extension) { t = T("Change extensions"); *hint = T("A new one for each  ·  Tab: the next row"); }
+    else if (app->rename_is_password) {
+        proven_u8str_view_t name = rubraview_path_basename((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->password_for, .size = app->password_for_len });
+        rubraview_fmt(title, capacity, T("Password for {}"), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)));
+        *hint = T("Enter opens  ·  the eye shows it as typed  ·  Esc leaves it");
+        return;
+    }
+    else if (app->rename_is_address) { t = T("Add a station"); *hint = T("Its address, then a space and its title if you like"); }
+    else if (app->rename_is_apply) { t = T("Name of the copies"); *hint = T("* is the picture's own name: *_edit, edited_*"); }
+    else if (app->rename_is_value || app->rename_is_gmic || app->rename_is_ffmpeg || app->batch_typing) {
+        t = T("Type it"); *hint = T("Enter keeps it  ·  Esc leaves it");
+    }
+    else if (app->rename_is_archive) { t = T("Rename the page"); *hint = T("Inside the archive  ·  Enter renames  ·  Esc leaves it"); }
+    else if (app->rename_is_picker) { t = T("Name"); *hint = T("Enter keeps it  ·  Esc leaves it"); }
+    rubraview_fmt(title, capacity, "{}", PROVEN_ARG(t));
+}
+
 void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
     if (!app->rename_active) return;
     {
+        /* RV-238: a card — title, the line saying what the keys do, the field, the buttons — over a dimmed window;
+           the open-file screen's typed path and filter stay in its path bar, Compress keeps its own window */
+        bool card = !(app->rename_is_path || app->rename_is_filter || app->rename_is_pack);
+        bool live = app->rename_is_find || app->rename_is_listfilter;   /* what it filters stays in sight, undimmed */
+        app->rename_card_modal = false;
+        rubraview_pal_rect_t card_rect = {0};
         double box_w = (app->rename_is_pack ? 680.0 : 560.0) * dpi, box_h = 72.0 * dpi;   /* 1.25.0: roomier; D-260: the Compress window's rows */
         if (box_w > win_w - 16.0 * dpi) box_w = win_w - 16.0 * dpi;   /* a narrow Edit window (RV-137) */
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
-        /* Edit to all asks with Edit open: the box goes left of its panel. */
-        if (edit_panel_open(app) && !app->edit_window && app->panel.open && box.x + box.width > app->panel.bounds.x && app->panel.bounds.x > box_w)
-            box.x = (app->panel.bounds.x - box_w) * 0.5;
-        /* A password is asked in the middle, clear of the toolbox's anchor
-           (VM, 2026-10-01: it showed through the box). */
-        if (app->rename_is_password || app->rename_is_target || app->rename_is_extension || app->rename_is_pack) box.y = (win_h - box_h) * 0.5;
         if (app->rename_is_pack) {   /* D-260: the rows, the label, the box and its buttons centred together */
             double above = pack_window_height(dpi) + 38.0 * dpi, below = box_h + 68.0 * dpi;
             double top = (win_h - above - below) * 0.5;
             box.y = (top > 8.0 * dpi ? top : 8.0 * dpi) + above;
         }
-        if (app->rename_is_extension) {   /* 1.24.0: the rows over the box, the one it edits lit */
-            double row_h = 34.0 * dpi, top = box.y - 40.0 * dpi - row_h * (double)app->ext_n;
-            if (top < 8.0 * dpi) top = 8.0 * dpi;
-            rubraview_pal_rect_t panel = { box.x, top - 34.0 * dpi, box.width, 34.0 * dpi + row_h * (double)app->ext_n + 6.0 * dpi };
-            rubraview_pal_render_fill_rect(app->renderer, panel, 0xF6202020u, 4.0 * dpi);
-            rubraview_pal_render_stroke_rect(app->renderer, panel, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
-            rubraview_pal_render_draw_text(app->renderer, TU8("Change extensions: a new one for each (Tab: the next row)"),
-                                           (rubraview_pal_rect_t){ panel.x + 12.0 * dpi, panel.y, panel.width - 24.0 * dpi, 34.0 * dpi },
-                                           14.0 * dpi, 0xC0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
-            for (int32_t k = 0; k < app->ext_n; ++k) {
-                rubraview_pal_rect_t r = { panel.x + 6.0 * dpi, top + row_h * (double)k, panel.width - 12.0 * dpi, row_h - 4.0 * dpi };
-                app->ext_row_rect[k] = r;
-                bool on = k == app->ext_at;
-                rubraview_pal_render_fill_rect(app->renderer, r, on ? COLOR_TILE_CURRENT : pal_rect_has(r, app->pointer_x, app->pointer_y) ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
-                char line[128];
-                proven_u8str_view_t to = on ? rubraview_textedit_text(&app->rename_edit) : cstr(app->ext_to[k]);
-                int n = rubraview_fmt(line, sizeof(line), "{}   \xE2\x86\x92   {}", PROVEN_ARG(app->ext_from[k]), PROVEN_ARG(rubraview_bytes_view(to.ptr, (int)(to.size < 64 ? to.size : 64))));
-                if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
-                                                          (rubraview_pal_rect_t){ r.x + 14.0 * dpi, r.y, r.width - 28.0 * dpi, r.height },
-                                                          16.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        if (card) {
+            double pad = 20.0 * dpi, title_h = 30.0 * dpi, hint_h = 22.0 * dpi, field_h = 46.0 * dpi, btn_h = 38.0 * dpi;
+            double row_h = 34.0 * dpi, rows_h = app->rename_is_extension ? row_h * (double)app->ext_n + 8.0 * dpi : 0.0;
+            double cw = 600.0 * dpi;
+            if (cw > win_w - 16.0 * dpi) cw = win_w - 16.0 * dpi;
+            double ch = pad + title_h + hint_h + 12.0 * dpi + rows_h + field_h + 18.0 * dpi + btn_h + pad;
+            double cx = (win_w - cw) * 0.5;
+            /* Edit to all asks with Edit open: the card goes left of its panel. */
+            if (edit_panel_open(app) && !app->edit_window && app->panel.open && cx + cw > app->panel.bounds.x && app->panel.bounds.x > cw)
+                cx = (app->panel.bounds.x - cw) * 0.5;
+            double cy = live ? (app->rename_is_find ? 96.0 : 60.0) * dpi : (win_h - ch) * 0.45;
+            if (cy + ch > win_h - 8.0 * dpi) cy = win_h - 8.0 * dpi - ch;
+            if (cy < 8.0 * dpi) cy = 8.0 * dpi;
+            card_rect = (rubraview_pal_rect_t){ cx, cy, cw, ch };
+            app->rename_card = card_rect;
+            app->rename_card_modal = !live;
+            if (!live) rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, 0.0, win_w, win_h }, 0x90000000u, 0.0);
+            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cx + 3.0 * dpi, cy + 5.0 * dpi, cw, ch }, 0x60000000u, 8.0 * dpi);   /* its shadow */
+            rubraview_pal_render_fill_rect(app->renderer, card_rect, 0xFA242424u, 8.0 * dpi);
+            rubraview_pal_render_stroke_rect(app->renderer, card_rect, COLOR_BOX_BORDER, 1.0 * dpi, 8.0 * dpi);
+            char title[1200];
+            const char *hint = "";
+            rename_card_words(app, title, sizeof(title), &hint);
+            rubraview_pal_rect_t tr = { cx + pad, cy + pad - 4.0 * dpi, cw - 2.0 * pad, title_h };
+            proven_u8str_view_t tv = proven_u8str_view_from_cstr(title);
+            rubraview_pal_render_draw_text(app->renderer, tv, tr, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+            rubraview_pal_render_draw_text(app->renderer, tv, (rubraview_pal_rect_t){ tr.x + 0.6 * dpi, tr.y, tr.width, tr.height },
+                                           18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);   /* bold, as a title */
+            rubraview_pal_render_draw_text(app->renderer, cstr(hint), (rubraview_pal_rect_t){ cx + pad, tr.y + title_h, cw - 2.0 * pad, hint_h },
+                                           13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+            double fy = tr.y + title_h + hint_h + 12.0 * dpi;
+            if (app->rename_is_extension) {   /* 1.24.0: the rows over the field, the one it edits lit */
+                for (int32_t k = 0; k < app->ext_n; ++k) {
+                    rubraview_pal_rect_t r = { cx + pad, fy + row_h * (double)k, cw - 2.0 * pad, row_h - 4.0 * dpi };
+                    app->ext_row_rect[k] = r;
+                    bool on = k == app->ext_at;
+                    rubraview_pal_render_fill_rect(app->renderer, r, on ? COLOR_TILE_CURRENT : pal_rect_has(r, app->pointer_x, app->pointer_y) ? 0x40FFFFFFu : COLOR_TILE_FILL, 4.0 * dpi);
+                    char line[128];
+                    proven_u8str_view_t to = on ? rubraview_textedit_text(&app->rename_edit) : cstr(app->ext_to[k]);
+                    int n = rubraview_fmt(line, sizeof(line), "{}   \xE2\x86\x92   {}", PROVEN_ARG(app->ext_from[k]), PROVEN_ARG(rubraview_bytes_view(to.ptr, (int)(to.size < 64 ? to.size : 64))));
+                    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
+                                                              (rubraview_pal_rect_t){ r.x + 14.0 * dpi, r.y, r.width - 28.0 * dpi, r.height },
+                                                              15.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+                }
+                fy += rows_h;
             }
-        }
-        if (app->rename_is_find) {
-            /* RFC-0005: Find, above the text. */
-            box.y = 128.0 * dpi;   /* under the messages line */
-            rubraview_pal_rect_t label = { box.x - 40.0 * dpi, box.y - 26.0 * dpi, box.width + 80.0 * dpi, 22.0 * dpi };
-            rubraview_pal_render_fill_rect(app->renderer, label, COLOR_BOX_FILL, 3.0);
-            rubraview_pal_render_draw_text(app->renderer, TU8("Find:  Enter / Ctrl+G the next  ·  Shift+Enter back  ·  Esc"),
-                                           label, 13.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        }
-        if (app->rename_is_listfilter) {   /* 1.25.0 */
-            rubraview_pal_rect_t label = { box.x, box.y - 30.0 * dpi, box.width, 26.0 * dpi };
-            rubraview_pal_render_fill_rect(app->renderer, label, COLOR_BOX_FILL, 3.0);
-            rubraview_pal_render_draw_text(app->renderer, TU8("The list shows the names holding this  ·  Esc shows them all"),
-                                           label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            box = (rubraview_pal_rect_t){ cx + pad, fy, cw - 2.0 * pad, field_h };
         }
         if (app->rename_is_pack) {   /* RV-207: the new archive's place */
             rubraview_pal_rect_t label = { box.x - 40.0 * dpi, box.y - 30.0 * dpi, box.width + 80.0 * dpi, 26.0 * dpi };
@@ -827,22 +866,19 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
                 box = app->pack_field[app->pack_focus];
             }
         }
-        if (app->rename_is_target) {
-            rubraview_pal_rect_t label = { box.x - 40.0 * dpi, box.y - 30.0 * dpi, box.width + 80.0 * dpi, 26.0 * dpi };
-            rubraview_pal_render_fill_rect(app->renderer, label, COLOR_BOX_FILL, 3.0);
-            rubraview_pal_render_draw_text(app->renderer,
-                                           app->target_moving ? TU8("Move to which folder?  Enter  /  Ctrl+O browses  /  a new one is made")
-                                                              : TU8("Copy to which folder?  Enter  /  Ctrl+O browses  /  a new one is made"),
-                                           label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        }
         /* The typed path sits where the path is, as an address bar does. */
         if (app->rename_is_path || app->rename_is_filter) {
             rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, picker_top(app), win_w, PICKER_CRUMB_HEIGHT * dpi },
                                            0xFF101010u, 0.0);   /* the chips under it do not show through */
             box = (rubraview_pal_rect_t){ 4.0 * dpi, picker_top(app) + 4.0 * dpi, win_w - 8.0 * dpi, (PICKER_CRUMB_HEIGHT - 8.0) * dpi };
         }
-        rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
-        rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+        if (card) {   /* RV-238: a field that looks like one: dark, lit at its edge */
+            rubraview_pal_render_fill_rect(app->renderer, box, 0xFF141414u, 5.0 * dpi);
+            rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_TILE_CURRENT, 1.5 * dpi, 5.0 * dpi);
+        } else {
+            rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+            rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+        }
         /* The name with the syllable the IME is still building at the
            caret, the selection shaded under its characters, and a caret
            that blinks (owner, 2026-09-23: the box did not look like it was
@@ -878,21 +914,13 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             sel_a = 3 * at_a;
             sel_b = 3 * at_b;
         }
-        if (app->rename_is_password && !app->rename_is_pack) {
-            rubraview_pal_rect_t label = { box.x, box.y - 30.0 * dpi, box.width, 26.0 * dpi };
-            char title[1200];
-            proven_u8str_view_t name = rubraview_path_basename((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->password_for, .size = app->password_for_len });
-            int tn = rubraview_fmt(title, sizeof(title), T("Password for {}"), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)));
-            if (tn > 0 && !app->rename_is_pack) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)title, .size = (size_t)(tn < (int)sizeof(title) ? tn : (int)sizeof(title) - 1) },
-                                                       label, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        }
         double size = 18.0 * dpi, pad = 14.0 * dpi;
         double full = 0.0, to_caret = 0.0;
         (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = total }, size, &full);
         (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = caret + comp }, size, &to_caret);
         /* Centred while it fits; longer, it scrolls so the caret stays in the box. */
         double inner = box.width - 2.0 * pad;
-        double x0 = full <= inner && !app->rename_is_path ? box.x + (box.width - full) * 0.5 : box.x + pad;
+        double x0 = full <= inner && !app->rename_is_path && !card ? box.x + (box.width - full) * 0.5 : box.x + pad;   /* RV-238: a card's from the left */
         if (full > inner && to_caret > inner) x0 = box.x + pad + inner - to_caret;
         if (has_selection) {
             size_t a = sel_a, b = sel_b;
@@ -929,7 +957,7 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             if (app->rename_is_target) { words[n] = T("Browse..."); kinds[n++] = RENAME_BTN_BROWSE; }
             words[n] = T("Cancel"); kinds[n++] = RENAME_BTN_CANCEL;
         }
-        double bw = 120.0 * dpi, bh = 48.0 * dpi, gap = 10.0 * dpi;   /* 1.25.0: roomier */
+        double bw = (card ? 104.0 : 120.0) * dpi, bh = (card ? 38.0 : 48.0) * dpi, gap = 10.0 * dpi;   /* 1.25.0: roomier; RV-238: a card's */
         for (int32_t i = 0; i < n; ++i) {   /* RV-182: one width for all, the longest word's with room, never less */
             double tw = 0.0;
             if (rubraview_pal_render_measure_text(app->renderer, cstr(words[i]), 15.0 * dpi, &tw) && tw + 36.0 * dpi > bw) bw = tw + 36.0 * dpi;
@@ -938,15 +966,21 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
         double bx = app->rename_is_path || app->rename_is_filter ? at.x + at.width - (bw + gap) * (double)n
                                                                    : at.x + (at.width - (bw + gap) * (double)n + gap) * 0.5;
         double by = at.y + at.height + 10.0 * dpi;
+        if (card) {   /* RV-238: along the card's foot, at its right */
+            bx = card_rect.x + card_rect.width - 20.0 * dpi - (bw + gap) * (double)n + gap;
+            by = card_rect.y + card_rect.height - 20.0 * dpi - bh;
+        }
         app->rename_btn_n = n;
         for (int32_t i = 0; i < n; ++i) {
             rubraview_pal_rect_t b = { bx + (double)i * (bw + gap), by, bw, bh };
             app->rename_btn[i] = b;
             app->rename_btn_kind[i] = kinds[i];
             bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
-            rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? COLOR_TILE_CURRENT : over ? 0x50FFFFFFu : COLOR_BOX_FILL, 3.0);
-            rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 3.0);
-            rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, 15.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            double round = card ? 5.0 * dpi : 3.0;
+            rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? COLOR_TILE_CURRENT : over ? 0x50FFFFFFu : card ? COLOR_TILE_FILL : COLOR_BOX_FILL, round);
+            if (i == 0 && over && card) rubraview_pal_render_fill_rect(app->renderer, b, 0x30FFFFFFu, round);
+            if (!card || i > 0) rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, round);
+            rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, (card ? 14.0 : 15.0) * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         }
         /* D-262 (owner, 2026-11-02: "눈알 버튼을 달아서 그걸로 보면서 입력할 때는 다른 문자도 입력 가능"): an unpacking
            password's eye, at the box's right end: shown as typed, any letter through the IME; hidden, plain letters */

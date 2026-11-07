@@ -1171,7 +1171,10 @@ breaks, the encoding, the sound track — opens a list of them to tap, rows
 a finger wide, and the wheel over it goes to the one before or after;
 its key still steps to the next one. A panel's choice (printing,
 exporting, Edit) opens the same list, and a panel's slider takes a typed
-number: press its number (or its name). Every box that takes typing has
+number: press its number (or its name). A name or a text to type comes in
+a card over the dimmed window — what it is for, the keys, the field and
+its buttons (Find and the playlist's filter stay beside what they search,
+undimmed). Every box that takes typing has
 its buttons under it — **OK**, **Cancel**, and **Browse...** where a
 folder is asked for. The buttons do not show their keys; their tooltips
 do. What the Toolbar has no button for is in the right click, on a key

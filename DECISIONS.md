@@ -3586,3 +3586,14 @@ Do not store credentials, private infrastructure details, personal data, private
   messages are unchanged; a film already playing through FFmpeg keeps its device until reopened.
 - Consequences: `test_ui_slidepop`, `test_boxes_doc`, `test_settings_doc`; T365. Not measured: two devices (the VM
   has only its remote-audio endpoint), the every-app switch.
+
+## 2026-11-07: D-294 Typed names and texts in a card (RV-238)
+
+- Status: Accepted (owner 2026-11-07: "뭔가 파일이름이나 텍스트를 입력받을 때 모양이 조금 성의가 없어요. 잘 다듬어진 팝업창을 띄우거나 해서 좀 다듬어 주세요."). RV-238.
+- Decision: one look for every typed name or text but the open-file screen's address bar and filter (they are its
+  path bar's) and Compress (its own window): the window dimmed, a card with a shadow, a bold title, the keys on a line
+  under it, the field (dark, accent edge, text from the left) and the buttons along the foot at the right, OK first in
+  the accent. The labels that floated over the field (target, password, Find, the playlist filter, extensions) are
+  the card's title and line now. Find and the playlist's filter are not dimmed and sit near the top. A press outside
+  a dimmed card is spent, as a dialog's.
+- Consequences: T366.

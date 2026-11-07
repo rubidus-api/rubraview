@@ -1143,6 +1143,8 @@ typedef struct app_state {
     rubraview_pal_rect_t   rename_btn[4];
     int32_t                rename_btn_kind[4];
     int32_t                rename_btn_n;
+    rubraview_pal_rect_t   rename_card;        /* RV-238: the card round the box, as last drawn */
+    bool                   rename_card_modal;  /* RV-238: drawn over a dimmed window: a press outside it is spent */
     rubraview_pal_rect_t   ext_row_rect[16];
     size_t                 rename_picker_at;      /* which, in its listing */
     bool                   rename_is_path;        /* the box is the picker's typed path (owner, 2026-09-28) */

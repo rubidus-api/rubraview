@@ -413,8 +413,7 @@ void target_begin(app_state_t *app, bool moving, bool from_picker) {
     app->target_offered_len = 0;
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, true);
-    osd_say(app, moving ? TU8("type the folder to move to; Ctrl+O browses, a new one is made")
-                        : TU8("type the folder to copy to; Ctrl+O browses, a new one is made"));
+    /* RV-238: the card says what to type; no message over it */
 }
 
 void target_browse(app_state_t *app) {
