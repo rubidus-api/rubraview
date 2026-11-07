@@ -44,6 +44,16 @@ uint32_t rubraview_keyboard_mark_of(rubraview_key_combo_t combo);
    `out`, each once, in the keymap's order; how many (at most `cap`). */
 size_t rubraview_keyboard_off_layout(const rubraview_keymap_t *keymap, proven_u8str_view_t *out, size_t cap);
 
+/* RV-252 (owner, 2026-11-07: "키 배치 보기에서 꼭 하단에 색깔 점이 한줄 가로로 있을 필요는 없다. 반투명 좀 더 큰 원으로 3, 2 모양으로 w 모양으로 원을 배치하자. 그래서 마우스로 호버링하기 편하게 하자."): where a kind's circle sits on a key drawn at (x, y, w, h), `unit` a key unit:
+   in the key's lower half as a W — alone, Ctrl and two or more on the top line, Shift and Alt on the line under
+   between them, in the order of a W drawn left to right. Its centre and its diameter. */
+void rubraview_keyboard_dot_place(double x, double y, double w, double h, double unit, int kind,
+                                  double *cx, double *cy, double *diameter);
+
+/* The kind whose circle (of those in `marks`) is under (px, py) on that key — the nearest, a little past its edge
+   counted in — or -1. */
+int rubraview_keyboard_dot_at(double x, double y, double w, double h, double unit, uint32_t marks, double px, double py);
+
 /* The cap at (x, y) key units, or -1. */
 int32_t rubraview_keyboard_cap_at(double x, double y);
 

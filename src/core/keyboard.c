@@ -128,6 +128,34 @@ size_t rubraview_keyboard_off_layout(const rubraview_keymap_t *keymap, proven_u8
     return n;
 }
 
+void rubraview_keyboard_dot_place(double x, double y, double w, double h, double unit, int kind,
+                                  double *cx, double *cy, double *diameter) {
+    double d = unit * 0.24, s = unit * 0.30;           /* the diameter, and the step between the top line's circles */
+    double fit = (w * 0.94 - d) / 2.0;                 /* a narrow key: closer, and smaller if it must */
+    if (s > fit) s = fit > 0.0 ? fit : 0.0;
+    if (d > s * 1.6 && s > 0.0) d = s * 1.6;
+    static const double COL[RUBRAVIEW_KEYMARK_KINDS] = { -1.0, -0.5, 0.0, 0.5, 1.0 };   /* W: top, under, top, under, top */
+    int k = kind < 0 ? 0 : kind >= RUBRAVIEW_KEYMARK_KINDS ? RUBRAVIEW_KEYMARK_KINDS - 1 : kind;
+    double top = y + h * 0.5 + d * 0.5, under = top + d * 0.8;
+    if (under + d * 0.5 > y + h) { under = y + h - d * 0.5; top = under - d * 0.8; }
+    if (cx) *cx = x + w * 0.5 + COL[k] * s;
+    if (cy) *cy = (k % 2 == 0) ? top : under;
+    if (diameter) *diameter = d;
+}
+
+int rubraview_keyboard_dot_at(double x, double y, double w, double h, double unit, uint32_t marks, double px, double py) {
+    int best = -1;
+    double best_d2 = 0.0;
+    for (int m = 0; m < RUBRAVIEW_KEYMARK_KINDS; ++m) {
+        if (!(marks & (1u << m))) continue;
+        double cx = 0, cy = 0, d = 0;
+        rubraview_keyboard_dot_place(x, y, w, h, unit, m, &cx, &cy, &d);
+        double d2 = (px - cx) * (px - cx) + (py - cy) * (py - cy), reach = d * 0.6;   /* its radius and a little more */
+        if (d2 <= reach * reach && (best < 0 || d2 < best_d2)) { best = m; best_d2 = d2; }
+    }
+    return best;
+}
+
 int32_t rubraview_keyboard_cap_at(double x, double y) {
     for (size_t i = 0; i < sizeof CAPS / sizeof CAPS[0]; ++i) {
         const rubraview_keycap_t *k = &CAPS[i];

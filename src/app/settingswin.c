@@ -71,6 +71,8 @@ static bool g_keys_by_key;
 static bool g_keys_layout;                       /* RV-217: the keyboard drawn, a dot a kind of binding on each key */
 #define KEYS_LAYOUT_ROWS 33                       /* RV-244: 29 for the keyboard (12.5 key units, 2.3 rows a key), the dots' key, what is not on it */
 static bool keys_layout_click(app_state_t *app, double px, double py);
+static int32_t keys_dot_under(app_state_t *app, double px, double py);   /* RV-252 */
+static int32_t g_keys_dot_hover = -1;   /* RV-252: the circle the pointer rests on, drawn lit */
 static int32_t g_key_row[KEY_ROWS_MAX];          /* by function: a binding, or -(context + 1) for a heading */
 static key_combo_row_t g_key_combo[KEY_ROWS_MAX];  /* by key: every key of every binding, sorted (RV-193) */
 static size_t g_key_row_count;
@@ -2065,6 +2067,10 @@ size_t settings_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
                 app->settings_px = event.mouse.x;
                 app->settings_py = event.mouse.y;
+                {   /* RV-252: the circle under the pointer lights */
+                    int32_t dot = keys_dot_under(app, event.mouse.x, event.mouse.y);
+                    if (dot != g_keys_dot_hover) { g_keys_dot_hover = dot; app->settings_dirty = true; }
+                }
                 if (scrollbar_motion(app, app->settings_window, event.mouse.x, event.mouse.y)) { app->settings_dirty = true; break; }   /* RV-170 */
                 if (scrollbar_hover(app, RVSB_SETTINGS, event.mouse.x, event.mouse.y)) app->settings_dirty = true;   /* its parts light */
                 if (app->spath_active) app->settings_dirty = true;   /* its buttons light under the pointer */
@@ -3541,10 +3547,19 @@ static keys_layout_box_t keys_layout_box(app_state_t *app) {
     return b;
 }
 
-/* RV-244: where a key's dots sit, apart enough to click one */
-static double keys_dot_step(double cap_width, double dot) {
-    double room = cap_width * 0.94 / RUBRAVIEW_KEYMARK_KINDS;
-    return dot * 1.25 < room ? dot * 1.25 : room;
+/* RV-252: the circle under (px, py) — its key's index times 8 plus its kind — or -1 */
+static int32_t keys_dot_under(app_state_t *app, double px, double py) {
+    keys_layout_box_t b = keys_layout_box(app);
+    if (!b.ok) return -1;
+    int32_t at = rubraview_keyboard_cap_at((px - b.x) / b.unit, (py - b.y) / b.unit);
+    if (at < 0) return -1;
+    size_t count = 0;
+    const rubraview_keycap_t *k = &rubraview_keyboard_caps(&count)[at];
+    if (!k->name) return -1;
+    double gap = b.unit * 0.08;
+    int m = rubraview_keyboard_dot_at(b.x + b.unit * k->x + gap / 2, b.y + b.unit * k->y + gap / 2, b.unit * k->w - gap, b.unit * k->h - gap, b.unit,
+                                      rubraview_keyboard_marks(&app->keymap, proven_u8str_view_from_cstr(k->name)), px, py);
+    return m < 0 ? -1 : at * 8 + m;
 }
 
 static void keys_layout_draw(app_state_t *app) {
@@ -3556,7 +3571,7 @@ static void keys_layout_draw(app_state_t *app) {
     double top = ch * RUBRAVIEW_SETTINGS_TOP_ROWS, bottom = ch * (RUBRAVIEW_SETTINGS_TOP_ROWS + rubraview_settings_view_visible_rows(v));
     size_t count = 0;
     const rubraview_keycap_t *caps = rubraview_keyboard_caps(&count);
-    double gap = b.unit * 0.08, dot = b.unit * 0.2;   /* RV-244: dots large enough to click */
+    double gap = b.unit * 0.08;
     for (size_t i = 0; i < count; ++i) {
         const rubraview_keycap_t *k = &caps[i];
         rubraview_pal_rect_t cap = { b.x + b.unit * k->x + gap / 2, b.y + b.unit * k->y + gap / 2, b.unit * k->w - gap, b.unit * k->h - gap };
@@ -3567,11 +3582,16 @@ static void keys_layout_draw(app_state_t *app) {
         rubraview_pal_rect_t words = { cap.x, cap.y + cap.height * 0.04, cap.width, cap.height * 0.5 };
         rubraview_pal_render_draw_text(r, proven_u8str_view_from_cstr(k->label), words, b.unit * 0.30,
                                        k->name ? (marks ? SETTINGS_TEXT : SETTINGS_DIM) : 0xFF59626Du, RUBRAVIEW_TEXT_CENTER);
-        double step = keys_dot_step(cap.width, dot);
-        for (int m = 0; m < RUBRAVIEW_KEYMARK_KINDS; ++m) {   /* five places along the foot, each kind its own */
+        /* RV-252 (owner, 2026-11-07: "반투명 좀 더 큰 원으로 3, 2 모양으로 w 모양으로 원을 배치하자. 그래서 마우스로 호버링하기 편하게"):
+           larger see-through circles as a W, each kind in its own place; the one under the pointer full and ringed */
+        for (int m = 0; m < RUBRAVIEW_KEYMARK_KINDS; ++m) {
             if (!(marks & (1u << m))) continue;
-            double cx = cap.x + cap.width / 2 + (m - 2) * step, cy = cap.y + cap.height - dot * 0.9;
-            rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cx - dot / 2, cy - dot / 2, dot, dot }, KEYMARK_COLOR[m], dot / 2);
+            double cx = 0, cy = 0, d = 0;
+            rubraview_keyboard_dot_place(cap.x, cap.y, cap.width, cap.height, b.unit, m, &cx, &cy, &d);
+            bool lit = g_keys_dot_hover == (int32_t)i * 8 + m;
+            rubraview_pal_rect_t c = { cx - d / 2, cy - d / 2, d, d };
+            rubraview_pal_render_fill_rect(r, c, lit ? KEYMARK_COLOR[m] : (KEYMARK_COLOR[m] & 0x00FFFFFFu) | 0xA0000000u, d / 2);
+            if (lit) rubraview_pal_render_stroke_rect(r, c, 0xFFFFFFFFu, 1.5, d / 2);
         }
     }
     /* the dots' key, on the row under the keyboard */
@@ -3601,15 +3621,8 @@ static bool keys_layout_click(app_state_t *app, double px, double py) {
        kind of binding (alone, Shift, Ctrl, Alt, two or more); elsewhere on the key, all of them */
     uint32_t only = 0;
     {
-        double gap = b.unit * 0.08, dot = b.unit * 0.2;
-        double cx0 = b.x + b.unit * k->x + gap / 2, cw = b.unit * k->w - gap;
-        double cy = b.y + b.unit * k->y + gap / 2 + (b.unit * k->h - gap) - dot * 0.9, step = keys_dot_step(cw, dot);
-        uint32_t marks = k->name ? rubraview_keyboard_marks(&app->keymap, proven_u8str_view_from_cstr(k->name)) : 0;
-        for (int m = 0; m < RUBRAVIEW_KEYMARK_KINDS; ++m) {
-            if (!(marks & (1u << m))) continue;
-            double cx = cx0 + cw / 2 + (m - 2) * step;
-            if ((px - cx) * (px - cx) + (py - cy) * (py - cy) <= dot * dot * 0.64) only = 1u << m;   /* a finger's slack round it */
-        }
+        int32_t dot = keys_dot_under(app, px, py);   /* RV-252: the W's circles */
+        if (dot >= 0 && dot / 8 == at) only = 1u << (dot % 8);
     }
     char said[sizeof(app->settings_message)];
     int n = rubraview_fmt(said, sizeof said, "{}:", PROVEN_ARG(k->label));
