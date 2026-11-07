@@ -424,7 +424,7 @@ typedef struct app_state {
     /* RFC-0006: a window that opens and closes is made, with its renderer, in a block of the
        windows pool, given back when it closes. */
     struct window_block { void *block; proven_arena_t arena; } mini_block, toolbox_block, info_block, help_block, files_block, fontpick_block, subs_block, edit_block,
-                                                               batch_block, names_block, log_block;
+                                                               batch_block, names_block, log_block, clash_block;
     rubraview_window_t *window;
     rubraview_renderer_t *renderer;
     rubraview_keymap_t keymap;
@@ -1418,6 +1418,12 @@ typedef struct app_state {
     size_t                 log_row_count, log_built;
     char                   log_message[160];
     rubraview_pal_rect_t   log_btn[3];
+    /* RV-258 (D-310): the window asking about names already there */
+    bool                   clash_open, clash_dirty;
+    rubraview_window_t    *clash_window;
+    rubraview_renderer_t  *clash_renderer;
+    int32_t                clash_frame[4];
+    double                 clash_px, clash_py;
     bool                   list_del_ask;            /* RV-256: a file of the list to the Recycle Bin? asked on a card */
     size_t                 list_del_row;
     char                   list_del_path[1024];
@@ -2312,8 +2318,6 @@ size_t basket_total(const app_state_t *app);
 enum { BASKET_LIST_PUT_IN = 0, BASKET_LIST_PUT_HERE, BASKET_LIST_SEE };   /* D-286: the last, a basket chosen to see its files */
 void chooser_open_basket(app_state_t *app, int mode, double x, double y, double above_y);
 void chooser_open_basket_files(app_state_t *app, int which, double x, double y, double above_y);
-size_t paste_paths(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving,
-                   bool *moved, size_t *skipped, size_t *failed);
 void picker_filter_follow(app_state_t *app);
 void picker_filter_forget(app_state_t *app);
 void picker_filter_set(app_state_t *app, proven_u8str_view_t text);
@@ -2507,6 +2511,15 @@ void log_show(app_state_t *app);
 void log_close(app_state_t *app);
 void draw_log_window(app_state_t *app);
 size_t log_pump(app_state_t *app);
+bool filejob_start(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving, int basket, bool from_cut);   /* RV-258 */
+bool filejob_busy(void);
+size_t filejob_pump(app_state_t *app);
+void filejob_shutdown(app_state_t *app);
+void clashwin_show(app_state_t *app);
+void clashwin_close(app_state_t *app);
+void clashwin_toggle(app_state_t *app);
+void draw_clash_window(app_state_t *app);
+size_t clash_pump(app_state_t *app);
 int shell_wipe(bool all_users);
 void show_frame(app_state_t *app, size_t frame_index);
 void skip_dirs_table_rows(app_state_t *app);

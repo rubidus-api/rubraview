@@ -21,6 +21,8 @@ void app_end(app_state_t *app) {
     if (app->panel.open || app->edit_window) panel_close(app);
     info_close(app);
     log_close(app);   /* RV-256 */
+    clashwin_close(app);     /* RV-258: the questions window */
+    filejob_shutdown(app);   /* RV-258: the worker stopped after its item */
     help_close(app);
     mini_close(app);
     takeout_end(app);

@@ -238,6 +238,12 @@ bool rubraview_pal_fs_delete_tree(proven_u8str_view_t path);
 /** Create a directory, and any missing parent of it. */
 bool rubraview_pal_fs_make_dirs(proven_u8str_view_t path);
 
+/** RV-258 (D-310): the file system as rubraview_fileop needs it — identity by volume serial and file id, a copy that
+    never overwrites (CopyFileExW), a rename never over a name, a swap that recycles what it replaced (ReplaceFileW),
+    bytes compared, a file flushed to the disk. One for the program; its calls are safe from any one thread. */
+struct rubraview_fileop_fs;
+const struct rubraview_fileop_fs *rubraview_pal_fileop_fs(void);
+
 #ifdef __cplusplus
 }
 #endif

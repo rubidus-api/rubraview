@@ -1018,6 +1018,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         info_show(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_log"))) {   /* RV-256 */
         log_show(app);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_clashes"))) {   /* RV-258 */
+        clashwin_toggle(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_miniplayer"))) {
         mini_show(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("boxes_opacity_100")) || proven_u8str_view_eq(action, PROVEN_LIT("boxes_opacity_80")) ||

@@ -69,6 +69,7 @@ ships with, so it cannot drift from them.
 | `Shift+/`, `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `Ctrl+Shift+L` | This window's log: what it did, kept in memory; save it as text from its window |
+| `Ctrl+Shift+K` | The names already there that a copy or a move waits on: tick which to keep, or answer all at once |
 | `Shift+P` | Mini player |
 | `Ctrl+Q` | Quit |
 | `Esc` | Esc: closes what is open; with nothing open, the sound off and the window down at once |

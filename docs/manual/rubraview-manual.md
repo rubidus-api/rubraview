@@ -1396,6 +1396,23 @@ and **Delete the file...**, which first asks in a warning of Windows' own —
 No is the answer it starts on — and then moves the file to the recycle
 bin, from where it can be put back.
 
+**Names already there.** Paste, Move to, Copy to and a basket's Copy or
+Move here first check every name in the folder. What clashes with nothing
+is copied or moved at once, in the background (the line at the top counts
+it); the names already there wait in **Rubraview - names already there**:
+for each, the one coming and the one there (size, date, folder) and two
+ticks. Both ticked keeps both (the one coming as `name_2.jpg`), only the
+one coming replaces the one there (that one goes to the Recycle Bin), and
+otherwise it is left. **Apply the ticks** (`Enter`), or answer all at once:
+**Overwrite all**, **Keep both, all**, **Skip all**, **Only the same ones**
+(the same size and bytes: the one there is kept — a move's source goes to
+the Recycle Bin, a copy's is left or recycled as the last button says;
+others are kept as `name_2`). A folder already there is merged, its files
+asked about the same way. Close the window and the questions wait;
+`Ctrl+Shift+K` opens it again. `Ctrl+Z` takes the whole copy or move back.
+A move to another drive is copied, compared and only then its source goes
+to the Recycle Bin.
+
 `Ctrl+Shift+L` (or ☰ › Log) opens this window's log: each thing it did —
 files opened, actions, its messages, what Explorer sent, what was dropped,
 and what waited — one line each with the seconds since the window opened.
@@ -1969,6 +1986,7 @@ listed under a later heading only means that while that is on screen.
 | `Shift+/`, `F1` | This help, in a window of its own |
 | `I`, `Ctrl+I` | The file's information (size, pixels, codec, EXIF), text you can mark and copy |
 | `Ctrl+Shift+L` | This window's log: what it did, kept in memory; save it as text from its window |
+| `Ctrl+Shift+K` | The names already there that a copy or a move waits on: tick which to keep, or answer all at once |
 | `Shift+P` | Mini player |
 | `Ctrl+Q` | Quit |
 | `Esc` | Esc: closes what is open; with nothing open, the sound off and the window down at once |

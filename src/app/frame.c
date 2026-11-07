@@ -88,6 +88,8 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     handled += help_pump(app);
     handled += info_pump(app);
     handled += log_pump(app);   /* RV-256 */
+    handled += clash_pump(app);   /* RV-258 */
+    handled += filejob_pump(app);
     handled += mini_pump(app);
     handled += files_pump(app);
     handled += fontpick_pump(app);
@@ -239,6 +241,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     draw_help_window(app);
     draw_info_window(app);
     draw_log_window(app);   /* RV-256 */
+    draw_clash_window(app);   /* RV-258 */
     /* The strip moves while the track does, so the little window is
        redrawn each pass it is playing. */
     if (app->mini_open && !mini_paused(app)) app->mini_dirty = true;

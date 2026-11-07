@@ -107,6 +107,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "next_page", "Next page" },
     { "next_subtitle_track", "Next subtitles" },
     { "open_batch", "Convert many files" },
+    { "open_clashes", "The names already there that a copy or a move waits on: tick which to keep, or answer all at once" },
     { "open_edit", "Adjust the picture" },
     { "open_favorites", "The favourites, files and folders, in a list window: open, reorder, remove" },
     { "open_folder", "Open a folder" },
