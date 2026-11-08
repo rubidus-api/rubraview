@@ -13,6 +13,9 @@ void filmcache_for(app_state_t *app, proven_u8str_view_t path) {
     uint64_t limit = keep && gb > 0.0 ? (uint64_t)(gb * 1073741824.0) : 0;
     rubraview_pal_filmcache_configure(rubraview_settings_get_text(&app->settings, PROVEN_LIT("cache"), PROVEN_LIT("film_folder")),
                                       limit, rubraview_settings_get(&app->settings, PROVEN_LIT("cache"), PROVEN_LIT("film_ahead")) >= 0.5);
+    /* RV-261: a film read into memory, up to this much (Settings › Cache) */
+    double mb = rubraview_settings_get(&app->settings, PROVEN_LIT("cache"), PROVEN_LIT("film_memory_mb"));
+    rubraview_pal_filmcache_configure_memory(mb > 0.0 ? (uint64_t)mb << 20 : 0);
 }
 
 /* ---- video pages (M5 slice 1: D-8, D-9) ---- */
@@ -37,6 +40,8 @@ void ab_edit_close(app_state_t *app);
 
 static void station_job_leave(app_state_t *app);
 
+static void media_close_later(rubraview_media_t *media);   /* RV-261 */
+
 void media_close(app_state_t *app) {
     station_job_leave(app);   /* RV-157: a station still connecting belongs to the page being left */
     /* §3.14.6: a track that is still playing does not die because its
@@ -56,9 +61,13 @@ void media_close(app_state_t *app) {
     if (app->ab_edit_open) ab_edit_close(app);
     app->video_transform_ok = false;
     if (app->media) {
-        rubraview_pal_media_close(app->media);
+        /* RV-261: moving to another page, the film is closed off this thread and the film opened ahead kept */
+        if (app->media_closing_for_next) media_close_later(app->media);
+        else rubraview_pal_media_close(app->media);
         app->media = NULL;
     }
+    if (!app->media_closing_for_next) film_ahead_drop(app);
+    app->media_settled_at = 0.0;
     if (app->media_page >= 0 && (size_t)app->media_page < page_count(app)) {
         app_page_t *page = &app->pages[app->media_page];
         if (page->texture) rubraview_pal_texture_destroy(page->texture);
@@ -1025,6 +1034,189 @@ void station_title_poll(app_state_t *app) {
     update_window_title(app);
 }
 
+/* ---- opening a film, on this thread or ahead on another (RV-261) ---- */
+
+typedef struct film_open {
+    char path[MAX_PATH * 4];
+    size_t path_size;
+    rubraview_media_backend_t order[2];
+    size_t count;
+    bool no_ffmpeg, ffmpeg_here;
+    rubraview_media_gpu_t gpu;
+    /* what came of it */
+    rubraview_media_open_result_t opened;
+    rubraview_media_failure_t why;
+    int32_t hdr_handed;
+} film_open_t;
+
+/* What the open needs from the viewer's state, taken on the UI thread. */
+static void film_open_make(app_state_t *app, int32_t index, proven_u8str_view_t path, film_open_t *fo) {
+    *fo = (film_open_t){ .opened = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE }, .why = RUBRAVIEW_MEDIA_FAIL_FILE };
+    fo->path_size = path.size < sizeof fo->path - 1 ? path.size : 0;
+    proven_sys_mem_copy(fo->path, path.ptr, fo->path_size);
+    /* D-9: the preferred backend first, the other one when it cannot. */
+    fo->no_ffmpeg = app->media_no_ffmpeg_page == index + 1;   /* RV-176: it stopped on this one */
+    fo->ffmpeg_here = !fo->no_ffmpeg && rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
+    fo->count = rubraview_media_backend_order(fo->no_ffmpeg ? RUBRAVIEW_BACKEND_MEDIA_FOUNDATION : app->media_preferred,
+                                              fo->ffmpeg_here, fo->order);
+    /* RV-062: decoding on the graphics card, as [video] hardware_decode
+       says — off (the default until it has been measured on a real card),
+       on where the card offers decoders, or always (diagnostic). */
+    rubraview_media_gpu_t *gpu = &fo->gpu;
+    gpu->mode = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hardware_decode")));
+    if (gpu->mode > 0) gpu->device = rubraview_pal_render_video_device(app->renderer, &gpu->decoder_profiles);
+    /* RV-150: an HDR film is tone mapped by our shader on the renderer's decode device */
+    gpu->tone_mapping = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hdr_tone_mapping")));
+    if (gpu->tone_mapping > 0) gpu->shader_device = gpu->device ? gpu->device : rubraview_pal_render_video_device(app->renderer, NULL);
+    /* RV-153: [video] hdr_output — an HDR film tone mapped for the HDR screen the window is on (always: any screen) */
+    int32_t hdr_out = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hdr_output")));
+    rubraview_pal_render_hdr_display(app->renderer, &app->media_hdr_screen);
+    if (gpu->tone_mapping > 0 && !app->hdr_output_refused && (hdr_out == 2 || (hdr_out == 1 && app->media_hdr_screen.hdr))) {
+        gpu->hdr_screen_peak = !app->media_hdr_screen.hdr ? app->media_hdr_screen.sdr_white_nits
+                             : app->media_hdr_screen.peak_nits > 0.0 ? app->media_hdr_screen.peak_nits : RUBRAVIEW_HDR_DEFAULT_PEAK;
+        gpu->hdr_sdr_white = app->media_hdr_screen.sdr_white_nits;
+    }
+    filmcache_for(app, path);
+}
+
+/* The open itself: any thread. */
+static void film_open_run(film_open_t *fo) {
+    proven_u8str_view_t path = rubraview_bytes_view(fo->path, fo->path_size);
+    for (size_t i = 0; i < fo->count; ++i) {
+        rubraview_pal_media_log("app: open {} by {}", PROVEN_ARG(path), PROVEN_ARG(fo->order[i] == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation"));
+        fo->opened = rubraview_pal_media_open(path, fo->order[i], &fo->gpu);
+        rubraview_pal_media_log("app: open returned, {}", PROVEN_ARG(fo->opened.media ? "opened" : "failed"));
+        if (fo->opened.media) break;
+        fo->why = i == 0 ? fo->opened.failure : rubraview_media_failure_pick(fo->why, fo->opened.failure);
+    }
+    /* RV-150 (owner, 2026-10-21): Windows' decoder does not tone map an HDR film; FFmpeg does, when it is here */
+    fo->hdr_handed = 0;
+    rubraview_media_open_result_t opened = fo->opened;
+    if (opened.media && opened.info.backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION &&
+        rubraview_media_hdr_ask_ffmpeg(opened.info.hdr_transfer, opened.info.video_fourcc) &&
+        fo->gpu.tone_mapping > 0 && fo->ffmpeg_here) {
+        rubraview_media_open_result_t other = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_FFMPEG, &fo->gpu);
+        /* not when FFmpeg would lose the sound Windows plays */
+        if (other.media && other.info.hdr_tone_mapped && (other.info.audio_output || !opened.info.audio_output)) {
+            rubraview_pal_media_close(opened.media);
+            fo->hdr_handed = opened.info.hdr_transfer ? 1 : 2;
+            fo->opened = other;
+        } else if (other.media) {
+            rubraview_pal_media_close(other.media);
+        }
+    }
+}
+
+/* ---- films closed off the UI thread (RV-261) ---- */
+
+static volatile LONG g_closing;   /* closers still running */
+
+static DWORD WINAPI media_close_run(LPVOID arg) {
+    rubraview_pal_media_close((rubraview_media_t *)arg);
+    rubraview_pal_media_log("app: a film closed off the UI thread");
+    InterlockedDecrement(&g_closing);
+    return 0;
+}
+
+/* `media` closed on a thread of its own; on this one when no thread can be made. */
+static void media_close_later(rubraview_media_t *media) {
+    if (!media) return;
+    InterlockedIncrement(&g_closing);
+    HANDLE t = CreateThread(NULL, 0, media_close_run, media, 0, NULL);
+    if (t) { CloseHandle(t); return; }
+    InterlockedDecrement(&g_closing);
+    rubraview_pal_media_close(media);
+}
+
+void media_close_wait(void) {
+    for (int i = 0; i < 1000 && InterlockedCompareExchange(&g_closing, 0, 0) > 0; ++i) Sleep(10);
+}
+
+/* ---- the next film opened ahead (RV-261) ---- */
+
+typedef struct film_ahead {
+    film_open_t fo;
+    int32_t page;
+    HANDLE thread;
+    volatile LONG state;   /* 0 opening, 1 opened (the UI thread takes it), 2 let go (the thread closes what it opened) */
+    void *wake;
+} film_ahead_t;
+
+static DWORD WINAPI film_ahead_run(LPVOID arg) {
+    film_ahead_t *fa = (film_ahead_t *)arg;
+    rubraview_pal_media_log("app: the next film opening ahead");
+    film_open_run(&fa->fo);
+    if (fa->fo.opened.media) {   /* silent and still until its page comes */
+        rubraview_pal_media_set_gain(fa->fo.opened.media, 0.0);
+        rubraview_pal_media_set_paused(fa->fo.opened.media, true);
+        /* its head in memory: about 20 s of it (owner: "속도를 빠르게 할 수 있는 유의미한 크기로") */
+        rubraview_pal_media_read_limit(fa->fo.opened.media, rubraview_filmbuf_head_bytes((double)fa->fo.opened.info.bitrate_kbps * 1000.0));
+    }
+    rubraview_pal_media_log("app: the next film opened ahead, {}", PROVEN_ARG(fa->fo.opened.media ? "ready" : "failed"));
+    if (InterlockedCompareExchange(&fa->state, 1, 0) == 2) {
+        if (fa->fo.opened.media) rubraview_pal_media_close(fa->fo.opened.media);
+        rubraview_free(fa);
+    }
+    return 0;
+}
+
+void film_ahead_drop(app_state_t *app) {
+    film_ahead_t *fa = app->film_ahead;
+    if (!fa) return;
+    app->film_ahead = NULL;
+    HANDLE thread = fa->thread;
+    if (InterlockedCompareExchange(&fa->state, 2, 0) == 1) {   /* it had finished: closed off this thread */
+        WaitForSingleObject(thread, INFINITE);
+        media_close_later(fa->fo.opened.media);
+        rubraview_free(fa);
+    }
+    CloseHandle(thread);   /* otherwise the thread closes what it opens, and frees it */
+}
+
+/* The film opened ahead for page `index`, when there is one: waited for while it opens, then made the page's player.
+   False: open it as before (another page, or it failed). */
+static bool film_ahead_take(app_state_t *app, int32_t index, proven_u8str_view_t path) {
+    film_ahead_t *fa = app->film_ahead;
+    if (!fa) return false;
+    if (fa->page != index || !proven_u8str_view_eq(rubraview_bytes_view(fa->fo.path, fa->fo.path_size), path)) {
+        film_ahead_drop(app);
+        return false;
+    }
+    app->film_ahead = NULL;
+    WaitForSingleObject(fa->thread, INFINITE);   /* at most what opening it here would take */
+    CloseHandle(fa->thread);
+    film_open_t fo = fa->fo;
+    rubraview_free(fa);
+    if (!fo.opened.media) return false;
+    rubraview_pal_media_log("app: the film opened ahead taken");
+    rubraview_pal_media_set_gain(fo.opened.media, 1.0);
+    rubraview_pal_media_set_paused(fo.opened.media, false);
+    rubraview_pal_media_read_limit(fo.opened.media, UINT64_MAX);   /* its page has come: memory reads on to the end */
+    app->media_hdr_handed = fo.hdr_handed;
+    media_adopt(app, index, path, fo.opened, fo.why);
+    return true;
+}
+
+/* Once a pass: at a steady moment of a film (its picture shown for 3 s since the open or the last seek), the next
+   page, when it is a film, is opened ahead on a thread of its own and kept paused (owner, 2026-11-08: "적절하게
+   안정적인 타이밍에 다음 파일 버퍼링 해두게 합시다"). */
+void film_ahead_poll(app_state_t *app) {
+    if (app->film_ahead || !app->media || !app->media_info.has_video || app->media_info.live) return;
+    if (!(app->media_settled_at > 0.0) || rubraview_pal_time_now_seconds() - app->media_settled_at < 3.0) return;
+    int32_t next = app->media_page + 1;
+    if (next <= 0 || (size_t)next >= page_count(app) || app->pages[next].skipped || app->pages[next].failed) return;
+    proven_u8str_view_t path = app->source.pages[next].path;
+    if (!is_media_path(path) || is_station_path(path) || rubraview_tags_is_music_name(rubraview_path_basename(path))) return;
+    film_ahead_t *fa = (film_ahead_t *)rubraview_alloc_zero(1, sizeof *fa);
+    if (!fa) return;
+    film_open_make(app, next, path, &fa->fo);
+    fa->fo.gpu.open_ahead = true;   /* memory reads only its head until its page comes */
+    fa->page = next;
+    fa->thread = fa->fo.path_size ? CreateThread(NULL, 0, film_ahead_run, fa, 0, NULL) : NULL;
+    if (!fa->thread) { rubraview_free(fa); app->media_settled_at = 0.0; return; }   /* not again for this film */
+    app->film_ahead = fa;
+}
+
 /* Opens the video when the page on screen is one, and closes the old one. */
 void media_prepare(app_state_t *app) {
     text_prepare(app);   /* RFC-0005: a text page is read here too */
@@ -1032,7 +1224,12 @@ void media_prepare(app_state_t *app) {
     if (app->media && index == app->media_page) return;
     if (!app->media && app->station_job && app->station_job->page == index) return;   /* RV-157: still connecting */
 
+    rubraview_pal_media_log("app: page {} wanted, the film before closing", PROVEN_ARG((long long)index));   /* RV-261 */
+    app->media_closing_for_next = true;
     media_close(app);   /* which hands a playing track to the background */
+    app->media_closing_for_next = false;
+    if (app->film_ahead && app->film_ahead->page != index) film_ahead_drop(app);   /* RV-261: not the page it was for */
+    rubraview_pal_media_log("app: the film before closed");
 
     /* Back on the music's own page: the same player, where it had got to. */
     if (bgm_release_to_page(app, index)) return;
@@ -1059,55 +1256,13 @@ void media_prepare(app_state_t *app) {
         return;
     }
 
-    /* D-9: the preferred backend first, the other one when it cannot. */
-    rubraview_media_backend_t order[2];
-    bool no_ffmpeg = app->media_no_ffmpeg_page == index + 1;   /* RV-176: it stopped on this one */
-    size_t count = rubraview_media_backend_order(no_ffmpeg ? RUBRAVIEW_BACKEND_MEDIA_FOUNDATION : app->media_preferred,
-                                                 !no_ffmpeg && rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
-                                                 order);
-    rubraview_media_open_result_t opened = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE };
-    rubraview_media_failure_t why = RUBRAVIEW_MEDIA_FAIL_FILE;
-    /* RV-062: decoding on the graphics card, as [video] hardware_decode
-       says — off (the default until it has been measured on a real card),
-       on where the card offers decoders, or always (diagnostic). */
-    rubraview_media_gpu_t gpu = {
-        .mode = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hardware_decode"))),
-    };
-    if (gpu.mode > 0) gpu.device = rubraview_pal_render_video_device(app->renderer, &gpu.decoder_profiles);
-    /* RV-150: an HDR film is tone mapped by our shader on the renderer's decode device */
-    gpu.tone_mapping = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hdr_tone_mapping")));
-    if (gpu.tone_mapping > 0) gpu.shader_device = gpu.device ? gpu.device : rubraview_pal_render_video_device(app->renderer, NULL);
-    /* RV-153: [video] hdr_output — an HDR film tone mapped for the HDR screen the window is on (always: any screen) */
-    int32_t hdr_out = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hdr_output")));
-    rubraview_pal_render_hdr_display(app->renderer, &app->media_hdr_screen);
-    if (gpu.tone_mapping > 0 && !app->hdr_output_refused && (hdr_out == 2 || (hdr_out == 1 && app->media_hdr_screen.hdr))) {
-        gpu.hdr_screen_peak = !app->media_hdr_screen.hdr ? app->media_hdr_screen.sdr_white_nits
-                            : app->media_hdr_screen.peak_nits > 0.0 ? app->media_hdr_screen.peak_nits : RUBRAVIEW_HDR_DEFAULT_PEAK;
-        gpu.hdr_sdr_white = app->media_hdr_screen.sdr_white_nits;
-    }
-    for (size_t i = 0; i < count; ++i) {
-        filmcache_for(app, path);
-        opened = rubraview_pal_media_open(path, order[i], &gpu);
-        if (opened.media) break;
-        why = i == 0 ? opened.failure : rubraview_media_failure_pick(why, opened.failure);
-    }
-    /* RV-150 (owner, 2026-10-21): Windows' decoder does not tone map an HDR film; FFmpeg does, when it is here */
-    app->media_hdr_handed = 0;
-    if (opened.media && opened.info.backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION &&
-        rubraview_media_hdr_ask_ffmpeg(opened.info.hdr_transfer, opened.info.video_fourcc) &&
-        gpu.tone_mapping > 0 && !no_ffmpeg && rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)) {
-        filmcache_for(app, path);
-        rubraview_media_open_result_t other = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_FFMPEG, &gpu);
-        /* not when FFmpeg would lose the sound Windows plays */
-        if (other.media && other.info.hdr_tone_mapped && (other.info.audio_output || !opened.info.audio_output)) {
-            rubraview_pal_media_close(opened.media);
-            app->media_hdr_handed = opened.info.hdr_transfer ? 1 : 2;
-            opened = other;
-        } else if (other.media) {
-            rubraview_pal_media_close(other.media);
-        }
-    }
-    media_adopt(app, index, path, opened, why);
+    /* RV-261: the film opened ahead for this page is taken as it is; one still opening is waited for. */
+    if (film_ahead_take(app, index, path)) return;
+    film_open_t fo;
+    film_open_make(app, index, path, &fo);
+    film_open_run(&fo);
+    app->media_hdr_handed = fo.hdr_handed;
+    media_adopt(app, index, path, fo.opened, fo.why);
 }
 
 /* What was opened for page `index` becomes the page's player; nothing opened, and it is said why and passed. */
@@ -1215,6 +1370,15 @@ static void media_show(app_state_t *app, app_page_t *page, const rubraview_video
 
 static void media_show_blended(app_state_t *app, app_page_t *page, const rubraview_video_frame_t *frame, double weight,
                                double display_at) {
+    if (frame->preview) {
+        /* RV-261: a seek's keyframe, drawn while the exact frame is decoded: neither the position, the clock,
+           a frame asked to be saved nor the blend take it. */
+        app->media_blend_weight = 0.0;
+        if (frame->gpu_texture) rubraview_pal_texture_copy_video_frame(page->texture, frame->gpu_texture, frame->gpu_subresource);
+        else rubraview_pal_texture_upload_bgra(page->texture, frame->pixels, frame->stride);
+        app->media_new_picture = true;
+        return;
+    }
     if (weight > 0.0 && app->media_has_frame && !app->media_sought && media_blend_swap(app, page)) {   /* not with a frame from before a seek */
         app->media_blend_weight = weight;
         app->media_blend_at = display_at;
@@ -1356,6 +1520,12 @@ void media_tick(app_state_t *app) {
             app->media_new_picture = true;
         }
         while (rubraview_pal_media_peek_frame(m, &frame)) {
+            if (frame.preview) {   /* RV-261: drawn at once; the exact frame still to come */
+                rubraview_pal_media_log("app: keyframe shown at {:.3} s while the exact frame is decoded", PROVEN_ARG(frame.pts));
+                media_show(app, page, &frame);
+                rubraview_pal_media_pop_frame(m);
+                break;
+            }
             /* The first picture after opening or seeking shows at once. */
             rubraview_frame_decision_t decision = !app->media_has_frame ? RUBRAVIEW_FRAME_SHOW
                 : blend ? rubraview_media_schedule_blend(frame.pts, frame.duration, clock + ahead, period, &weight)
@@ -1367,6 +1537,8 @@ void media_tick(app_state_t *app) {
                 continue;
             }
             bool first = !app->media_has_frame;
+            if (first) rubraview_pal_media_log("app: first picture shown at {:.3} s{}", PROVEN_ARG(frame.pts), PROVEN_ARG(app->media_sought ? " (after a seek)" : ""));
+            if (first) app->media_settled_at = now;   /* RV-261: the steady moment counts from here */
             if (app->info_open && !first) { app->stats_shown++; app->stats_late += clock - frame.pts; }   /* RV-215 (D-248) */
             media_show_blended(app, page, &frame, blend ? weight : 0.0, clock + ahead);
             rubraview_pal_media_pop_frame(m);
@@ -1661,12 +1833,25 @@ void media_ab_check(app_state_t *app) {
 }
 
 void media_seek_to(app_state_t *app, double seconds) {
+    media_seek_to_mode(app, seconds, RUBRAVIEW_SEEK_EXACT);
+}
+
+/* RV-261: Left / Right and the long seeks: to the keyframe when Settings › Video says so, else exact. */
+void media_seek_arrow(app_state_t *app, double delta) {
+    bool keyframes = rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("arrow_seek_keyframes")) > 0.5;
+    media_seek_to_mode(app, app->media_position + delta,
+                       !keyframes ? RUBRAVIEW_SEEK_EXACT : delta > 0.0 ? RUBRAVIEW_SEEK_KEY_FORWARD : RUBRAVIEW_SEEK_KEY_BACK);
+}
+
+void media_seek_to_mode(app_state_t *app, double seconds, rubraview_seek_mode_t mode) {
     if (!app->media) return;
     if (app->media_info.live) { osd_say(app, TU8("a live station cannot be wound")); return; }   /* RV-157 */
     double duration = app->media_info.duration_seconds;
     if (duration > 0.0 && seconds > duration) seconds = duration;
     if (seconds < 0.0) seconds = 0.0;
-    rubraview_pal_media_seek(app->media, seconds);
+    rubraview_pal_media_log("app: seek to {:.3} s", PROVEN_ARG(seconds));
+    app->media_settled_at = 0.0;
+    rubraview_pal_media_seek_mode(app->media, seconds, mode);
     rubraview_media_clock_seek(&app->media_clock, seconds, rubraview_pal_time_now_seconds());
     /* The landing frame shows at once, even while paused; a sound-only
        page keeps its picture. */
@@ -1715,7 +1900,12 @@ void media_step(app_state_t *app, bool forward) {
     }
     app_page_t *page = media_page_ready(app);
     rubraview_video_frame_t frame;
-    for (int i = 0; i < 100 && !rubraview_pal_media_peek_frame(app->media, &frame); ++i) {
+    for (int i = 0; i < 100; ++i) {
+        if (rubraview_pal_media_peek_frame(app->media, &frame)) {
+            if (!frame.preview) break;
+            rubraview_pal_media_pop_frame(app->media);   /* RV-261: a seek's keyframe is not a step */
+            continue;
+        }
         rubraview_pal_time_sleep_ms(5);   /* the decoder is at most one frame behind */
     }
     if (page && rubraview_pal_media_peek_frame(app->media, &frame)) {

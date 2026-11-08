@@ -67,8 +67,9 @@ cp vendor/libjpeg-turbo/README.ijg "$out/licences/libjpeg-turbo-README.ijg"
 
 # The check the "no DLL beside it" criterion really needs: list what the
 # executable imports, so a new dependency cannot slip in unnoticed.
-if command -v x86_64-w64-mingw32-objdump >/dev/null 2>&1; then
-  x86_64-w64-mingw32-objdump -p "dist/$exe" \
+objdump=${MINGW_PREFIX:-x86_64-w64-mingw32ucrt-}objdump
+if command -v "$objdump" >/dev/null 2>&1; then
+  "$objdump" -p "dist/$exe" \
     | sed -n 's/^\tDLL Name: //p' | sort > "dist/rubraview-v$version.imports.txt"
   printf '%s\n' "package: imports recorded in dist/rubraview-v$version.imports.txt (beside the bundle, not in it)"
 fi

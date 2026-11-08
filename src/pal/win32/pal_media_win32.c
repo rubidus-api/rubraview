@@ -4,6 +4,9 @@
 #include "rubraview/pal/pal_media_backend.h"
 #include "rubraview/pal/pal_media_host.h"
 #include "rubraview/stream.h"
+#include "rubraview/pal/pal_media.h"
+#include <windows.h>
+#include <stdatomic.h>
 
 /*
  * The public media PAL: which backend opened a file, and forwarding to it
@@ -15,6 +18,35 @@ struct rubraview_media {
     const rubraview_media_backend_api_t *api;
     void *impl;
 };
+
+/* RV-261 step 1: the media log (pal_media.h). */
+void rubraview_pal_media_log_args(const char *format, const proven_arg_t *fmt_args, size_t fmt_count) {
+    static _Atomic int known;   /* 0 not looked yet, 1 off, 2 on */
+    static WCHAR file[MAX_PATH];
+    int k = atomic_load_explicit(&known, memory_order_acquire);
+    if (k == 0) {
+        DWORD n = GetEnvironmentVariableW(L"RUBRAVIEW_MEDIA_LOG", file, MAX_PATH);
+        k = n > 0 && n < MAX_PATH ? 2 : 1;
+        atomic_store_explicit(&known, k, memory_order_release);
+    }
+    if (k != 2) return;
+    LARGE_INTEGER now, freq;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&freq);
+    double ms = (double)now.QuadPart * 1000.0 / (double)freq.QuadPart;
+    char line[768];
+    int head = rubraview_fmt(line, sizeof line, "{:.1} {} ", PROVEN_ARG(ms), PROVEN_ARG((unsigned long)GetCurrentProcessId()));
+    if (head < 0) return;
+    int body = rubraview_fmt_length(proven_fmt_to_internal(line + head, sizeof line - (size_t)head - 1, format, fmt_args, fmt_count));
+    if (body < 0) return;
+    size_t len = proven_cstr_len(line);
+    line[len++] = '\n';
+    HANDLE h = CreateFileW(file, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD put = 0;
+    WriteFile(h, line, (DWORD)len, &put, NULL);
+    CloseHandle(h);
+}
 
 static const rubraview_media_backend_api_t *backend_api(rubraview_media_backend_t backend) {
     return backend == RUBRAVIEW_BACKEND_FFMPEG ? rubraview_media_backend_ffmpeg()
@@ -77,7 +109,15 @@ size_t rubraview_pal_media_frames_ready(rubraview_media_t *media) {
 }
 
 void rubraview_pal_media_seek(rubraview_media_t *media, double seconds) {
-    if (media) media->api->seek(media->impl, seconds);
+    if (media) media->api->seek(media->impl, seconds, RUBRAVIEW_SEEK_EXACT);
+}
+
+void rubraview_pal_media_read_limit(rubraview_media_t *media, uint64_t bytes) {
+    if (media && media->api->read_limit) media->api->read_limit(media->impl, bytes);
+}
+
+void rubraview_pal_media_seek_mode(rubraview_media_t *media, double seconds, rubraview_seek_mode_t mode) {
+    if (media) media->api->seek(media->impl, seconds, mode);
 }
 
 bool rubraview_pal_media_stopped(rubraview_media_t *media) {

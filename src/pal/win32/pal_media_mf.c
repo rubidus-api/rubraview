@@ -53,6 +53,7 @@ typedef struct media_slot {
     bool on_gpu;                /* this frame is in `texture`, not in `pixels` */
     double pts, duration;
     uint64_t generation;   /* which seek this frame belongs to */
+    bool preview;          /* RV-261: the keyframe a seek landed on, before the exact frame */
 } media_slot_t;
 
 typedef struct mf_media {
@@ -96,6 +97,9 @@ typedef struct mf_media {
     _Atomic int32_t audio_gain_millionths;  /* RV-075, likewise */
     _Atomic int32_t pending_audio_stream;   /* §3.16.2: -1 when nothing was asked */
     _Atomic int64_t seek_target_100ns;      /* written before seek_generation is bumped */
+    _Atomic int32_t seek_mode;              /* RV-261: rubraview_seek_mode_t, written with the target */
+    rubraview_filmcache_stream_t *film;     /* RV-261: the stream the reader reads (its IStream holds it); NULL none */
+    _Atomic uint64_t read_limit;            /* RV-261: asked of the film's memory; 0 nothing asked */
     _Atomic uint64_t seek_generation;
     _Atomic uint64_t end_generation;        /* the generation whose decode reached the end */
 
@@ -511,7 +515,16 @@ static void video_processor_keeps_every_picture(IMFSourceReader *reader, DWORD s
     IMFSourceReaderEx_Release(ex);
 }
 
+static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu);
+/* RV-261 step 1: each opening of the reader timed in the media log. */
 static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu) {
+    rubraview_pal_media_log("mf: reader opening{}", PROVEN_ARG(on_gpu ? " (on the card)" : ""));
+    bool ok = open_reader_now(m, out_reader, on_gpu);
+    rubraview_pal_media_log("mf: reader {}", PROVEN_ARG(ok ? "open" : "failed"));
+    return ok;
+}
+
+static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu) {
     *out_reader = NULL;
 
     IMFAttributes *attrs = NULL;
@@ -531,7 +544,8 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
     IMFSourceReader *reader = NULL;
     HRESULT hr = E_FAIL;
     /* RV-216 (D-249): a film on a network drive is read through its local copy, which fills as it is read. */
-    rubraview_filmcache_stream_t *cached = g_mf.stream_on_istream && g_mf.create_reader_stream ? rubraview_pal_filmcache_open(m->path) : NULL;
+    rubraview_filmcache_stream_t *cached = g_mf.stream_on_istream && g_mf.create_reader_stream ? rubraview_pal_filmcache_open_ex(m->path, m->gpu.open_ahead) : NULL;
+    m->film = NULL;
     if (cached) {
         IStream *is = (IStream *)rubraview_pal_filmcache_istream(cached);
         rubraview_pal_filmcache_close(cached);   /* the IStream holds it now */
@@ -544,10 +558,11 @@ static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu
                 IMFAttributes_Release(named);
             }
             hr = g_mf.create_reader_stream(stream, attrs, &reader);
+            if (SUCCEEDED(hr)) m->film = cached;   /* RV-261: alive while the reader is */
             IMFByteStream_Release(stream);
         }
         if (is) IStream_Release(is);
-        if (FAILED(hr)) reader = NULL;
+        if (FAILED(hr)) { reader = NULL; m->film = NULL; }
     }
     if (!reader) hr = g_mf.create_reader(m->path, attrs, &reader);
     if ((FAILED(hr) || !reader) && g_mf.create_file && g_mf.create_reader_stream) {
@@ -1119,9 +1134,39 @@ static bool mf_apply_audio_switch(mf_media_t *m, IMFSourceReader *reader, DWORD 
     return true;
 }
 
+/* RV-261: the first keyframe at or after `target` (100 ns), found by moving the reader and decoding only the picture
+   it lands on: further on each time, by 1, 2, 4 ... s, until it lands at or past the target. None found (the end
+   of the film): the target itself, which lands on the keyframe before it. */
+static LONGLONG mf_keyframe_after(mf_media_t *m, IMFSourceReader *reader, LONGLONG target) {
+    LONGLONG at = target, step = 10000000;
+    for (int tries = 0; tries < 6; ++tries) {
+        PROPVARIANT position;
+        PropVariantInit(&position);
+        position.vt = VT_I8;
+        position.hVal.QuadPart = at;
+        if (FAILED(IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &position))) break;
+        LONGLONG landed = -1;
+        for (int reads = 0; reads < 64 && landed < 0; ++reads) {
+            DWORD actual = 0, flags = 0;
+            LONGLONG timestamp = 0;
+            IMFSample *sample = NULL;
+            HRESULT hr = IMFSourceReader_ReadSample(reader, m->video_stream, 0, &actual, &flags, &timestamp, &sample);
+            if (sample) { landed = timestamp; IMFSample_Release(sample); }
+            if (FAILED(hr) || (flags & (MF_SOURCE_READERF_ERROR | MF_SOURCE_READERF_ENDOFSTREAM))) break;
+        }
+        if (landed < 0) break;
+        if (landed >= target - 10000) return landed;
+        at = (at > landed ? at : landed) + step;
+        step *= 2;
+    }
+    return target;
+}
+
 static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
     uint64_t generation = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
     double skip_video = -1.0, skip_audio = -1.0;
+    uint32_t skipped = 0;   /* RV-261: pictures decoded and passed over since the seek */
+    bool landing = false;   /* RV-261: a keyframe seek waits for its first picture to say where the sound starts */
     rubraview_rate_meter_t rate_meter = {0};
     double audio_base = 0.0;      /* where the heard position was told to start */
     bool audio_begun = false;     /* its first sound has come */
@@ -1136,6 +1181,8 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
             if (mf_apply_audio_switch(m, reader, (DWORD)asked)) audio_done = false;
         }
         const bool want_audio = m->audio_stream != NO_STREAM;
+        uint64_t limit = atomic_exchange_explicit(&m->read_limit, 0, memory_order_acq_rel);   /* RV-261 */
+        if (limit && m->film) rubraview_pal_filmcache_read_limit(m->film, limit);
 
         uint64_t wanted = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
         if (wanted != generation) {
@@ -1150,8 +1197,20 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
             position.hVal.QuadPart = target;
             /* The reader lands on the keyframe before the target; what lies
                between is decoded and skipped below. */
+            int32_t mode = atomic_load_explicit(&m->seek_mode, memory_order_relaxed);
+            if (!want_video) mode = RUBRAVIEW_SEEK_EXACT;   /* sound alone has no keyframes */
+            rubraview_pal_media_log("mf: seek to {:.3} s taken{}", PROVEN_ARG((double)target / 1e7),
+                                    PROVEN_ARG(mode == RUBRAVIEW_SEEK_EXACT ? "" : mode == RUBRAVIEW_SEEK_KEY_BACK ? ", to the keyframe before" : ", to the keyframe after"));
+            if (mode == RUBRAVIEW_SEEK_KEY_FORWARD) position.hVal.QuadPart = mf_keyframe_after(m, reader, target);
             IMFSourceReader_SetCurrentPosition(reader, &GUID_NULL, &position);
+            rubraview_pal_media_log("mf: reader moved");
             skip_video = skip_audio = (double)target / 1e7;
+            skipped = 0;
+            landing = mode != RUBRAVIEW_SEEK_EXACT;
+            if (landing) {
+                skip_video = -1.0;   /* the first picture is where it lands */
+                skip_audio = 1e18;   /* no sound until then */
+            }
             audio_base = (double)target / 1e7;
             audio_begun = false;
             video_done = audio_done = ended = false;
@@ -1204,7 +1263,27 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
                        the VM: 0.083 s + 5 s stopped at 5.042, not 5.083). */
                     bool before = skip_video >= 0.0 &&
                         pts + (frame_duration > 0.0 ? frame_duration : 1e-3) <= skip_video + 1e-4;
+                    if (landing) {
+                        /* RV-261: a keyframe seek has landed: the sound starts where the picture does. */
+                        landing = false;
+                        skip_audio = pts;
+                        audio_base = pts;
+                        if (m->audio) rubraview_pal_audio_flush(m->audio, pts);
+                        rubraview_pal_media_log("mf: landed on the keyframe at {:.3} s", PROVEN_ARG(pts));
+                    }
+                    if (before) ++skipped;
+                    /* RV-261: the first picture after a seek that is still short of the target is shown at once,
+                       marked as a preview; the ones after it are passed over until the target. */
+                    if (before && skipped == 1 && store_picture(m, sample, &m->slots[slot])) {
+                        m->slots[slot].pts = pts;
+                        m->slots[slot].duration = frame_duration;
+                        m->slots[slot].generation = generation;
+                        m->slots[slot].preview = true;
+                        rubraview_spsc_commit_write(&m->ring);
+                        rubraview_pal_media_log("mf: keyframe at {:.3} s shown ahead of {:.3} s", PROVEN_ARG(pts), PROVEN_ARG(skip_video));
+                    }
                     if (!before) {
+                        if (skip_video >= 0.0) rubraview_pal_media_log("mf: picture at {:.3} s decoded after the seek, {} passed over", PROVEN_ARG(pts), PROVEN_ARG(skipped));
                         skip_video = -1.0;
                         double measured = 0.0;
                         if (rubraview_rate_meter_add(&rate_meter, pts, &measured) && measured > 0.5 && measured < 1000.0) {
@@ -1214,6 +1293,7 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
                             m->slots[slot].pts = pts;
                             m->slots[slot].duration = frame_duration;
                             m->slots[slot].generation = generation;
+                            m->slots[slot].preview = false;
                             rubraview_spsc_commit_write(&m->ring);   /* publishes the pixels above */
                         }
                     }
@@ -1271,7 +1351,15 @@ static void undo_open(mf_media_t *m) {
    not reached — a rewind lands on the first picture (an MKV's), and the
    sound before it would be lost (RV-111). The caller opens it again. */
 #define FIRST_PICTURE_NEAR_100NS 10000000
+static bool first_picture_arrives_now(mf_media_t *m, IMFSourceReader *reader, bool *refused, bool *rewound);
 static bool first_picture_arrives(mf_media_t *m, IMFSourceReader *reader, bool *refused, bool *rewound) {
+    bool arrives = first_picture_arrives_now(m, reader, refused, rewound);
+    rubraview_pal_media_log("mf: first picture {}{}", PROVEN_ARG(arrives ? "arrived" : "did not arrive"),
+                            PROVEN_ARG(arrives && !*rewound ? ", late: the reader opens again" : ""));
+    return arrives;
+}
+
+static bool first_picture_arrives_now(mf_media_t *m, IMFSourceReader *reader, bool *refused, bool *rewound) {
     *refused = true;
     *rewound = false;
     for (int i = 0; i < 200; ++i) {
@@ -1435,6 +1523,7 @@ static void *mf_open(proven_u8str_view_t path, rubraview_media_failure_t *out_fa
 
     atomic_init(&m->quit, false);
     atomic_init(&m->seek_target_100ns, 0);
+    atomic_init(&m->seek_mode, RUBRAVIEW_SEEK_EXACT);
     atomic_init(&m->seek_generation, 0);
     atomic_init(&m->end_generation, NO_GENERATION);
     atomic_init(&m->pending_audio_stream, -1);
@@ -1484,6 +1573,7 @@ static bool mf_peek_frame(void *handle, rubraview_video_frame_t *out_frame) {
             .stride = media->width * 4,
             .pts = s->pts,
             .duration = s->duration,
+            .preview = s->preview,
         };
         return true;
     }
@@ -1501,14 +1591,20 @@ static size_t mf_frames_ready(void *handle) {
     return media ? rubraview_spsc_count(&media->ring) : 0;
 }
 
-static void mf_seek(void *handle, double seconds) {
+static void mf_seek(void *handle, double seconds, rubraview_seek_mode_t mode) {
     mf_media_t *media = (mf_media_t*)handle;
     if (!media) return;
     if (!(seconds > 0.0)) seconds = 0.0;
     atomic_store_explicit(&media->seek_target_100ns, (int64_t)llround(seconds * 1e7), memory_order_relaxed);
+    atomic_store_explicit(&media->seek_mode, (int32_t)mode, memory_order_relaxed);
     /* The release on the generation is what carries the target with it. */
     media->consumer_generation =
         atomic_fetch_add_explicit(&media->seek_generation, 1, memory_order_release) + 1;
+}
+
+static void mf_read_limit(void *handle, uint64_t bytes) {
+    mf_media_t *media = (mf_media_t*)handle;
+    if (media && bytes) atomic_store_explicit(&media->read_limit, bytes, memory_order_release);   /* the decode thread applies it */
 }
 
 static bool mf_finished(void *handle) {
@@ -1622,6 +1718,7 @@ static const rubraview_media_backend_api_t MF_API = {
     .pop_frame = mf_pop_frame,
     .frames_ready = mf_frames_ready,
     .seek = mf_seek,
+    .read_limit = mf_read_limit,
     .finished = mf_finished,
     .sound_over = mf_sound_over,
     .set_paused = mf_set_paused,

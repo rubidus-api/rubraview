@@ -35,6 +35,7 @@ void live_start(app_state_t *app) {
     rubraview_pal_filmcache_stats(&cs);
     app->stats_copy_from = cs.from_copy;
     app->stats_network_from = cs.from_source;
+    app->stats_memory_from = cs.from_memory;
     app->live = (rubraview_live_t){ .fine_timer = app->stats_fine };
 }
 
@@ -75,6 +76,9 @@ static void live_second(app_state_t *app, double now) {
     app->live.from_network = cs.from_source >= app->stats_network_from ? cs.from_source - app->stats_network_from : 0;
     app->live.copy_filled = cs.filled;
     app->live.copy_blocks = cs.blocks;
+    app->live.memory_held = app->media ? cs.memory_held : 0;   /* RV-261 */
+    app->live.memory_room = app->media ? cs.memory_room : 0;
+    app->live.from_memory = cs.from_memory >= app->stats_memory_from ? cs.from_memory - app->stats_memory_from : 0;
     rubraview_live_t keep = app->live;
     live_start(app);
     app->live = keep;
@@ -156,6 +160,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
         next_spread(app);
     }
     station_job_poll(app);
+    film_ahead_poll(app);      /* RV-261 */
     station_title_poll(app);   /* RV-158 */
     gmic_list_poll(app);   /* RFC-0009 C */
     double media_from = rubraview_pal_time_now_seconds();

@@ -77,6 +77,42 @@ typedef struct rubraview_filmcache_entry {
 size_t rubraview_filmcache_evict(const rubraview_filmcache_entry_t *entries, size_t count, uint64_t limit,
                                  uint64_t incoming, size_t *victims, size_t cap);
 
+/*
+ * RV-261 (owner, 2026-11-08): a film read into memory as it plays — the head first, then on to the end — in blocks
+ * of RUBRAVIEW_FILMCACHE_BLOCK, on the heap, freed when the film closes. How much: the setting (Settings › Cache),
+ * but never so much that the memory free falls to 20 % of the whole, and never less than the floor. A film larger
+ * than that keeps a window of it that moves with the reading. A film opened ahead (the next one) reads only its head.
+ */
+#define RUBRAVIEW_FILMBUF_FLOOR (64u << 20)   /* always taken, however little is free */
+
+/* The bytes of a film of `file_size` to hold, given the setting (0: off), the memory and the memory free. */
+uint64_t rubraview_filmbuf_budget(uint64_t file_size, uint64_t setting, uint64_t total_mem, uint64_t avail_mem);
+/* Whether the fill may go on: more than 20 % free, or less than the floor held so far. */
+bool rubraview_filmbuf_may_fill(uint64_t total_mem, uint64_t avail_mem, uint64_t held_bytes);
+/* The next film's head read ahead: about 20 s at `bits_per_second`, 16 to 128 MB (32 MB unknown). */
+uint64_t rubraview_filmbuf_head_bytes(double bits_per_second);
+
+typedef struct rubraview_filmbuf {
+    uint64_t file_blocks;  /* blocks the film takes */
+    uint64_t slots;        /* blocks memory holds */
+    bool     whole;        /* slots == file_blocks: nothing is ever replaced */
+    uint64_t held;         /* slots holding a block */
+    uint64_t *tags;        /* the block in each slot plus one; 0 empty (malloc'd) */
+} rubraview_filmbuf_t;
+
+/* Room for `budget` bytes of a film of `file_size`, nothing held. False when either is 0 or out of memory. */
+bool rubraview_filmbuf_make(rubraview_filmbuf_t *w, uint64_t file_size, uint64_t budget);
+void rubraview_filmbuf_free(rubraview_filmbuf_t *w);
+uint64_t rubraview_filmbuf_slot(const rubraview_filmbuf_t *w, uint64_t block);
+bool rubraview_filmbuf_has(const rubraview_filmbuf_t *w, uint64_t block);
+/* The slot of `block` now holds it (whatever it held before is gone) / holds nothing. */
+void rubraview_filmbuf_put(rubraview_filmbuf_t *w, uint64_t block);
+void rubraview_filmbuf_drop(rubraview_filmbuf_t *w, uint64_t block);
+/* The next block to read, the reading being at `from`: the first missing one from there within the window (to the
+   end of the film), then — when the whole film fits — the first missing one before it; only blocks under `limit`
+   (a head). UINT64_MAX: nothing to read now. */
+uint64_t rubraview_filmbuf_next(const rubraview_filmbuf_t *w, uint64_t from, uint64_t limit);
+
 #ifdef __cplusplus
 }
 #endif

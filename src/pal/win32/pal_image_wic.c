@@ -366,7 +366,7 @@ static rubraview_image_load_result_t finish_decode_frame(rubraview_renderer_t *r
                     break;
                 }
                 /* A device that is gone will not take a smaller one either. */
-                if (hr == D2DERR_RECREATE_TARGET || tw <= 1024 || th <= 1) break;
+                if (hr == (HRESULT)D2DERR_RECREATE_TARGET || tw <= 1024 || th <= 1) break;
                 tw /= 2;
                 th = th / 2 > 0 ? th / 2 : 1;
             }

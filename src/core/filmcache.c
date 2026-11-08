@@ -174,3 +174,75 @@ size_t rubraview_filmcache_evict(const rubraview_filmcache_entry_t *entries, siz
     }
     return chosen;
 }
+
+/* ---- RV-261: a film in memory ---- */
+
+uint64_t rubraview_filmbuf_budget(uint64_t file_size, uint64_t setting, uint64_t total_mem, uint64_t avail_mem) {
+    if (setting == 0 || file_size == 0) return 0;
+    uint64_t keep = total_mem / 5;                                   /* 20 % stays free */
+    uint64_t room = avail_mem > keep ? avail_mem - keep : 0;
+    uint64_t cap = setting < room ? setting : room;
+    if (cap < RUBRAVIEW_FILMBUF_FLOOR) cap = RUBRAVIEW_FILMBUF_FLOOR;
+    return cap < file_size ? cap : file_size;
+}
+
+bool rubraview_filmbuf_may_fill(uint64_t total_mem, uint64_t avail_mem, uint64_t held_bytes) {
+    return held_bytes < RUBRAVIEW_FILMBUF_FLOOR || avail_mem > total_mem / 5;
+}
+
+uint64_t rubraview_filmbuf_head_bytes(double bits_per_second) {
+    const uint64_t MB = 1u << 20;
+    if (!(bits_per_second > 0.0)) return 32 * MB;
+    double bytes = bits_per_second / 8.0 * 20.0;
+    if (bytes < (double)(16 * MB)) return 16 * MB;
+    if (bytes > (double)(128 * MB)) return 128 * MB;
+    return (uint64_t)bytes;
+}
+
+bool rubraview_filmbuf_make(rubraview_filmbuf_t *w, uint64_t file_size, uint64_t budget) {
+    *w = (rubraview_filmbuf_t){0};
+    if (file_size == 0 || budget == 0) return false;
+    w->file_blocks = (file_size + RUBRAVIEW_FILMCACHE_BLOCK - 1) / RUBRAVIEW_FILMCACHE_BLOCK;
+    w->slots = (budget + RUBRAVIEW_FILMCACHE_BLOCK - 1) / RUBRAVIEW_FILMCACHE_BLOCK;
+    if (w->slots >= w->file_blocks) { w->slots = w->file_blocks; w->whole = true; }
+    w->tags = (uint64_t *)rubraview_alloc_zero((size_t)w->slots, sizeof *w->tags);
+    if (!w->tags) { *w = (rubraview_filmbuf_t){0}; return false; }
+    return true;
+}
+
+void rubraview_filmbuf_free(rubraview_filmbuf_t *w) {
+    rubraview_free(w->tags);
+    *w = (rubraview_filmbuf_t){0};
+}
+
+uint64_t rubraview_filmbuf_slot(const rubraview_filmbuf_t *w, uint64_t block) {
+    return w->slots ? block % w->slots : 0;
+}
+
+bool rubraview_filmbuf_has(const rubraview_filmbuf_t *w, uint64_t block) {
+    return w->tags && block < w->file_blocks && w->tags[block % w->slots] == block + 1;
+}
+
+void rubraview_filmbuf_put(rubraview_filmbuf_t *w, uint64_t block) {
+    if (!w->tags || block >= w->file_blocks) return;
+    uint64_t *t = &w->tags[block % w->slots];
+    if (*t == 0) w->held++;
+    *t = block + 1;
+}
+
+void rubraview_filmbuf_drop(rubraview_filmbuf_t *w, uint64_t block) {
+    if (!w->tags || block >= w->file_blocks) return;
+    uint64_t *t = &w->tags[block % w->slots];
+    if (*t != 0) w->held--;
+    *t = 0;
+}
+
+uint64_t rubraview_filmbuf_next(const rubraview_filmbuf_t *w, uint64_t from, uint64_t limit) {
+    if (!w->tags) return UINT64_MAX;
+    uint64_t end = limit < w->file_blocks ? limit : w->file_blocks;
+    if (from >= w->file_blocks) from = w->file_blocks - 1;
+    uint64_t stop = w->whole ? end : (from + w->slots < end ? from + w->slots : end);
+    for (uint64_t b = from; b < stop; ++b) if (!rubraview_filmbuf_has(w, b)) return b;
+    if (w->whole) for (uint64_t b = 0; b < from && b < end; ++b) if (!rubraview_filmbuf_has(w, b)) return b;
+    return UINT64_MAX;
+}

@@ -133,6 +133,7 @@
 #include "rubraview/gmic.h"
 #include "rubraview/pal/pal_ffilter.h"
 #include "rubraview/pal/pal_filmcache.h"
+#include "rubraview/filmcache.h"   /* RV-261: the next film's head */
 #include "rubraview/ffilter.h"
 #include "rubraview/playback.h"
 #include "rubraview/textenc.h"
@@ -672,6 +673,11 @@ typedef struct app_state {
        hands rather than opened again. */
     rubraview_media_t         *bgm_media;
     struct station_job        *station_job;   /* RV-157: a station being connected to, off this thread */
+    /* RV-261 (owner, 2026-11-08): the next film opened ahead, off this thread, at a steady moment, and kept paused
+       until its page comes; the film before closed off this thread too. */
+    struct film_ahead         *film_ahead;
+    double                     media_settled_at;   /* when the first picture after an open or a seek was shown; 0 none */
+    bool                       media_closing_for_next;   /* media_close keeps the film ahead and closes off this thread */
     char                      station_title[256];   /* RV-158: what the station playing says is on (ICY); "" none */
     bool                      rename_is_address;    /* RV-158: the box takes an address and its title for the list */
     rubraview_media_info_t     bgm_info;
@@ -1444,6 +1450,7 @@ typedef struct app_state {
     int32_t                stats_size_page;        /* the page whose size is in stats_size_bytes, -1 none */
     uint64_t               stats_size_bytes;
     uint64_t               stats_copy_from, stats_network_from;   /* RV-216: the cache's counts when the second began */
+    uint64_t               stats_memory_from;   /* RV-261: the bytes read from a film in memory when the second began */
     rubraview_live_t       live;                   /* the last second's */
     size_t                 picker_tap_index;
     uint32_t               picker_tap_generation;
@@ -2217,6 +2224,8 @@ void media_close(app_state_t *app);
 void media_prepare(app_state_t *app);
 void media_reopen_on_new_device(app_state_t *app);
 void media_seek_to(app_state_t *app, double seconds);
+void media_seek_to_mode(app_state_t *app, double seconds, rubraview_seek_mode_t mode);   /* RV-261 */
+void media_seek_arrow(app_state_t *app, double delta);   /* RV-261: Left / Right, to the keyframe when set */
 void media_step(app_state_t *app, bool forward);
 void media_tick(app_state_t *app);
 void media_toggle_pause(app_state_t *app);
@@ -2574,6 +2583,9 @@ void startup_without_file(app_state_t *app, bool no_file);
 void station_alts_note(const rubraview_playlist_entry_t *e);
 int32_t station_connecting_page(const app_state_t *app);
 void station_job_poll(app_state_t *app);
+void film_ahead_poll(app_state_t *app);   /* RV-261: the next film opened ahead at a steady moment */
+void film_ahead_drop(app_state_t *app);   /* RV-261: let the film opened ahead go (off this thread) */
+void media_close_wait(void);             /* RV-261: the films being closed off the UI thread, waited for */
 void station_title_poll(app_state_t *app);
 bool strip_active(const app_state_t *app);
 void strip_cells_free(app_state_t *app);

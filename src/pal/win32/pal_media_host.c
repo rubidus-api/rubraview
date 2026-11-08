@@ -232,7 +232,7 @@ static SRWLOCK g_live_lock = SRWLOCK_INIT;
 static HANDLE g_live[MH_LIVE_MAX];
 static rubraview_mhost_block_t *g_live_block[MH_LIVE_MAX];
 static uint64_t g_live_gone;   /* what children that ended had read */
-static uint64_t g_cache_gone_copy, g_cache_gone_source;   /* RV-216: and served from their caches */
+static uint64_t g_cache_gone_copy, g_cache_gone_source, g_cache_gone_memory;   /* RV-216: and served from their caches */
 
 static void live_note(HANDLE process, rubraview_mhost_block_t *block, bool add) {
     AcquireSRWLockExclusive(&g_live_lock);
@@ -244,6 +244,7 @@ static void live_note(HANDLE process, rubraview_mhost_block_t *block, bool add) 
             if (g_live_block[i]) {
                 g_cache_gone_copy += atomic_load(&g_live_block[i]->cache_from_copy);
                 g_cache_gone_source += atomic_load(&g_live_block[i]->cache_from_source);
+                g_cache_gone_memory += atomic_load(&g_live_block[i]->cache_from_memory);
             }
             g_live[i] = NULL;
             g_live_block[i] = NULL;
@@ -258,11 +259,17 @@ void rubraview_mhost_children_cache(rubraview_filmcache_stats_t *add) {
     AcquireSRWLockShared(&g_live_lock);
     add->from_copy += g_cache_gone_copy;
     add->from_source += g_cache_gone_source;
+    add->from_memory += g_cache_gone_memory;
     for (size_t i = 0; i < MH_LIVE_MAX; ++i) {
         rubraview_mhost_block_t *b = g_live_block[i];
         if (!g_live[i] || !b) continue;
         add->from_copy += atomic_load(&b->cache_from_copy);
         add->from_source += atomic_load(&b->cache_from_source);
+        add->from_memory += atomic_load(&b->cache_from_memory);
+        if (atomic_load(&b->cache_memory_room) > 0) {   /* RV-261: the film in a child's memory */
+            add->memory_held = atomic_load(&b->cache_memory_held);
+            add->memory_room = atomic_load(&b->cache_memory_room);
+        }
         uint64_t blocks = atomic_load(&b->cache_blocks), filled = atomic_load(&b->cache_filled);
         if (atomic_load(&b->cache_open) && blocks > 0) {
             add->open = true;
@@ -525,6 +532,8 @@ static bool pool_take(mh_child_t *out, const rubraview_media_gpu_t *gpu) {
     atomic_store(&b->wanted.quit, 0);
     atomic_store(&b->wanted.seek_100ns, 0);
     atomic_store(&b->wanted.seek_generation, 0);
+    atomic_store(&b->wanted.seek_mode, 0);
+    atomic_store(&b->wanted.read_limit, 0);
     atomic_store(&b->wanted.gain_millionths, 1000000);
     atomic_store(&b->wanted.audio_stream, -1);
     atomic_store(&b->wanted.audio_serial, 0);
@@ -590,7 +599,9 @@ static void *remote_open(proven_u8str_view_t path, rubraview_media_failure_t *ou
     if (!rubraview_mhost_remote_available()) { rubraview_fmt(g_open_why, sizeof g_open_why, "the service process found no FFmpeg"); return NULL; }
     mh_play_t *p = (mh_play_t *)rubraview_alloc_zero(1, sizeof(*p));
     if (!p) return NULL;
-    if (!pool_take(&p->child, gpu) && !child_start(&p->child, RUBRAVIEW_MHOST_PLAYBACK, gpu)) {
+    bool pooled = pool_take(&p->child, gpu);
+    rubraview_pal_media_log("host: {}", PROVEN_ARG(pooled ? "a waiting child taken" : "no waiting child: one started"));   /* RV-261 step 1 */
+    if (!pooled && !child_start(&p->child, RUBRAVIEW_MHOST_PLAYBACK, gpu)) {
         rubraview_free(p);
         rubraview_fmt(g_open_why, sizeof g_open_why, "the process could not be started");
         return NULL;
@@ -609,6 +620,9 @@ static void *remote_open(proven_u8str_view_t path, rubraview_media_failure_t *ou
     b->request_args[0] = (int64_t)folder_n;
     b->request_args[1] = (int64_t)(limit > (uint64_t)INT64_MAX ? (uint64_t)INT64_MAX : limit);
     b->request_args[2] = ahead ? 1 : 0;
+    uint64_t memory = rubraview_pal_filmcache_memory_setting();   /* RV-261: the film in the child's memory */
+    b->request_args[3] = (int64_t)(memory > (uint64_t)INT64_MAX ? (uint64_t)INT64_MAX : memory);
+    b->request_args[4] = gpu && gpu->open_ahead ? 1 : 0;
     int32_t status = child_call(&p->child, RUBRAVIEW_MHOST_REQ_OPEN, OPEN_WAIT_MS);
     bool ok = status == RUBRAVIEW_MHOST_OK && rubraview_mhost_opened_take(b, &p->opened);
     if (!ok) {
@@ -680,6 +694,7 @@ static bool remote_peek_frame(void *handle, rubraview_video_frame_t *out_frame) 
             .pixels = s.on_gpu ? NULL : p->frames.view + slot * p->opened.frame_bytes,
             .width = p->opened.info.width, .height = p->opened.info.height, .stride = p->opened.info.width * 4,
             .pts = s.pts, .duration = s.duration, .gpu_texture = texture, .gpu_subresource = 0,
+            .preview = (s.flags & RUBRAVIEW_MHOST_SLOT_PREVIEW) != 0,
         };
         return true;
     }
@@ -696,14 +711,20 @@ static size_t remote_frames_ready(void *handle) {
     return p && !p->stopped ? (size_t)remote_waiting(p) : 0;
 }
 
-static void remote_seek(void *handle, double seconds) {
+static void remote_seek(void *handle, double seconds, rubraview_seek_mode_t mode) {
     mh_play_t *p = (mh_play_t *)handle;
     if (!p || p->stopped || p->opened.info.live) return;
     if (!(seconds > 0.0)) seconds = 0.0;
     rubraview_mhost_wanted_t *w = &p->child.block->wanted;
     atomic_store_explicit(&w->seek_100ns, (int64_t)llround(seconds * 1e7), memory_order_relaxed);
+    atomic_store_explicit(&w->seek_mode, (int32_t)mode, memory_order_relaxed);
     p->consumer_generation++;
     atomic_store_explicit(&w->seek_generation, p->consumer_generation, memory_order_release);
+}
+
+static void remote_read_limit(void *handle, uint64_t bytes) {   /* RV-261 */
+    mh_play_t *p = (mh_play_t *)handle;
+    if (p && !p->stopped && bytes) atomic_store_explicit(&p->child.block->wanted.read_limit, bytes, memory_order_release);
 }
 
 static bool remote_seen(mh_play_t *p, rubraview_mhost_seen_t *seen) {
@@ -838,6 +859,7 @@ static const rubraview_media_backend_api_t REMOTE_API = {
     .pop_frame = remote_pop_frame,
     .frames_ready = remote_frames_ready,
     .seek = remote_seek,
+    .read_limit = remote_read_limit,
     .finished = remote_finished,
     .sound_over = remote_sound_over,
     .set_paused = remote_set_paused,
@@ -1282,8 +1304,10 @@ static int32_t child_open(child_play_t *cp) {
     if (b->request_args[0] >= 0 && n + 1 + folder_n <= RUBRAVIEW_MHOST_INLINE - 1)
         rubraview_pal_filmcache_configure((proven_u8str_view_t){ .ptr = b->inline_data + n + 1, .size = (size_t)folder_n },
                                           b->request_args[1] > 0 ? (uint64_t)b->request_args[1] : 0, b->request_args[2] != 0);
+    rubraview_pal_filmcache_configure_memory(b->request_args[3] > 0 ? (uint64_t)b->request_args[3] : 0);   /* RV-261 */
     rubraview_media_gpu_t gpu = { .mode = b->gpu_mode, .tone_mapping = b->tone_mapping,
-                                  .hdr_screen_peak = b->hdr_screen_peak, .hdr_sdr_white = b->hdr_sdr_white };   /* RV-177 */
+                                  .hdr_screen_peak = b->hdr_screen_peak, .hdr_sdr_white = b->hdr_sdr_white,
+                                  .open_ahead = b->request_args[4] != 0 };   /* RV-177; RV-261 */
     if ((b->gpu_mode > 0 || b->tone_mapping > 0) && !cp->device) cp->device = child_device(b->adapter_luid, &cp->profiles);
     gpu.decoder_profiles = cp->profiles;
     if (cp->device) {
@@ -1590,6 +1614,9 @@ int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *re
             atomic_store(&b->cache_filled, cs.open ? cs.filled : 0);
             atomic_store(&b->cache_blocks, cs.open ? cs.blocks : 0);
             atomic_store(&b->cache_open, cs.open ? 1u : 0u);
+            atomic_store(&b->cache_from_memory, cs.from_memory);
+            atomic_store(&b->cache_memory_held, cs.memory_held);
+            atomic_store(&b->cache_memory_room, cs.memory_room);
         }
         if (cp.media) {
             rubraview_ffmpeg_host_apply(cp.media, &b->wanted, &cp.applied);

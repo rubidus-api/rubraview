@@ -75,6 +75,8 @@ typedef struct rubraview_media_gpu {
        0: for an SDR screen */
     double   hdr_screen_peak;
     double   hdr_sdr_white;
+    /* RV-261: opened ahead of its page (the next film): memory reads only its head until told more */
+    bool     open_ahead;
 } rubraview_media_gpu_t;
 
 typedef struct rubraview_media_open_result {
@@ -207,6 +209,10 @@ typedef struct rubraview_video_frame {
        at least width x height. Copy it with rubraview_pal_texture_copy_video_frame. */
     const void *gpu_texture;
     uint32_t    gpu_subresource;
+    /* RV-261 (owner, 2026-11-08: "둘 다 + 설정"): the keyframe a seek landed on, shown at once while the frame
+       asked for is still being decoded. It is drawn, but it moves neither the position nor the clock; the
+       exact frame follows with the same seek. */
+    bool        preview;
 } rubraview_video_frame_t;
 
 /**
@@ -232,6 +238,19 @@ size_t rubraview_pal_media_frames_ready(rubraview_media_t *media);
  * before it, so the landing is exact, not "the nearest keyframe").
  */
 void rubraview_pal_media_seek(rubraview_media_t *media, double seconds);
+
+/* RV-261 (owner, 2026-11-08: "둘 다 + 설정"): where a seek lands. Exact decodes on from the keyframe before to the
+   frame asked for, showing that keyframe first as a preview. The keyframe ways land on a keyframe and decode
+   nothing more: before the place asked for (back), or at or after it (forward), as mpv's relative seeks do. */
+typedef enum rubraview_seek_mode {
+    RUBRAVIEW_SEEK_EXACT = 0,
+    RUBRAVIEW_SEEK_KEY_BACK = 1,
+    RUBRAVIEW_SEEK_KEY_FORWARD = 2,
+} rubraview_seek_mode_t;
+void rubraview_pal_media_seek_mode(rubraview_media_t *media, double seconds, rubraview_seek_mode_t mode);
+/* RV-261: how much of the film is read into memory ahead: `bytes` from its start (a film opened ahead), or
+   UINT64_MAX on to the end (its page has come). Nothing when the film is not read into memory. */
+void rubraview_pal_media_read_limit(rubraview_media_t *media, uint64_t bytes);
 
 /** The decoder has reached the end and every decoded frame has been taken. */
 bool rubraview_pal_media_finished(rubraview_media_t *media);
@@ -327,6 +346,14 @@ const rubraview_details_t *rubraview_pal_media_details(rubraview_media_t *media)
  */
 proven_u8str_view_t rubraview_pal_media_read_subtitle_stream(rubraview_media_t *media, proven_arena_t *arena,
                                                  int32_t stream_index);
+
+/*
+ * RV-261 step 1: RUBRAVIEW_MEDIA_LOG names a file that every process (the viewer and its FFmpeg children)
+ * appends a line to for each step of opening, closing and seeking a film: the milliseconds of the
+ * system's performance counter (the same clock in every process), the process, the text. Unset: nothing.
+ */
+void rubraview_pal_media_log_args(const char *format, const proven_arg_t *fmt_args, size_t fmt_count);
+#define rubraview_pal_media_log(format, ...) rubraview_pal_media_log_args(format, RUBRAVIEW_FMT_ARGS(__VA_ARGS__))
 
 #ifdef __cplusplus
 }

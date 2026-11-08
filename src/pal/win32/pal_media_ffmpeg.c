@@ -19,6 +19,7 @@
 #include <libswscale/swscale.h>
 #include <libswresample/swresample.h>
 #include "rubraview/pal/pal_media_backend.h"
+#include "rubraview/pal/pal_media.h"
 #include "rubraview/lang.h"
 #include "rubraview/mediaclock.h"
 #include <stdio.h>
@@ -59,6 +60,7 @@ typedef struct ff_slot {
     uint8_t *pixels;
     double pts, duration;
     uint64_t generation;
+    bool preview;   /* RV-261: the keyframe a seek landed on, before the exact frame */
     /* RV-149: a picture decoded on the card is turned into BGRA there, into this texture — shared with the
        renderer's device under a keyed mutex, as Media Foundation's are; made on first use */
     ID3D11Texture2D *texture;
@@ -101,6 +103,8 @@ typedef struct ff_media {
     SRWLOCK audio_lock;
     _Atomic int32_t pending_audio_stream;   /* §3.16.2: -1 when nothing was asked */
     _Atomic int64_t seek_target_100ns;
+    _Atomic int32_t seek_mode;   /* RV-261: rubraview_seek_mode_t, written with the target */
+    _Atomic uint64_t read_limit; /* RV-261: asked of the film's memory; 0 nothing asked */
     _Atomic uint64_t seek_generation, end_generation;
     uint64_t consumer_generation;
 
@@ -675,6 +679,8 @@ typedef struct ff_decode {
        target), and whether its first sound has come since. */
     double audio_base;
     bool audio_begun;
+    bool landing;        /* RV-261: a keyframe seek waits for its first picture to say where the sound starts */
+    uint32_t skipped;    /* RV-261: pictures passed over since the seek */
     /* RV-216 (D-249): a film on a network drive read through its local copy */
     rubraview_filmcache_stream_t *cache;
     AVIOContext *cache_io;
@@ -721,7 +727,7 @@ static bool open_cached(ff_media_t *m, ff_decode_t *d) {
     if (!g_ff.avformat_alloc_context || !g_ff.avio_alloc_context || !g_ff.avio_context_free || !g_ff.av_malloc || !g_ff.av_free) return false;
     WCHAR wide[MAX_PATH * 4];
     if (MultiByteToWideChar(CP_UTF8, 0, m->path, -1, wide, MAX_PATH * 4) <= 0) return false;
-    d->cache = rubraview_pal_filmcache_open(wide);
+    d->cache = rubraview_pal_filmcache_open_ex(wide, m->gpu.open_ahead);   /* RV-261: memory too */
     if (!d->cache) return false;
     d->cache_at = 0;
     unsigned char *buffer = (unsigned char *)g_ff.av_malloc(IO_BYTES + AV_INPUT_BUFFER_PADDING_SIZE);
@@ -1099,15 +1105,18 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
     if (m->station) {
         if (!open_station(m, d)) return false;
     } else {
+        rubraview_pal_media_log("ffmpeg: format opening");   /* RV-261 step 1 */
         if (!open_cached(m, d) && (g_ff.avformat_open_input(&d->format, m->path, NULL, NULL) < 0 || !d->format)) {
             m->failure = GetFileAttributesA(m->path) != INVALID_FILE_ATTRIBUTES
                 ? RUBRAVIEW_MEDIA_FAIL_CONTAINER : RUBRAVIEW_MEDIA_FAIL_FILE;
             return false;
         }
+        rubraview_pal_media_log("ffmpeg: format open, streams probing");
         if (g_ff.avformat_find_stream_info(d->format, NULL) < 0) {
             m->failure = RUBRAVIEW_MEDIA_FAIL_CONTAINER;
             return false;
         }
+        rubraview_pal_media_log("ffmpeg: streams probed");
     }
 
     m->video_stream = g_ff.av_find_best_stream(d->format, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
@@ -1889,7 +1898,7 @@ static bool ff_vp_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
     return ok;
 }
 
-static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double duration, uint64_t generation) {
+static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double duration, uint64_t generation, bool preview) {
     size_t slot = 0;
     for (int waited = 0; !rubraview_spsc_acquire_write(m->ringp, &slot); waited += 5) {
         if (atomic_load_explicit(&m->quit, memory_order_acquire) ||
@@ -1938,9 +1947,10 @@ static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double durati
     m->slots[slot].pts = pts;
     m->slots[slot].duration = duration;
     m->slots[slot].generation = generation;
+    m->slots[slot].preview = preview;
     if (m->hosted && m->host.slots) {   /* RV-176: what the viewer reads of it, before it is published */
         m->host.slots[slot] = (rubraview_mhost_slot_t){
-            .pts = pts, .duration = duration, .generation = generation,
+            .pts = pts, .duration = duration, .generation = generation, .flags = preview ? RUBRAVIEW_MHOST_SLOT_PREVIEW : 0u,
             .on_gpu = m->slots[slot].on_gpu ? 1u : 0u, .shared_handle = m->slots[slot].on_gpu ? m->slots[slot].shared : 0,
         };
     }
@@ -2031,10 +2041,24 @@ static void decode_packet(ff_media_t *m, ff_decode_t *d, AVPacket *packet, doubl
             double duration = d->frame->duration > 0
                 ? stream_seconds(d->format, m->video_stream, d->frame->duration)
                 : (m->info.frame_rate > 0.0 ? 1.0 / m->info.frame_rate : 1.0 / 30.0);
+            if (d->landing) {
+                /* RV-261: a keyframe seek has landed: the sound starts where the picture does. */
+                d->landing = false;
+                *skip_audio = pts;
+                d->audio_base = pts;
+                if (m->audio) rubraview_pal_audio_flush(m->audio, pts);
+                rubraview_pal_media_log("ffmpeg: landed on the keyframe at {:.3} s", PROVEN_ARG(pts));
+            }
             bool before = *skip_video >= 0.0 && pts + duration <= *skip_video + 1e-4;
+            /* RV-261: the first picture short of the target is shown at once, marked as a preview */
+            if (before && ++d->skipped == 1) {
+                rubraview_pal_media_log("ffmpeg: keyframe at {:.3} s shown ahead of {:.3} s", PROVEN_ARG(pts), PROVEN_ARG(*skip_video));
+                if (!store_video(m, d, pts, duration, generation, true)) { g_ff.av_frame_unref(d->frame); break; }
+            }
             if (!before) {
+                if (*skip_video >= 0.0) rubraview_pal_media_log("ffmpeg: picture at {:.3} s decoded after the seek, {} passed over", PROVEN_ARG(pts), PROVEN_ARG(d->skipped));
                 *skip_video = -1.0;
-                if (!store_video(m, d, pts, duration, generation)) { g_ff.av_frame_unref(d->frame); break; }
+                if (!store_video(m, d, pts, duration, generation, false)) { g_ff.av_frame_unref(d->frame); break; }
             }
         } else {
             store_audio(m, d, pts, skip_audio, generation);
@@ -2121,16 +2145,30 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
             }
         }
 
+        uint64_t limit = atomic_exchange_explicit(&m->read_limit, 0, memory_order_acq_rel);   /* RV-261 */
+        if (limit && d->cache) rubraview_pal_filmcache_read_limit(d->cache, limit);
         uint64_t wanted = atomic_load_explicit(&m->seek_generation, memory_order_acquire);
         if (wanted != generation) {
             generation = wanted;
             int64_t target = atomic_load_explicit(&m->seek_target_100ns, memory_order_relaxed);
             double seconds = (double)target / 1e7;
+            int32_t mode = d->video ? atomic_load_explicit(&m->seek_mode, memory_order_relaxed) : RUBRAVIEW_SEEK_EXACT;
             if (m->audio) rubraview_pal_audio_flush(m->audio, seconds);
-            g_ff.av_seek_frame(d->format, -1, (int64_t)((seconds + file_start_seconds(d->format)) * AV_TIME_BASE), AVSEEK_FLAG_BACKWARD);
+            rubraview_pal_media_log("ffmpeg: seek to {:.3} s taken{}", PROVEN_ARG(seconds),
+                                    PROVEN_ARG(mode == RUBRAVIEW_SEEK_EXACT ? "" : mode == RUBRAVIEW_SEEK_KEY_BACK ? ", to the keyframe before" : ", to the keyframe after"));
+            /* RV-261: forward, the keyframe at or after the place (the index's next one); otherwise the one before */
+            int64_t at = (int64_t)((seconds + file_start_seconds(d->format)) * AV_TIME_BASE);
+            if (mode != RUBRAVIEW_SEEK_KEY_FORWARD || g_ff.av_seek_frame(d->format, -1, at, 0) < 0)
+                g_ff.av_seek_frame(d->format, -1, at, AVSEEK_FLAG_BACKWARD);
             if (d->video) g_ff.avcodec_flush_buffers(d->video);
             if (d->audio) g_ff.avcodec_flush_buffers(d->audio);
             skip_video = skip_audio = seconds;
+            d->skipped = 0;
+            d->landing = mode != RUBRAVIEW_SEEK_EXACT;
+            if (d->landing) {
+                skip_video = -1.0;   /* the first picture is where it lands */
+                skip_audio = 1e18;   /* no sound until then */
+            }
             d->audio_base = seconds;
             d->audio_begun = false;
             ended = false;
@@ -2248,6 +2286,7 @@ static void *ff_open_with(proven_u8str_view_t path, rubraview_media_failure_t *o
     atomic_init(&m->paused, false);
     atomic_init(&m->seek_target_100ns, 0);
     atomic_init(&m->seek_generation, 0);
+    atomic_init(&m->seek_mode, RUBRAVIEW_SEEK_EXACT);
     atomic_init(&m->end_generation, NO_GENERATION);
     atomic_init(&m->pending_audio_stream, -1);
     if (hosting) {   /* RV-176: a child's: the ring and the pictures where the viewer reads them */
@@ -2307,7 +2346,7 @@ static bool ff_peek_frame(void *handle, rubraview_video_frame_t *out_frame) {
         }
         *out_frame = (rubraview_video_frame_t){
             .pixels = s->on_gpu ? NULL : s->pixels, .width = m->width, .height = m->height,
-            .stride = m->width * 4, .pts = s->pts, .duration = s->duration,
+            .stride = m->width * 4, .pts = s->pts, .duration = s->duration, .preview = s->preview,
             .gpu_texture = s->on_gpu ? (const void*)s->texture : NULL,   /* RV-149 */
             .gpu_subresource = 0,
         };
@@ -2326,12 +2365,18 @@ static size_t ff_frames_ready(void *handle) {
     return m ? rubraview_spsc_count(m->ringp) : 0;
 }
 
-static void ff_seek(void *handle, double seconds) {
+static void ff_seek(void *handle, double seconds, rubraview_seek_mode_t mode) {
     ff_media_t *m = (ff_media_t*)handle;
     if (!m || m->station) return;   /* RV-157: a live station has nowhere to wind to */
     if (!(seconds > 0.0)) seconds = 0.0;
     atomic_store_explicit(&m->seek_target_100ns, (int64_t)llround(seconds * 1e7), memory_order_relaxed);
+    atomic_store_explicit(&m->seek_mode, (int32_t)mode, memory_order_relaxed);
     m->consumer_generation = atomic_fetch_add_explicit(&m->seek_generation, 1, memory_order_release) + 1;
+}
+
+static void ff_read_limit(void *handle, uint64_t bytes) {
+    ff_media_t *m = (ff_media_t*)handle;
+    if (m && bytes) atomic_store_explicit(&m->read_limit, bytes, memory_order_release);   /* the decode thread applies it */
 }
 
 static bool ff_finished(void *handle) {
@@ -2582,6 +2627,8 @@ void rubraview_ffmpeg_host_apply(void *handle, rubraview_mhost_wanted_t *wanted,
     if (!m || !wanted || !applied) return;
     int32_t paused = atomic_load_explicit(&wanted->paused, memory_order_acquire) != 0;
     if (paused != applied->paused) { ff_set_paused(m, paused); applied->paused = paused; }
+    uint64_t limit = atomic_exchange_explicit(&wanted->read_limit, 0, memory_order_acq_rel);   /* RV-261 */
+    if (limit) ff_read_limit(m, limit);
     int32_t gain = atomic_load_explicit(&wanted->gain_millionths, memory_order_acquire);
     if (gain != applied->gain_millionths && gain >= 0 && gain <= 4000000) { ff_set_gain(m, gain / 1e6); applied->gain_millionths = gain; }
     uint32_t audio = atomic_load_explicit(&wanted->audio_serial, memory_order_acquire);
@@ -2592,7 +2639,9 @@ void rubraview_ffmpeg_host_apply(void *handle, rubraview_mhost_wanted_t *wanted,
     uint64_t generation = atomic_load_explicit(&wanted->seek_generation, memory_order_acquire);
     if (generation != applied->seek_generation && !m->station) {
         int64_t target = atomic_load_explicit(&wanted->seek_100ns, memory_order_acquire);
+        int32_t mode = atomic_load_explicit(&wanted->seek_mode, memory_order_acquire);
         atomic_store_explicit(&m->seek_target_100ns, target > 0 ? target : 0, memory_order_relaxed);
+        atomic_store_explicit(&m->seek_mode, mode >= RUBRAVIEW_SEEK_EXACT && mode <= RUBRAVIEW_SEEK_KEY_FORWARD ? mode : RUBRAVIEW_SEEK_EXACT, memory_order_relaxed);
         atomic_store_explicit(&m->seek_generation, generation, memory_order_release);   /* the viewer's own number */
         applied->seek_generation = generation;
     }
@@ -2629,6 +2678,7 @@ static const rubraview_media_backend_api_t FFMPEG_API = {
     .pop_frame = ff_pop_frame,
     .frames_ready = ff_frames_ready,
     .seek = ff_seek,
+    .read_limit = ff_read_limit,
     .finished = ff_finished,
     .sound_over = ff_sound_over,
     .set_paused = ff_set_paused,

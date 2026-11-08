@@ -1647,6 +1647,12 @@ filename code page, the memory cap). Some worth knowing:
   a frame that starts within a refresh is shown at once, mixed with the one
   before it by how much of that refresh is still the earlier frame's, as
   mpv's interpolation does. Not with HDR output.
+- **Video** › **Arrows seek to keyframes** (off): `Left` and `Right` (and the
+  long seeks) land on a keyframe at once, as other players do: forward the
+  one at or after the place, back the one before. Off, a seek goes to the
+  exact frame and shows the keyframe it starts from first, so something new
+  is on screen at once even when the exact frame takes a moment to decode.
+  The seek bar, frame steps and the repeat are always exact.
 - **Video** also has the subtitle's **font** (type a family's name, such
   as `Malgun Gothic`) and **colour**, and **Preferred sound** and
   **Preferred subtitles**: a language as films name it (`kor`, `eng`,
@@ -1692,6 +1698,15 @@ filename code page, the memory cap). Some worth knowing:
   read ahead and kept behind (up to 99 each; as many as the memory holds,
   the nearest first); **Always strip metadata on export** starts Export with
   that box ticked.
+- **Cache** › **Read into memory, up to** (2048 MB): a film is read into
+  memory as it plays, its start first and then on to the end, so seeking and
+  playing never wait for the disk or the network. It never takes so much that
+  less than a fifth of the computer's memory stays free, and always takes at
+  least 64 MB; a film larger than that keeps the part around where it plays.
+  The memory is given back when the film closes. 0 MB: none. Once a film has
+  played steadily for a few seconds, the next film in the folder is opened
+  and its start read, so moving on to it shows it at once. The information
+  window's Live rows say **Film in memory**.
 - **Keys › Use keymap.ini** off uses the built-in keys whatever the file says.
 
 **H** on the title bar puts the title bar and the Floating Widget away, so nothing

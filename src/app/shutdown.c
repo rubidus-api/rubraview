@@ -82,6 +82,8 @@ void app_end(app_state_t *app) {
     }
 
     media_close(app);
+    film_ahead_drop(app);
+    media_close_wait();   /* RV-261: the films still closing off the UI thread */
     unload_all_pages(app);
     source_close(app);
     secure_wipe(rubraview_mem_mut(app->passwords, sizeof(app->passwords)));   /* owner, 2026-10-01: memory only, and not after */

@@ -300,9 +300,12 @@ check:
 	@sh scripts/project-check.sh
 	@sh scripts/context-budget.sh
 
-MINGW_CC ?= x86_64-w64-mingw32-gcc
+# The UCRT toolchain (owner, 2026-11-08: "ucrt 의존 빌드가 더 바람직해 보이는데"): the executable links the
+# Universal C Runtime that Windows 10/11 carry (Windows 7 SP1 with KB2999226), not the old msvcrt.
+MINGW_PREFIX ?= x86_64-w64-mingw32ucrt-
+MINGW_CC ?= $(MINGW_PREFIX)gcc
 
-MINGW_AR ?= x86_64-w64-mingw32-ar
+MINGW_AR ?= $(MINGW_PREFIX)ar
 
 build/fulta-win/vendor/bzip2_alz/%.o: $(FULTA)/vendor/bzip2_alz/%.c
 	@mkdir -p $(dir $@)
@@ -373,7 +376,7 @@ $(AVIF_LIB_WIN): $(AVIF_OBJS_WIN) $(DAV1D_OBJS_WIN)
 	$(MINGW_AR) rcs $@ $^
 
 # The icon and the version Explorer shows (owner, 2026-09-29).
-MINGW_WINDRES ?= x86_64-w64-mingw32-windres
+MINGW_WINDRES ?= $(MINGW_PREFIX)windres
 RES_WIN = build/rubraview-res.o
 $(RES_WIN): src/app/rubraview.rc resources/distribution/rubraview.ico $(wildcard resources/distribution/rubraview-*.ico) include/rubraview/version.h
 	@mkdir -p build
@@ -413,8 +416,11 @@ win64: $(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) $(AVIF_LIB_WIN) $(JPEG
 		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) \
 		$(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) $(AVIF_LIB_WIN) -lbcrypt \
 		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid -limm32 -lcomdlg32 -lwinspool -lruntimeobject \
+		-static \
 		-o dist/$(EXE_NAME)
 	@echo "Linked: dist/$(EXE_NAME)"
+	@# No DLL beside it (D-90): a toolchain whose threads are winpthread must not make one needed.
+	@! $(MINGW_PREFIX)objdump -p dist/$(EXE_NAME) | grep -qi 'DLL Name: lib' || { echo "win64: dist/$(EXE_NAME) imports a lib*.dll"; exit 1; }
 
 # A diagnostic, not part of the viewer: it asks a Windows machine which
 # media formats it can decode by itself. That question cannot be answered

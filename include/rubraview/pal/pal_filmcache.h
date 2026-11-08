@@ -28,9 +28,19 @@ void rubraview_pal_filmcache_settings(char *folder, size_t cap, uint64_t *limit_
 /* The folder the copies go to (the default when none was set), UTF-8. */
 void rubraview_pal_filmcache_folder(char *out, size_t cap);
 
-/* A stream over `path` through its copy; NULL when the cache is off, the file is not on a network
-   drive or is smaller than RUBRAVIEW_FILMCACHE_FLOOR, or anything fails: then read the file as before. */
+/* RV-261: the most of a film read into memory (Settings › Cache; 0: none), in the viewer and (from each open
+   request) in the FFmpeg child. */
+void rubraview_pal_filmcache_configure_memory(uint64_t bytes);
+uint64_t rubraview_pal_filmcache_memory_setting(void);
+
+/* A stream over `path`: through its copy on a network drive (when the cache is on), and — RV-261 — read into memory
+   as it plays, local or not (when the memory setting is on). NULL when neither applies, the file is smaller than
+   RUBRAVIEW_FILMCACHE_FLOOR, or anything fails: then read the file as before. `head_only`: a film opened ahead,
+   which reads only its head into memory until rubraview_pal_filmcache_read_limit says more. */
 rubraview_filmcache_stream_t *rubraview_pal_filmcache_open(const wchar_t *path);
+rubraview_filmcache_stream_t *rubraview_pal_filmcache_open_ex(const wchar_t *path, bool head_only);
+/* RV-261: how much of the film memory reads ahead: `bytes` from its start (a film opened ahead), UINT64_MAX all. */
+void rubraview_pal_filmcache_read_limit(rubraview_filmcache_stream_t *stream, uint64_t bytes);
 uint64_t rubraview_pal_filmcache_size(const rubraview_filmcache_stream_t *stream);
 /* Up to `len` bytes at `at`; `*got` fewer only at the end. False on a read that failed. */
 bool rubraview_pal_filmcache_read(rubraview_filmcache_stream_t *stream, uint64_t at, proven_mem_mut_t dst_view, uint32_t *got);
@@ -41,6 +51,8 @@ void *rubraview_pal_filmcache_istream(rubraview_filmcache_stream_t *stream);
 
 typedef struct rubraview_filmcache_stats {
     uint64_t from_copy, from_source;   /* bytes served since the program started */
+    uint64_t from_memory;              /* RV-261: bytes served from memory */
+    uint64_t memory_held, memory_room; /* RV-261: the film last opened: bytes in memory, of how many */
     uint64_t filled, blocks;           /* the copy last opened: its blocks filled, of how many */
     bool     open;                     /* a film is read through the cache now */
 } rubraview_filmcache_stats_t;

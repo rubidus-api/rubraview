@@ -424,5 +424,9 @@ void rubraview_info_add_live(proven_arena_t *arena, rubraview_info_t *info, cons
         rubraview_info_addf(arena, info, T("Network film"), T("{:.1} MB/s from the copy, {:.1} MB/s from the network; the copy {:.0} % here"),
                             PROVEN_ARG((double)live->from_copy / span / 1e6), PROVEN_ARG((double)live->from_network / span / 1e6),
                             PROVEN_ARG((double)(live->copy_blocks ? 100.0 * (double)live->copy_filled / (double)live->copy_blocks : 0.0)));
+    if (live->memory_room > 0)   /* RV-261 */
+        rubraview_info_addf(arena, info, T("Film in memory"), T("{} of {} MB; {:.1} MB/s read from it"),
+                            PROVEN_ARG((unsigned long long)(live->memory_held >> 20)), PROVEN_ARG((unsigned long long)(live->memory_room >> 20)),
+                            PROVEN_ARG((double)live->from_memory / span / 1e6));
     rubraview_info_addf(arena, info, T("Timer"), "{}", PROVEN_ARG(live->fine_timer ? T("1 ms") : T("Windows' default (15.6 ms)")));
 }

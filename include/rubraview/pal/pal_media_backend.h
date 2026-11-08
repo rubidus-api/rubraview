@@ -26,7 +26,9 @@ typedef struct rubraview_media_backend_api {
     bool  (*peek_frame)(void *impl, rubraview_video_frame_t *out_frame);
     void  (*pop_frame)(void *impl);
     size_t (*frames_ready)(void *impl);
-    void  (*seek)(void *impl, double seconds);
+    void  (*seek)(void *impl, double seconds, rubraview_seek_mode_t mode);
+    /** RV-261: memory reads `bytes` of the film ahead (UINT64_MAX all). May be NULL. */
+    void  (*read_limit)(void *impl, uint64_t bytes);
     bool  (*finished)(void *impl);
     bool  (*sound_over)(void *impl);   /* the device holds no sound to play; NULL: never */
     void  (*set_paused)(void *impl, bool paused);

@@ -283,7 +283,7 @@ bool rubraview_mhost_slot_take(const rubraview_mhost_slot_t *w, rubraview_mhost_
     if (!w || !out) return false;
     rubraview_mhost_slot_t s;
     proven_sys_mem_copy(&s, w, sizeof s);
-    if (s.on_gpu > 1 || !isfinite(s.pts) || !isfinite(s.duration) || s.duration < 0.0 || s.duration > 3600.0) return false;
+    if (s.on_gpu > 1 || s.flags > RUBRAVIEW_MHOST_SLOT_PREVIEW || !isfinite(s.pts) || !isfinite(s.duration) || s.duration < 0.0 || s.duration > 3600.0) return false;
     if (s.pts < -86400.0 || s.pts > 1e9) return false;
     if (s.on_gpu && s.shared_handle == 0) return false;
     *out = s;

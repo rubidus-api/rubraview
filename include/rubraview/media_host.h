@@ -101,8 +101,9 @@ typedef struct rubraview_mhost_slot {
     uint64_t generation;
     uint64_t shared_handle;   /* the slot texture's (IDXGIResource::GetSharedHandle); 0 until made */
     uint32_t on_gpu;
-    uint32_t pad;
+    uint32_t flags;           /* RV-261: RUBRAVIEW_MHOST_SLOT_PREVIEW */
 } rubraview_mhost_slot_t;
+#define RUBRAVIEW_MHOST_SLOT_PREVIEW 1u   /* the keyframe a seek landed on, before the exact frame */
 
 /* Written by the viewer. */
 typedef struct rubraview_mhost_wanted {
@@ -110,6 +111,8 @@ typedef struct rubraview_mhost_wanted {
     _Atomic int32_t  quit;
     _Atomic int64_t  seek_100ns;
     _Atomic uint64_t seek_generation;    /* set after seek_100ns; the frames of older ones are skipped */
+    _Atomic int32_t  seek_mode;          /* RV-261: rubraview_seek_mode_t, set with seek_100ns */
+    _Atomic uint64_t read_limit;         /* RV-261: how much of the film memory reads; UINT64_MAX all */
     _Atomic int32_t  gain_millionths;
     _Atomic int32_t  audio_stream;
     _Atomic uint32_t audio_serial;       /* a new track asked */
@@ -195,6 +198,7 @@ typedef struct rubraview_mhost_block {
     _Atomic uint64_t heartbeat;          /* the child counts while it lives */
     /* RV-216: the child's network film cache, for the viewer's Live rows (numbers only, clamped there) */
     _Atomic uint64_t cache_from_copy, cache_from_source, cache_filled, cache_blocks;
+    _Atomic uint64_t cache_from_memory, cache_memory_held, cache_memory_room;   /* RV-261 */
     _Atomic uint32_t cache_open;
     _Atomic uint32_t log_used;
     char     log[RUBRAVIEW_MHOST_LOG];   /* FFmpeg's last words */
