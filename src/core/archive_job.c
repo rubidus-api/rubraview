@@ -132,6 +132,17 @@ bool rubraview_archive_free_folder_name(proven_u8str_view_t path, bool (*exists)
 static proven_u8str_view_t view(const char *s) { return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)s, .size = s ? proven_cstr_len(s) : 0 }; }
 static bool exists_fn(proven_u8str_view_t path) { return rubraview_pal_fs_exists(path); }
 
+/* D-319: an entry's time in seconds since the epoch, UTC; 0 when it has none. A time FultaArc names as the
+   archive's local wall clock (a DOS time) is read in this machine's zone, as Windows reads it. */
+static int64_t entry_seconds(const fulta_arc_entry_t *e) {
+    if (!(e->flags & FULTA_ARC_ENTRY_HAS_MTIME)) return 0;
+    int64_t s = e->mtime / 1000000000;
+#ifdef FULTA_ARC_ENTRY_MTIME_LOCAL
+    if (e->flags & FULTA_ARC_ENTRY_MTIME_LOCAL) s = rubraview_pal_local_civil_to_utc(s);
+#endif
+    return s;
+}
+
 /* D-263: a split set's names. Volume `i` of the set named `set` ("x.7z", "x.zip"), not its last (ZIP's last is the
    set's own name); false past the name's room. */
 static bool volume_name(rubraview_pack_format_t format, const char *set, uint32_t i, char *out, size_t cap) {
@@ -373,7 +384,7 @@ rubraview_archive_result_t rubraview_archive_index_read(const char *archive, rub
         proven_sys_mem_copy(it->name, name, len);
         it->name[len] = '\0';
         it->size = e->size;
-        it->mtime = (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? e->mtime / 1000000000 : 0;
+        it->mtime = entry_seconds(e);
         it->is_dir = (e->flags & FULTA_ARC_ENTRY_DIR) != 0;
         it->encrypted = (e->flags & FULTA_ARC_ENTRY_ENCRYPTED) != 0;
     }
@@ -510,7 +521,7 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
                 parked_cap = cap;
             }
             job->parked[job->parked_count++] = (rubraview_extract_parked_t){
-                .index = i, .size = e->size, .mtime = (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? e->mtime / 1000000000 : 0,
+                .index = i, .size = e->size, .mtime = entry_seconds(e),
                 .path = rubraview_strdup(path) };
             atomic_fetch_add(&job->done, e->size);
             continue;
@@ -552,7 +563,7 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
             say(job->why, sizeof job->why, T("it could not be written"), final);
             continue;
         }
-        if (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) (void)rubraview_pal_fs_set_mtime(view(final), e->mtime / 1000000000);
+        if (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) (void)rubraview_pal_fs_set_mtime(view(final), entry_seconds(e));
         job->written++;
         atomic_fetch_add(&job->files, 1);
     }

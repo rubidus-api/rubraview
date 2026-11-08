@@ -822,6 +822,17 @@ bool rubraview_pal_fs_set_mtime(proven_u8str_view_t path, int64_t mtime) {
     return ok != 0;
 }
 
+int64_t rubraview_pal_local_civil_to_utc(int64_t local_as_utc) {
+    if (local_as_utc < -11644473600LL) return local_as_utc;
+    ULARGE_INTEGER u = { .QuadPart = (ULONGLONG)(local_as_utc + 11644473600LL) * 10000000ULL };
+    FILETIME ft = { .dwLowDateTime = u.LowPart, .dwHighDateTime = u.HighPart }, out;
+    SYSTEMTIME local, utc;
+    if (!FileTimeToSystemTime(&ft, &local) || !TzSpecificLocalTimeToSystemTime(NULL, &local, &utc) ||
+        !SystemTimeToFileTime(&utc, &out)) return local_as_utc;
+    u.LowPart = out.dwLowDateTime; u.HighPart = out.dwHighDateTime;
+    return (int64_t)(u.QuadPart / 10000000ULL) - 11644473600LL;
+}
+
 /* ---- RV-220 (D-275): wide formatting through proven's formatter (pal_wide.h) ---- */
 
 static _Thread_local char g_wfmt_scratch[RUBRAVIEW_WFMT_SCRATCH];

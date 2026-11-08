@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <time.h>
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/path.h"
 
@@ -418,4 +419,13 @@ bool rubraview_pal_fs_set_mtime(proven_u8str_view_t path, int64_t mtime) {
     z[path.size] = '\0';
     struct timespec times[2] = { { .tv_nsec = UTIME_OMIT }, { .tv_sec = (time_t)mtime, .tv_nsec = 0 } };
     return utimensat(AT_FDCWD, z, times, 0) == 0;
+}
+
+int64_t rubraview_pal_local_civil_to_utc(int64_t local_as_utc) {
+    time_t t = (time_t)local_as_utc;
+    struct tm civil;
+    if (!gmtime_r(&t, &civil)) return local_as_utc;
+    civil.tm_isdst = -1;   /* the zone's rule says whether summer time holds */
+    time_t utc = mktime(&civil);
+    return utc == (time_t)-1 ? local_as_utc : (int64_t)utc;
 }

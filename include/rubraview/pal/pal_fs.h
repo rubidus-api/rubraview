@@ -95,6 +95,14 @@ bool rubraview_pal_fs_stat(proven_arena_t *arena, proven_u8str_view_t path, rubr
 /** RV-129: give a file the modified time `mtime` (seconds since the Unix epoch); false when it cannot. */
 bool rubraview_pal_fs_set_mtime(proven_u8str_view_t path, int64_t mtime);
 
+/**
+ * D-319: `local_as_utc` holds a wall-clock time of this machine's zone counted as if it were UTC (an archive's DOS
+ * time: ZIP without a UTC field, ALZ, RAR 4, EGG, LHA); the same moment in seconds since the Unix epoch, UTC, as
+ * Windows reads a DOS time. The zone's own rule decides an hour that a change of summer time makes twice or never.
+ * `local_as_utc` itself when it cannot be converted.
+ */
+int64_t rubraview_pal_local_civil_to_utc(int64_t local_as_utc);
+
 bool rubraview_pal_fs_exists(proven_u8str_view_t path);
 
 /**
