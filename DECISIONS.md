@@ -3754,3 +3754,31 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: the build host's `x86_64-w64-mingw32-gcc` was gone, `x86_64-w64-mingw32ucrt-gcc` (GCC 14, posix threads) in its place. Asked, the owner: "어느 쪽이 더 좋은지 판단해서 진행해 줘요. 하지만 나는 ucrt 의존 빌드가 더 바람직해 보이는데 어떤가요?" The released 1.39.98 already imported the UCRT (`api-ms-win-crt-*`), so the runtime does not change; the new compiler alone made the program need `libwinpthread-1.dll`.
 - Decision: the Makefile names its tools by `MINGW_PREFIX` (`x86_64-w64-mingw32ucrt-` as it comes); the executable links `-static` (libgcc and winpthread inside, Windows' DLLs as before), and `make win64` fails when it imports any `lib*.dll`; `scripts/package.sh` lists imports with the same prefix's objdump.
 - Consequences: the executable's imports are 1.39.98's to the letter. Windows 7 SP1 needs the UCRT update (KB2999226), as it already did.
+
+## D-315: The Main Window Drawn Only When Something Changed, After An Input Too (RV-262)
+
+- Date: 2026-11-08
+- Context: RV-166 (D-199) found that a picture at rest costs nothing once settled, but in the 3 s after an input (`IDLE_REDRAW_GRACE`) every pass drew, whether anything changed or not; three ways were left for the owner. The owner: "화면 다시 그리기는 바뀐 것이 있을때만 다시 그리기로 하고" (B).
+- Decision: in the grace the main window draws on the pass of an input and the one after it, and otherwise only when the scene's summary changed, something moves by itself (`others_moving`, a transition) or a film picture is new. The summary gains what lit or moved only because every pass drew: the pointer's place, a caret's blink phase while a box takes text, the widget's size shown after the wheel, a menu's armed "Delete?", a transition running.
+- Consequences: a change the summary does not name still shows, because the input's own pass draws; a change that comes later from a timer and is not named shows at the next ten-second frame — the risk B carries, watched with T362 (a frame seconds late), still in Later. On the VM five Shift taps cost 0 ms of CPU against 16 ms (the clock's resolution is 15.6 ms, so the measure is coarse).
+
+## D-316: The File Keys On The Open-File Screen's Own Picks (RV-263)
+
+- Date: 2026-11-08
+- Context: since D-304 (RV-251) the open-file screen let no key reach the picture behind it, so Delete, rename and copy / move to a folder did nothing there (BACKLOGS, the D-304 follow-up); the owner: "나머지도 다 계속 진행 바랍니다".
+- Decision: `rubraview_keymap_resolve_picker` also lets through delete_file, rename_file, copy_to_folder and move_to_folder; `picker_file_key` turns them on the screen's picks, or on the tile with the focus (picked for it): Delete as the Recycle button, pressed twice; rename the rename box; copy / move as their buttons (a number folder, or 0 and the folder box).
+- Consequences: the keys follow keymap.ini's rebinding; nothing acts behind the screen still. Delete asks "press Recycle again", in the button's words.
+
+## D-317: Extracting Through The Clash Check (RV-258's Last Step)
+
+- Date: 2026-11-08
+- Context: the RV-258 plan (D-310), step 4: "Extracting into a folder lists the entries first and goes through the same check. The clashes are asked in the same window."
+- Decision: the extraction parks an entry whose name is taken (`RUBRAVIEW_EXISTS_PARK`) and writes the rest; the parked entries are rows of the clashes window; the answered ones of an archive and folder are written out again by a rule each (`rules`): overwrite (the one there recycled first), keep both, only the same ones (`RUBRAVIEW_EXISTS_SAME`: written aside, compared, the same left), skip.
+- Consequences: an extraction no longer numbers a taken name unasked; "Extract into a folder of its name" still makes a new folder when that one is there (nothing to ask). The rows wait while the window is closed and come back with Ctrl+Shift+K, as the copies' do. Seen on the VM: a ZIP's time shown 9 h off in the window (BACKLOGS).
+
+## D-318: The Log Window Scrolled And Marked As The Information Window (RV-264)
+
+- Date: 2026-11-08
+- Context: the D-308 follow-up in BACKLOGS: "The log window's scroll bar (RV-170's), and marking part of it to copy as the information window does."
+- Decision: the log window takes RV-170's scroll bar (`RVSB_LOG`) and the grid marking of the information window: a drag marks, Ctrl+C copies the marked cells or everything, Ctrl+A marks all.
+- Consequences: the Copy all button keeps copying everything; marking stops the window following the newest line until End or the foot is reached again.

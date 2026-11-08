@@ -1702,7 +1702,12 @@ void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (picker_handle_key(app, combo)) return;
     /* RV-251: the open-file screen is the window's own screen, not a sheet over the picture: what it does not take
        reaches the window's common actions and the ways to open, never the picture, film or file behind it */
-    if (app->picker_open) { handle_action(app, rubraview_keymap_resolve_picker(&app->keymap, combo)); return; }
+    if (app->picker_open) {
+        proven_u8str_view_t action = rubraview_keymap_resolve_picker(&app->keymap, combo);
+        if (picker_file_key(app, action)) return;   /* RV-263: Delete, rename, copy / move to a folder on its picks */
+        handle_action(app, action);
+        return;
+    }
     /* §3.7.1, RV-184 (D-219): the contexts of what is on screen, in the order rubraview_keymap_mode_chain gives —
        the slide show's while one runs, the kind of file's own, then navigation, file and common. One table, so
        what a key does here is what the Keymap page and F1 say it does. */

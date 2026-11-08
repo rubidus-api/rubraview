@@ -7,6 +7,14 @@
  */
 #include "app.h"
 #include "rubraview/archive_job.h"
+#include "rubraview/fileop.h"
+
+/* RV-258's last step: an entry whose name is taken, parked by the extraction to be asked in the clashes window */
+typedef struct xpark {
+    size_t archive;                           /* which of the work's archives */
+    char root[RUBRAVIEW_ARCHIVE_PATH];        /* the folder it went into */
+    rubraview_extract_parked_t p;
+} xpark_t;
 
 typedef struct archwork {
     bool compress;
@@ -21,6 +29,9 @@ typedef struct archwork {
     char password[256];
     rubraview_extract_job_t ex;
     uint32_t written, skipped, failed;
+    xpark_t *parked;                          /* RV-258: the names taken, every archive's */
+    size_t parked_n, parked_cap;
+    uint8_t *rules;                           /* RV-258: a second extraction, an answer's rule for each of `only` */
     char last_root[RUBRAVIEW_ARCHIVE_PATH];
     /* compressing */
     char **sources;
@@ -50,6 +61,9 @@ static void work_free(archwork_t *w) {
     free_list(w->archives, w->count);
     free_list(w->sources, w->source_count);
     rubraview_free(w->only);
+    for (size_t i = 0; i < w->parked_n; ++i) rubraview_free(w->parked[i].p.path);
+    rubraview_free(w->parked);
+    rubraview_free(w->rules);
     secure_wipe(rubraview_mem_mut(w->password, sizeof w->password));
     rubraview_free(w);
 }
@@ -75,12 +89,31 @@ static DWORD WINAPI work_main(void *arg) {
             ex->archive = w->archives[w->at];
             ex->dest = dest;
             ex->mode = w->mode;
-            ex->exists = RUBRAVIEW_EXISTS_NUMBER;
+            ex->exists = RUBRAVIEW_EXISTS_PARK;   /* RV-258: a name taken is asked, not numbered unasked */
+            ex->rules = w->rules;
             ex->password = w->password[0] ? w->password : NULL;
             ex->only = w->only;
             ex->only_count = w->only_count;
             ex->inner = w->only ? w->inner : NULL;
             rubraview_extract_run(ex);
+            for (size_t k = 0; k < ex->parked_count; ++k) {   /* kept for the main thread, which asks */
+                if (w->parked_n == w->parked_cap) {
+                    size_t cap = w->parked_cap ? w->parked_cap * 2 : 16;
+                    xpark_t *grown = rubraview_alloc(cap * sizeof *grown);
+                    if (!grown) { rubraview_free(ex->parked[k].path); continue; }
+                    if (w->parked) proven_sys_mem_copy(grown, w->parked, w->parked_n * sizeof *grown);
+                    rubraview_free(w->parked);
+                    w->parked = grown;
+                    w->parked_cap = cap;
+                }
+                xpark_t *x = &w->parked[w->parked_n++];
+                x->archive = w->at;
+                rubraview_fmt(x->root, sizeof x->root, "{}", PROVEN_ARG(ex->root));
+                x->p = ex->parked[k];
+            }
+            rubraview_free(ex->parked);
+            ex->parked = NULL;
+            ex->parked_count = 0;
             w->written += ex->written; w->skipped += ex->skipped; w->failed += ex->failed;
             if (ex->root[0]) rubraview_fmt(w->last_root, sizeof w->last_root, "{}", PROVEN_ARG(ex->root));
             if (ex->result == RUBRAVIEW_ARCHIVE_CANCELLED || ex->result == RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED ||
@@ -633,8 +666,12 @@ static void say_progress(app_state_t *app, archwork_t *w) {
     osd_say(app, cstr(line));
 }
 
+static size_t xrows_take(app_state_t *app, archwork_t *w);   /* RV-258, below */
+static void xrows_carry_out(app_state_t *app);
+
 void archwork_poll(app_state_t *app, bool quitting) {
     archwork_t *w = app->archwork;
+    if (!w && !quitting) xrows_carry_out(app);   /* RV-258: what was answered about names taken */
     if (!w) return;
     if (quitting) atomic_store(w->compress ? &w->pk.cancel : &w->ex.cancel, true);
     if (!quitting && !InterlockedCompareExchange(&w->done, 0, 0)) { say_progress(app, w); return; }
@@ -694,6 +731,11 @@ void archwork_poll(app_state_t *app, bool quitting) {
         else if (w->skipped) rubraview_fmt(line, sizeof line, T("extracted {} files into {} ({} left out)"), PROVEN_ARG((unsigned)w->written), PROVEN_ARG(rubraview_bytes_view((const char *)where.ptr, (int)where.size)), PROVEN_ARG((unsigned)w->skipped));
         else rubraview_fmt(line, sizeof line, T("extracted {} files into {}"), PROVEN_ARG((unsigned)w->written), PROVEN_ARG(rubraview_bytes_view((const char *)where.ptr, (int)where.size)));
         if (w->password[0]) password_remember(app, proven_u8str_view_from_cstr(w->password));
+        size_t asked = xrows_take(app, w);   /* RV-258: the names taken, to the clashes window */
+        if (asked) {
+            size_t len = proven_cstr_len(line);
+            rubraview_fmt(line + len, sizeof line - len, T("; {} names already there are asked (Ctrl+Shift+K)"), PROVEN_ARG(asked));
+        }
         if (w->written > 0 && w->last_root[0]) {   /* RV-240: what next, asked */
             rubraview_fmt(app->extract_done_line, sizeof app->extract_done_line, "{}", PROVEN_ARG(line));
             rubraview_fmt(app->extract_done_path, sizeof app->extract_done_path, "{}", PROVEN_ARG(w->last_root));
@@ -705,6 +747,149 @@ void archwork_poll(app_state_t *app, bool quitting) {
     osd_say(app, cstr(line));
     if (app->picker_open) picker_navigate(app, app->picker_dir);
     work_free(w);
+}
+
+/* ---- RV-258's last step: names taken by an extraction, asked with the copies' (D-310) ---- */
+
+typedef struct xrow {
+    size_t id;
+    char *archive, *root, *inner, *coming, *password;
+    size_t entry;
+    char *target;
+    uint64_t csize, tsize;
+    int64_t cmtime, tmtime;
+    int answer;               /* -1 not yet, else a rubraview_fileop_answer_t */
+} xrow_t;
+
+static xrow_t *g_x;
+static size_t g_xn, g_xcap, g_xid;
+static uint32_t g_xversion;
+
+static void xrow_free(xrow_t *r) {
+    rubraview_free(r->archive); rubraview_free(r->root); rubraview_free(r->inner); rubraview_free(r->coming); rubraview_free(r->target);
+    if (r->password) { secure_wipe(rubraview_mem_mut(r->password, proven_cstr_len(r->password))); rubraview_free(r->password); }
+}
+
+/* The work's parked entries become rows of the clashes window. */
+static size_t xrows_take(app_state_t *app, archwork_t *w) {
+    size_t added = 0;
+    for (size_t i = 0; i < w->parked_n; ++i) {
+        xpark_t *x = &w->parked[i];
+        if (g_xn == g_xcap) {
+            size_t cap = g_xcap ? g_xcap * 2 : 32;
+            xrow_t *grown = rubraview_alloc(cap * sizeof *grown);
+            if (!grown) break;
+            if (g_x) proven_sys_mem_copy(grown, g_x, g_xn * sizeof *grown);
+            rubraview_free(g_x);
+            g_x = grown;
+            g_xcap = cap;
+        }
+        rubraview_fs_entry_t st = {0};
+        (void)rubraview_pal_fs_stat(app->arena, proven_u8str_view_from_cstr(x->p.path), &st);
+        char coming[RUBRAVIEW_ARCHIVE_PATH * 2];
+        proven_u8str_view_t name = rubraview_path_basename(proven_u8str_view_from_cstr(x->p.path));
+        (void)rubraview_fmt(coming, sizeof coming, "{}/{}", PROVEN_ARG(w->archives[x->archive]), PROVEN_ARG(name));
+        g_x[g_xn++] = (xrow_t){ .id = ++g_xid, .archive = rubraview_strdup(w->archives[x->archive]), .root = rubraview_strdup(x->root),
+                                .inner = w->only ? rubraview_strdup(w->inner) : NULL, .coming = rubraview_strdup(coming),
+                                .password = w->password[0] ? rubraview_strdup(w->password) : NULL, .entry = x->p.index,
+                                .target = rubraview_strdup(x->p.path), .csize = x->p.size, .tsize = st.size_bytes,
+                                .cmtime = x->p.mtime, .tmtime = st.mtime, .answer = -1 };
+        added++;
+    }
+    if (added) g_xversion++;
+    return added;
+}
+
+size_t archwork_clash_rows(xclash_row_t *out, size_t cap) {
+    size_t n = 0;
+    for (size_t i = 0; i < g_xn; ++i) {
+        if (g_x[i].answer >= 0) continue;
+        if (out && n < cap) out[n] = (xclash_row_t){ .index = g_x[i].id, .coming = g_x[i].coming, .there = g_x[i].target,
+                                                     .csize = g_x[i].csize, .tsize = g_x[i].tsize, .cmtime = g_x[i].cmtime, .tmtime = g_x[i].tmtime };
+        n++;
+    }
+    return n;
+}
+
+uint32_t archwork_clash_version(void) { return g_xversion; }
+
+void archwork_clash_answer(app_state_t *app, size_t id, rubraview_fileop_answer_t answer) {
+    (void)app;
+    for (size_t i = 0; i < g_xn; ++i) if (g_x[i].id == id && g_x[i].answer < 0) { g_x[i].answer = (int)answer; g_xversion++; }
+}
+
+void archwork_clash_answer_all(app_state_t *app, rubraview_fileop_answer_t answer) {
+    (void)app;
+    bool any = false;
+    for (size_t i = 0; i < g_xn; ++i) if (g_x[i].answer < 0) { g_x[i].answer = (int)answer; any = true; }
+    if (any) g_xversion++;
+}
+
+static bool same_text(const char *a, const char *b) { return (!a && !b) || (a && b && rubraview_cstr_cmp(a, b) == 0); }
+
+/* Once a pass, when no other work runs: the answered rows of one archive and folder written out as answered. */
+static void xrows_carry_out(app_state_t *app) {
+    if (app->archwork || g_waiting) return;
+    size_t first = SIZE_MAX;
+    for (size_t i = 0; i < g_xn && first == SIZE_MAX; ++i) if (g_x[i].answer >= 0) first = i;
+    if (first == SIZE_MAX) return;
+    xrow_t lead = g_x[first];
+    size_t n = 0;
+    for (size_t i = 0; i < g_xn; ++i)
+        if (g_x[i].answer >= 0 && same_text(g_x[i].archive, lead.archive) && same_text(g_x[i].root, lead.root) && same_text(g_x[i].inner, lead.inner)) n++;
+    archwork_t *w = rubraview_alloc_zero(1, sizeof *w);
+    size_t *only = w ? rubraview_alloc_zero(n, sizeof *only) : NULL;
+    uint8_t *rules = w ? rubraview_alloc_zero(n, 1) : NULL;
+    char **archives = w ? rubraview_alloc_zero(1, sizeof *archives) : NULL;
+    if (!w || !only || !rules || !archives || !(archives[0] = rubraview_strdup(lead.archive))) {
+        rubraview_free(only); rubraview_free(rules); rubraview_free(archives); rubraview_free(w);
+        return;
+    }
+    size_t k = 0, recycled = 0, kept = 0;
+    for (size_t i = 0; i < g_xn;) {
+        xrow_t *r = &g_x[i];
+        bool mine = r->answer >= 0 && same_text(r->archive, lead.archive) && same_text(r->root, lead.root) && same_text(r->inner, lead.inner);
+        if (!mine) { ++i; continue; }
+        rubraview_fileop_answer_t a = (rubraview_fileop_answer_t)r->answer;
+        uint8_t rule = a == RUBRAVIEW_FILEOP_ANSWER_KEEP_BOTH ? RUBRAVIEW_EXISTS_NUMBER
+                     : a == RUBRAVIEW_FILEOP_ANSWER_SAME_ONLY ? RUBRAVIEW_EXISTS_SAME
+                     : a == RUBRAVIEW_FILEOP_ANSWER_OVERWRITE ? RUBRAVIEW_EXISTS_REPLACE : RUBRAVIEW_EXISTS_SKIP;
+        /* overwrite: the one there to the Recycle Bin first, as a copy's (D-310); refused, it stays and is left */
+        if (rule == RUBRAVIEW_EXISTS_REPLACE) {
+            if (rubraview_pal_fs_recycle(proven_u8str_view_from_cstr(r->target))) recycled++;
+            else rule = RUBRAVIEW_EXISTS_SKIP;
+        }
+        if (rule != RUBRAVIEW_EXISTS_SKIP) { only[k] = r->entry; rules[k] = rule; k++; } else kept++;
+        if (k == 1 && rule != RUBRAVIEW_EXISTS_SKIP && r->password) rubraview_fmt(w->password, sizeof w->password, "{}", PROVEN_ARG(r->password));
+        if (r->inner) rubraview_fmt(w->inner, sizeof w->inner, "{}", PROVEN_ARG(r->inner));
+        rubraview_fmt(w->dest, sizeof w->dest, "{}", PROVEN_ARG(r->root));
+        xrow_free(r);
+        g_x[i] = g_x[--g_xn];
+    }
+    g_xversion++;
+    char line[256];
+    if (k == 0) {
+        rubraview_fmt(line, sizeof line, T("{} names already there left as they were"), PROVEN_ARG(kept));
+        osd_say(app, cstr(line));
+        free_list(archives, 1); rubraview_free(only); rubraview_free(rules); rubraview_free(w);
+        return;
+    }
+    w->archives = archives;
+    w->count = 1;
+    w->mode = RUBRAVIEW_EXTRACT_AS_IS;   /* into the folder the first writing went into, the same names */
+    w->only = only;
+    w->only_count = k;
+    w->rules = rules;
+    if (!lead.inner) w->inner[0] = '\0';
+    app_log(app, "clash", PROVEN_LIT("names taken by an extraction: written out as answered"));
+    (void)work_start(app, w);
+}
+
+void archwork_clash_shutdown(void) {
+    for (size_t i = 0; i < g_xn; ++i) xrow_free(&g_x[i]);
+    rubraview_free(g_x);
+    g_x = NULL;
+    g_xn = g_xcap = 0;
 }
 
 /* The password box's Enter or Esc, when it was asked for the work. True when it was. */

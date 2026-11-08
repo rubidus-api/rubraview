@@ -417,7 +417,7 @@ typedef struct chooser {
    2026-10-26): the panels too — Edit's (a bar to each of its columns), its selection box and its list of edits,
    Export, Print, Batch, the steps, Classify — and the text page. */
 enum { RVSB_NONE = 0, RVSB_LIST, RVSB_RECENT, RVSB_FAVS, RVSB_PICKER, RVSB_CHOOSER, RVSB_FILES, RVSB_SUBS, RVSB_SETTINGS, RVSB_FONTPICK, RVSB_INFO,
-       RVSB_TEXT, RVSB_CHANGES, RVSB_SEL, RVSB_STEPS, RVSB_CLASSIFY,
+       RVSB_TEXT, RVSB_CHANGES, RVSB_SEL, RVSB_STEPS, RVSB_CLASSIFY, RVSB_LOG,
        RVSB_PANEL, RVSB_PANEL_END = RVSB_PANEL + RUBRAVIEW_PANEL_MAX_COLUMNS, RVSB_COUNT = RVSB_PANEL_END };
 
 typedef struct app_state {
@@ -1425,6 +1425,8 @@ typedef struct app_state {
     size_t                 log_row_count, log_built;
     char                   log_message[160];
     rubraview_pal_rect_t   log_btn[3];
+    rubraview_grid_selection_t log_sel;             /* RV-264: what is marked, as in the information window */
+    bool                   log_selecting;
     /* RV-258 (D-310): the window asking about names already there */
     bool                   clash_open, clash_dirty;
     rubraview_window_t    *clash_window;
@@ -1793,6 +1795,7 @@ typedef struct frame_clock {
     uint64_t last_scene_signature;   /* the settled screen last drawn (see scene_signature) */
     double   last_render_seconds;
     double   last_input_seconds;
+    int32_t  input_passes;   /* RV-262: passes left that draw whatever the summary says, after an input */
 } frame_clock_t;
 
 /* ---- functions called across files ---- */
@@ -2337,6 +2340,7 @@ double picker_grid_top(const app_state_t *app, double dpi);
 void picker_history_go(app_state_t *app, bool forward);
 void picker_hold_tick(app_state_t *app);
 bool picker_is_up(const app_state_t *app, size_t index);
+bool picker_file_key(app_state_t *app, proven_u8str_view_t action);   /* RV-263 */
 void picker_layout(app_state_t *app);
 void picker_make_playlist(app_state_t *app);
 rubraview_pal_rect_t picker_nav_rect(const app_state_t *app, double dpi, int which);
@@ -2521,6 +2525,8 @@ void log_show(app_state_t *app);
 void log_close(app_state_t *app);
 void draw_log_window(app_state_t *app);
 size_t log_pump(app_state_t *app);
+bool log_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);   /* RV-264 */
+void log_sb_to(app_state_t *app, size_t first);
 bool filejob_start(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving, int basket, bool from_cut);   /* RV-258 */
 bool filejob_start_viewer(app_state_t *app, proven_u8str_view_t dir, proven_u8str_view_t path, bool moving, int32_t page, proven_u8str_view_t temp_dir);   /* RV-259 */
 bool filejob_busy(void);
@@ -2535,6 +2541,13 @@ bool arcadd_busy(void);
 void arcadd_answer(app_state_t *app, size_t index, rubraview_fileop_answer_t answer);
 void arcadd_answer_all(app_state_t *app, rubraview_fileop_answer_t answer);
 void arcadd_poll(app_state_t *app);
+/* RV-258's last step: names taken by an extraction (archwork.c), asked in the clashes window */
+typedef struct xclash_row { size_t index; const char *coming, *there; uint64_t csize, tsize; int64_t cmtime, tmtime; } xclash_row_t;
+size_t archwork_clash_rows(xclash_row_t *out, size_t cap);
+uint32_t archwork_clash_version(void);
+void archwork_clash_answer(app_state_t *app, size_t id, rubraview_fileop_answer_t answer);
+void archwork_clash_answer_all(app_state_t *app, rubraview_fileop_answer_t answer);
+void archwork_clash_shutdown(void);
 void arcadd_quit(void);
 bool arcadd_asking(void);
 void arcadd_format_answer(app_state_t *app, int which);

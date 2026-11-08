@@ -113,6 +113,24 @@ static void log_scroll_by(app_state_t *app, int32_t lines) {
     app->log_dirty = true;
 }
 
+/* RV-264 (D-308 follow-up): the rows' scroll bar, at the window's right edge, as the information window's. */
+bool log_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi) {
+    if (!app->log_open) return false;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->log_window, &w, &h);
+    int32_t rows = log_visible_rows(app);
+    double ch = app->log_cell_h;
+    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, ch * 0.5, bw, ch * (double)rows },
+                                   .button = bw, .total = (double)app->log_row_count, .shown = (double)rows,
+                                   .first = (double)app->log_scroll, .step = 1.0, .min_thumb = ch };
+    return true;
+}
+
+void log_sb_to(app_state_t *app, size_t first) {
+    app->log_follow = false;
+    log_scroll_by(app, (int32_t)first - app->log_scroll);
+}
+
 #define LOG_BACKGROUND 0xFF16181Cu
 #define LOG_TEXT       0xFFE0E0E0u
 #define LOG_TIME       0xFF7FB2E5u
@@ -138,6 +156,12 @@ void draw_log_window(app_state_t *app) {
         if (index >= app->log_row_count) break;
         proven_u8str_view_t line = app->log_rows[index];
         double y = ch * (0.5 + (double)row);
+        int32_t c0 = 0, c1 = 0;   /* RV-264: what is marked */
+        if (rubraview_grid_selection_row(&app->log_sel, (int32_t)index, &c0, &c1)) {
+            int32_t last = (int32_t)((double)w / cw);
+            if (c1 > last) c1 = last;
+            if (c1 >= c0) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cw * (0.5 + c0), y, cw * (c1 - c0 + 1), ch }, 0x704A90D9u, 0.0);
+        }
         size_t head = line.size < 11 ? line.size : 11;   /* the seconds, in their own colour */
         rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ .ptr = line.ptr, .size = head }, cw * 0.5, y, app->log_font, LOG_TIME);
         if (line.size > head)
@@ -163,6 +187,7 @@ void draw_log_window(app_state_t *app) {
                           PROVEN_ARG(app->log.cap / 1024u), PROVEN_ARG(app->log_message[0] ? "   |   " : ""), PROVEN_ARG(app->log_message));
     if (n > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)foot, (size_t)n < sizeof foot ? (size_t)n : sizeof foot - 1 },
                                               (rubraview_pal_rect_t){ x + 8.0 * dpi, by, (double)w - x - 16.0 * dpi, bh }, 12.0 * dpi, LOG_DIM, RUBRAVIEW_TEXT_LEFT);
+    draw_scrollbar(app, r, RVSB_LOG, app->log_px, app->log_py);   /* RV-264 */
     if (!rubraview_pal_render_end(r)) app->log_dirty = true;
 }
 
@@ -186,6 +211,20 @@ static void log_save(app_state_t *app) {
     app->log_dirty = true;
 }
 
+/* RV-264: Ctrl+C copies what is marked, as the information window does; everything when nothing is. */
+static void log_copy_all(app_state_t *app);
+static void log_copy(app_state_t *app) {
+    if (!app->log_sel.active) { log_copy_all(app); return; }
+    log_build(app);
+    char *text = (char *)rubraview_alloc(1u << 20);
+    if (!text) return;
+    size_t n = rubraview_grid_selection_copy(&app->log_sel, app->log_rows, (int32_t)app->log_row_count, text, 1u << 20);
+    bool ok = n > 0 && rubraview_pal_clipboard_set_text(app->log_window, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n });
+    rubraview_free(text);
+    rubraview_fmt(app->log_message, sizeof app->log_message, "{}", PROVEN_ARG(ok ? T("copied") : T("nothing to copy")));
+    app->log_dirty = true;
+}
+
 static void log_copy_all(app_state_t *app) {
     size_t n = rubraview_log_copy(&app->log, NULL, 0);
     char *text = (char *)rubraview_alloc(n + 1);
@@ -202,6 +241,7 @@ static void log_button(app_state_t *app, int which) {
     else if (which == 1) log_copy_all(app);
     else if (which == 2) {
         rubraview_log_clear(&app->log);
+        app->log_sel.active = false;   /* RV-264 */
         app->log_built = (size_t)-1;
         app->log_scroll = 0;
         app->log_follow = true;
@@ -215,6 +255,15 @@ size_t log_pump(app_state_t *app) {
     rubraview_window_event_t event;
     while (app->log_open && rubraview_pal_window_poll_event(app->log_window, &event)) {
         handled++;
+        int32_t col = 0, row = 0;   /* RV-264: the cell under the pointer, for marking */
+        if (event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN || event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE ||
+            event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_UP) {
+            col = (int32_t)((event.mouse.x - app->log_cell_w * 0.5) / app->log_cell_w);
+            row = app->log_scroll + (int32_t)(event.mouse.y / app->log_cell_h - 0.5);
+            if (col < 0) col = 0;
+            if (row < 0) row = 0;
+            if (row >= (int32_t)app->log_row_count) row = app->log_row_count > 0 ? (int32_t)app->log_row_count - 1 : 0;
+        }
         switch (event.kind) {
             case RUBRAVIEW_WINDOW_EVENT_CLOSE:
                 log_close(app);
@@ -233,17 +282,43 @@ size_t log_pump(app_state_t *app) {
                 app->log_px = event.mouse.x;
                 app->log_py = event.mouse.y;
                 app->log_dirty = true;   /* the buttons light under the pointer */
+                if (scrollbar_motion(app, app->log_window, event.mouse.x, event.mouse.y)) break;   /* RV-264 */
+                (void)scrollbar_hover(app, RVSB_LOG, event.mouse.x, event.mouse.y);
+                if (app->log_selecting) { app->log_sel.end_row = row; app->log_sel.end_col = col; }
                 break;
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
-                for (int i = 0; i < 3; ++i) if (pal_rect_has(app->log_btn[i], event.mouse.x, event.mouse.y)) { log_button(app, i); break; }
+                bool on_button = false;
+                for (int i = 0; i < 3; ++i) if (pal_rect_has(app->log_btn[i], event.mouse.x, event.mouse.y)) { log_button(app, i); on_button = true; break; }
                 if (!app->log_open) return handled;
+                if (on_button) break;
+                if (scrollbar_press(app, RVSB_LOG, event.mouse.x, event.mouse.y)) { app->log_dirty = true; break; }   /* RV-264 */
+                if (event.mouse.y < app->log_btn[0].y) {   /* a drag over the rows marks them */
+                    app->log_sel = (rubraview_grid_selection_t){ true, row, col, row, col };
+                    app->log_selecting = true;
+                    app->log_follow = false;
+                    app->log_message[0] = '\0';
+                    app->log_dirty = true;
+                }
+                break;
+            }
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (scrollbar_release(app, app->log_window)) { app->log_dirty = true; break; }   /* RV-264 */
+                if (!app->log_selecting) break;
+                app->log_selecting = false;
+                if (app->log_sel.anchor_row == app->log_sel.end_row && app->log_sel.anchor_col == app->log_sel.end_col) app->log_sel.active = false;
+                app->log_dirty = true;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN: {
                 rubraview_key_combo_t k = event.key.combo;
                 bool ctrl = (k.modifiers & RUBRAVIEW_MOD_CTRL) != 0, shift = (k.modifiers & RUBRAVIEW_MOD_SHIFT) != 0;
                 if (ctrl && key_is(k, "S")) { log_save(app); break; }
-                if (ctrl && key_is(k, "C")) { log_copy_all(app); break; }
+                if (ctrl && key_is(k, "C")) { log_copy(app); break; }   /* RV-264: what is marked, else all */
+                if (ctrl && key_is(k, "A")) {
+                    app->log_sel = (rubraview_grid_selection_t){ true, 0, 0, (int32_t)app->log_row_count, INT32_MAX / 2 };
+                    app->log_dirty = true;
+                    break;
+                }
                 if (key_is(k, "Escape") || (ctrl && shift && key_is(k, "L"))) { log_close(app); return handled; }
                 if (key_is(k, "Down")) log_scroll_by(app, 1);
                 else if (key_is(k, "Up")) log_scroll_by(app, -1);

@@ -293,6 +293,10 @@ proven_u8str_view_t rubraview_keymap_resolve_picker(const rubraview_keymap_t *ke
     if (proven_u8str_view_eq(found, PROVEN_LIT("open_picker")) || proven_u8str_view_eq(found, PROVEN_LIT("open_folder")) ||
         proven_u8str_view_eq(found, PROVEN_LIT("open_recent_list")))
         return found;
+    /* RV-263: the file keys, for the open-file screen's own picks (the caller acts on them there) */
+    if (proven_u8str_view_eq(found, PROVEN_LIT("delete_file")) || proven_u8str_view_eq(found, PROVEN_LIT("rename_file")) ||
+        proven_u8str_view_eq(found, PROVEN_LIT("copy_to_folder")) || proven_u8str_view_eq(found, PROVEN_LIT("move_to_folder")))
+        return found;
     return PROVEN_LIT("");
 }
 

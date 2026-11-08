@@ -1419,13 +1419,23 @@ others are kept as `name (2)`). A folder already there is merged, its files
 asked about the same way. Close the window and the questions wait;
 `Ctrl+Shift+K` opens it again. `Ctrl+Z` takes the whole copy or move back.
 A move to another drive is copied, compared and only then its source goes
-to the Recycle Bin.
+to the Recycle Bin. Extracting an archive checks its names the same way: what
+is not there yet is written at once, and each name already there waits in
+the same window, the one coming being the archive's entry.
+
+In the open-file screen `Delete` sends what is picked — or, with nothing
+picked, the tile with the focus — to the Recycle Bin (press it twice, as the
+Recycle button), `Ctrl+M` or `F2` renames the tile with the focus, and
+`Ctrl+Shift+C` / `Ctrl+Shift+M` copy or move what is picked to a folder, as
+the Copy and Move buttons do. They never act on the picture behind.
 
 `Ctrl+Shift+L` (or ☰ › Log) opens this window's log: each thing it did —
 files opened, actions, its messages, what Explorer sent, what was dropped,
 and what waited — one line each with the seconds since the window opened.
 **Save as text...** (`Ctrl+S`) writes it to a file, **Copy all** (`Ctrl+C`)
-puts it on the clipboard, **Clear** empties it. It is kept in memory only
+puts it on the clipboard, **Clear** empties it. A drag over the lines marks
+part of them, and `Ctrl+C` then copies only that part (`Ctrl+A` marks all);
+the scroll bar at its right moves through it. It is kept in memory only
 and ends with the window; past its size (Settings › General › Log, 1 MB as
 it comes) the oldest lines go. A file, a drop or an Explorer menu item that
 arrives while the window is asking something or taking typed input waits

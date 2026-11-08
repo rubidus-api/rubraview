@@ -233,6 +233,37 @@ static bool picked(const rubraview_extract_job_t *job, size_t index) {
     return false;
 }
 
+void rubraview_extract_parked_free(rubraview_extract_parked_t *parked, size_t count) {
+    for (size_t i = 0; parked && i < count; ++i) rubraview_free(parked[i].path);
+    rubraview_free(parked);
+}
+
+/* RV-258: what to do with entry `index` when its name is taken: its own rule, or the job's. */
+static rubraview_exists_rule_t rule_of(const rubraview_extract_job_t *job, size_t index) {
+    if (job->only && job->rules)
+        for (size_t i = 0; i < job->only_count; ++i) if (job->only[i] == index) return (rubraview_exists_rule_t)job->rules[i];
+    return job->exists;
+}
+
+/* RV-258: whether `a` (`size` bytes, just written) and `b` hold the same bytes. An empty file maps to nothing:
+   the one there is the same when it maps to nothing or to no bytes either. */
+static bool same_bytes(proven_u8str_view_t a, proven_u8str_view_t b, uint64_t size) {
+    rubraview_fs_mapping_t ma = {0}, mb = {0};
+    if (size == 0) {
+        bool empty = !rubraview_pal_fs_map(b, &mb) || mb.size == 0;
+        if (mb.os) rubraview_pal_fs_unmap(&mb);
+        return empty;
+    }
+    bool same = rubraview_pal_fs_map(a, &ma) && rubraview_pal_fs_map(b, &mb) && ma.size == mb.size;
+    for (uint64_t at = 0; same && at < ma.size; at += 1u << 30) {
+        uint64_t n = ma.size - at < (1u << 30) ? ma.size - at : (1u << 30);
+        same = proven_sys_mem_cmp(ma.data + at, mb.data + at, (size_t)n) == 0;
+    }
+    if (ma.os) rubraview_pal_fs_unmap(&ma);
+    if (mb.os) rubraview_pal_fs_unmap(&mb);
+    return same;
+}
+
 /* The entry's name as it goes under the root: `inner` left off, each part made safe, the root's separator between. */
 static bool place_of(const rubraview_extract_job_t *job, const char *name, char sep, char *out, size_t cap) {
     size_t skip = 0;
@@ -417,7 +448,10 @@ size_t rubraview_archive_index_under(const rubraview_archive_index_t *index, pro
 void rubraview_extract_run(rubraview_extract_job_t *job) {
     if (!job) return;
     job->result = RUBRAVIEW_ARCHIVE_DONE;
-    job->written = job->skipped = job->failed = 0;
+    job->written = job->skipped = job->failed = job->same = 0;
+    job->parked = NULL;
+    job->parked_count = 0;
+    size_t parked_cap = 0;
     job->why[0] = job->root[0] = '\0';
     fulta_arc_t *arc = NULL;
     fulta_arc_err_t err = open_archive(job->archive, job->codepage, job, &arc);
@@ -464,8 +498,25 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
         if (last) { *last = '\0'; (void)rubraview_pal_fs_make_dirs(view(path)); *last = sep; }
         proven_u8str_view_t pv = view(path);
         bool there = rubraview_pal_fs_exists(pv);
-        if (there && job->exists == RUBRAVIEW_EXISTS_SKIP) { job->skipped++; atomic_fetch_add(&job->done, e->size); continue; }
-        if (there && job->exists == RUBRAVIEW_EXISTS_NUMBER) {
+        rubraview_exists_rule_t rule = rule_of(job, i);
+        if (there && rule == RUBRAVIEW_EXISTS_PARK) {   /* RV-258: kept to be asked */
+            if (job->parked_count == parked_cap) {
+                size_t cap = parked_cap ? parked_cap * 2 : 16;
+                rubraview_extract_parked_t *grown = (rubraview_extract_parked_t *)rubraview_alloc(cap * sizeof *grown);
+                if (!grown) { job->failed++; continue; }
+                if (job->parked) proven_sys_mem_copy(grown, job->parked, job->parked_count * sizeof *grown);
+                rubraview_free(job->parked);
+                job->parked = grown;
+                parked_cap = cap;
+            }
+            job->parked[job->parked_count++] = (rubraview_extract_parked_t){
+                .index = i, .size = e->size, .mtime = (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? e->mtime / 1000000000 : 0,
+                .path = rubraview_strdup(path) };
+            atomic_fetch_add(&job->done, e->size);
+            continue;
+        }
+        if (there && rule == RUBRAVIEW_EXISTS_SKIP) { job->skipped++; atomic_fetch_add(&job->done, e->size); continue; }
+        if (there && (rule == RUBRAVIEW_EXISTS_NUMBER || rule == RUBRAVIEW_EXISTS_SAME)) {
             if (!rubraview_archive_free_name(pv, exists_fn, final, sizeof final)) { job->failed++; continue; }
         } else {
             rubraview_fmt(final, sizeof final, "{}", PROVEN_ARG(path));
@@ -487,8 +538,14 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
             continue;
         }
         bool closed = rubraview_pal_fs_writer_close(&x.writer);
-        bool placed = closed && (there && job->exists == RUBRAVIEW_EXISTS_REPLACE ? rubraview_pal_fs_replace(view(part), view(final))
-                                                                                    : rubraview_pal_fs_move(view(part), view(final)));
+        if (closed && there && rule == RUBRAVIEW_EXISTS_SAME && same_bytes(view(part), pv, e->size)) {   /* RV-258: the one there is it */
+            (void)rubraview_pal_fs_delete(view(part));
+            job->skipped++;
+            job->same++;
+            continue;
+        }
+        bool placed = closed && (there && rule == RUBRAVIEW_EXISTS_REPLACE ? rubraview_pal_fs_replace(view(part), view(final))
+                                                                           : rubraview_pal_fs_move(view(part), view(final)));
         if (!placed) {
             (void)rubraview_pal_fs_delete(view(part));
             job->failed++;
@@ -506,7 +563,7 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
     }
     if (job->result == RUBRAVIEW_ARCHIVE_DONE) {
         if (job->failed > 0) job->result = RUBRAVIEW_ARCHIVE_PARTLY;
-        else if (job->written == 0 && job->skipped == 0) job->result = RUBRAVIEW_ARCHIVE_NOTHING;
+        else if (job->written == 0 && job->skipped == 0 && job->parked_count == 0) job->result = RUBRAVIEW_ARCHIVE_NOTHING;
     }
 }
 

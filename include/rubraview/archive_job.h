@@ -22,6 +22,8 @@ typedef enum rubraview_exists_rule {
     RUBRAVIEW_EXISTS_NUMBER = 0,   /* a new name: photo-1.jpg, photo-2.jpg ... */
     RUBRAVIEW_EXISTS_SKIP,         /* leave the one there */
     RUBRAVIEW_EXISTS_REPLACE,      /* write over it (to the Recycle Bin never: the new one is whole first) */
+    RUBRAVIEW_EXISTS_PARK,         /* RV-258: not written; its index kept in `parked`, to be asked */
+    RUBRAVIEW_EXISTS_SAME,         /* RV-258: written aside and compared: the same bytes left as they are, others numbered */
 } rubraview_exists_rule_t;
 
 typedef enum rubraview_extract_mode {
@@ -62,6 +64,15 @@ bool rubraview_archive_free_folder_name(proven_u8str_view_t path, bool (*exists)
 
 #define RUBRAVIEW_ARCHIVE_PATH 4096
 
+/* RV-258: an entry PARK left because its name was taken, to be asked. */
+typedef struct rubraview_extract_parked {
+    size_t   index;    /* the entry */
+    uint64_t size;     /* its bytes */
+    int64_t  mtime;    /* its time, seconds since 1970; 0 unknown */
+    char    *path;     /* where it would go (malloc'd) */
+} rubraview_extract_parked_t;
+void rubraview_extract_parked_free(rubraview_extract_parked_t *parked, size_t count);
+
 typedef struct rubraview_extract_job {
     /* given */
     const char *archive;               /* UTF-8 */
@@ -71,6 +82,7 @@ typedef struct rubraview_extract_job {
     const size_t *only;                /* the entries picked; NULL: all of them */
     size_t only_count;
     const char *inner;                 /* with `only`: the archive's folder they were picked in ("a/b/"), left off their names */
+    const uint8_t *rules;              /* RV-258: with `only`, a rubraview_exists_rule_t for each of them; NULL: `exists` */
     const char *password;              /* UTF-8, or NULL */
     rubraview_codepage_t codepage;
     /* while it runs */
@@ -80,6 +92,9 @@ typedef struct rubraview_extract_job {
     /* when it is done */
     rubraview_archive_result_t result;
     uint32_t written, skipped, failed;
+    uint32_t same;                     /* RV-258: left because the one there held the same bytes (counted in skipped too) */
+    rubraview_extract_parked_t *parked;   /* RV-258: the entries PARK left, whose name was taken (the caller frees) */
+    size_t parked_count;
     char root[RUBRAVIEW_ARCHIVE_PATH]; /* the folder the files went into */
     char why[256];                     /* the first thing that went wrong, in words */
 } rubraview_extract_job_t;

@@ -200,7 +200,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
                          (!app->filmstrip.visible && strip_shown(app) > 0.0) ||   /* the wheel's strip is up or fading */
                          app->filmstrip.scroll_offset != app->strip_target ||      /* it slides */
                          app->tiles_arrived;             /* D-40: a sharper tile came in */
-    if (handled > 0) fc->last_input_seconds = now;
+    if (handled > 0) { fc->last_input_seconds = now; fc->input_passes = 2; }   /* RV-262: this pass and the next draw */
     if (handled > 0 || media_playing || others_moving) fc->last_busy_seconds = now;
     bool settled = now - fc->last_busy_seconds > IDLE_REDRAW_GRACE;
     app->stats_fine = rubraview_pal_time_fine(!settled || media_playing);   /* RV-215: 1 ms waits while anything moves, the default when still */
@@ -214,10 +214,16 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     if (visualizer_live(app) && now - app->viz_last >= 1.0 / 30.0) app->media_new_picture = true;
     bool paced = media_playing && !others_moving && now - fc->last_input_seconds > IDLE_REDRAW_GRACE;
     /* Settled: a frame when what it would show has changed, checked
-       each pass, and one every ten seconds whatever the summary says. */
+       each pass, and one every ten seconds whatever the summary says.
+       RV-262 (owner, 2026-11-08: "화면 다시 그리기는 바뀐 것이 있을때만 다시 그리기로"): in the grace after an input too,
+       a frame only when the summary changed or something moves by itself — no longer every pass; the pass of an
+       input and the one after it draw whatever the summary says, so a change it does not name is never left out. */
+    bool input_now = fc->input_passes > 0;
+    if (fc->input_passes > 0) fc->input_passes--;
+    bool moving_alone = app->transition.active || others_moving;
     bool draw = paced ? rubraview_media_redraw_due(app->media_new_picture, now - fc->last_render_seconds)
-                      : (!settled || now - fc->last_idle_frame_seconds >= 10.0 ||
-                         scene_signature(app) != fc->last_scene_signature);
+                      : (input_now || (!settled && moving_alone) || now - fc->last_idle_frame_seconds >= 10.0 ||
+                         app->media_new_picture || scene_signature(app) != fc->last_scene_signature);
     if (draw) {
         double drawn_at = rubraview_pal_time_now_seconds();
         if (app->info_open && fc->last_render_seconds > 0.0 && now - fc->last_render_seconds > app->stats_worst)

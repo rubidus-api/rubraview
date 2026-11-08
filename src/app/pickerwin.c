@@ -500,6 +500,24 @@ void picker_pick_alone(app_state_t *app, size_t index) {
     app->picker_anchor = index;
 }
 
+/* RV-263 (D-304 follow-up): the file keys on the open-file screen act on what is picked there, or — nothing picked —
+   on the tile with the focus (picked for it, so the screen shows what they act on): Delete as the Recycle button
+   (pressed twice), rename in the rename box, copy / move to a folder as their buttons. Never on what is behind. */
+bool picker_file_key(app_state_t *app, proven_u8str_view_t action) {
+    bool del = proven_u8str_view_eq(action, PROVEN_LIT("delete_file")), ren = proven_u8str_view_eq(action, PROVEN_LIT("rename_file"));
+    bool cpy = proven_u8str_view_eq(action, PROVEN_LIT("copy_to_folder")), mov = proven_u8str_view_eq(action, PROVEN_LIT("move_to_folder"));
+    if (!del && !ren && !cpy && !mov) return false;
+    size_t focus = app->picker.focus;
+    bool on_tile = focus < app->picker_listing.count && !picker_is_up(app, focus) && !rubraview_picker_is_places(app->picker_dir);
+    if (ren) {
+        if (on_tile) rename_picker_begin(app, focus);
+        return true;
+    }
+    if (picker_picked_count(app) == 0 && on_tile) picker_pick_alone(app, focus);
+    picker_button(app, del ? PICKER_BTN_RECYCLE : mov ? PICKER_BTN_MOVE : PICKER_BTN_COPY);
+    return true;
+}
+
 /* RV-229: the first of the path's crumbs drawn — the last ones kept between the arrows and the filter's chip (the star
    after them, left out too when the last crumb would not fit beside it: Ctrl+D stars), a chip standing for those left
    out before them. render.c and events.c lay them out alike. */

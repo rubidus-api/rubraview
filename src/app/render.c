@@ -1734,6 +1734,14 @@ uint64_t scene_signature(const app_state_t *app) {
     SIG(&h, app->arc_job != NULL); SIG(&h, app->arc_ask);
     if (app->arc_job) SIG(&h, atomic_load(&app->arc_job->job.done));
     SIG(&h, rubraview_pal_window_is_fullscreen(app->window));
+    /* RV-262: what lights or moves in the grace after an input, now that it no longer draws every pass */
+    if (app->pointer_inside) { SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y); }   /* a tile, a button lit under it */
+    double now = rubraview_pal_time_now_seconds();
+    bool typing = app->ab_edit_open || app->volpop_typing || app->slidepop_typing || app->rename_active;
+    if (typing) SIG(&h, fmod(now, 1.0) < 0.5);   /* a caret blinks */
+    SIG(&h, now < app->widget_wheel_until);
+    SIG(&h, now < app->menu_confirm.until);   /* a menu item says "Delete?" until then */
+    SIG(&h, app->transition.active);
     return h;
 }
 #undef SIG

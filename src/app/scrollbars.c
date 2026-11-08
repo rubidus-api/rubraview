@@ -49,6 +49,7 @@ static rubraview_window_t *scrollbar_window(app_state_t *app, int which) {
         case RVSB_SETTINGS: return app->settings_window;
         case RVSB_FONTPICK: return app->fontpick_window;
         case RVSB_INFO:     return app->info_window;
+        case RVSB_LOG:      return app->log_open ? app->log_window : NULL;   /* RV-264 */
         default:          return NULL;
     }
 }
@@ -97,6 +98,7 @@ bool scrollbar_of(app_state_t *app, int which, rubraview_scrollbar_t *sb) {
         case RVSB_SETTINGS: if (!settings_sb(app, sb, bar_width(dpi), dpi)) return false; break;
         case RVSB_FONTPICK: if (!fontpick_sb(app, sb, bar_width(dpi), dpi)) return false; break;
         case RVSB_INFO:     if (!info_sb(app, sb, bar_width(dpi), dpi)) return false; break;
+        case RVSB_LOG:      if (!log_sb(app, sb, bar_width(dpi), dpi)) return false; break;
         case RVSB_TEXT:     if (!text_sb(app, sb, bar_width(dpi), dpi)) return false; break;
         case RVSB_CHANGES:
             if (!edit_windowed(app) || app->changes.height <= 0.0) return false;
@@ -132,6 +134,7 @@ static void scrollbar_to(app_state_t *app, int which, double first) {
         case RVSB_SETTINGS: settings_sb_to(app, whole(first)); break;
         case RVSB_FONTPICK: fontpick_sb_to(app, whole(first)); break;
         case RVSB_INFO:     info_sb_to(app, whole(first)); break;
+        case RVSB_LOG:      log_sb_to(app, whole(first)); break;
         case RVSB_TEXT:     text_sb_to(app, first); break;
         case RVSB_CHANGES:  app->changes.first = whole(first); break;
         default: {
