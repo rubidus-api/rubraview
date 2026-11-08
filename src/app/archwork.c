@@ -833,7 +833,15 @@ static void xrows_carry_out(app_state_t *app) {
     size_t first = SIZE_MAX;
     for (size_t i = 0; i < g_xn && first == SIZE_MAX; ++i) if (g_x[i].answer >= 0) first = i;
     if (first == SIZE_MAX) return;
-    xrow_t lead = g_x[first];
+    /* the group's keys, copied: the rows (the first among them) are freed as they are taken */
+    char *lead_archive = rubraview_strdup(g_x[first].archive), *lead_root = rubraview_strdup(g_x[first].root);
+    char *lead_inner = g_x[first].inner ? rubraview_strdup(g_x[first].inner) : NULL;
+    bool has_inner = g_x[first].inner != NULL;
+    if (!lead_archive || !lead_root || (has_inner && !lead_inner)) {
+        rubraview_free(lead_archive); rubraview_free(lead_root); rubraview_free(lead_inner);
+        return;
+    }
+    xrow_t lead = { .archive = lead_archive, .root = lead_root, .inner = lead_inner };
     size_t n = 0;
     for (size_t i = 0; i < g_xn; ++i)
         if (g_x[i].answer >= 0 && same_text(g_x[i].archive, lead.archive) && same_text(g_x[i].root, lead.root) && same_text(g_x[i].inner, lead.inner)) n++;
@@ -843,6 +851,7 @@ static void xrows_carry_out(app_state_t *app) {
     char **archives = w ? rubraview_alloc_zero(1, sizeof *archives) : NULL;
     if (!w || !only || !rules || !archives || !(archives[0] = rubraview_strdup(lead.archive))) {
         rubraview_free(only); rubraview_free(rules); rubraview_free(archives); rubraview_free(w);
+        rubraview_free(lead_archive); rubraview_free(lead_root); rubraview_free(lead_inner);
         return;
     }
     size_t k = 0, recycled = 0, kept = 0;
@@ -867,6 +876,8 @@ static void xrows_carry_out(app_state_t *app) {
         g_x[i] = g_x[--g_xn];
     }
     g_xversion++;
+    rubraview_free(lead_archive); rubraview_free(lead_root); rubraview_free(lead_inner);
+    lead = (xrow_t){0};
     char line[256];
     if (k == 0) {
         rubraview_fmt(line, sizeof line, T("{} names already there left as they were"), PROVEN_ARG(kept));
@@ -880,7 +891,7 @@ static void xrows_carry_out(app_state_t *app) {
     w->only = only;
     w->only_count = k;
     w->rules = rules;
-    if (!lead.inner) w->inner[0] = '\0';
+    if (!has_inner) w->inner[0] = '\0';
     app_log(app, "clash", PROVEN_LIT("names taken by an extraction: written out as answered"));
     (void)work_start(app, w);
 }
