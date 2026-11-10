@@ -524,7 +524,8 @@ cannot be written.
 
 **Resize.** **Resize %**, or **or a size**: half, double, fit the screen,
 640x480 to 8K (turned to the picture's way), the long side, or megapixels.
-**Size: ... px (... cm)...** types it: a number is pixels, and a unit
+**Size: ... px (... cm)...** types it in a card with **OK** and **Cancel**
+(Cancel leaves the size, and a crop's area, as they were): a number is pixels, and a unit
 makes it a length — `21cm`, `210mm`, `8.5in`, `50%` — at **DPI for cm and
 in**. Under each number its button (or `/`) switches it between pixels
 and a **ratio** of the picture: `0.5` is half, `1.5` half as big again, as
@@ -730,6 +731,19 @@ code (`frei0r`, `ladspa`, `lv2`) are refused wherever they appear in a graph.
 after asking), `Ctrl+M` renames it (the box edits like any text field: arrows
 and `Shift` select, `Ctrl+A`, `Ctrl+C` / `Ctrl+X` / `Ctrl+V`), `Ctrl+Z` undoes a move,
 a copy or a rename, and `1`–`9` send it to a folder you chose.
+
+**Typing a name or a value.** Every box that asks for text or numbers —
+a new name, a folder to copy or extract to, a password, Find, the list's
+filter, a station, a value in Edit or Batch, the size or the area in
+Edit — is one card. Drag its title to move it, drag an edge or the dotted
+corner to make it larger; it always stays inside its window, also when
+the window is made smaller, and opens again where you left it. It has
+**OK** and **Cancel** (`Enter` and `Esc`). The window under it keeps
+working: click the picture to turn pages or play while the card waits
+(its edge goes grey and its line says the window has the keys); click
+the card to type in it again; `Esc` then closes it. A rename card names
+its file and renames that file even after you have moved on to another
+page; a card for a page or a list you have left closes by itself.
 
 To use the number keys for sorting, give them folders in Settings › Files ›
 Number keys send the file to: `Enter` on a folder opens a box with the

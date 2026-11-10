@@ -108,7 +108,7 @@ void takeout_begin(app_state_t *app);
 void reopen_after_removal(app_state_t *app, size_t removed_index);
 void reopen_on_path(app_state_t *app, proven_u8str_view_t path, size_t fallback);
 void files_close(app_state_t *app);
-void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
+void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h, double dpi);
 void draw_eqwin(app_state_t *app, double win_w, double win_h);
 void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi);
 void ab_edit_begin(app_state_t *app);

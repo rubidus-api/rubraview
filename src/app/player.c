@@ -110,14 +110,27 @@ rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_pal_rect
     return (rubraview_pal_rect_t){ box.x + box.width - s - 4.0, box.y + 4.0, s, s };
 }
 rubraview_pal_rect_t ab_box_rect(const app_state_t *app) { return answer_box_rect(app, 560.0, 158.0); }
-rubraview_pal_rect_t px_box_rect(const app_state_t *app) { return answer_box_rect(app, 600.0, 132.0); }
+/* RV-265: the size box is a card now (popups.c draws it): its rectangle where the reader left it */
+rubraview_pal_rect_t px_box_rect(const app_state_t *app) {
+    if (app->px_card.open) return (rubraview_pal_rect_t){ app->px_card.rect.x, app->px_card.rect.y, app->px_card.rect.width, app->px_card.rect.height };
+    return answer_box_rect(app, 600.0, 132.0);
+}
+static double px_card_dpi(const app_state_t *app) {
+    return rubraview_pal_window_dpi_scale(app->px_card_host == CARD_HOST_EDIT && app->edit_window ? app->edit_window : app->window);
+}
+/* The row the numbers are on, under the title and the line saying the keys. */
+rubraview_pal_rect_t px_fields_rect(const app_state_t *app) {
+    rubraview_pal_rect_t box = px_box_rect(app);
+    double dpi = px_card_dpi(app);
+    return (rubraview_pal_rect_t){ box.x + 20.0 * dpi, box.y + 84.0 * dpi, box.width - 40.0 * dpi, 40.0 * dpi };
+}
 /* RV-187: a field's px / ratio switch, under the fields, a column each */
 rubraview_pal_rect_t px_unit_rect(const app_state_t *app, int32_t field) {
-    rubraview_pal_rect_t box = px_box_rect(app);
-    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_pal_rect_t row = px_fields_rect(app);
+    double dpi = px_card_dpi(app);
     int32_t n = px_edit_fields(app);
-    double col = box.width / (double)n, w = col - 16.0 * dpi;
-    return (rubraview_pal_rect_t){ box.x + col * field + 8.0 * dpi, box.y + 92.0 * dpi, w, 28.0 * dpi };
+    double col = row.width / (double)n, w = col - 16.0 * dpi;
+    return (rubraview_pal_rect_t){ row.x + col * field + 8.0 * dpi, row.y + row.height + 8.0 * dpi, w, 28.0 * dpi };
 }
 /* "A = now" (0) and "B = now" (1), side by side under the fields. */
 rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which) {

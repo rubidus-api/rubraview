@@ -1137,7 +1137,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     }
 
     /* The picker covers the chrome: its text box and its messages are drawn here. */
-    draw_rename_box(app, win_w, win_h, dpi);
+    draw_rename_box(app, CARD_HOST_MAIN, win_w, win_h, dpi);
     draw_notice(app, win_w, win_h, dpi);
     draw_titlebar(app, win_w);   /* over the band at the top */
 }
@@ -1614,7 +1614,7 @@ void render_frame(app_state_t *app) {
         /* 1.24.0: a value typed for a panel's slider sits over the panel and the print preview */
         if (app->panel.open && app->rename_active && app->rename_is_value && !app->edit_window) {
             double cd = rubraview_pal_window_dpi_scale(app->window);
-            draw_rename_box(app, (double)win_w, (double)win_h, cd);
+            draw_rename_box(app, CARD_HOST_MAIN, (double)win_w, (double)win_h, cd);
         }
     }
     draw_chooser(app, app->renderer, CHOOSE_IN_MAIN, app->pointer_x, app->pointer_y);   /* 1.24.0: over everything */
@@ -1739,6 +1739,10 @@ uint64_t scene_signature(const app_state_t *app) {
     double now = rubraview_pal_time_now_seconds();
     bool typing = app->ab_edit_open || app->volpop_typing || app->slidepop_typing || app->rename_active;
     if (typing) SIG(&h, fmod(now, 1.0) < 0.5);   /* a caret blinks */
+    if (app->card.open) {   /* RV-265: the card moved, sized, its focus */
+        SIG(&h, (int64_t)app->card.rect.x); SIG(&h, (int64_t)app->card.rect.y);
+        SIG(&h, (int64_t)app->card.rect.width); SIG(&h, (int64_t)app->card.rect.height); SIG(&h, app->card.focused);
+    }
     SIG(&h, now < app->widget_wheel_until);
     SIG(&h, now < app->menu_confirm.until);   /* a menu item says "Delete?" until then */
     SIG(&h, app->transition.active);

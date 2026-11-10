@@ -1511,8 +1511,19 @@ static void rename_cancel(app_state_t *app) {
 
 /* 1.24.0 (owner, 2026-10-19: "단축키만 있는게 아니라 버튼으로도 각 기능이나 입력, 취소가 버튼으로"): the box's buttons and,
    for Change extensions, its rows. True when the press was theirs. */
-bool rename_box_press(app_state_t *app, double x, double y) {
+bool rename_box_press(app_state_t *app, int32_t host, double x, double y) {
     if (!app->rename_active) return false;
+    /* RV-265 (R296): a card is modeless: a press on it takes the keys (on its title or an edge it moves or sizes it),
+       a press anywhere else is the window's, which takes the keys */
+    bool carded = app->card.open;
+    if (carded) {
+        if (host != app->card_host) return false;
+        bool was = app->card.focused;
+        bool on = rubraview_card_press(&app->card, x, y);
+        if (app->card.focused != was && host == CARD_HOST_MAIN) rubraview_pal_window_text_input(app->window, app->card.focused);
+        if (!on) return false;
+        if (app->card.drag != 0) return true;
+    }
     for (int32_t i = 0; i < app->rename_btn_n; ++i) {
         if (!pal_rect_has(app->rename_btn[i], x, y)) continue;
         switch (app->rename_btn_kind[i]) {
@@ -1530,15 +1541,16 @@ bool rename_box_press(app_state_t *app, double x, double y) {
         for (int32_t k = 0; k < app->ext_n; ++k) if (pal_rect_has(app->ext_row_rect[k], x, y)) { ext_switch(app, k); return true; }
     }
     if (app->rename_is_pack) return pack_window_press(app, x, y);   /* D-260 */
-    if (app->rename_card_modal) return true;   /* RV-238: the dimmed window under the card takes nothing */
-    return false;
+    return carded;   /* the card's own body */
 }
 
 static bool triage_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     /* An open text box takes every key first: a resume offer still on
        screen took its Enter, and the typed path went nowhere (VM,
        2026-09-28). */
-    if (app->rename_active) {
+    /* RV-265: a card that has not the focus leaves the keys to the window; Esc closes it first */
+    if (app->rename_active && !rename_has_keys(app) && key_is(combo, "Escape")) { rename_cancel(app); return true; }
+    if (rename_has_keys(app)) {
         if (app->rename_is_find && (((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && key_is(combo, "Enter")) ||
                                     ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "G")))) {   /* RV-184: Ctrl+G as with the box closed */
             text_find_step(app, !(combo.modifiers & RUBRAVIEW_MOD_SHIFT));   /* RFC-0005: back with Shift */

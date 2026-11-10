@@ -256,6 +256,7 @@ void triage_undo(app_state_t *app) {
    Ctrl+C / Ctrl+X / Ctrl+V use the clipboard. */
 /* The box closes: the window goes back to keys only (K5). */
 void rename_end(app_state_t *app) {
+    card_close_keep(app);   /* RV-265: its place kept for the next of its kind */
     app->rename_active = false;
     app->rename_btn_n = 0;
     app->rename_is_archive = false;
@@ -319,12 +320,12 @@ void rename_text(app_state_t *app, const rubraview_window_event_t *event) {
         return;
     }
     if (app->px_edit_open) {
-        if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
+        if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT && px_has_keys(app)) {   /* RV-265: not while the window has the keys */
             px_edit_text_typed(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event->text.utf8, .size = event->text.length });
         }
         return;
     }
-    if (!app->rename_active) return;
+    if (!rename_has_keys(app)) return;   /* RV-265: the window has the keys, not the card */
     proven_u8str_view_t text = { .ptr = (const proven_byte_t *)event->text.utf8, .size = event->text.length };
     if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
         rename_take_text(app, text);
@@ -479,12 +480,26 @@ void rename_begin(app_state_t *app) {
        owner asked for no question when it changes. */
     proven_u8str_view_t name = rubraview_path_basename(path);
     if (name.size >= sizeof(app->rename_buffer)) return;
+    if (app->rename_active && !in_archive && path.size < sizeof(app->card_for)) {   /* another box open: it goes first */
+        char kept[1024];
+        proven_sys_mem_copy(kept, path.ptr, path.size);
+        rename_end(app);
+        proven_sys_mem_copy(app->card_for, kept, path.size);
+        path = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->card_for, .size = path.size };
+        name = rubraview_path_basename(path);
+    } else if (app->rename_active) {
+        rename_end(app);
+    }
 
     app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
     rubraview_textedit_set(&app->rename_edit, name);
     app->rename_active = true;
     app->rename_is_archive = in_archive;
     app->rename_composing_length = 0;
+    if (!in_archive && path.size < sizeof(app->card_for)) {   /* RV-265: the file it is for, whatever the window shows next */
+        if (path.ptr != (const proven_byte_t *)app->card_for) proven_sys_mem_copy(app->card_for, path.ptr, path.size);
+        app->card_for_len = path.size;
+    }
     rubraview_pal_window_text_input(app->window, true);   /* Hangul, capitals, symbols (K5's hole) */
 }
 
@@ -643,6 +658,9 @@ void rename_commit(app_state_t *app) {
     /* Enter with a syllable still being built: it is part of the name. */
     rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     bool in_archive = app->rename_is_archive;
+    char for_path[1024];   /* RV-265: the file the card was opened for, the window may have moved on since */
+    size_t for_len = app->card_for_len;
+    if (for_len > 0) proven_sys_mem_copy(for_path, app->card_for, for_len);
     rename_end(app);
 
     if (in_archive) {
@@ -660,8 +678,10 @@ void rename_commit(app_state_t *app) {
         return;
     }
 
-    proven_u8str_view_t path = current_file_path(app);
+    proven_u8str_view_t on_screen = current_file_path(app);
+    proven_u8str_view_t path = for_len > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)for_path, .size = for_len } : on_screen;
     if (path.size == 0) return;
+    bool elsewhere = !proven_u8str_view_eq(path, on_screen);   /* the page turned under the card */
 
     proven_u8str_view_t new_name = rubraview_textedit_text(&app->rename_edit);
 
@@ -678,15 +698,20 @@ void rename_commit(app_state_t *app) {
     }
 
     int32_t page = current_page_index(app);
+    if (elsewhere) {   /* RV-265: its own place in the list, and the page on screen kept on screen */
+        for (size_t i = 0; i < page_count(app); ++i)
+            if (proven_u8str_view_eq(app->source.pages[i].path, path)) { page = (int32_t)i; break; }
+    }
     rubraview_undo_push(&app->undo, (rubraview_file_action_t){
         .op = RUBRAVIEW_FILE_OP_RENAME,
-        .source_path = path,
+        .source_path = app_keep(app, path),
         .target_path = target,
         .playlist_index = page >= 0 ? (size_t)page : 0,
     });
 
     osd_say(app, TU8("renamed"));
-    reopen_after_removal(app, page >= 0 ? (size_t)page : 0);
+    if (elsewhere) reopen_on_path(app, on_screen, (size_t)(current_page_index(app) >= 0 ? current_page_index(app) : 0));
+    else reopen_after_removal(app, page >= 0 ? (size_t)page : 0);
 }
 
 /* §3.19.2: what to do with what was dropped. */

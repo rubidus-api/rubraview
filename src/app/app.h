@@ -82,6 +82,12 @@
 #include "rubraview/fontspec.h"
 #include "rubraview/memory.h"
 #include "rubraview/ui_eqwin.h"
+#include "rubraview/ui_card.h"
+
+/* RV-265: the kinds of question the input card asks, each with its place kept, and the windows it is drawn in. */
+enum { CARD_RENAME, CARD_ARCHIVE_PAGE, CARD_PICKER_NAME, CARD_EXTENSIONS, CARD_TARGET, CARD_EXTRACT, CARD_PASSWORD,
+       CARD_FIND, CARD_LIST_FILTER, CARD_ADDRESS, CARD_COPIES, CARD_VALUE, CARD_FAVORITE, CARD_SIZE, CARD_KINDS };
+enum { CARD_HOST_NONE = 0, CARD_HOST_MAIN, CARD_HOST_EDIT, CARD_HOST_BATCH, CARD_HOST_NAMES };
 #include "rubraview/repeat.h"
 #include "rubraview/lyrics.h"
 #include "rubraview/filmstrip.h"
@@ -373,6 +379,7 @@ typedef struct save_job {
     volatile LONG done;
     int result;
     const char *why;   /* RV-139: SAVE_UNWRITABLE, when the writer said why (an N_ literal) */
+    char taken[512];   /* RV-266: the copy's name that was already there ("" when it was free) */
 } save_job_t;
 
 /* The owner (2026-10-18): Edit's steps onto every picture of the list, each
@@ -596,6 +603,14 @@ typedef struct app_state {
     /* The Adjust panel's size in pixels (owner, 2026-10-15): width and height typed,
        the other following the shape. */
     bool                   px_edit_open;
+    /* RV-265 (R296; owner: "크기 설정하는 버튼 누르면, 확인 또는 취소가 버튼이 있어야"): the size / crop numbers in a card
+       of their own, the same model as the text box's: moved, sized, OK and Cancel, modeless */
+    rubraview_card_t       px_card;
+    int32_t                px_card_host;
+    double                 px_card_host_w, px_card_host_h;
+    rubraview_pal_rect_t   px_btn[2];          /* OK, Cancel, as last drawn */
+    rubraview_crop_rect_t  px_crop_was;        /* the selection before the crop's numbers moved it: Cancel puts it back */
+    bool                   px_crop_active_was;
     bool                   px_edit_crop;      /* the crop's corner and size instead (owner, 2026-10-15) */
     int32_t                px_edit_field;     /* 0 = width, 1 = height; for the crop 0..3 = x, y, width, height */
     char                   px_edit_text[4][16];   /* RV-128: a size may carry its unit, "21cm" */
@@ -1154,8 +1169,17 @@ typedef struct app_state {
     rubraview_pal_rect_t   rename_btn[4];
     int32_t                rename_btn_kind[4];
     int32_t                rename_btn_n;
-    rubraview_pal_rect_t   rename_card;        /* RV-238: the card round the box, as last drawn */
-    bool                   rename_card_modal;  /* RV-238: drawn over a dimmed window: a press outside it is spent */
+    /* RV-265 (R296): the box as a modeless card, moved by its title and sized by its edges inside the window it is
+       drawn in (its host); one at a time. Where each kind was left is kept (layout.ini [cards]). */
+    rubraview_card_t       card;
+    rubraview_card_share_t card_kept[CARD_KINDS];
+    int32_t                card_kind;          /* CARD_*, while open */
+    int32_t                card_host;          /* CARD_HOST_*: the window it was last drawn in */
+    double                 card_host_w, card_host_h;
+    uint64_t               card_subject;       /* what was on screen when it opened, to tell the window moved on */
+    char                   card_for[1024];     /* the file a plain rename is for (the card names it) */
+    size_t                 card_for_len;
+    double                 card_checked_at;    /* when card_for was last looked for on the disk */
     rubraview_pal_rect_t   ext_row_rect[16];
     size_t                 rename_picker_at;      /* which, in its listing */
     bool                   rename_is_path;        /* the box is the picker's typed path (owner, 2026-09-28) */
@@ -1990,9 +2014,19 @@ void draw_panel(app_state_t *app);
 void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool numbers);
 void draw_picker_check(app_state_t *app, size_t index, double win_w, double dpi);
 void draw_print_preview(app_state_t *app);
-void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi);
+void draw_px_edit_box(app_state_t *app, int32_t host, double win_w, double win_h, double dpi);
+bool px_has_keys(const app_state_t *app);
+void px_edit_ok(app_state_t *app);
+void px_edit_cancel(app_state_t *app);
 void draw_recentwin(app_state_t *app, double win_w, double win_h);
-void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi);
+void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h, double dpi);
+int32_t card_kind_now(const app_state_t *app);
+const char *card_kind_key(int32_t kind);
+bool rename_has_keys(const app_state_t *app);
+void card_close_keep(app_state_t *app);
+bool card_motion(app_state_t *app, int32_t host, double x, double y);
+bool card_release(app_state_t *app, int32_t host);
+void card_watch(app_state_t *app);
 void draw_seekfan(app_state_t *app, rubraview_renderer_t *r, bool detached);
 void draw_settings_window(app_state_t *app);
 void draw_slidepop(app_state_t *app);
@@ -2423,6 +2457,7 @@ bool px_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo);
 void px_edit_text_typed(app_state_t *app, proven_u8str_view_t text);
 void px_edit_toggle_unit(app_state_t *app, int32_t field);   /* RV-187 */
 rubraview_pal_rect_t px_unit_rect(const app_state_t *app, int32_t field);
+rubraview_pal_rect_t px_fields_rect(const app_state_t *app);
 bool px_box_press(app_state_t *app, double x, double y);
 bool edit_push(app_state_t *app, rubraview_edit_step_t *s);   /* RV-187: a step pushed in its units */
 void rebuild_layout(app_state_t *app);
@@ -2438,7 +2473,7 @@ bool recentwin_press(app_state_t *app, double x, double y);
 bool recentwin_release(app_state_t *app);
 void recentwin_toggle(app_state_t *app);
 void rename_begin(app_state_t *app);
-bool rename_box_press(app_state_t *app, double x, double y);
+bool rename_box_press(app_state_t *app, int32_t host, double x, double y);
 void rename_commit(app_state_t *app);
 void rename_end(app_state_t *app);
 void rename_extension_apply(app_state_t *app);

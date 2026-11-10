@@ -756,7 +756,7 @@ static void draw_owned(app_state_t *app, int which) {
     if (which == 2) draw_names_preview(app, (double)ww, (double)wh, dpi);
     bool box_here = app->batch_typing == BATCH_TYPING_VALUE ? which == 1 : app->batch_typing == NAMES_TYPING_VALUE ? which == 2
                   : (which == 2) == (app->names_window != NULL);   /* RV-200: a value typed in the window it was asked in */
-    if (app->rename_active && app->batch_typing && box_here) draw_rename_box(app, (double)ww, (double)wh, dpi);
+    if (app->rename_active && app->batch_typing && box_here) draw_rename_box(app, which == 1 ? CARD_HOST_BATCH : CARD_HOST_NAMES, (double)ww, (double)wh, dpi);
     draw_chooser(app, app->renderer, which == 1 ? CHOOSE_IN_BATCH : CHOOSE_IN_NAMES, app->pointer_x, app->pointer_y);
     owned_panel_out(app);
     bool ok = rubraview_pal_render_end(app->renderer);
@@ -806,7 +806,7 @@ static size_t owned_pump(app_state_t *app, int which) {
         if (event.kind == RUBRAVIEW_WINDOW_EVENT_CLOSE) { batch_after(app, which == 1 ? BATCH_AFTER_CLOSE : BATCH_AFTER_NAMES_CLOSE); owned_after(app); break; }
         if (event.kind == RUBRAVIEW_WINDOW_EVENT_KEY_DOWN) {
             if (chooser_key(app, where, event.key.combo)) continue;
-            if (app->rename_active && app->batch_typing) {   /* a name or a folder typed here: the box takes the key */
+            if (rename_has_keys(app) && app->batch_typing) {   /* a name or a folder typed here: the box takes the key (RV-265: while it has the focus) */
                 owned_panel_in(app, which);
                 dispatch_key(app, event.key.combo);
                 owned_panel_out(app);
@@ -819,7 +819,7 @@ static size_t owned_pump(app_state_t *app, int which) {
             continue;
         }
         if (event.kind == RUBRAVIEW_WINDOW_EVENT_TEXT || event.kind == RUBRAVIEW_WINDOW_EVENT_COMPOSITION) {
-            if (app->batch_typing) rename_text(app, &event);
+            if (app->batch_typing) rename_text(app, &event);   /* RV-265: dropped there while the card has not the focus */
             continue;
         }
         owned_panel_in(app, which);
@@ -831,6 +831,7 @@ static size_t owned_pump(app_state_t *app, int which) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
                 *px = event.mouse.x; *py = event.mouse.y;
+                if (card_motion(app, which == 1 ? CARD_HOST_BATCH : CARD_HOST_NAMES, event.mouse.x, event.mouse.y)) break;   /* RV-265 */
                 if (scrollbar_motion(app, win, event.mouse.x, event.mouse.y)) break;
                 if (app->panel.active_row >= 0) {
                     int32_t dragged = -1;
@@ -842,11 +843,12 @@ static size_t owned_pump(app_state_t *app, int which) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
                 if (chooser_press(app, where, event.mouse.x, event.mouse.y)) break;
-                if (app->rename_active && app->batch_typing && rename_box_press(app, event.mouse.x, event.mouse.y)) break;
+                if (app->rename_active && app->batch_typing && rename_box_press(app, which == 1 ? CARD_HOST_BATCH : CARD_HOST_NAMES, event.mouse.x, event.mouse.y)) break;
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
                 owned_press(app, which, event.mouse.x, event.mouse.y);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (card_release(app, which == 1 ? CARD_HOST_BATCH : CARD_HOST_NAMES)) break;   /* RV-265 */
                 (void)scrollbar_release(app, win);
                 rubraview_panel_release(&app->panel);
                 break;
@@ -863,7 +865,7 @@ static size_t owned_pump(app_state_t *app, int which) {
     }
     rubraview_window_t *win = which == 1 ? app->batch_window : app->names_window;
     bool *on = which == 1 ? &app->batch_text_on : &app->names_text_on;
-    bool typing = app->rename_active && app->batch_typing != 0;
+    bool typing = rename_has_keys(app) && app->batch_typing != 0;   /* RV-265: while the card has the focus */
     if (win && typing != *on) { rubraview_pal_window_text_input(win, typing); *on = typing; }
     return handled;
 }

@@ -878,6 +878,10 @@ void panel_write_current(app_state_t *app, bool apply_edit) {
     job->thread = CreateThread(NULL, 0, save_job_run, job, 0, NULL);
     if (!job->thread) { rubraview_free(job); osd_say(app, TU8("not saved: could not start")); return; }
     app->save_job = job;
+    if (renumbered && name.size < sizeof(job->taken)) {   /* said again when it is saved, the line staying */
+        proven_sys_mem_copy(job->taken, name.ptr, name.size);
+        job->taken[name.size] = '\0';
+    }
     if (renumbered) {
         char line[1200];
         proven_u8str_view_t as = rubraview_path_basename(out_path);
@@ -952,6 +956,12 @@ void save_job_poll(app_state_t *app, bool wait) {
     if (!wait && (job->result == SAVE_UNWRITABLE || job->result == SAVE_EDIT_FAILED) && job->why) {   /* RV-139; RFC-0007 */
         char line[256];
         rubraview_fmt(line, sizeof(line), T("not saved: {}"), PROVEN_ARG(rubraview_tr(job->why)));
+        osd_say(app, cstr(line));
+    } else if (!wait && job->result == SAVE_OK && job->taken[0]) {   /* RV-266: the owner asked to be told the name was there */
+        char line[1200];
+        proven_u8str_view_t as = rubraview_path_basename(cstr(job->out));
+        rubraview_fmt(line, sizeof(line), T("{} was already there: saved the copy as {}"), PROVEN_ARG(job->taken),
+                      PROVEN_ARG(rubraview_bytes_view(as.ptr, (int)as.size)));
         osd_say(app, cstr(line));
     } else if (!wait && job->result >= 0 && job->result < (int)(sizeof(SAID) / sizeof(SAID[0]))) osd_say(app, cstr(SAID[job->result]));
     rubraview_free(job);

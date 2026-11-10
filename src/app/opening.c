@@ -159,6 +159,19 @@ void layout_load(app_state_t *app) {
     }
     if (frame[2] >= 200 && frame[3] >= 150) proven_sys_mem_copy(app->settings_frame, frame, sizeof(frame));
 
+    /* RV-265 (R296): where each kind of input card was left, as shares of the window it was in */
+    for (int32_t k = 0; k < CARD_KINDS; ++k) {
+        char key[48];
+        static const char *const PART[5] = { "left", "top", "width", "height", "sized" };
+        double v[5];
+        for (int p = 0; p < 5; ++p) {
+            rubraview_fmt(key, sizeof key, "{}_{}", PROVEN_ARG(card_kind_key(k)), PROVEN_ARG(PART[p]));
+            v[p] = ini_number(&doc, PROVEN_LIT("cards"), cstr(key), -1.0);
+        }
+        rubraview_card_share_t s = { v[0], v[1], v[2], v[3], true, v[4] > 0.5 };
+        if (rubraview_card_share_valid(&s)) app->card_kept[k] = s;
+    }
+
     /* RV-207: the folder the open-file screen was left in, if it is still there */
     const proven_u8str_view_t *last = ini_text(&doc, PROVEN_LIT("picker"), PROVEN_LIT("last_dir"));
     rubraview_fs_entry_t entry;
@@ -199,6 +212,19 @@ void layout_save(app_state_t *app) {
         rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("settings_window"), PROVEN_LIT("y"), app->settings_frame[1]);
         rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("settings_window"), PROVEN_LIT("width"), app->settings_frame[2]);
         rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("settings_window"), PROVEN_LIT("height"), app->settings_frame[3]);
+    }
+    if (app->card.open) card_close_keep(app);   /* an open card's place too: the program is closing */
+    for (int32_t k = 0; k < CARD_KINDS; ++k) {
+        if (!rubraview_card_share_valid(&app->card_kept[k])) continue;
+        static const char *const PART[4] = { "left", "top", "width", "height" };
+        const double v[4] = { app->card_kept[k].left, app->card_kept[k].top, app->card_kept[k].width, app->card_kept[k].height };
+        for (int p = 0; p < 5; ++p) {
+            char key[48];
+            int n = rubraview_fmt(key, sizeof key, "{}_{}", PROVEN_ARG(card_kind_key(k)), PROVEN_ARG(p < 4 ? PART[p] : "sized"));
+            proven_u8str_view_t kv = app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)key, .size = n > 0 ? (size_t)n : 0 });
+            if (p < 4) rubraview_ini_set_float(app->arena, &doc, PROVEN_LIT("cards"), kv, v[p]);
+            else rubraview_ini_set_int(app->arena, &doc, PROVEN_LIT("cards"), kv, app->card_kept[k].sized ? 1 : 0);
+        }
     }
     proven_u8str_view_t last = picker_folder_to_keep(app);
     if (last.size > 0) rubraview_ini_set_string(app->arena, &doc, PROVEN_LIT("picker"), PROVEN_LIT("last_dir"), last);

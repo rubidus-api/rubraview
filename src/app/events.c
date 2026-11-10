@@ -47,6 +47,11 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
             if (volpop_motion(app, event->mouse.x, event->mouse.y)) break;   /* RV-237: the volume's bar dragged */
+            if (card_motion(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y)) {   /* RV-265: the card moved or sized */
+                app->pointer_x = event->mouse.x;
+                app->pointer_y = event->mouse.y;
+                break;
+            }
             if (scrollbar_motion(app, app->window, event->mouse.x, event->mouse.y)) break;   /* RV-170: a list's bar held */
             if (app->text && app->text->selecting) { text_drag(app, event->mouse.x, event->mouse.y); break; }
             if (!app->seekfan_detached) seekfan_pointer(app, event->mouse.x, event->mouse.y);
@@ -197,7 +202,9 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (list_del_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-256 */
             if (arcadd_press(app, event->mouse.x, event->mouse.y)) break;     /* RV-260 */
             if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)) &&
-                rename_box_press(app, event->mouse.x, event->mouse.y)) break;   /* 1.24.0: the box's buttons */
+                rename_box_press(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y)) break;   /* 1.24.0: the box's buttons; RV-265: the card */
+            if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && app->px_edit_open && !(app->edit_window && edit_panel_open(app)) &&
+                px_box_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-265: the size box's card, before what is under it */
             if (app->picker_open && app->favwin.open && event->mouse.button == RUBRAVIEW_MOUSE_LEFT &&
                 favwin_press(app, event->mouse.x, event->mouse.y)) break;   /* 1.24.0: over the open-file screen too */
             if (app->chrome_hidden) {
@@ -467,9 +474,6 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                     break;
                 }
             }
-            if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && app->px_edit_open) {
-                if (px_box_press(app, event->mouse.x, event->mouse.y)) break;
-            }
 
             /* §3.13: with the workbench open, a drag on the picture
                is the crop rectangle. It is asked before the panel,
@@ -558,6 +562,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && titlebar_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-257 */
             if (volpop_release(app)) break;   /* RV-237 */
+            if (card_release(app, CARD_HOST_MAIN)) break;   /* RV-265 */
             if (app->picker_rhold && event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {   /* RV-223: a right click, not a drag */
                 app->picker_rhold = false;
                 if (app->picker_open && app->picker_rhold_index < app->picker_listing.count)

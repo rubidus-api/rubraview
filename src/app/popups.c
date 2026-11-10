@@ -991,11 +991,127 @@ bool pack_ask_press(app_state_t *app, double x, double y) {
     return true;   /* nothing under it while it asks */
 }
 
+/* RV-265 (R296): the box as a modeless card. Which kind of question it is (its place is kept by kind), -1 for the
+   boxes that are fields of their own screens: the open-file screen's path and filter, the Compress window. */
+int32_t card_kind_now(const app_state_t *app) {
+    if (!app->rename_active || app->rename_is_path || app->rename_is_filter || app->rename_is_pack) return -1;
+    if (app->rename_is_find) return CARD_FIND;
+    if (app->rename_is_listfilter) return CARD_LIST_FILTER;
+    if (app->rename_is_target) return CARD_TARGET;
+    if (app->rename_is_extract) return CARD_EXTRACT;
+    if (app->rename_is_extension) return CARD_EXTENSIONS;
+    if (app->rename_is_password) return CARD_PASSWORD;
+    if (app->rename_is_address) return CARD_ADDRESS;
+    if (app->rename_is_apply) return CARD_COPIES;
+    if (app->rename_is_value || app->rename_is_gmic || app->rename_is_ffmpeg || app->batch_typing) return CARD_VALUE;
+    if (app->rename_is_archive) return CARD_ARCHIVE_PAGE;
+    if (app->rename_is_picker) return CARD_PICKER_NAME;
+    if (app->rename_favorite >= 0) return CARD_FAVORITE;
+    return CARD_RENAME;
+}
+
+static const char *const CARD_KEY[CARD_KINDS] = { "rename", "archive_page", "name", "extensions", "target", "extract", "password",
+                                                  "find", "list_filter", "address", "copies", "value", "favorite", "size" };
+const char *card_kind_key(int32_t kind) { return kind >= 0 && kind < CARD_KINDS ? CARD_KEY[kind] : ""; }
+
+/* What the window had in hand when the card opened: the page, the open-file screen's folder and listing. A card
+   that acts on it (a page of an archive renamed, a name in the open-file screen, the extensions or the folder for
+   the files picked) closes when the window moves on, rather than act on what came after. */
+static uint64_t card_subject_now(app_state_t *app) {
+    uint64_t h = 1469598103934665603ull;
+    proven_u8str_view_t parts[2] = { current_file_path(app), app->picker_dir };
+    for (int k = 0; k < 2; ++k)
+        for (size_t i = 0; i < parts[k].size; ++i) { h ^= parts[k].ptr[i]; h *= 1099511628211ull; }
+    uint64_t more[3] = { (uint64_t)(int64_t)current_page_index(app), app->picker_open ? 1u : 0u, (uint64_t)app->picker_listing.count };
+    for (int k = 0; k < 3; ++k) { h ^= more[k]; h *= 1099511628211ull; }
+    return h;
+}
+
+static bool card_bound(int32_t kind) {
+    return kind == CARD_ARCHIVE_PAGE || kind == CARD_PICKER_NAME || kind == CARD_EXTENSIONS || kind == CARD_TARGET;
+}
+
+/* The keyboard is the box's: no card, or the card has the focus. */
+bool rename_has_keys(const app_state_t *app) {
+    return app->rename_active && (!app->card.open || app->card.focused);
+}
+
+/* The card goes with its box; where it was is kept for the next of its kind. */
+void card_close_keep(app_state_t *app) {
+    if (app->card.open && app->card_kind >= 0 && app->card_kind < CARD_KINDS && app->card_host_w > 0.0)
+        app->card_kept[app->card_kind] = rubraview_card_share_of(&app->card, app->card_host_w, app->card_host_h);
+    rubraview_card_close(&app->card);
+    app->card_kind = -1;
+    app->card_for_len = 0;
+}
+
+bool card_motion(app_state_t *app, int32_t host, double x, double y) {
+    if (app->px_card.open && app->px_card.drag != 0 && host == app->px_card_host) {   /* the size box's card */
+        (void)rubraview_card_motion(&app->px_card, x, y, app->px_card_host_w, app->px_card_host_h);
+        return true;
+    }
+    if (!app->card.open || app->card.drag == 0 || host != app->card_host) return false;
+    (void)rubraview_card_motion(&app->card, x, y, app->card_host_w, app->card_host_h);
+    return true;
+}
+
+bool card_release(app_state_t *app, int32_t host) {
+    if (app->px_card.open && host == app->px_card_host && rubraview_card_release(&app->px_card)) return true;
+    if (host != app->card_host) return false;
+    return rubraview_card_release(&app->card);
+}
+
+/* Once a pass: a card for what the window has left closes, saying so; a plain rename's file gone, the same. */
+void card_watch(app_state_t *app) {
+    if (!app->card.open || !app->rename_active) return;
+    int32_t kind = app->card_kind;
+    bool gone = false;
+    if (card_bound(kind) && card_subject_now(app) != app->card_subject) gone = true;
+    if (kind == CARD_RENAME && app->card_for_len > 0) {
+        double now = rubraview_pal_time_now_seconds();
+        if (now - app->card_checked_at >= 1.0) {
+            app->card_checked_at = now;
+            gone = !rubraview_pal_fs_exists((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->card_for, .size = app->card_for_len });
+        }
+    }
+    if (!gone) return;
+    if (app->rename_is_extract) archwork_extract_dest_dropped(app);
+    rename_end(app);
+    osd_say(app, TU8("the box closed: what it was for is no longer there"));
+}
+
+/* A card opened in a host: its kind's place if kept, else where it always came. */
+static void card_open_in(app_state_t *app, int32_t kind, double win_w, double win_h, double want_w, double want_h, bool live, double dpi) {
+    rubraview_card_t *cd = &app->card;
+    cd->margin = 8.0 * dpi;
+    cd->edge = 6.0 * dpi;
+    cd->title_height = 46.0 * dpi;
+    const rubraview_card_share_t *kept = &app->card_kept[kind];
+    double rise = 0.45;
+    if (live) {   /* what it filters stays in sight: near the top */
+        double room = win_h - want_h;
+        rise = room > 1.0 ? fmin(1.0, (app->rename_is_find ? 96.0 : 60.0) * dpi / room) : 0.0;
+    }
+    rubraview_card_open(cd, win_w, win_h, want_w, want_h, rise, kept);
+    /* Edit to all asks with Edit open: the card goes left of its panel, the first time. */
+    if (!rubraview_card_share_valid(kept) && edit_panel_open(app) && !app->edit_window && app->panel.open &&
+        cd->rect.x + cd->rect.width > app->panel.bounds.x && app->panel.bounds.x > cd->rect.width)
+        cd->rect.x = (app->panel.bounds.x - cd->rect.width) * 0.5;
+    app->card_kind = kind;
+    app->card_subject = card_subject_now(app);
+    app->card_checked_at = rubraview_pal_time_now_seconds();
+}
+
 /* RV-238 (owner, 2026-11-07: "파일이름이나 텍스트를 입력받을 때 모양이 조금 성의가 없어요. 잘 다듬어진 팝업창을 띄우거나 해서 좀
    다듬어 주세요"): what the box is for, as its card's title and the line under it. */
 static void rename_card_words(const app_state_t *app, char *title, size_t capacity, const char **hint) {
     const char *t = T("Rename");
     *hint = T("The whole name, its extension too  ·  Enter renames  ·  Esc leaves it");
+    if (app->card_for_len > 0 && card_kind_now(app) == CARD_RENAME) {   /* RV-265: the card names the file it is for */
+        proven_u8str_view_t name = rubraview_path_basename((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->card_for, .size = app->card_for_len });
+        rubraview_fmt(title, capacity, T("Rename {}"), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)));
+        return;
+    }
     if (app->rename_is_find) { t = T("Find"); *hint = T("Enter or Ctrl+G the next  ·  Shift+Enter back  ·  Esc closes"); }
     else if (app->rename_is_listfilter) { t = T("Filter the list"); *hint = T("The list shows the names holding this  ·  Esc shows them all"); }
     else if (app->rename_is_target) {
@@ -1023,15 +1139,58 @@ static void rename_card_words(const app_state_t *app, char *title, size_t capaci
     rubraview_fmt(title, capacity, "{}", PROVEN_ARG(t));
 }
 
-void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
+/* RV-265 (R296): every input card is drawn by this: its shadow, the card lit at its edge while it has the keys, the
+   grip its corner is sized by, the title (moved by), the line saying what the keys do. Returns where the content
+   starts. */
+static double draw_card_frame(app_state_t *app, rubraview_pal_rect_t c, const char *title, const char *hint, bool focused, double dpi) {
+    double pad = 20.0 * dpi, title_h = 30.0 * dpi, hint_h = 22.0 * dpi;
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ c.x + 3.0 * dpi, c.y + 5.0 * dpi, c.width, c.height }, 0x60000000u, 8.0 * dpi);   /* its shadow */
+    rubraview_pal_render_fill_rect(app->renderer, c, 0xFA242424u, 8.0 * dpi);
+    rubraview_pal_render_stroke_rect(app->renderer, c, focused ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, (focused ? 1.5 : 1.0) * dpi, 8.0 * dpi);
+    for (int gi = 0; gi < 3; ++gi)   /* the grip a corner is sized by: six dots in a triangle */
+        for (int gj = 0; gi + gj < 3; ++gj)
+            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ c.x + c.width - 8.0 * dpi - (double)gi * 4.0 * dpi,
+                                           c.y + c.height - 8.0 * dpi - (double)gj * 4.0 * dpi, 2.0 * dpi, 2.0 * dpi }, 0x90F0F0F0u, 0.0);
+    if (!focused) hint = T("The window has the keys  ·  click the card to type in it  ·  Esc closes it");
+    rubraview_pal_rect_t tr = { c.x + pad, c.y + pad - 4.0 * dpi, c.width - 2.0 * pad, title_h };
+    proven_u8str_view_t tv = proven_u8str_view_from_cstr(title);
+    rubraview_pal_render_draw_text(app->renderer, tv, tr, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    rubraview_pal_render_draw_text(app->renderer, tv, (rubraview_pal_rect_t){ tr.x + 0.6 * dpi, tr.y, tr.width, tr.height },
+                                   18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);   /* bold, as a title */
+    rubraview_pal_render_draw_text(app->renderer, cstr(hint), (rubraview_pal_rect_t){ c.x + pad, tr.y + title_h, c.width - 2.0 * pad, hint_h },
+                                   13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    return tr.y + title_h + hint_h + 12.0 * dpi;
+}
+
+/* A card's buttons along its foot at the right, the first lit (what Enter does). */
+static void draw_card_buttons(app_state_t *app, rubraview_pal_rect_t c, const char *const *words, int32_t n, rubraview_pal_rect_t *out, double dpi) {
+    double bw = 104.0 * dpi, bh = 38.0 * dpi, gap = 10.0 * dpi;
+    for (int32_t i = 0; i < n; ++i) {
+        double tw = 0.0;
+        if (rubraview_pal_render_measure_text(app->renderer, cstr(words[i]), 15.0 * dpi, &tw) && tw + 36.0 * dpi > bw) bw = tw + 36.0 * dpi;
+    }
+    double bx = c.x + c.width - 20.0 * dpi - (bw + gap) * (double)n + gap, by = c.y + c.height - 20.0 * dpi - bh;
+    for (int32_t i = 0; i < n; ++i) {
+        rubraview_pal_rect_t b = { bx + (double)i * (bw + gap), by, bw, bh };
+        out[i] = b;
+        bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
+        double round = 5.0 * dpi;
+        rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? COLOR_TILE_CURRENT : over ? 0x50FFFFFFu : COLOR_TILE_FILL, round);
+        if (i == 0 && over) rubraview_pal_render_fill_rect(app->renderer, b, 0x30FFFFFFu, round);
+        if (i > 0) rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, round);
+        rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+}
+
+void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h, double dpi) {
     if (!app->rename_active) return;
     {
         /* RV-238: a card — title, the line saying what the keys do, the field, the buttons — over a dimmed window;
            the open-file screen's typed path and filter stay in its path bar, Compress keeps its own window */
         bool card = !(app->rename_is_path || app->rename_is_filter || app->rename_is_pack);
         bool live = app->rename_is_find || app->rename_is_listfilter;   /* what it filters stays in sight, undimmed */
-        app->rename_card_modal = false;
         rubraview_pal_rect_t card_rect = {0};
+        bool focused = true;
         double box_w = (app->rename_is_pack ? 680.0 : 560.0) * dpi, box_h = 72.0 * dpi;   /* 1.25.0: roomier; D-260: the Compress window's rows */
         if (box_w > win_w - 16.0 * dpi) box_w = win_w - 16.0 * dpi;   /* a narrow Edit window (RV-137) */
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
@@ -1043,34 +1202,28 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
         if (card) {
             double pad = 20.0 * dpi, title_h = 30.0 * dpi, hint_h = 22.0 * dpi, field_h = 46.0 * dpi, btn_h = 38.0 * dpi;
             double row_h = 34.0 * dpi, rows_h = app->rename_is_extension ? row_h * (double)app->ext_n + 8.0 * dpi : 0.0;
-            double cw = 600.0 * dpi;
-            if (cw > win_w - 16.0 * dpi) cw = win_w - 16.0 * dpi;
-            double ch = pad + title_h + hint_h + 12.0 * dpi + rows_h + field_h + 18.0 * dpi + btn_h + pad;
-            double cx = (win_w - cw) * 0.5;
-            /* Edit to all asks with Edit open: the card goes left of its panel. */
-            if (edit_panel_open(app) && !app->edit_window && app->panel.open && cx + cw > app->panel.bounds.x && app->panel.bounds.x > cw)
-                cx = (app->panel.bounds.x - cw) * 0.5;
-            double cy = live ? (app->rename_is_find ? 96.0 : 60.0) * dpi : (win_h - ch) * 0.45;
-            if (cy + ch > win_h - 8.0 * dpi) cy = win_h - 8.0 * dpi - ch;
-            if (cy < 8.0 * dpi) cy = 8.0 * dpi;
+            /* RV-265 (R296): the card is where the reader put it and as large, inside the window, never under what its
+               content needs; nothing under it is dimmed or held: a press there is the window's, and takes the keys */
+            double min_h = pad + title_h + hint_h + 12.0 * dpi + rows_h + field_h + 18.0 * dpi + btn_h + pad;
+            int32_t kind = card_kind_now(app);
+            if (!app->card.open || app->card_kind != kind) {
+                if (app->card.open) card_close_keep(app);
+                app->card_host = host;
+                app->card_host_w = win_w;
+                app->card_host_h = win_h;
+                card_open_in(app, kind, win_w, win_h, 600.0 * dpi, min_h, live, dpi);
+            }
+            app->card_host = host;
+            app->card_host_w = win_w;
+            app->card_host_h = win_h;
+            rubraview_card_fit(&app->card, win_w, win_h, 440.0 * dpi, min_h);
+            focused = app->card.focused;
+            double cx = app->card.rect.x, cy = app->card.rect.y, cw = app->card.rect.width, ch = app->card.rect.height;
             card_rect = (rubraview_pal_rect_t){ cx, cy, cw, ch };
-            app->rename_card = card_rect;
-            app->rename_card_modal = !live;
-            if (!live) rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, 0.0, win_w, win_h }, 0x90000000u, 0.0);
-            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cx + 3.0 * dpi, cy + 5.0 * dpi, cw, ch }, 0x60000000u, 8.0 * dpi);   /* its shadow */
-            rubraview_pal_render_fill_rect(app->renderer, card_rect, 0xFA242424u, 8.0 * dpi);
-            rubraview_pal_render_stroke_rect(app->renderer, card_rect, COLOR_BOX_BORDER, 1.0 * dpi, 8.0 * dpi);
             char title[1200];
             const char *hint = "";
             rename_card_words(app, title, sizeof(title), &hint);
-            rubraview_pal_rect_t tr = { cx + pad, cy + pad - 4.0 * dpi, cw - 2.0 * pad, title_h };
-            proven_u8str_view_t tv = proven_u8str_view_from_cstr(title);
-            rubraview_pal_render_draw_text(app->renderer, tv, tr, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-            rubraview_pal_render_draw_text(app->renderer, tv, (rubraview_pal_rect_t){ tr.x + 0.6 * dpi, tr.y, tr.width, tr.height },
-                                           18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);   /* bold, as a title */
-            rubraview_pal_render_draw_text(app->renderer, cstr(hint), (rubraview_pal_rect_t){ cx + pad, tr.y + title_h, cw - 2.0 * pad, hint_h },
-                                           13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
-            double fy = tr.y + title_h + hint_h + 12.0 * dpi;
+            double fy = draw_card_frame(app, card_rect, title, hint, focused, dpi);
             if (app->rename_is_extension) {   /* 1.24.0: the rows over the field, the one it edits lit */
                 for (int32_t k = 0; k < app->ext_n; ++k) {
                     rubraview_pal_rect_t r = { cx + pad, fy + row_h * (double)k, cw - 2.0 * pad, row_h - 4.0 * dpi };
@@ -1179,7 +1332,7 @@ void draw_rename_box(app_state_t *app, double win_w, double win_h, double dpi) {
             rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = total },
                                            line, size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         }
-        if (fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5) {
+        if (focused && fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5) {
             rubraview_pal_rect_t bar = { x0 + to_caret, box.y + box.height * 0.22, 2.0 * dpi, box.height * 0.56 };
             rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_TEXT, 0.0);
         }
@@ -1307,15 +1460,39 @@ static void px_unit_buttons(app_state_t *app, double dpi) {
     }
 }
 
-void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi) {
+void draw_px_edit_box(app_state_t *app, int32_t host, double win_w, double win_h, double dpi) {
     if (!app->px_edit_open) return;
-    (void)win_w; (void)win_h;
-    rubraview_pal_rect_t box = px_box_rect(app);
-    rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
-    rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
-    draw_answer_close(app, box, dpi);
-    bool caret_lit = fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
+    /* RV-265 (R296, RV-265.3): a card as the text box's — moved by its title, sized by its edges inside the window,
+       OK and Cancel at its foot, modeless */
+    rubraview_card_t *cd = &app->px_card;
+    double min_h = 84.0 * dpi + 40.0 * dpi + 8.0 * dpi + 28.0 * dpi + 18.0 * dpi + 38.0 * dpi + 20.0 * dpi;
+    app->px_card_host = host;
+    app->px_card_host_w = win_w;
+    app->px_card_host_h = win_h;
+    if (!cd->open) {
+        cd->margin = 8.0 * dpi;
+        cd->edge = 6.0 * dpi;
+        cd->title_height = 46.0 * dpi;
+        rubraview_card_open(cd, win_w, win_h, 640.0 * dpi, min_h, 0.62, &app->card_kept[CARD_SIZE]);
+        /* clear of an open panel (the Adjust panel the crop box comes from), the first time, when there is room */
+        if (!rubraview_card_share_valid(&app->card_kept[CARD_SIZE]) && host == CARD_HOST_MAIN && app->panel.open &&
+            cd->rect.x + cd->rect.width > app->panel.bounds.x - 8.0)
+            cd->rect.x = app->panel.bounds.x - 8.0 - cd->rect.width;
+    }
+    rubraview_card_fit(cd, win_w, win_h, 480.0 * dpi, min_h);
+    rubraview_pal_rect_t box = { cd->rect.x, cd->rect.y, cd->rect.width, cd->rect.height };
+    bool focused = cd->focused;
+    bool caret_lit = focused && fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
+    const char *title = app->px_edit_crop ? T("The area: its corner and its size") : T("The size it is saved at");
+    const char *hint = app->px_edit_crop ? T("From the top left  ·  Tab next  ·  / pixels or a ratio (0.25 = a quarter)  ·  Enter cuts  ·  Esc")
+                     : app->edit.resize_lock_aspect ? T("The other side follows the shape  ·  Tab swaps  ·  / pixels or a ratio  ·  Enter keeps  ·  Esc")
+                                                    : T("Tab swaps  ·  / pixels or a ratio (1.5 = half as big again)  ·  Enter keeps  ·  Esc");
+    (void)draw_card_frame(app, box, title, hint, focused, dpi);
+    rubraview_pal_rect_t row = px_fields_rect(app);
+    rubraview_pal_render_fill_rect(app->renderer, row, 0xFF141414u, 5.0 * dpi);
+    rubraview_pal_render_stroke_rect(app->renderer, row, focused ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, 1.0 * dpi, 5.0 * dpi);
     char line[160];
+    int n = 0;
     if (app->px_edit_crop) {
         /* The crop: its left and top corner and its size, the field in hand in brackets. */
         static const char *const NAME[4] = { "X", "Y", "W", "H" };
@@ -1328,31 +1505,19 @@ void draw_px_edit_box(app_state_t *app, double win_w, double win_h, double dpi) 
             if (m < 0) break;
             at += m;
         }
-        if (at > (int)sizeof(line) - 1) at = (int)sizeof(line) - 1;
-        rubraview_pal_rect_t top = { box.x, box.y + 10.0 * dpi, box.width, 34.0 * dpi };
-        rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)at }, top, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        rubraview_pal_rect_t hint = { box.x, box.y + 50.0 * dpi, box.width, 34.0 * dpi };
-        rubraview_pal_render_draw_text(app->renderer, TU8("From the top left  ·  Tab next  ·  / pixels or a ratio (0.25 = a quarter)  ·  Enter cuts  ·  Esc"),
-                                       hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
-        px_unit_buttons(app, dpi);
-        return;
+        n = at > (int)sizeof(line) - 1 ? (int)sizeof(line) - 1 : at;
+    } else {
+        n = rubraview_fmt(line, sizeof(line), T("Width {}{}{}{}  x  Height {}{}{}{}"),
+                         PROVEN_ARG(app->px_edit_field == 0 ? "[" : " "), PROVEN_ARG(rubraview_bytes_view(app->px_edit_text[0], (int)app->px_edit_length[0])),
+                         PROVEN_ARG(app->px_edit_field == 0 ? (caret_lit ? "|]" : " ]") : " "), PROVEN_ARG((app->px_edit_ratio & 1u) ? "×" : ""),
+                         PROVEN_ARG(app->px_edit_field == 1 ? "[" : " "), PROVEN_ARG(rubraview_bytes_view(app->px_edit_text[1], (int)app->px_edit_length[1])),
+                         PROVEN_ARG(app->px_edit_field == 1 ? (caret_lit ? "|]" : " ]") : " "), PROVEN_ARG((app->px_edit_ratio & 2u) ? "×" : ""));
     }
-    int n = rubraview_fmt(line, sizeof(line), T("Width {}{}{}{}  x  Height {}{}{}{}"),
-                     PROVEN_ARG(app->px_edit_field == 0 ? "[" : " "), PROVEN_ARG(rubraview_bytes_view(app->px_edit_text[0], (int)app->px_edit_length[0])),
-                     PROVEN_ARG(app->px_edit_field == 0 ? (caret_lit ? "|]" : " ]") : " "), PROVEN_ARG((app->px_edit_ratio & 1u) ? "×" : ""),
-                     PROVEN_ARG(app->px_edit_field == 1 ? "[" : " "), PROVEN_ARG(rubraview_bytes_view(app->px_edit_text[1], (int)app->px_edit_length[1])),
-                     PROVEN_ARG(app->px_edit_field == 1 ? (caret_lit ? "|]" : " ]") : " "), PROVEN_ARG((app->px_edit_ratio & 2u) ? "×" : ""));
-    if (n > 0) {
-        rubraview_pal_rect_t top = { box.x, box.y + 10.0 * dpi, box.width, 34.0 * dpi };
-        rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
-                                       top, 20.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-    }
-    rubraview_pal_rect_t hint = { box.x, box.y + 50.0 * dpi, box.width, 34.0 * dpi };
-    rubraview_pal_render_draw_text(app->renderer,
-                                   app->edit.resize_lock_aspect ? TU8("The other side follows the shape  ·  Tab swaps  ·  / pixels or a ratio  ·  Enter keeps  ·  Esc")
-                                                                : TU8("Tab swaps  ·  / pixels or a ratio (1.5 = half as big again)  ·  Enter keeps  ·  Esc"),
-                                   hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
+                                              row, (app->px_edit_crop ? 18.0 : 20.0) * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     px_unit_buttons(app, dpi);
+    const char *words[2] = { T("OK"), T("Cancel") };
+    draw_card_buttons(app, box, words, 2, app->px_btn, dpi);
 }
 
 /* §3.18's confirmation, the text boxes and the notices sit above
@@ -1419,9 +1584,9 @@ void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
     }
     /* RV-137: a value typed, or the copies' name, asked for in the Edit window is drawn there */
     if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)) &&
-        !(app->batch_typing && app->batch_window)) draw_rename_box(app, win_w, win_h, chrome_dpi);   /* RV-194: Batch's in its window */
+        !(app->batch_typing && app->batch_window)) draw_rename_box(app, CARD_HOST_MAIN, win_w, win_h, chrome_dpi);   /* RV-194: Batch's in its window */
     draw_ab_edit_box(app, win_w, win_h, chrome_dpi);
-    if (!(app->edit_window && edit_panel_open(app))) draw_px_edit_box(app, win_w, win_h, chrome_dpi);   /* RV-137: else in the Edit window */
+    if (!(app->edit_window && edit_panel_open(app))) draw_px_edit_box(app, CARD_HOST_MAIN, win_w, win_h, chrome_dpi);   /* RV-137: else in the Edit window */
     draw_notice(app, win_w, win_h, chrome_dpi);
 }
 

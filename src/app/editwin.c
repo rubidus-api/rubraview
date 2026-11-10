@@ -92,6 +92,8 @@ void px_edit_fill_crop(app_state_t *app) {
 void px_edit_begin_crop(app_state_t *app) {
     if (app->edit.image_width <= 0 || app->edit.image_height <= 0) { osd_say(app, TU8("the picture's size is not known yet")); return; }
     app->px_edit_crop = true;
+    app->px_crop_was = app->edit.crop;   /* RV-265: Cancel puts the selection back as it was */
+    app->px_crop_active_was = app->edit.crop_active;
     app->px_edit_ratio = ~app->unit_px & RUBRAVIEW_RATIO_AREA;   /* RV-187: each field in the unit it has */
     px_edit_fill_crop(app);
     app->px_edit_field = 0;
@@ -114,22 +116,41 @@ void px_edit_begin(app_state_t *app) {
     rubraview_pal_window_text_input(app->window, true);
 }
 
-/* A press on the pixel box, in whichever window it is drawn: its X, a field's px / ratio switch (RV-187), a field. */
+/* A press on the pixel box, in whichever window it is drawn: OK, Cancel, a field's px / ratio switch (RV-187), a
+   field; RV-265: a card's title or edge moves or sizes it, a press outside it is the window's (modeless). */
 bool px_box_press(app_state_t *app, double x, double y) {
     if (!app->px_edit_open) return false;
-    rubraview_pal_rect_t box = px_box_rect(app);
-    if (pal_rect_has(answer_box_close(app, box), x, y)) { px_edit_close(app); return true; }
+    if (app->px_card.open) {
+        bool was = app->px_card.focused;
+        bool on = rubraview_card_press(&app->px_card, x, y);
+        if (app->px_card.focused != was && app->px_card_host == CARD_HOST_MAIN) rubraview_pal_window_text_input(app->window, app->px_card.focused);
+        if (!on) return false;
+        if (app->px_card.drag != 0) return true;
+    }
+    if (pal_rect_has(app->px_btn[0], x, y)) { px_edit_ok(app); return true; }
+    if (pal_rect_has(app->px_btn[1], x, y)) { px_edit_cancel(app); return true; }
     for (int32_t k = 0; k < px_edit_fields(app); ++k) {
         if (pal_rect_has(px_unit_rect(app, k), x, y)) { px_edit_toggle_unit(app, k); return true; }
     }
-    if (!pal_rect_has(box, x, y)) return false;
-    int32_t n = px_edit_fields(app);
-    int32_t k = (int32_t)((x - box.x) / box.width * (double)n);
-    app->px_edit_field = k < 0 ? 0 : k >= n ? n - 1 : k;
-    return true;
+    rubraview_pal_rect_t row = px_fields_rect(app);
+    if (pal_rect_has(row, x, y)) {
+        int32_t n = px_edit_fields(app);
+        int32_t k = (int32_t)((x - row.x) / row.width * (double)n);
+        app->px_edit_field = k < 0 ? 0 : k >= n ? n - 1 : k;
+    }
+    return pal_rect_has(px_box_rect(app), x, y);
+}
+
+/* RV-265: the card's keys while it has the focus */
+bool px_has_keys(const app_state_t *app) {
+    return app->px_edit_open && (!app->px_card.open || app->px_card.focused);
 }
 
 void px_edit_close(app_state_t *app) {
+    if (app->px_card.open && app->px_card_host_w > 0.0)   /* RV-265: where it was left, for the next */
+        app->card_kept[CARD_SIZE] = rubraview_card_share_of(&app->px_card, app->px_card_host_w, app->px_card_host_h);
+    rubraview_card_close(&app->px_card);
+    app->px_btn[0] = app->px_btn[1] = (rubraview_pal_rect_t){0};
     app->px_edit_open = false;
     rubraview_pal_window_text_input(app->window, false);
 }
@@ -200,13 +221,30 @@ static bool px_edit_commit(app_state_t *app) {
     return true;
 }
 
+/* RV-265.3: OK keeps the numbers (as Enter); Cancel leaves the size as it was and puts a crop's selection back (as Esc). */
+void px_edit_ok(app_state_t *app) {
+    if (px_edit_commit(app)) px_edit_close(app);
+}
+
+void px_edit_cancel(app_state_t *app) {
+    if (app->px_edit_crop) {
+        app->edit.crop = app->px_crop_was;
+        app->edit.crop_active = app->px_crop_active_was;
+        app->edit_rev++;
+        app->edit_shown_valid = false;
+        edit_sel_sync(app);
+    }
+    px_edit_close(app);
+}
+
 bool px_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (!app->px_edit_open) return false;
-    if (key_is(combo, "Escape")) { px_edit_close(app); return true; }
-    if (key_is(combo, "Enter")) {
-        if (px_edit_commit(app)) px_edit_close(app);
-        return true;
+    if (!px_has_keys(app)) {   /* RV-265: the window has the keys; Esc closes the card first */
+        if (key_is(combo, "Escape")) { px_edit_cancel(app); return true; }
+        return false;
     }
+    if (key_is(combo, "Escape")) { px_edit_cancel(app); return true; }
+    if (key_is(combo, "Enter")) { px_edit_ok(app); return true; }
     if (key_is(combo, "Tab") || key_is(combo, "Down")) {
         app->px_edit_field = (app->px_edit_field + 1) % px_edit_fields(app);
         return true;
@@ -3380,12 +3418,12 @@ void draw_edit_window(app_state_t *app) {
     if (app->rename_active && (app->rename_is_value || app->rename_is_apply)) {
         int32_t ww = 0, wh = 0;
         rubraview_pal_window_get_size(app->edit_window, &ww, &wh);
-        draw_rename_box(app, (double)ww, (double)wh, rubraview_pal_window_dpi_scale(app->edit_window));
+        draw_rename_box(app, CARD_HOST_EDIT, (double)ww, (double)wh, rubraview_pal_window_dpi_scale(app->edit_window));
     }
     if (app->px_edit_open) {   /* a value typed: its box where it was asked for */
         int32_t ww = 0, wh = 0;
         rubraview_pal_window_get_size(app->edit_window, &ww, &wh);
-        draw_px_edit_box(app, (double)ww, (double)wh, rubraview_pal_window_dpi_scale(app->edit_window));
+        draw_px_edit_box(app, CARD_HOST_EDIT, (double)ww, (double)wh, rubraview_pal_window_dpi_scale(app->edit_window));
     }
     draw_chooser(app, app->renderer, CHOOSE_IN_EDIT, app->edit_px, app->edit_py);
     bool ok = rubraview_pal_render_end(app->renderer);
@@ -3418,6 +3456,7 @@ size_t edit_pump(app_state_t *app) {
                 app->edit_tab_hover = edit_bar_part_at(app, event.mouse.x, event.mouse.y);
                 if (app->edit_tab_hover != was) app->edit_dirty = true;
                 }
+                if (card_motion(app, CARD_HOST_EDIT, event.mouse.x, event.mouse.y)) break;   /* RV-265: the card moved or sized */
                 if (scrollbar_motion(app, app->edit_window, event.mouse.x, event.mouse.y)) { app->edit_dirty = true; break; }   /* RV-170: a list's bar */
                 if (app->change_press >= 0) { changes_motion(app, event.mouse.y); break; }
                 if (app->curve_dragging >= 0) { curve_widget_drag(app, event.mouse.x, event.mouse.y); break; }
@@ -3437,7 +3476,7 @@ size_t edit_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
                 if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT) { (void)curve_widget_press(app, event.mouse.x, event.mouse.y, true); break; }
                 if (chooser_press(app, CHOOSE_IN_EDIT, event.mouse.x, event.mouse.y)) break;   /* 1.24.0 */
-                if ((app->rename_is_value || app->rename_is_apply) && rename_box_press(app, event.mouse.x, event.mouse.y)) break;
+                if ((app->rename_is_value || app->rename_is_apply) && rename_box_press(app, CARD_HOST_EDIT, event.mouse.x, event.mouse.y)) break;
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
                 if (px_box_press(app, event.mouse.x, event.mouse.y)) { app->edit_dirty = true; break; }   /* RV-187: its box is here too */
                 if (edit_bar_press(app, event.mouse.x, event.mouse.y)) break;   /* RV-188: the tabs, undo, redo, saving */
@@ -3447,6 +3486,7 @@ size_t edit_pump(app_state_t *app) {
                 (void)panel_handle_press(app, event.mouse.x, event.mouse.y);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (card_release(app, CARD_HOST_EDIT)) break;   /* RV-265 */
                 if (scrollbar_release(app, app->edit_window)) { app->edit_dirty = true; break; }   /* RV-170 */
                 changes_release(app, event.mouse.y);
                 app->curve_dragging = -1;
@@ -3477,7 +3517,7 @@ size_t edit_pump(app_state_t *app) {
                 break;
         }
     }
-    bool typing = app->rename_active || app->px_edit_open;
+    bool typing = rename_has_keys(app) || px_has_keys(app);   /* RV-265: the card's keys while it has the focus */
     if (app->edit_window && typing != app->edit_text_on) {
         rubraview_pal_window_text_input(app->edit_window, typing);
         app->edit_text_on = typing;
