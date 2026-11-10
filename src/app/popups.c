@@ -1011,7 +1011,7 @@ int32_t card_kind_now(const app_state_t *app) {
 }
 
 static const char *const CARD_KEY[CARD_KINDS] = { "rename", "archive_page", "name", "extensions", "target", "extract", "password",
-                                                  "find", "list_filter", "address", "copies", "value", "favorite", "size" };
+                                                  "find", "list_filter", "address", "copies", "value", "favorite", "size", "progress" };
 const char *card_kind_key(int32_t kind) { return kind >= 0 && kind < CARD_KINDS ? CARD_KEY[kind] : ""; }
 
 /* What the window had in hand when the card opened: the page, the open-file screen's folder and listing. A card
@@ -1046,6 +1046,10 @@ void card_close_keep(app_state_t *app) {
 }
 
 bool card_motion(app_state_t *app, int32_t host, double x, double y) {
+    if (app->prog_card.open && app->prog_card.drag != 0 && host == CARD_HOST_MAIN) {   /* RV-268: the progress card */
+        (void)rubraview_card_motion(&app->prog_card, x, y, app->prog_host_w, app->prog_host_h);
+        return true;
+    }
     if (app->px_card.open && app->px_card.drag != 0 && host == app->px_card_host) {   /* the size box's card */
         (void)rubraview_card_motion(&app->px_card, x, y, app->px_card_host_w, app->px_card_host_h);
         return true;
@@ -1056,6 +1060,7 @@ bool card_motion(app_state_t *app, int32_t host, double x, double y) {
 }
 
 bool card_release(app_state_t *app, int32_t host) {
+    if (app->prog_card.open && host == CARD_HOST_MAIN && rubraview_card_release(&app->prog_card)) return true;
     if (app->px_card.open && host == app->px_card_host && rubraview_card_release(&app->px_card)) return true;
     if (host != app->card_host) return false;
     return rubraview_card_release(&app->card);
@@ -1142,7 +1147,7 @@ static void rename_card_words(const app_state_t *app, char *title, size_t capaci
 /* RV-265 (R296): every input card is drawn by this: its shadow, the card lit at its edge while it has the keys, the
    grip its corner is sized by, the title (moved by), the line saying what the keys do. Returns where the content
    starts. */
-static double draw_card_frame(app_state_t *app, rubraview_pal_rect_t c, const char *title, const char *hint, bool focused, double dpi) {
+double draw_card_frame(app_state_t *app, rubraview_pal_rect_t c, const char *title, const char *hint, bool focused, double dpi) {
     double pad = 20.0 * dpi, title_h = 30.0 * dpi, hint_h = 22.0 * dpi;
     rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ c.x + 3.0 * dpi, c.y + 5.0 * dpi, c.width, c.height }, 0x60000000u, 8.0 * dpi);   /* its shadow */
     rubraview_pal_render_fill_rect(app->renderer, c, 0xFA242424u, 8.0 * dpi);
@@ -1163,7 +1168,7 @@ static double draw_card_frame(app_state_t *app, rubraview_pal_rect_t c, const ch
 }
 
 /* A card's buttons along its foot at the right, the first lit (what Enter does). */
-static void draw_card_buttons(app_state_t *app, rubraview_pal_rect_t c, const char *const *words, int32_t n, rubraview_pal_rect_t *out, double dpi) {
+void draw_card_buttons(app_state_t *app, rubraview_pal_rect_t c, const char *const *words, int32_t n, rubraview_pal_rect_t *out, double dpi) {
     double bw = 104.0 * dpi, bh = 38.0 * dpi, gap = 10.0 * dpi;
     for (int32_t i = 0; i < n; ++i) {
         double tw = 0.0;
@@ -1587,6 +1592,7 @@ void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
         !(app->batch_typing && app->batch_window)) draw_rename_box(app, CARD_HOST_MAIN, win_w, win_h, chrome_dpi);   /* RV-194: Batch's in its window */
     draw_ab_edit_box(app, win_w, win_h, chrome_dpi);
     if (!(app->edit_window && edit_panel_open(app))) draw_px_edit_box(app, CARD_HOST_MAIN, win_w, win_h, chrome_dpi);   /* RV-137: else in the Edit window */
+    draw_progress_card(app, win_w, win_h, chrome_dpi);   /* RV-268 */
     draw_notice(app, win_w, win_h, chrome_dpi);
 }
 

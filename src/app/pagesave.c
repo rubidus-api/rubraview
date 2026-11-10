@@ -482,17 +482,17 @@ void arc_job_poll(app_state_t *app, bool quitting) {
     }
     if (quitting) atomic_store(&job->job.cancel, true);
     if (!quitting && !InterlockedCompareExchange(&job->done, 0, 0)) {
-        uint64_t done = atomic_load(&job->job.done), total = atomic_load(&job->job.total);
-        char line[96];
-        if (atomic_load(&job->job.cancel)) rubraview_fmt(line, sizeof(line), T("stopping..."));
-        else if (total > 0) rubraview_fmt(line, sizeof(line), T("writing the archive... {} %  (Esc stops it)"), PROVEN_ARG((int)(done * 100u / total)));
-        else rubraview_fmt(line, sizeof(line), T("writing the archive...  (Esc stops it)"));
-        osd_say(app, cstr(line));
+        progress_view_t v = { .source = PROGRESS_ARCEDIT, .bytes = true, .can_stop = true,   /* RV-268: the progress card */
+                              .done = atomic_load(&job->job.done), .total = atomic_load(&job->job.total), .stopping = atomic_load(&job->job.cancel) };
+        rubraview_fmt(v.title, sizeof v.title, "{}", PROVEN_ARG(T("Writing the archive")));
+        rubraview_fmt(v.note, sizeof v.note, "{}", PROVEN_ARG(T("Esc or Stop stops it")));
+        progress_show(app, &v);
         return;
     }
     WaitForSingleObject(job->thread, INFINITE);
     CloseHandle(job->thread);
     app->arc_job = NULL;               /* opening is allowed again */
+    progress_end(app, PROGRESS_ARCEDIT);
     if (!quitting) {
         if (job->result == RUBRAVIEW_ARCEDIT_OK) arc_job_finish(app, job);
         else osd_say(app, cstr(rubraview_arcedit_result_text((rubraview_arcedit_result_t)job->result)));

@@ -643,27 +643,32 @@ void archwork_pack_cancelled(app_state_t *app) {
 
 /* ---- each pass ---- */
 
+/* RV-268: where it is, for the progress card (it was a line at the top). */
 static void say_progress(app_state_t *app, archwork_t *w) {
-    char line[256];
+    progress_view_t v = { .source = PROGRESS_ARCHWORK, .bytes = true, .can_stop = true };
     if (w->compress) {
-        uint64_t done = atomic_load(&w->pk.done), total = atomic_load(&w->pk.total);
-        int pct = total ? (int)(done * 100u / total) : 0;
         int phase = atomic_load(&w->pk.phase);
+        v.done = atomic_load(&w->pk.done);
+        v.total = atomic_load(&w->pk.total);
+        v.stopping = atomic_load(&w->pk.cancel);
+        if (phase == 1) { v.files_at = atomic_load(&w->pk.files_done); v.files_total = atomic_load(&w->pk.files_total); }
         proven_u8str_view_t name = rubraview_path_basename(proven_u8str_view_from_cstr(w->output));
-        if (atomic_load(&w->pk.cancel)) rubraview_fmt(line, sizeof line, "{}", PROVEN_ARG(T("stopping...")));
-        else rubraview_fmt(line, sizeof line, phase == 2 ? T("checking {}... {} %  (Esc stops it)") : T("compressing into {}... {} %  (Esc stops it)"),
-                      PROVEN_ARG(rubraview_bytes_view((const char *)name.ptr, (int)name.size)), PROVEN_ARG((int)pct));
+        rubraview_fmt(v.title, sizeof v.title, phase == 0 ? T("Listing the files for {}") : phase == 2 ? T("Checking {}") : T("Compressing into {}"),
+                      PROVEN_ARG(rubraview_bytes_view((const char *)name.ptr, (int)name.size)));
     } else {
-        uint64_t done = atomic_load(&w->ex.done), total = atomic_load(&w->ex.total);
-        int pct = total ? (int)(done * 100u / total) : 0;
+        v.done = atomic_load(&w->ex.done);
+        v.total = atomic_load(&w->ex.total);
+        v.stopping = atomic_load(&w->ex.cancel);
+        v.files_at = atomic_load(&w->ex.files_at);
+        v.files_total = atomic_load(&w->ex.files_total);
         size_t at = w->at < w->count ? w->at : w->count - 1;
         proven_u8str_view_t name = rubraview_path_basename(proven_u8str_view_from_cstr(w->archives[at]));
-        if (atomic_load(&w->ex.cancel)) rubraview_fmt(line, sizeof line, "{}", PROVEN_ARG(T("stopping...")));
-        else if (w->count > 1) rubraview_fmt(line, sizeof line, T("extracting {} ({} of {})... {} %  (Esc stops it)"),
-                                        PROVEN_ARG(rubraview_bytes_view((const char *)name.ptr, (int)name.size)), PROVEN_ARG((size_t)(at + 1)), PROVEN_ARG((size_t)w->count), PROVEN_ARG((int)pct));
-        else rubraview_fmt(line, sizeof line, T("extracting {}... {} %  (Esc stops it)"), PROVEN_ARG(rubraview_bytes_view((const char *)name.ptr, (int)name.size)), PROVEN_ARG((int)pct));
+        if (w->count > 1) rubraview_fmt(v.title, sizeof v.title, T("Extracting {} ({} of {})"), PROVEN_ARG(rubraview_bytes_view((const char *)name.ptr, (int)name.size)),
+                                        PROVEN_ARG((size_t)(at + 1)), PROVEN_ARG((size_t)w->count));
+        else rubraview_fmt(v.title, sizeof v.title, T("Extracting {}"), PROVEN_ARG(rubraview_bytes_view((const char *)name.ptr, (int)name.size)));
     }
-    osd_say(app, cstr(line));
+    rubraview_fmt(v.note, sizeof v.note, "{}", PROVEN_ARG(T("Esc or Stop stops it")));
+    progress_show(app, &v);
 }
 
 static size_t xrows_take(app_state_t *app, archwork_t *w);   /* RV-258, below */
@@ -679,6 +684,7 @@ void archwork_poll(app_state_t *app, bool quitting) {
     CloseHandle(w->thread);
     w->thread = NULL;
     app->archwork = NULL;
+    progress_end(app, PROGRESS_ARCHWORK);   /* RV-268 */
     if (quitting) { work_free(w); return; }
     char line[512];
     if (w->compress) {

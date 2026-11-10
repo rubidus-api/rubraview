@@ -1138,6 +1138,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
 
     /* The picker covers the chrome: its text box and its messages are drawn here. */
     draw_rename_box(app, CARD_HOST_MAIN, win_w, win_h, dpi);
+    draw_progress_card(app, win_w, win_h, dpi);   /* RV-268: over the open-file screen too */
     draw_notice(app, win_w, win_h, dpi);
     draw_titlebar(app, win_w);   /* over the band at the top */
 }
@@ -1742,6 +1743,12 @@ uint64_t scene_signature(const app_state_t *app) {
     if (app->card.open) {   /* RV-265: the card moved, sized, its focus */
         SIG(&h, (int64_t)app->card.rect.x); SIG(&h, (int64_t)app->card.rect.y);
         SIG(&h, (int64_t)app->card.rect.width); SIG(&h, (int64_t)app->card.rect.height); SIG(&h, app->card.focused);
+    }
+    if (app->prog.source != PROGRESS_NONE) {   /* RV-268: the progress card's numbers and place */
+        SIG(&h, app->prog.source); SIG(&h, (int64_t)app->prog.done); SIG(&h, (int64_t)app->prog.files_at); SIG(&h, app->prog.stopping);
+        SIG(&h, (int64_t)app->prog_card.rect.x); SIG(&h, (int64_t)app->prog_card.rect.y);
+        SIG(&h, (int64_t)app->prog_card.rect.width); SIG(&h, (int64_t)app->prog_card.rect.height);
+        SIG(&h, (int64_t)(now - app->prog_rate.started));   /* the time left moves on a second at a time */
     }
     if (app->px_card.open) {   /* the size box's card, the same */
         SIG(&h, (int64_t)app->px_card.rect.x); SIG(&h, (int64_t)app->px_card.rect.y);

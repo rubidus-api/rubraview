@@ -83,10 +83,22 @@
 #include "rubraview/memory.h"
 #include "rubraview/ui_eqwin.h"
 #include "rubraview/ui_card.h"
+#include "rubraview/progress.h"
 
 /* RV-265: the kinds of question the input card asks, each with its place kept, and the windows it is drawn in. */
 enum { CARD_RENAME, CARD_ARCHIVE_PAGE, CARD_PICKER_NAME, CARD_EXTENSIONS, CARD_TARGET, CARD_EXTRACT, CARD_PASSWORD,
-       CARD_FIND, CARD_LIST_FILTER, CARD_ADDRESS, CARD_COPIES, CARD_VALUE, CARD_FAVORITE, CARD_SIZE, CARD_KINDS };
+       CARD_FIND, CARD_LIST_FILTER, CARD_ADDRESS, CARD_COPIES, CARD_VALUE, CARD_FAVORITE, CARD_SIZE, CARD_PROGRESS, CARD_KINDS };
+/* RV-268: who fills the progress card */
+enum { PROGRESS_NONE = 0, PROGRESS_ARCHWORK, PROGRESS_ARCEDIT, PROGRESS_FILEJOB };
+typedef struct progress_view {
+    int32_t source;              /* PROGRESS_* */
+    char title[600];
+    char note[300];              /* a line under the title: what Esc does, names waiting */
+    uint64_t done, total;        /* bytes, when `bytes` */
+    bool bytes;
+    uint32_t files_at, files_total;   /* files_total 0: not counted */
+    bool stopping, can_stop;
+} progress_view_t;
 enum { CARD_HOST_NONE = 0, CARD_HOST_MAIN, CARD_HOST_EDIT, CARD_HOST_BATCH, CARD_HOST_NAMES };
 #include "rubraview/repeat.h"
 #include "rubraview/lyrics.h"
@@ -606,6 +618,12 @@ typedef struct app_state {
     /* RV-265 (R296; owner: "크기 설정하는 버튼 누르면, 확인 또는 취소가 버튼이 있어야"): the size / crop numbers in a card
        of their own, the same model as the text box's: moved, sized, OK and Cancel, modeless */
     rubraview_card_t       px_card;
+    /* RV-268: a long job's progress in a card of the main window (moved by its title, kept where it was left) */
+    progress_view_t        prog;
+    rubraview_card_t       prog_card;
+    rubraview_progress_t   prog_rate;
+    double                 prog_host_w, prog_host_h, prog_seen_at;
+    rubraview_pal_rect_t   prog_stop;
     int32_t                px_card_host;
     double                 px_card_host_w, px_card_host_h;
     rubraview_pal_rect_t   px_btn[2];          /* OK, Cancel, as last drawn */
@@ -2026,6 +2044,12 @@ bool rename_has_keys(const app_state_t *app);
 void card_close_keep(app_state_t *app);
 bool card_motion(app_state_t *app, int32_t host, double x, double y);
 bool card_release(app_state_t *app, int32_t host);
+double draw_card_frame(app_state_t *app, rubraview_pal_rect_t c, const char *title, const char *hint, bool focused, double dpi);
+void draw_card_buttons(app_state_t *app, rubraview_pal_rect_t c, const char *const *words, int32_t n, rubraview_pal_rect_t *out, double dpi);
+void progress_show(app_state_t *app, const progress_view_t *view);
+void progress_end(app_state_t *app, int32_t source);
+void draw_progress_card(app_state_t *app, double win_w, double win_h, double dpi);
+bool progress_card_press(app_state_t *app, double x, double y);
 void card_watch(app_state_t *app);
 void draw_seekfan(app_state_t *app, rubraview_renderer_t *r, bool detached);
 void draw_settings_window(app_state_t *app);

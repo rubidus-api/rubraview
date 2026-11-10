@@ -481,9 +481,17 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
     }
 
     uint64_t total = 0;
-    for (size_t i = 0; i < fulta_arc_count(arc); ++i) if (picked(job, i)) total += fulta_arc_entry(arc, i)->size;
+    uint32_t files_total = 0;
+    for (size_t i = 0; i < fulta_arc_count(arc); ++i) {
+        if (!picked(job, i)) continue;
+        const fulta_arc_entry_t *e = fulta_arc_entry(arc, i);
+        total += e->size;
+        if (!(e->flags & (FULTA_ARC_ENTRY_DIR | FULTA_ARC_ENTRY_SYMLINK))) files_total++;
+    }
     atomic_store(&job->total, total);
     atomic_store(&job->done, 0);
+    atomic_store(&job->files_total, files_total);   /* RV-268 */
+    atomic_store(&job->files_at, 0);
     bool made_root = !rubraview_pal_fs_exists(view(job->root));   /* taken back if nothing comes of it */
     if (!rubraview_pal_fs_make_dirs(view(job->root))) {
         job->result = RUBRAVIEW_ARCHIVE_CANNOT_WRITE;
@@ -502,6 +510,7 @@ void rubraview_extract_run(rubraview_extract_job_t *job) {
         if (w <= 0 || (size_t)w >= sizeof path) { job->failed++; say(job->why, sizeof job->why, T("the name is too long"), e->name); continue; }
         if (e->flags & FULTA_ARC_ENTRY_DIR) { (void)rubraview_pal_fs_make_dirs(view(path)); continue; }
         if (e->flags & FULTA_ARC_ENTRY_SYMLINK) { job->skipped++; continue; }   /* a link is not followed out of the folder */
+        atomic_fetch_add(&job->files_at, 1);   /* RV-268: the file it is on */
         /* its folder */
         char *last = rubraview_cstr_rchr(path, sep);
         if (last) { *last = '\0'; (void)rubraview_pal_fs_make_dirs(view(path)); *last = sep; }
@@ -672,7 +681,12 @@ static fulta_arc_err_t pack_read(void *ctx, void *buf, size_t cap, size_t *got) 
     if (n) proven_sys_mem_copy(buf, r->map.data + r->at, n);
     r->at += n;
     *got = n;
-    if (r->at == r->map.size) { rubraview_pal_fs_unmap(&r->map); r->mapped = false; r->at = r->item->size; }
+    if (r->at == r->map.size) {
+        rubraview_pal_fs_unmap(&r->map);
+        r->mapped = false;
+        r->at = r->item->size;
+        if (n > 0) atomic_fetch_add(&r->job->files_done, 1);   /* RV-268: once, not again on the reads after its end */
+    }
     return FULTA_ARC_OK;
 }
 
@@ -1007,6 +1021,12 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
     }
     atomic_store(&job->total, total);
     atomic_store(&job->done, 0);
+    {   /* RV-268: the files going in; an empty one is never read, so it counts as done from the start */
+        uint32_t nfiles = 0, empty = 0;
+        for (size_t i = 0; i < list.count; ++i) if (!list.items[i].dir) { nfiles++; if (list.items[i].size == 0) empty++; }
+        atomic_store(&job->files_total, nfiles);
+        atomic_store(&job->files_done, empty);
+    }
     atomic_store(&job->phase, 1);
     bool secret = job->password && job->password[0];
     fulta_arc_write_options_t wo = {

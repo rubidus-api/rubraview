@@ -60,7 +60,6 @@ static fj_row_t *m_rows;
 static size_t    m_nrows;
 static uint32_t  m_version;
 static int32_t   m_scroll;
-static double    m_last_said;
 
 static void rows_free(fj_row_t *rows, size_t n) {
     for (size_t i = 0; i < n; ++i) { rubraview_free(rows[i].source); rubraview_free(rows[i].target); }
@@ -535,14 +534,13 @@ size_t filejob_pump(app_state_t *app) {
         if (grew && !app->clash_open) clashwin_show(app);   /* new questions: the window comes */
         if (m_nrows == 0 && app->clash_open) clashwin_close(app);
     }
-    double now = rubraview_pal_time_now_seconds();
-    if (filejob_busy() && total > 0 && now - m_last_said > 1.0) {
-        m_last_said = now;
-        char line[160];
-        int w = m_nrows ? rubraview_fmt(line, sizeof line, T("files: {} of {} done, {} names waiting for an answer (Ctrl+Shift+K)"), PROVEN_ARG(done), PROVEN_ARG(total), PROVEN_ARG(m_nrows))
-                        : rubraview_fmt(line, sizeof line, T("files: {} of {} done"), PROVEN_ARG(done), PROVEN_ARG(total));
-        if (w > 0) { size_t len = (size_t)w; proven_sys_mem_copy(app->notice, line, len < sizeof app->notice ? len : sizeof app->notice - 1);
-                     app->notice_length = len < sizeof app->notice ? len : sizeof app->notice - 1; app->notice[app->notice_length] = '\0'; app->notice_seconds = 1.5; }
+    if (filejob_busy() && total > 0) {   /* RV-268: the progress card (it was a line at the top) */
+        progress_view_t v = { .source = PROGRESS_FILEJOB, .files_at = (uint32_t)done, .files_total = (uint32_t)total };
+        rubraview_fmt(v.title, sizeof v.title, "{}", PROVEN_ARG(T("Copying and moving files")));
+        if (m_nrows) rubraview_fmt(v.note, sizeof v.note, T("{} names waiting for an answer (Ctrl+Shift+K)"), PROVEN_ARG(m_nrows));
+        progress_show(app, &v);
+    } else {
+        progress_end(app, PROGRESS_FILEJOB);
     }
     return nended + (changed ? 1 : 0);
 }

@@ -89,6 +89,8 @@ typedef struct rubraview_extract_job {
     _Atomic bool cancel;
     _Atomic uint64_t done, total;      /* bytes */
     _Atomic uint32_t files;            /* files finished */
+    _Atomic uint32_t files_total;      /* RV-268: the files it is to write out (folders and links not counted) */
+    _Atomic uint32_t files_at;         /* RV-268: which of them it is on, from 1 */
     /* when it is done */
     rubraview_archive_result_t result;
     uint32_t written, skipped, failed;
@@ -206,6 +208,8 @@ typedef struct rubraview_compress_job {
     _Atomic bool cancel;
     _Atomic uint64_t done, total;      /* bytes packed, then bytes checked */
     _Atomic int phase;                 /* 0 listing, 1 packing, 2 checking */
+    _Atomic uint32_t files_total;      /* RV-268: the files going in (folders not counted) */
+    _Atomic uint32_t files_done;       /* RV-268: read in whole so far */
     /* when it is done */
     rubraview_archive_result_t result;
     uint32_t files, folders;

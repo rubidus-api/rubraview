@@ -1782,6 +1782,14 @@ to the list, Make a playlist of them, Copy their paths, Copy or Move them,
 Them to the recycle bin and Pick none. A folder picked is copied or moved
 whole; added to a list, it brings its pictures, films, music and text.
 
+**Progress.** While an archive is extracted, compressed or written again, or
+files are copied or moved, a card in the window shows it: a bar, the size done
+of the whole and the percent, the file it is on of how many, and about how long
+is left (worked out after the first second). **Stop** (or `Esc`) stops an
+extraction, a compression or an archive being written; what is already written
+stays. Drag the card by its title to move it; it opens again where you left it,
+and the window keeps working under it. Copying and moving count files only.
+
 **Archives.** The right click on an archive offers Extract into a folder of
 its name, Extract here (smart: as it is when everything in it is in one top
 folder) and Extract to...; on files and folders, Compress to a ZIP and
