@@ -162,15 +162,22 @@ static fulta_arc_err_t alz_extract(fulta_arc_t *arc, size_t index, const fulta_a
             if (attempt > 64) return FULTA_ARC_ERR_PASSWORD_WRONG;
         }
     }
+    /* The entry is decoded whole into one block of its declared size, so that size is checked against what its
+       packed bytes can expand to before anything is allocated: a few bytes must not claim gigabytes. Deflate
+       expands at most 1032 times; bzip2 about 1.24 million times on zeros (measured with
+       libbzip2 on 400 MiB), so 2 million is allowed. The block also counts against options.max_memory. */
+    uint64_t ratio = ae->method == FA_ALZ_METHOD_STORED ? 1 : ae->method == FA_ALZ_METHOD_DEFLATE ? 1032 : 2000000;
+    uint64_t packed = ae->packed_size;
+    if (packed > UINT64_MAX / ratio || ae->size > packed * ratio + 65536) return FULTA_ARC_ERR_CORRUPT;
     if (ae->size > SIZE_MAX - 4096) return FULTA_ARC_ERR_LIMIT;
     size_t need = (size_t)ae->size + 4096;
-    void *mem = fa_alloc(arc->alloc, need);
-    if (!mem) return FULTA_ARC_ERR_NOMEM;
+    void *mem = fa_alloc(fa_arc_budget(arc), need);        /* counted against max_memory */
+    if (!mem) return fa_arc_nomem(arc);
     proven_arena_t a = proven_arena_create((proven_mem_mut_t){.ptr = mem, .size = need});
     fa_alz_data_result_t r = fa_alz_read_entry(&a, &g->ar, index, ae->size);
     fulta_arc_err_t e = map_err(r.err);
     if (!e && sink && r.data.size) e = sink->write(sink->ctx, r.data.ptr, r.data.size);
-    fa_release(arc->alloc, mem);
+    fa_release(fa_arc_budget(arc), mem);
     return e;
 }
 

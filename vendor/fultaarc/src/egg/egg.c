@@ -367,7 +367,7 @@ static fulta_arc_err_t decoder(fulta_arc_t *arc, const egg_block_t *b, fa_stream
     case 1: return fa_dec_deflate(in, false, b->out, out);
     case 2: return fa_dec_bzip2(in, b->out, &arc->limits, out);
     case 3: {
-        fulta_arc_err_t e = fa_dec_azo(in, &in);
+        fulta_arc_err_t e = fa_dec_azo(in, &arc->limits, &in);
         if (e) return e;
         return fa_stream_limit_strict(in, b->out, out);   /* validate AZO's end record even though we stop at b->out */
     }

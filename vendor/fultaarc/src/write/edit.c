@@ -87,6 +87,7 @@ fulta_arc_err_t fulta_arc_edit_replace(fulta_arc_edit_t *edit, size_t index, con
     size_t at = find_original(edit, index);
     if (at == SIZE_MAX) return FULTA_ARC_ERR_INVALID_ARG;
     const char *nm = NULL;
+    if (name && !fa_write_name_ok(proven_u8str_view_from_cstr(name))) return FULTA_ARC_ERR_BAD_NAME;
     if (name) { nm = own_name(edit, name); if (!nm) return FULTA_ARC_ERR_NOMEM; }
     fa_edit_item_t *it = &edit->items[at];
     if (reader && reader->read) {                            /* new data: re-encode */
@@ -109,6 +110,7 @@ fulta_arc_err_t fulta_arc_edit_replace(fulta_arc_edit_t *edit, size_t index, con
 
 fulta_arc_err_t fulta_arc_edit_add(fulta_arc_edit_t *edit, const char *name, const fulta_arc_reader_t *reader) {
     if (!edit || !name) return FULTA_ARC_ERR_INVALID_ARG;
+    if (!fa_write_name_ok(proven_u8str_view_from_cstr(name))) return FULTA_ARC_ERR_BAD_NAME;   /* as fulta_arc_write */
     const char *nm = own_name(edit, name);
     if (!nm) return FULTA_ARC_ERR_NOMEM;
     fa_edit_item_t it = { .is_copy = false, .src = NULL, .name = nm };
@@ -212,12 +214,15 @@ fulta_arc_err_t fulta_arc_edit_write_file(fulta_arc_edit_t *edit, fulta_arc_form
         return fa_vol_files(fa_write_alloc(opts), path, format, opts->volume_size, edit_job_run, &j);
     }
     size_t pl = strlen(path);
-    char *tmp = fa_alloc(edit->alloc, pl + 7);
+    char tag[17];
+    if (!fa_random_tag(tag)) return FULTA_ARC_ERR_IO;
+    char *tmp = fa_alloc(edit->alloc, pl + 7 + 1 + 16 + 1);
     if (!tmp) return FULTA_ARC_ERR_NOMEM;
-    memcpy(tmp, path, pl);
-    memcpy(tmp + pl, ".fatmp", 7);                           /* same directory -> rename stays on one volume */
+    memcpy(tmp, path, pl);                                   /* same directory -> rename stays on one volume; */
+    memcpy(tmp + pl, ".fatmp-", 7);                          /* a random tag: unguessable, so nothing can be */
+    memcpy(tmp + pl + 7, tag, 17);                           /* planted under it ahead (D-041) */
     proven_result_file_t r = proven_fs_open(proven_heap_allocator(), proven_u8str_view_from_cstr(tmp),
-                                            PROVEN_FS_WRITE | PROVEN_FS_CREATE | PROVEN_FS_TRUNC);
+                                            PROVEN_FS_WRITE | PROVEN_FS_CREATE_NEW);   /* exclusive: never through an existing name or link */
     if (r.err) { fa_release(edit->alloc, tmp); return FULTA_ARC_ERR_IO; }
     proven_file_t f = r.value;
     fulta_arc_write_sink_t sink = {.ctx = &f, .write = ew_write, .patch = ew_patch};

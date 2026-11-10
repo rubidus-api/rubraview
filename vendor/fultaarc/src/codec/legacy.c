@@ -100,6 +100,7 @@ static fulta_arc_err_t legacy_new(fa_stream_t *in, uint64_t out_size, step_fn st
     proven_allocator_t a = in->alloc;
     legacy_t *L = fa_zalloc(a, 1, sizeof *L);
     if (!L) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    L->base.alloc = a;                 /* first: the failure path below releases through legacy_destroy */
     fa_bytes_init(&L->b.in, in);
     L->state = fa_zalloc(a, 1, state_size);
     L->win = window ? fa_zalloc(a, 1, WIN) : NULL;

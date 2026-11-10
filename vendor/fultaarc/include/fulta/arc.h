@@ -151,17 +151,20 @@ typedef struct fulta_arc_options {
     fulta_arc_password_fn password;      /* may be NULL */
     void *password_ctx;
     fulta_arc_codepage_t codepage;       /* default FULTA_ARC_CP_AUTO */
-    uint64_t max_dictionary;             /* refuse windows/dictionaries/models larger than this; 0 = 1 GiB */
+    uint64_t max_dictionary;             /* refuse windows/dictionaries/models larger than this; 0 = 1 GiB (RAR's
+                                            window too: up to 64 GiB is declarable) */
     /* Cap the total live memory the vendored decompressors (PPMd/LZMA/bzip2/zstd) may hold while opening or
        extracting, so a hostile archive cannot drive unbounded allocation; a decode that would exceed it stops with
        FULTA_ARC_ERR_LIMIT. 0 = unlimited (NB: unlike max_dictionary, whose 0 means 1 GiB). This bounds the codec
        buffers sized by archive-declared parameters -- the PPMd model, the LZMA/LZMA2 state and window, the zstd
        window, the bzip2 block table -- which are the attacker-driven allocations. It does not account for the
        library's own small bookkeeping or fixed-size scratch (the deflate window and codec input buffers are a
-       constant 64 KiB each and go uncounted). max_dictionary still caps each single request and is checked first. */
+       constant 64 KiB each and go uncounted). max_dictionary still caps each single request and is checked first.
+       A RAR window, and an ALZ entry (decoded whole, so its declared size is also checked against what its packed
+       bytes can expand to), larger than this are refused before they are allocated. */
     uint64_t max_memory;
-    /* Back the decompressor buffers that max_memory caps with a caller-supplied allocator (see
-       fulta_arc_allocator_t). All-NULL (the default) uses the C library's malloc. */
+    /* The allocator for everything the archive allocates, decompressor buffers included (see
+       fulta_arc_allocator_t). All-NULL (the default) is proven_c_lib's heap. */
     fulta_arc_allocator_t allocator;
     /* Polled during long operations; return nonzero to cancel. May be NULL. */
     int (*cancel)(void *ctx);
@@ -184,7 +187,9 @@ typedef struct fulta_arc_options {
 #define FULTA_ARC_ENTRY_DIR        0x0001u   /* a folder (no data) */
 #define FULTA_ARC_ENTRY_ENCRYPTED  0x0002u   /* data is encrypted */
 #define FULTA_ARC_ENTRY_SOLID      0x0004u   /* decoding needs the entries before it */
-#define FULTA_ARC_ENTRY_SYMLINK    0x0008u   /* data is the link target */
+#define FULTA_ARC_ENTRY_SYMLINK    0x0008u   /* data is the link target, as stored: not checked, may be absolute or
+                                                 hold "..". A caller that makes links must not let a later entry be
+                                                 written through one to outside its destination. */
 #define FULTA_ARC_ENTRY_SPLIT      0x0010u   /* data spans volumes */
 #define FULTA_ARC_ENTRY_HAS_CRC32  0x0020u
 #define FULTA_ARC_ENTRY_HAS_MTIME  0x0040u
@@ -196,7 +201,11 @@ typedef struct fulta_arc_options {
                                                 zone of the machine that made the archive, usually the reader's */
 
 typedef struct fulta_arc_entry {
-    const char *name;                 /* UTF-8, '/' between folders, NUL-terminated; never absolute, no ".." */
+    const char *name;                 /* UTF-8, '/' between folders, NUL-terminated; never absolute, no drive
+                                         ("C:", "C:x"), no ".." part, also as Windows reads one (".. ", ". .");
+                                         "_" when nothing safe remains. It may still hold characters a file system
+                                         refuses (':' '*' '?' on Windows) or a device name (CON, NUL): the caller
+                                         who writes files maps those. See also FULTA_ARC_ENTRY_SYMLINK. */
     const uint8_t *name_raw;          /* the name's bytes as stored */
     size_t name_raw_size;
     uint64_t size;                    /* unpacked size */
@@ -242,7 +251,10 @@ size_t fulta_arc_count(const fulta_arc_t *arc);
 const fulta_arc_entry_t *fulta_arc_entry(const fulta_arc_t *arc, size_t index);   /* NULL when out of range */
 
 /* Decode entry `index` into `sink`, checking its size and checksum. Directories write nothing. In a solid archive
- * the entries before it are decoded first (and discarded) unless they were just extracted in order. */
+ * the entries before it are decoded first (and discarded) unless they were just extracted in order.
+ * Callbacks (sink, progress, cancel, password) may not use this archive: a nested fulta_arc_extract or
+ * fulta_arc_check_password returns FULTA_ARC_ERR_INVALID_ARG, and closing the archive or freeing an edit of it
+ * from inside one is undefined. One archive is used by one thread at a time; different archives are independent. */
 fulta_arc_err_t fulta_arc_extract(fulta_arc_t *arc, size_t index, const fulta_arc_sink_t *sink);
 
 /* Check a password against entry `index` without decoding it, using the format's check value.
@@ -253,7 +265,8 @@ fulta_arc_err_t fulta_arc_check_password(fulta_arc_t *arc, size_t index);
 
 /* Extract into memory. *out_data is allocated with the archive's allocator: with options.allocator set, release it
    with that allocator's free; otherwise release it with fulta_arc_free (not the C library's free). The block stays
-   valid after fulta_arc_close. */
+   valid after fulta_arc_close. The block grows to whatever the entry decodes to, which an untrusted archive
+   chooses: for those, extract into a sink that stops at a limit of the caller's. */
 fulta_arc_err_t fulta_arc_extract_alloc(fulta_arc_t *arc, size_t index, void **out_data, size_t *out_size);
 
 /* Release a block FultaArc allocated with its default allocator (fulta_arc_extract_alloc without
@@ -419,7 +432,9 @@ typedef struct fulta_arc_reader {
     uint32_t attributes;              /* Windows attributes; 0 for none */
 } fulta_arc_reader_t;
 
-/* An edit in progress. Begin from an open archive; every existing entry is copied unless removed or replaced. */
+/* An edit in progress. Begin from an open archive; every existing entry is copied unless removed or replaced. The
+   archive must stay open until fulta_arc_edit_free. Added and renamed entries take a name fulta_arc_write would
+   (FULTA_ARC_ERR_BAD_NAME otherwise); a ZIP name over 65535 bytes is BAD_NAME when written. */
 typedef struct fulta_arc_edit fulta_arc_edit_t;
 
 fulta_arc_err_t fulta_arc_edit_begin(fulta_arc_t *arc, fulta_arc_edit_t **out);

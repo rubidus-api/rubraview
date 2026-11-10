@@ -155,8 +155,19 @@ static fulta_arc_err_t cab_decode_folder(fulta_arc_t *arc, cab_state_t *st, size
     if (pend) return FULTA_ARC_ERR_CORRUPT;
     if (cap == 0) { f->decoded = true; return FULTA_ARC_OK; }
     if (cap > CAB_CACHE_CAP || st->cache_total > CAB_CACHE_CAP - cap) return FULTA_ARC_ERR_LIMIT;
-    uint8_t *buf = fa_alloc(arc->alloc, cap);
-    if (!buf) return FULTA_ARC_ERR_NOMEM;
+    uint8_t *buf = fa_alloc(fa_arc_budget(arc), cap);   /* counted against max_memory while cached */
+    if (!buf && arc->budget.exceeded) {                  /* the other folders' caches made room scarce: drop them */
+        for (size_t i = 0; i < st->nfolders; i++)
+            if (i != fi && st->folders[i].cache) {
+                fa_release(fa_arc_budget(arc), st->folders[i].cache);
+                st->folders[i].cache = NULL;
+                st->folders[i].decoded = false;
+            }
+        st->cache_total = 0;
+        fa_budget_arm(&arc->budget);
+        buf = fa_alloc(fa_arc_budget(arc), cap);
+    }
+    if (!buf) return fa_arc_nomem(arc);
     uint8_t *join = NULL;                                             /* the split block's joined payload */
     uint32_t join_len = 0;
 
@@ -165,7 +176,7 @@ static fulta_arc_err_t cab_decode_folder(fulta_arc_t *arc, cab_state_t *st, size
     fulta_arc_err_t e = FULTA_ARC_OK;
     if (type == 3) e = fa_lzx_create(arc->alloc, wbits, buf, cap, &lz);
     else if (type == 2) e = fa_quantum_create(arc->alloc, wbits, buf, cap, &qt);
-    if (e) { fa_release(arc->alloc, buf); return e; }
+    if (e) { fa_release(fa_arc_budget(arc), buf); return e; }
 
     uint64_t produced = 0;
     for (uint32_t pi = 0; pi < f->nparts && !e; pi++) {
@@ -232,7 +243,7 @@ static fulta_arc_err_t cab_decode_folder(fulta_arc_t *arc, cab_state_t *st, size
     if (!e && lz) fa_lzx_finish(lz);                                     /* undo E8 x86 translation over the output */
     fa_lzx_destroy(lz);
     fa_quantum_destroy(qt);
-    if (e) { fa_release(arc->alloc, buf); return e; }
+    if (e) { fa_release(fa_arc_budget(arc), buf); return e; }
     f->cache = buf;
     f->cache_len = produced;
     f->decoded = true;
@@ -403,6 +414,8 @@ static fulta_arc_err_t cab_add_cabinet(fulta_arc_t *arc, cab_state_t *st, uint32
          * uncompressed Store case and leave MSZIP at 0 (unknown) rather than overstating it as the file size */
         en->pub.packed_size = (ok && st->folders[lf].comp == 0) ? cbFile : 0;
         if (to_next) en->pub.flags |= FULTA_ARC_ENTRY_SPLIT;
+        /* a folder is one compressed stream: its files are one solid unit (the API's solid_group) */
+        en->pub.solid_group = ok ? (uint32_t)lf : UINT32_MAX - (uint32_t)arc->count;
 
         if (st->nitems == st->capitems) {                 /* grow by doubling (it used to re-fit at every power of two) */
             size_t nc = st->capitems ? st->capitems * 2 : 64;
@@ -564,7 +577,7 @@ static fulta_arc_err_t cab_extract(fulta_arc_t *arc, size_t index, const fulta_a
 static void cab_close(fulta_arc_t *arc) {
     cab_state_t *st = arc->state;
     if (!st) return;
-    for (size_t i = 0; i < st->nfolders; i++) { fa_release(arc->alloc, st->folders[i].cache); fa_release(arc->alloc, st->folders[i].parts); }
+    for (size_t i = 0; i < st->nfolders; i++) { fa_release(fa_arc_budget(arc), st->folders[i].cache); fa_release(arc->alloc, st->folders[i].parts); }
     fa_release(arc->alloc, st->folders);
     fa_release(arc->alloc, st->items);
     fa_release(arc->alloc, st);

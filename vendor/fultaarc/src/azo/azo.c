@@ -229,7 +229,13 @@ typedef struct azo_stream {
     uint32_t out_len, out_pos;
     bool started, ended, xform;   /* xform: the chunks' bytes went through the E8/E9 call/jump filter */
     fulta_arc_err_t err;
+    proven_allocator_t ba;        /* the chunk buffers and the model, sized by the stream: the archive's budget */
+    fa_budget_t *budget;          /* NULL when the caller gave no limits */
 } azo_stream_t;
+
+static fulta_arc_err_t azo_nomem(const azo_stream_t *z) {
+    return z->budget && z->budget->exceeded ? FULTA_ARC_ERR_LIMIT : FULTA_ARC_ERR_NOMEM;
+}
 
 /* Undo the E8/E9 call/jump filter over one chunk's output (azo.md: positions counted from the chunk's start;
  * applied to stored and compressed chunks alike when the stream's flag bit is set). */
@@ -276,8 +282,8 @@ static fulta_arc_err_t next_chunk(azo_stream_t *z) {
     }
     if (!U || !C || (U ^ C) != X || U > CHUNK_MAX || C > CHUNK_MAX) return FULTA_ARC_ERR_CORRUPT;
     if (U > z->out_cap) {
-        uint8_t *p = fa_resize(z->base.alloc, z->out, z->out_cap, U);
-        if (!p) return FULTA_ARC_ERR_NOMEM;
+        uint8_t *p = fa_resize(z->ba, z->out, z->out_cap, U);
+        if (!p) return azo_nomem(z);
         z->out = p;
         z->out_cap = U;
     }
@@ -286,15 +292,15 @@ static fulta_arc_err_t next_chunk(azo_stream_t *z) {
         if (e) return e;
     } else {
         if (C > z->packed_cap) {
-            uint8_t *p = fa_resize(z->base.alloc, z->packed, z->packed_cap, C);
-            if (!p) return FULTA_ARC_ERR_NOMEM;
+            uint8_t *p = fa_resize(z->ba, z->packed, z->packed_cap, C);
+            if (!p) return azo_nomem(z);
             z->packed = p;
             z->packed_cap = C;
         }
         if ((e = fa_stream_read_exact(z->in, fa_bytes_mut(z->packed, C)))) return e;
         if (!z->m) {
-            z->m = fa_alloc(z->base.alloc, sizeof *z->m);
-            if (!z->m) return FULTA_ARC_ERR_NOMEM;
+            z->m = fa_alloc(z->ba, sizeof *z->m);
+            if (!z->m) return azo_nomem(z);
         }
         if ((e = decode_chunk(z->m, z->packed, C, z->out, U))) return e;
     }
@@ -327,18 +333,20 @@ static fulta_arc_err_t azo_read(fa_stream_t *s, void *buf, size_t n, size_t *got
 static void azo_destroy(fa_stream_t *s) {
     azo_stream_t *z = (azo_stream_t *)s;
     fa_stream_destroy(z->in);
-    fa_release(s->alloc, z->m);
-    fa_release(s->alloc, z->out);
-    fa_release(s->alloc, z->packed);
+    fa_release(z->ba, z->m);
+    fa_release(z->ba, z->out);
+    fa_release(z->ba, z->packed);
     fa_release(s->alloc, z);
 }
 
-fulta_arc_err_t fa_dec_azo(fa_stream_t *in, fa_stream_t **out) {
+fulta_arc_err_t fa_dec_azo(fa_stream_t *in, const fa_limits_t *lim, fa_stream_t **out) {
     proven_allocator_t a = in->alloc;
     azo_stream_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
     z->in = in;
     z->base.alloc = a;
+    z->budget = lim ? lim->budget : NULL;
+    z->ba = z->budget ? fa_budget_as_allocator(z->budget) : a;
     z->base.read = azo_read;
     z->base.destroy = azo_destroy;
     *out = &z->base;

@@ -200,6 +200,7 @@ typedef struct fv_set {
     fv_file_t **files;        /* one allocation each: a volume's sink keeps its address */
     uint32_t n, cap;
     char *tmp;                /* scratch for names */
+    char tag[17];             /* the set's random name tag */
     size_t tmpcap;
 } fv_set_t;
 
@@ -214,9 +215,10 @@ static fulta_arc_err_t fv_patch(void *ctx, uint64_t offset, const void *data, si
     return r.err || r.value != n ? FULTA_ARC_ERR_IO : FULTA_ARC_OK;
 }
 
-/* `<path>.fatmp<index>`: one directory with the set, so the renames stay on one volume. */
+/* `<path>.fatmp-<random>.<index>`: one directory with the set, so the renames stay on one volume; the random tag
+   (one per set) keeps the names unguessable (D-041). */
 static const char *fv_tmp_name(fv_set_t *s, uint32_t index) {
-    snprintf(s->tmp, s->tmpcap, "%s.fatmp%u", s->path, (unsigned)index);
+    snprintf(s->tmp, s->tmpcap, "%s.fatmp-%s.%u", s->path, s->tag, (unsigned)index);
     return s->tmp;
 }
 
@@ -232,7 +234,7 @@ static fulta_arc_err_t fv_open(void *ctx, uint32_t index, fulta_arc_write_sink_t
     fv_file_t *f = fa_alloc(s->alloc, sizeof *f);
     if (!f) return FULTA_ARC_ERR_NOMEM;
     proven_result_file_t r = proven_fs_open(proven_heap_allocator(), proven_u8str_view_from_cstr(fv_tmp_name(s, index)),
-                                            PROVEN_FS_WRITE | PROVEN_FS_CREATE | PROVEN_FS_TRUNC);
+                                            PROVEN_FS_WRITE | PROVEN_FS_CREATE_NEW);   /* exclusive: never through an existing name or link */
     if (r.err) { fa_release(s->alloc, f); return FULTA_ARC_ERR_IO; }
     *f = (fv_file_t){.f = r.value, .open = true};
     s->files[s->n++] = f;
@@ -295,7 +297,8 @@ static fulta_arc_err_t fv_finish(void *ctx, uint32_t count, int ok) {
 fulta_arc_err_t fa_vol_files(proven_allocator_t a, const char *path, fulta_arc_format_t format, uint64_t volume_size,
                              fulta_arc_err_t (*body)(void *ctx, const fulta_arc_write_sink_t *sink), void *ctx) {
     if (!path) return FULTA_ARC_ERR_INVALID_ARG;
-    fv_set_t s = {.alloc = a, .path = path, .format = format, .tmpcap = strlen(path) + 32};
+    fv_set_t s = {.alloc = a, .path = path, .format = format, .tmpcap = strlen(path) + 48};
+    if (!fa_random_tag(s.tag)) return FULTA_ARC_ERR_IO;
     s.tmp = fa_alloc(a, s.tmpcap);
     if (!s.tmp) return FULTA_ARC_ERR_NOMEM;
     fulta_arc_volume_sink_t vs = {.ctx = &s, .open = fv_open, .close = fv_close, .finish = fv_finish};

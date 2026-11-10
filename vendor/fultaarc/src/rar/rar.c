@@ -4,6 +4,7 @@
  * rar-decoder clean-room session; CRC-32 as ISO 3309 describes it. MIT, like the rest of Rubraview.
  */
 #include "rar.h"
+#include "core/fa_once.h"
 #include "rar_codec.h"
 
 #include <stdatomic.h>
@@ -25,17 +26,18 @@ const struct fa_rar_codec *fa_rar_codec(void) { return g_codec; }
 /* small helpers */
 
 static uint32_t crc_table[256];
-static bool crc_ready;
+static fa_once_t crc_once;
+
+static void crc_init(void) {
+    for (uint32_t i = 0; i < 256; ++i) {
+        uint32_t c = i;
+        for (int k = 0; k < 8; ++k) c = (c >> 1) ^ ((c & 1) ? 0xEDB88320u : 0);
+        crc_table[i] = c;
+    }
+}
 
 static uint32_t crc32_update(uint32_t crc, const uint8_t *p, size_t n) {
-    if (!crc_ready) {
-        for (uint32_t i = 0; i < 256; ++i) {
-            uint32_t c = i;
-            for (int k = 0; k < 8; ++k) c = (c >> 1) ^ ((c & 1) ? 0xEDB88320u : 0);
-            crc_table[i] = c;
-        }
-        crc_ready = true;
-    }
+    fa_once(&crc_once, crc_init);
     crc = ~crc;
     while (n--) crc = (crc >> 8) ^ crc_table[(crc ^ *p++) & 0xFF];
     return ~crc;

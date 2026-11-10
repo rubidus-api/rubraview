@@ -266,7 +266,7 @@ fulta_arc_err_t fa_lzx_chunk(fa_lzx_t *lz, const uint8_t *in, size_t in_len, uin
                 if (e) return e;
             } else if (type == 3) {                                  /* uncompressed: byte-aligned R0/R1/R2 + raw */
                 const uint8_t *bp = lzx_byte_align(&b);
-                if (bp + 12 > b.end) return FULTA_ARC_ERR_TRUNCATED;
+                if (bp > b.end || b.end - bp < 12) return FULTA_ARC_ERR_TRUNCATED;
                 lz->R0 = fa_le32(bp); lz->R1 = fa_le32(bp + 4); lz->R2 = fa_le32(bp + 8);
                 b.p = bp + 12;
                 lz->uncomp_odd = (sz & 1) != 0;
@@ -278,7 +278,7 @@ fulta_arc_err_t fa_lzx_chunk(fa_lzx_t *lz, const uint8_t *in, size_t in_len, uin
         if (lz->block_type == 3) {                                   /* raw copy (may span chunks) */
             uint64_t n = target - lz->pos;
             if (n > lz->block_remaining) n = lz->block_remaining;
-            if (b.p + n > b.end) return FULTA_ARC_ERR_TRUNCATED;
+            if (n > (uint64_t)(b.end - b.p)) return FULTA_ARC_ERR_TRUNCATED;   /* no pointer past the end */
             memcpy(lz->out + lz->pos, b.p, (size_t)n);
             b.p += n; lz->pos += n; lz->block_remaining -= (uint32_t)n;
             if (lz->block_remaining == 0 && lz->uncomp_odd) { if (b.p < b.end) b.p++; }   /* trailing pad byte */

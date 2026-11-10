@@ -6,6 +6,7 @@
  * Archives of RAR 1.4 / 1.5 alone are read by rar15_glue.c, which hands every other RAR archive here; a RAR 1.5
  * entry in an archive that mixes it with later ones is still reported unsupported (D-029). */
 #include "../core/internal.h"
+#include "core/fa_once.h"
 
 #include "rar.h"
 #include "rarcodec.h"
@@ -22,6 +23,9 @@ typedef struct rar_glue {
     fa_rar_archive_t ar;
     bool open;
     size_t *map;              /* FultaArc entry index -> rar.c entry index */
+    bool broken;              /* a solid run's stream broke (CORRUPT/TRUNCATED) at entry broken_at of group */
+    size_t broken_at;
+    uint32_t broken_group;
 } rar_glue_t;
 
 static bool rar_probe(const uint8_t *h, size_t n, uint64_t *off) {
@@ -95,13 +99,16 @@ static fulta_arc_err_t make_arena(rar_glue_t *g, size_t size) {
     return FULTA_ARC_OK;
 }
 
+static fa_once_t codec_once;
+static void codec_init(void) { fa_rar_set_codec(fa_rarcodec()); }
+
 static fulta_arc_err_t rar_open(fulta_arc_t *arc, uint64_t search) {
     (void)search;   /* rar.c finds a signature after an SFX stub itself */
     rar_glue_t *g = fa_zalloc(arc->alloc, 1, sizeof *g);
     if (!g) return FULTA_ARC_ERR_NOMEM;
     g->alloc = arc->alloc;
     arc->state = g;
-    fa_rar_set_codec(fa_rarcodec());
+    fa_once(&codec_once, codec_init);              /* the codec table, set once for every thread */
     fulta_arc_err_t e = add_volume(g, arc->volumes[0]);
     if (e) return e;
     if (search == UINT64_MAX && !fa_rar_is_rar(g->vols[0].data, g->vols[0].size)) return FULTA_ARC_ERR_NOT_ARCHIVE;
@@ -194,10 +201,31 @@ static fulta_arc_err_t rar_extract(fulta_arc_t *arc, size_t index, const fulta_a
             if (attempt > 64) return FULTA_ARC_ERR_PASSWORD_WRONG;
         }
     }
+    /* options.max_dictionary (and max_memory) bound the window this entry and the earlier entries of its solid run
+       will allocate: the dictionary size is the archive's word, up to 64 GiB for RAR 7. */
+    for (size_t j = ri + 1; j-- > 0;) {
+        const fa_rar_entry_t *re = &g->ar.entries[j];
+        if (re->method != 0 && (re->dict_size > arc->limits.max_dictionary ||
+                                (arc->opt.max_memory && re->dict_size > arc->opt.max_memory)))
+            return FULTA_ARC_ERR_LIMIT;
+        if (!re->solid) break;
+    }
+    /* A later entry of a solid run whose stream broke earlier cannot decode either (it continues that stream):
+       fail it at once instead of decoding the run again up to the break (quadratic over a damaged run, D-041). */
+    const fulta_arc_entry_t *pe = &arc->entries[index].pub;
+    if (g->broken && (pe->flags & FULTA_ARC_ENTRY_SOLID) && pe->solid_group == g->broken_group && index > g->broken_at)
+        return FULTA_ARC_ERR_CORRUPT;
     sink_ctx_t sc = {sink, FULTA_ARC_OK, arc};
     fa_rar_err_t r = fa_rar_extract(&g->ar, ri, rar_write, &sc);
     if (sc.err) return sc.err;
-    return map_err(r);
+    fulta_arc_err_t e = map_err(r);
+    if ((e == FULTA_ARC_ERR_CORRUPT || e == FULTA_ARC_ERR_TRUNCATED) && !(pe->flags & FULTA_ARC_ENTRY_ENCRYPTED) &&
+        (!g->broken || pe->solid_group != g->broken_group || index < g->broken_at)) {
+        g->broken = true;                         /* not for encrypted runs: a wrong password looks like damage */
+        g->broken_at = index;
+        g->broken_group = pe->solid_group;
+    }
+    return e;
 }
 
 static void rar_close(fulta_arc_t *arc) {

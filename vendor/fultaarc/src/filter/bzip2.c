@@ -60,7 +60,7 @@ static fulta_arc_err_t bzip2_extract(fulta_arc_t *arc, size_t index, const fulta
     fa_stream_t *s = NULL, *d = NULL;
     fulta_arc_err_t e = fa_stream_range(arc->alloc, &range, 0, src->size, &s);
     if (e) return e;
-    if ((e = fa_dec_bzip2(s, UINT64_MAX, &arc->limits, &d))) { fa_stream_destroy(s); return e; }
+    if ((e = fa_dec_bzip2(s, UINT64_MAX, &arc->limits, &d))) return e;   /* the decoder owns `s`: destroyed on failure too */
     e = fa_pump(d, UINT64_MAX, false, 0, sink, arc, arc->opt.keep_damaged);   /* bzip2 checks its own CRCs */
     fa_stream_destroy(d);
     return e;

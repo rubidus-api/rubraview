@@ -214,7 +214,7 @@ fulta_arc_err_t fa_dec_unshrink(fa_stream_t *in, uint64_t out_size, fa_stream_t 
 fulta_arc_err_t fa_dec_unreduce(fa_stream_t *in, int factor, uint64_t out_size, fa_stream_t **out);
 fulta_arc_err_t fa_dec_explode(fa_stream_t *in, uint16_t flags, int min_len, uint64_t out_size, fa_stream_t **out);
 fulta_arc_err_t fa_dec_zstd(fa_stream_t *in, uint64_t out_size, const fa_limits_t *lim, fa_stream_t **out);
-fulta_arc_err_t fa_dec_azo(fa_stream_t *in, fa_stream_t **out);
+fulta_arc_err_t fa_dec_azo(fa_stream_t *in, const fa_limits_t *lim, fa_stream_t **out);   /* buffers on lim's budget */
 
 /* Limit a stream to exactly `size` bytes (TRUNCATED if it ends sooner; the rest of the inner stream is ignored). */
 fulta_arc_err_t fa_stream_limit(fa_stream_t *in, uint64_t size, fa_stream_t **out);
@@ -246,6 +246,16 @@ void fa_aes_ctr_end(fa_aes_ctr_t *c);
 void fa_aes_cbc_encrypt(const uint8_t *key, size_t keylen, uint8_t iv[16], uint8_t *buf, size_t n);
 /* OS CSPRNG bytes; false => no entropy, caller must refuse to encrypt. */
 bool fa_random_bytes(void *buf, size_t n);
+/* 16 random lowercase hex digits and a NUL into tag[17], for temporary names nobody can guess ahead (proven's fs has
+ * no exclusive create, so a name planted as a link in a shared directory must be unknowable). false: no entropy. */
+static inline bool fa_random_tag(char tag[17]) {
+    uint8_t r[8];
+    if (!fa_random_bytes(r, sizeof r)) return false;
+    static const char hexd[] = "0123456789abcdef";
+    for (int i = 0; i < 8; i++) { tag[2 * i] = hexd[r[i] >> 4]; tag[2 * i + 1] = hexd[r[i] & 15]; }
+    tag[16] = 0;
+    return true;
+}
 
 /* 7zAES key derivation: SHA-256 iterated 2^power times over (salt | password-as-UTF-16LE | counter_le64).
  * `power` <= 24; shared by the 7z reader and the writer. */
@@ -304,9 +314,12 @@ char *fa_codepage_to_utf8(proven_allocator_t a, proven_mem_view_t s, fulta_arc_c
                           fulta_arc_codepage_t fallback);
 /* UTF-8 to a code page (passwords stored in an archiver's code page); NULL when a character has no mapping. */
 char *fa_utf8_to_codepage(proven_allocator_t a, const char *utf8, fulta_arc_codepage_t cp);
-/* Make a stored name safe: '\\' -> '/', drop leading '/', drive letters, "." parts; ".." parts make it unsafe.
+/* Make a stored name safe: '\\' -> '/', drop leading '/', a leading drive ("C:", "C:x"), "." parts; ".." parts, also
+ * as Windows reads them (".. ", ". ."), make it unsafe.
  * Returns false when nothing safe remains (the caller uses a placeholder). Edits in place. */
 bool fa_sanitize_name(char *name);
+/* A part Windows reads as "." or ".." after trimming trailing dots and spaces ("..", ".. ", ". ."). */
+bool fa_name_part_is_dots(const char *part, size_t len);
 
 /* ---- the archive object ------------------------------------------------------------------------------------- */
 
@@ -336,7 +349,16 @@ struct fulta_arc {
     char *password;
     uint32_t password_attempts;
     uint64_t progress_done, progress_total;   /* reset per fulta_arc_extract; fed to opt.progress */
+    bool busy;                           /* inside extract/check_password: a nested call from a callback is refused */
 };
+
+/* The archive's budgeted allocator (options.max_memory, D-041): for every buffer whose size the archive chooses
+ * (codec state, a whole decoded entry or folder, chunk buffers). Blocks from it are released through it, never
+ * through arc->alloc. When an allocation fails, fa_arc_nomem says whether the budget refused it (LIMIT). */
+static inline proven_allocator_t fa_arc_budget(fulta_arc_t *arc) { return fa_budget_as_allocator(&arc->budget); }
+static inline fulta_arc_err_t fa_arc_nomem(const fulta_arc_t *arc) {
+    return arc->budget.exceeded ? FULTA_ARC_ERR_LIMIT : FULTA_ARC_ERR_NOMEM;
+}
 
 struct fa_format_ops {
     fulta_arc_format_t format;
@@ -484,6 +506,9 @@ bool fa_write_alloc_ok(const fulta_arc_write_options_t *opt);
  * fa_write_dos_ok refuses an unknown mode or an offset beyond 14 h. fa_write_mtime_utc gives a source entry's mtime
  * in UTC seconds (0 when it has none). */
 int32_t fa_write_dos_offset(const fulta_arc_write_options_t *opt);
+/* A name a caller may store (fulta_arc_write, and the edit routes' added and renamed entries): relative, no ".." or
+ * "." part, no empty part, no control character, not a drive path. */
+bool fa_write_name_ok(proven_u8str_view_t name);
 bool fa_write_dos_ok(const fulta_arc_write_options_t *opt);
 int64_t fa_write_mtime_utc(const fulta_arc_entry_t *e, int32_t dos_offset);
 

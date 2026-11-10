@@ -45,6 +45,25 @@ static char *gzip_derive_name(proven_allocator_t alloc, const char *archive_name
     return out;
 }
 
+/* A NUL-terminated header string (FNAME, FCOMMENT) at *off: read in blocks, not a byte per source call; the first
+ * `keep` bytes go to `out` (may be NULL), the rest are skipped; *off ends just past the NUL. TRUNCATED without one. */
+static fulta_arc_err_t gz_zstring(const fulta_arc_source_t *src, uint64_t *off, fa_buf_t *out, size_t keep) {
+    uint8_t blk[4096];
+    for (;;) {
+        if (*off >= src->size) return FULTA_ARC_ERR_TRUNCATED;
+        size_t n = src->size - *off < sizeof blk ? (size_t)(src->size - *off) : sizeof blk;
+        if (fa_source_read_exact(src, *off, fa_bytes_mut(blk, n))) return FULTA_ARC_ERR_TRUNCATED;
+        const uint8_t *z = memchr(blk, 0, n);
+        size_t take = z ? (size_t)(z - blk) : n;
+        if (out && out->size < keep) {
+            size_t k = keep - out->size < take ? keep - out->size : take;
+            if (fa_buf_append(out, fa_bytes(blk, k))) return FULTA_ARC_ERR_NOMEM;
+        }
+        *off += take;
+        if (z) { *off += 1; return FULTA_ARC_OK; }
+    }
+}
+
 static fulta_arc_err_t gzip_open(fulta_arc_t *arc, uint64_t offset) {
     (void)offset;
     const fulta_arc_source_t *src = arc->volumes[0];
@@ -67,14 +86,8 @@ static fulta_arc_err_t gzip_open(fulta_arc_t *arc, uint64_t offset) {
     }
     if (flg & GZ_FNAME) {
         fa_buf_t nb = {.alloc = arc->alloc};
-        for (;;) {
-            uint8_t c;
-            if (off >= src->size || fa_source_read_exact(src, off, fa_bytes_mut(&c, 1))) { fa_buf_free(&nb); return FULTA_ARC_ERR_TRUNCATED; }
-            off++;
-            if (c == 0) break;
-            if (nb.size >= 4096) { off++; continue; }              /* cap the stored name; keep scanning to the NUL */
-            if (fa_buf_byte(&nb, c)) { fa_buf_free(&nb); return FULTA_ARC_ERR_NOMEM; }
-        }
+        fulta_arc_err_t ze = gz_zstring(src, &off, &nb, 4096);   /* the name is kept up to 4 KiB, scanned to its NUL */
+        if (ze) { fa_buf_free(&nb); return ze; }
         if (nb.size) {
             fname = fa_alloc(arc->alloc, nb.size + 1);
             if (!fname) { fa_buf_free(&nb); return FULTA_ARC_ERR_NOMEM; }
@@ -84,12 +97,8 @@ static fulta_arc_err_t gzip_open(fulta_arc_t *arc, uint64_t offset) {
         fa_buf_free(&nb);
     }
     if (flg & GZ_FCOMMENT) {
-        for (;;) {
-            uint8_t c;
-            if (off >= src->size || fa_source_read_exact(src, off, fa_bytes_mut(&c, 1))) { fa_release(arc->alloc, fname); return FULTA_ARC_ERR_TRUNCATED; }
-            off++;
-            if (c == 0) break;
-        }
+        fulta_arc_err_t ze = gz_zstring(src, &off, NULL, 0);
+        if (ze) { fa_release(arc->alloc, fname); return ze; }
     }
     if (flg & GZ_FHCRC) {
         off += 2;
@@ -136,7 +145,7 @@ static fulta_arc_err_t gzip_extract(fulta_arc_t *arc, size_t index, const fulta_
     fa_stream_t *s = NULL, *d = NULL;
     fulta_arc_err_t e = fa_stream_range(arc->alloc, &range, st->payload_off, st->payload_len, &s);
     if (e) return e;
-    if ((e = fa_dec_deflate(s, false, UINT64_MAX, &d))) { fa_stream_destroy(s); return e; }
+    if ((e = fa_dec_deflate(s, false, UINT64_MAX, &d))) return e;   /* the decoder owns `s`: destroyed on failure too */
     e = fa_pump(d, UINT64_MAX, st->has_crc, st->crc, sink, arc, arc->opt.keep_damaged);
     fa_stream_destroy(d);                                     /* owns s; fa_pump does not take the stream */
     return e;

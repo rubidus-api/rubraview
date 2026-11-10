@@ -7,6 +7,7 @@
  * Implements docs/spec/lzh-container.md.  Section numbers are cited at each part.
  */
 #include "lha_internal.h"
+#include "core/fa_once.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +18,7 @@
  * CRC-16, reflected polynomial 0xA001, initial value 0 (spec container §5.1).
  */
 static uint16_t crc_table[256];
-static int crc_ready;
+static fa_once_t crc_once;
 
 static void crc_init(void)
 {
@@ -27,13 +28,12 @@ static void crc_init(void)
         for (j = 0; j < 8; j++) r = (r & 1) ? (r >> 1) ^ 0xA001u : r >> 1;
         crc_table[i] = (uint16_t)r;
     }
-    crc_ready = 1;
 }
 
 uint16_t lha_crc16(uint16_t crc, const void *data, size_t n)
 {
     const unsigned char *p = (const unsigned char *)data;
-    if (!crc_ready) crc_init();
+    fa_once(&crc_once, crc_init);
     while (n--) crc = (uint16_t)(crc_table[(crc ^ *p++) & 0xFF] ^ (crc >> 8));
     return crc;
 }

@@ -3,6 +3,7 @@
  * Collin and Igor Pavlov). Blocks are located through the index at the end of each stream, so each block's packed
  * size is exact; LZMA2 and the filters are FultaArc's codecs. Checks: none, CRC-32, CRC-64, SHA-256. */
 #include "../core/internal.h"
+#include "core/fa_once.h"
 
 typedef struct xz_blk { uint64_t data_off, data_len, unc; uint8_t check_type; uint64_t check_off;
                         uint8_t nfilt; uint64_t fid[4]; uint8_t fprops[4][8]; uint8_t fplen[4]; } xz_blk_t;
@@ -22,17 +23,18 @@ typedef struct xz_stream {
 } xz_stream_t;
 
 static uint64_t crc64_table[256];
-static bool crc64_ready;
+static fa_once_t crc64_once;
+
+static void crc64_init(void) {
+    for (int i = 0; i < 256; i++) {
+        uint64_t c = (uint64_t)i;
+        for (int k = 0; k < 8; k++) c = (c >> 1) ^ ((c & 1) ? UINT64_C(0xC96C5795D7870F42) : 0);
+        crc64_table[i] = c;
+    }
+}
 
 static uint64_t crc64(uint64_t crc, const uint8_t *p, size_t n) {
-    if (!crc64_ready) {
-        for (int i = 0; i < 256; i++) {
-            uint64_t c = (uint64_t)i;
-            for (int k = 0; k < 8; k++) c = (c >> 1) ^ ((c & 1) ? UINT64_C(0xC96C5795D7870F42) : 0);
-            crc64_table[i] = c;
-        }
-        crc64_ready = true;
-    }
+    fa_once(&crc64_once, crc64_init);
     crc = ~crc;
     while (n--) crc = crc64_table[(crc ^ *p++) & 0xFF] ^ (crc >> 8);
     return ~crc;
@@ -72,7 +74,7 @@ static fulta_arc_err_t parse(xz_stream_t *z, uint64_t off, uint64_t len) {
         if ((e = fa_range_read_exact(&z->range, ipos, fa_bytes_mut(ix, (size_t)isize)))) { fa_release(z->base.alloc, ix); return e; }
         size_t p = 1;
         uint64_t nrec;
-        if (ix[0] != 0 || !vli(ix, (size_t)isize, &p, &nrec) || nrec > isize || fa_crc32(0, fa_bytes(ix, (size_t)isize - 4)) != fa_le32(ix + isize - 4)) {
+        if (ix[0] != 0 || !vli(ix, (size_t)isize, &p, &nrec) || nrec > isize / 2 || fa_crc32(0, fa_bytes(ix, (size_t)isize - 4)) != fa_le32(ix + isize - 4)) {
             fa_release(z->base.alloc, ix);
             return FULTA_ARC_ERR_CORRUPT;
         }
@@ -81,6 +83,7 @@ static fulta_arc_err_t parse(xz_stream_t *z, uint64_t off, uint64_t len) {
         if (!uns || !unc) { fa_release(z->base.alloc, ix); fa_release(z->base.alloc, uns); fa_release(z->base.alloc, unc); return FULTA_ARC_ERR_NOMEM; }
         for (uint64_t i = 0; i < nrec; i++) {
             if (!vli(ix, (size_t)isize, &p, &uns[i]) || !vli(ix, (size_t)isize, &p, &unc[i]) || !uns[i]) { e = FULTA_ARC_ERR_CORRUPT; break; }
+            if (uns[i] > end || total > end - uns[i]) { e = FULTA_ARC_ERR_CORRUPT; break; }   /* no block past the stream */
             total += (uns[i] + 3) & ~(uint64_t)3;
         }
         fa_release(z->base.alloc, ix);

@@ -129,10 +129,12 @@ static fulta_arc_err_t peek_write(void *ctx, const void *d, size_t n) {
 
 /* grow sink: accumulate the whole decompressed stream into a buffer of the archive's allocator, capped at
  * FA_REPROBE_CAP. */
-typedef struct { proven_allocator_t alloc; uint8_t *data; size_t n, cap; bool over; } grow_sink_t;
+typedef struct { proven_allocator_t alloc; uint8_t *data; size_t n, cap; bool over; uint64_t limit; } grow_sink_t;
 static fulta_arc_err_t grow_write(void *ctx, const void *d, size_t n) {
     grow_sink_t *g = ctx;
-    if (n > FA_REPROBE_CAP - g->n) { g->over = true; return (fulta_arc_err_t)FA_SINK_STOP; }
+    /* the payload outlives this archive (the inner one takes it over), so it cannot draw on this budget: max_memory
+       is checked here instead; past it, or past the cap, the wrapper simply stays a wrapper */
+    if (n > FA_REPROBE_CAP - g->n || (g->limit && g->n + n > g->limit)) { g->over = true; return (fulta_arc_err_t)FA_SINK_STOP; }
     if (g->n + n > g->cap) {
         size_t nc = g->cap ? g->cap : 65536;
         while (nc < g->n + n) nc *= 2;
@@ -169,7 +171,7 @@ static fulta_arc_err_t reprobe(fulta_arc_t *arc, const fulta_arc_options_t *opti
     if (!container) return FULTA_ARC_OK;
 
     /* a container: decompress the whole payload into memory (bounded by the cap) */
-    grow_sink_t g = {.alloc = arc->alloc};
+    grow_sink_t g = {.alloc = arc->alloc, .limit = arc->opt.max_memory};
     fulta_arc_sink_t gsink = { &g, grow_write };
     fulta_arc_err_t ge = fulta_arc_extract(arc, 0, &gsink);
     if ((ge && ge != (fulta_arc_err_t)FA_SINK_STOP) || g.over || g.n == 0) { fa_release(g.alloc, g.data); return FULTA_ARC_OK; }
@@ -290,17 +292,27 @@ fulta_arc_err_t fulta_arc_extract(fulta_arc_t *arc, size_t index, const fulta_ar
     if (!arc || !sink || !sink->write) return FULTA_ARC_ERR_INVALID_ARG;
     if (index >= arc->count) return FULTA_ARC_ERR_INVALID_ARG;
     if (arc->entries[index].pub.flags & FULTA_ARC_ENTRY_DIR) return FULTA_ARC_OK;
+    /* a sink, progress, cancel or password callback that extracts from this same archive would pull its decoder
+       state (a solid stream, a window) from under the running decode */
+    if (arc->busy) return FULTA_ARC_ERR_INVALID_ARG;
     fa_budget_arm(&arc->budget);              /* a fresh decode: clear any sticky budget trip from a prior extract */
     arc->progress_done = 0;
     arc->progress_total = (arc->entries[index].pub.flags & FULTA_ARC_ENTRY_UNKNOWN_SIZE) ? 0 : arc->entries[index].pub.size;
-    return arc->ops->extract(arc, index, sink);
+    arc->busy = true;
+    fulta_arc_err_t e = arc->ops->extract(arc, index, sink);
+    arc->busy = false;
+    return e;
 }
 
 fulta_arc_err_t fulta_arc_check_password(fulta_arc_t *arc, size_t index) {
     if (!arc || index >= arc->count) return FULTA_ARC_ERR_INVALID_ARG;
     if (!arc->ops->check_password) return FULTA_ARC_ERR_UNSUPPORTED;
+    if (arc->busy) return FULTA_ARC_ERR_INVALID_ARG;   /* from inside a callback of this archive */
     fa_budget_arm(&arc->budget);              /* check_password decodes (7z): clear any sticky budget trip */
-    return arc->ops->check_password(arc, index);
+    arc->busy = true;
+    fulta_arc_err_t e = arc->ops->check_password(arc, index);
+    arc->busy = false;
+    return e;
 }
 
 fulta_arc_editable_t fulta_arc_editable(const fulta_arc_t *arc) {
@@ -421,15 +433,14 @@ fa_entry_t *fa_add_entry(fulta_arc_t *arc, proven_mem_view_t raw, const char *ut
 
 fulta_arc_err_t fa_volume(fulta_arc_t *arc, uint32_t index, const char *name, const fulta_arc_source_t **out) {
     if (index < arc->nvolumes) { *out = arc->volumes[index]; return FULTA_ARC_OK; }
-    if (index != arc->nvolumes) {
-        /* volumes are asked for in order; fill the gap */
-        const fulta_arc_source_t *dummy;
-        fulta_arc_err_t e = fa_volume(arc, index - 1, NULL, &dummy);
-        if (e) return e;
-        (void)dummy;
-        if (index != arc->nvolumes) return FULTA_ARC_ERR_VOLUME_MISSING;
-    }
     if (!arc->opt.volume) return FULTA_ARC_ERR_VOLUME_MISSING;
+    /* volumes are asked for in order; fill a gap first, in a loop (an index may come from the archive itself, so
+       it must not set a recursion depth) */
+    while (arc->nvolumes < index) {
+        const fulta_arc_source_t *dummy;
+        fulta_arc_err_t e = fa_volume(arc, (uint32_t)arc->nvolumes, NULL, &dummy);
+        if (e) return e;
+    }
     if (arc->nvolumes == arc->capvolumes) {
         /* the array of pointers may move; the sources themselves never do */
         fulta_arc_source_t **p = fa_resize(arc->alloc, arc->volumes, arc->capvolumes * sizeof *p,

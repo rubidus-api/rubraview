@@ -59,7 +59,7 @@ static fulta_arc_err_t compress_extract(fulta_arc_t *arc, size_t index, const fu
     fa_stream_t *s = NULL, *d = NULL;
     fulta_arc_err_t e = fa_stream_range(arc->alloc, &range, 0, src->size, &s);
     if (e) return e;
-    if ((e = fa_dec_compress(s, &d))) { fa_stream_destroy(s); return e; }
+    if ((e = fa_dec_compress(s, &d))) return e;   /* the decoder owns `s`: it is destroyed on failure too */
     e = fa_pump(d, UINT64_MAX, false, 0, sink, arc, arc->opt.keep_damaged);
     fa_stream_destroy(d);
     return e;

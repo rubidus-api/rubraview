@@ -226,7 +226,9 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
     if (t == 0x06) {
         s->pack_pos = rd_num(r);
         uint64_t np = rd_num(r);
-        if (r->bad || np > (1u << 24)) return FULTA_ARC_ERR_CORRUPT;
+        /* every pack stream takes at least a byte (its size), so no more than the bytes left can be real; checked
+           before the arrays are made so a few header bytes cannot claim millions of entries */
+        if (r->bad || np > (1u << 24) || np > r->n - r->pos) return FULTA_ARC_ERR_CORRUPT;
         s->npack = (uint32_t)np;
         s->pack_sizes = fa_zalloc(r->alloc, np ? (size_t)np : 1, sizeof *s->pack_sizes);
         if (!s->pack_sizes) return FULTA_ARC_ERR_NOMEM;
@@ -250,13 +252,25 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
     if (t == 0x07) {
         if (rd_num(r) != 0x0B) return FULTA_ARC_ERR_CORRUPT;
         uint64_t nf = rd_num(r);
-        if (r->bad || nf > (1u << 24)) return FULTA_ARC_ERR_CORRUPT;
+        if (r->bad || nf > (1u << 24) || nf > (r->n - r->pos) / 2) return FULTA_ARC_ERR_CORRUPT;   /* >= 2 bytes each */
         if (rd_byte(r) != 0) return FULTA_ARC_ERR_UNSUPPORTED;    /* external folders (additional streams) */
-        s->folders = fa_zalloc(r->alloc, nf ? (size_t)nf : 1, sizeof *s->folders);
+        /* the array grows as folders actually parse (doubling, never past the declared count), so the memory
+           follows the bytes that describe folders rather than the count the header claims */
+        size_t cap = nf < 64 ? (size_t)(nf ? nf : 1) : 64;
+        s->folders = fa_zalloc(r->alloc, cap, sizeof *s->folders);
         if (!s->folders) return FULTA_ARC_ERR_NOMEM;
-        s->nfolders = (uint32_t)nf;
+        s->nfolders = 0;
         uint32_t pack_index = 0;
-        for (uint32_t i = 0; i < s->nfolders; i++) {
+        for (uint32_t i = 0; i < (uint32_t)nf; i++) {
+            if (i == cap) {
+                size_t nc = cap * 2 < nf ? cap * 2 : (size_t)nf;
+                sz_folder_t *g = fa_resize(r->alloc, s->folders, cap * sizeof *g, nc * sizeof *g);
+                if (!g) return FULTA_ARC_ERR_NOMEM;
+                memset(g + cap, 0, (nc - cap) * sizeof *g);
+                s->folders = g;
+                cap = nc;
+            }
+            s->nfolders = i + 1;                        /* counted before parsing: free_streams releases a half-made one */
             if ((e = parse_folder(r, &s->folders[i]))) return e;
             s->folders[i].first_pack = pack_index;
             pack_index += s->folders[i].npacked;
@@ -301,7 +315,9 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
             t2 = rd_num(r);
         }
         for (uint32_t i = 0; i < s->nfolders; i++) s->nsubtotal += s->nsub[i];
-        if (s->nsubtotal > (1u << 24)) return FULTA_ARC_ERR_CORRUPT;
+        /* each substream past a folder's first has its size stored: a byte at least */
+        if (s->nsubtotal > (1u << 24) || s->nsubtotal > (uint64_t)s->nfolders + (r->n - r->pos))
+            return FULTA_ARC_ERR_CORRUPT;
         s->sub_sizes = fa_zalloc(r->alloc, s->nsubtotal ? (size_t)s->nsubtotal : 1, sizeof *s->sub_sizes);
         s->sub_has_crc = fa_zalloc(r->alloc, s->nsubtotal ? (size_t)s->nsubtotal : 1, sizeof *s->sub_has_crc);
         s->sub_crc = fa_zalloc(r->alloc, s->nsubtotal ? (size_t)s->nsubtotal : 1, sizeof *s->sub_crc);
@@ -595,8 +611,11 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
     sz_state_t *st = arc->state;
     sz_streams_t *ss = &st->main;
     uint64_t nfiles = rd_num(r);
-    if (r->bad || nfiles > (1u << 24)) return FULTA_ARC_ERR_CORRUPT;
+    /* a file is a substream, or an empty entry that takes a bit of the EmptyStream property */
+    if (r->bad || nfiles > (1u << 24) || nfiles > ss->nsubtotal + 8 * (uint64_t)(r->n - r->pos))
+        return FULTA_ARC_ERR_CORRUPT;
     bool *empty = NULL, *emptyfile = NULL, *anti = NULL, *mdef = NULL, *adef = NULL;
+    uint64_t emptyfile_n = 0, anti_n = 0;   /* their lengths: each was sized by the EmptyStream count when read */
     uint64_t *mt = NULL;
     uint32_t *at = NULL;
     const uint8_t *names = NULL;
@@ -619,9 +638,11 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
         } else if (t == 0x0F) {
             fa_release(arc->alloc, emptyfile);
             emptyfile = rd_bits(&sub, nempty);
+            emptyfile_n = nempty;
         } else if (t == 0x10) {
             fa_release(arc->alloc, anti);
             anti = rd_bits(&sub, nempty);
+            anti_n = nempty;
         } else if (t == 0x11) {
             if (rd_byte(&sub) != 0) { e = FULTA_ARC_ERR_UNSUPPORTED; goto done; }
             names = sub.p + 1;
@@ -670,8 +691,10 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
         bool is_empty = empty && empty[i];
         bool is_dir = false, is_anti = false;
         if (is_empty) {
-            is_dir = !(emptyfile && emptyfile[ei]);
-            is_anti = anti && anti[ei];
+            /* EmptyFile/Anti may come before EmptyStream, or EmptyStream twice: index them only within their own
+               length (an out-of-range bit is "not set") */
+            is_dir = !(emptyfile && ei < emptyfile_n && emptyfile[ei]);
+            is_anti = anti && ei < anti_n && anti[ei];
             ei++;
         }
         sz_file_t sf = {.folder = UINT32_MAX};

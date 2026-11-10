@@ -238,7 +238,7 @@ static fulta_arc_err_t inflate_read(fa_stream_t *s, void *buf, size_t n, size_t 
             size_t k = z->copy_len < n - done ? z->copy_len : n - done;
             size_t fi = (size_t)(from & z->wmask), ti = (size_t)(z->wtotal & z->wmask);
             if (z->copy_dist >= k && fi + k <= z->wmask + 1u && ti + k <= z->wmask + 1u) {
-                memcpy(z->window + ti, z->window + fi, k);
+                memmove(z->window + ti, z->window + fi, k);   /* Deflate64's distance 65536 is the same slot */
                 memcpy(out + done, z->window + ti, k);
                 z->wtotal += k;
                 done += k;

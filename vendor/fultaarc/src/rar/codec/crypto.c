@@ -5,6 +5,7 @@
  * RFC 7693 and the BLAKE2 paper (BLAKE2s, BLAKE2sp).
  */
 #include "rc_internal.h"
+#include "core/fa_once.h"
 #include <string.h>
 
 void rc_wipe(void *p, size_t n) {
@@ -30,7 +31,7 @@ static uint32_t ror32(uint32_t x, unsigned n) { return (x >> n) | (x << (32 - n)
 /* ---- CRC-32 (spec 5.1) ---- */
 
 static uint32_t crc_table[8][256];
-static bool crc_ready;
+static fa_once_t crc_once;
 
 static void crc_init(void) {
     for (uint32_t i = 0; i < 256; ++i) {
@@ -40,11 +41,10 @@ static void crc_init(void) {
     }
     for (uint32_t i = 0; i < 256; ++i)
         for (int t = 1; t < 8; ++t) crc_table[t][i] = (crc_table[t - 1][i] >> 8) ^ crc_table[0][crc_table[t - 1][i] & 0xFF];
-    crc_ready = true;
 }
 
 uint32_t rc_crc32(uint32_t crc, const void *data, size_t size) {
-    if (!crc_ready) crc_init();   /* the same values from any thread that races here */
+    fa_once(&crc_once, crc_init);
     const uint8_t *p = (const uint8_t*)data;
     crc = ~crc;
     while (size >= 8) {

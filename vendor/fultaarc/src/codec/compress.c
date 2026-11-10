@@ -20,6 +20,7 @@ typedef struct comp {
     uint8_t *inbuf;             /* raw input buffer */
     size_t inpos, inlen;
     bool ineof;
+    fulta_arc_err_t inerr;      /* a read error of the input: reported, never taken for its end */
 
     int maxbits;
     bool block_mode;
@@ -44,7 +45,8 @@ static int cmp_in_byte(comp_t *z) {
     if (z->inpos >= z->inlen) {
         if (z->ineof) return -1;
         size_t got = 0;
-        if (z->in->read(z->in, z->inbuf, CMP_INBUF, &got)) { z->ineof = true; return -1; }
+        fulta_arc_err_t e = z->in->read(z->in, z->inbuf, CMP_INBUF, &got);
+        if (e) { z->ineof = true; z->inerr = e; return -1; }
         z->inpos = 0;
         z->inlen = got;
         if (!got) { z->ineof = true; return -1; }
@@ -150,6 +152,7 @@ static fulta_arc_err_t cmp_read(fa_stream_t *s, void *buf, size_t n, size_t *got
     uint8_t *o = buf;
     while (*got < n) {
         if (z->out_pos >= z->out_len) {
+            if (z->inerr) return z->inerr;
             if (z->done) break;
             fulta_arc_err_t e = cmp_step(z);
             if (e) return e;
@@ -178,14 +181,17 @@ fulta_arc_err_t fa_dec_compress(fa_stream_t *in, fa_stream_t **out) {
     proven_allocator_t a = in->alloc;
     comp_t *z = fa_zalloc(a, 1, sizeof *z);
     if (!z) { fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
+    z->base.alloc = a;          /* first: every error path below releases through cmp_destroy, which uses it */
     z->in = in;
     z->inbuf = fa_alloc(a, CMP_INBUF);
     if (!z->inbuf) { fa_release(a, z); fa_stream_destroy(in); return FULTA_ARC_ERR_NOMEM; }
 
     /* header: magic + flags */
-    if (cmp_in_byte(z) != 0x1F || cmp_in_byte(z) != 0x9D) { cmp_destroy(&z->base); return FULTA_ARC_ERR_NOT_ARCHIVE; }
-    int flags = cmp_in_byte(z);
-    if (flags < 0) { cmp_destroy(&z->base); return FULTA_ARC_ERR_TRUNCATED; }
+    int m0 = cmp_in_byte(z), m1 = m0 < 0 ? -1 : cmp_in_byte(z);
+    int flags = m1 < 0 ? -1 : cmp_in_byte(z);
+    fulta_arc_err_t he = z->inerr ? z->inerr                               /* a read error is that error */
+                       : (m0 != 0x1F || m1 != 0x9D) ? FULTA_ARC_ERR_NOT_ARCHIVE : flags < 0 ? FULTA_ARC_ERR_TRUNCATED : 0;
+    if (he) { cmp_destroy(&z->base); return he; }
     z->maxbits = flags & 0x1F;
     z->block_mode = (flags & 0x80) != 0;
     if ((flags & 0x60) || z->maxbits < CMP_INIT_BITS || z->maxbits > 16) { cmp_destroy(&z->base); return FULTA_ARC_ERR_CORRUPT; }
@@ -203,8 +209,6 @@ fulta_arc_err_t fa_dec_compress(fa_stream_t *in, fa_stream_t **out) {
     z->destack = fa_alloc(a, z->maxmaxcode);
     if (!z->prefix || !z->suffix || !z->destack) { cmp_destroy(&z->base); return FULTA_ARC_ERR_NOMEM; }
     for (uint32_t i = 0; i < 256; i++) z->suffix[i] = (uint8_t)i;   /* literals: suffix[c] == c */
-
-    z->base.alloc = a;
 
     z->base.read = cmp_read;
     z->base.destroy = cmp_destroy;

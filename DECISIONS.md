@@ -3822,3 +3822,17 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: the owner, 2026-11-10: "진행할 때 메인 창 안에 진행정도를 표시해주는 카드 창 만들면 좋을 것 같아요. 예를 들어 파일 탐색기에서 압축 풀기를 선택해서 루브라뷰가 실행되었을 떄 지금은 위에 메시지로만 뜨는데, 사실 이게 보기 좋은 모습은 아니에요 ... 용량기준 진행률이나 진행숫자(파일기준) 그리고 예상 남은시간 같은 것도 보여주고요". Found: archive work, an archive's rewrite and the copy / move jobs said their progress as an OSD line each pass (a percent, or "files: N of M done"); the extraction counted bytes and the files written, not the files in all; the compression its bytes only.
 - Decision: one card for whichever of them runs (`progress_view_t`, `progress_show` / `progress_end`, `draw_progress_card`), drawn by the input card's routine (D-323) and moved like it, with the bytes and percent, the file of how many, the time left (`rubraview_progress_t` in core, tested) and Stop where Esc stops the job. The extraction gains `files_total` / `files_at`, the compression `files_total` / `files_done` (a file counted once, on the read that reaches its end). The copy / move jobs keep counting files only; bytes there are a later item.
 - Consequences: `test_progress` (T390), `test_archive_job` (T391), VM T392. The OSD progress lines and their translations go.
+
+## D-325: FultaArc v0.1.0 Vendored
+
+- Date: 2026-11-10
+- Context: the owner, 2026-11-10: "fultaarc 의 재벤더링 요청합니다". FultaArc tagged `v0.1.0` (`24cd434`) after its security review (its D-041): double frees and a heap over-read fixed, header injection and unsafe names refused, one memory budget, exclusive random temporaries, first-use tables built once across threads, CBMC proofs; the API unchanged, one header added (`src/core/fa_once.h`), no source file added, its notices unchanged.
+- Decision: `vendor/fultaarc` taken whole again from `24cd434` (the same paths as D-320), unmodified; built on Rubraview's `vendor/proven` (v0.112.4) as before. FultaArc now reads a name's "a:" as a drive (Windows' "a:b" is drive-relative) and leaves it off: T-case 9 of `test_archive_job` expects `b_.txt` for `a:b?.txt` where it had `a_b_.txt`.
+- Consequences: `test_archive_job`, `test_archives` and the gate pass on it; `vendor/fultaarc/VENDORED.md` names the snapshot.
+
+## D-326: Copying And Moving Show Their Bytes In The Progress Card (RV-269)
+
+- Date: 2026-11-10
+- Context: the owner, 2026-11-10: "복사 이동도 용량 기준으로도 표시해 주세요". The copy / move jobs (D-310) counted their items only; D-324 showed them in the card by files.
+- Decision: `rubraview_fileop_bytes` (core, tested) gives a job's bytes, in all and ended; the Windows fs copy takes, as its `ctx`, an `_Atomic uint64_t` its `CopyFileExW` progress routine keeps at the bytes of the file in hand (each job's own copy of the fs struct carries its counter); `filejob` publishes the jobs' bytes under its lock and the main thread adds the counters in flight. The card shows the bytes and percent, the files of how many, the time left and the speed, as for an extraction.
+- Consequences: `test_fileop` (T393). Not seen on the VM: its disk copied 2.8 GB in about a second, before a pass drew the card.

@@ -45,7 +45,8 @@ static fulta_arc_err_t dbcs_decode(fa_buf_t *b, const uint8_t *s, size_t n, cons
         uint8_t c = s[i];
         fulta_arc_err_t e;
         if (c < 0x80) e = fa_buf_byte(b, c);
-        else if (d->lead[c - 0x80] && i + 1 < n && s[i + 1] >= 0x40 && s[i + 1] <= 0xFE) {
+        /* pairs[] holds leads 0x81..0xFE only: the range is checked here, not left to the tables */
+        else if (c >= 0x81 && c <= 0xFE && d->lead[c - 0x80] && i + 1 < n && s[i + 1] >= 0x40 && s[i + 1] <= 0xFE) {
             uint16_t u = d->pairs[(c - 0x81) * 191 + (s[i + 1] - 0x40)];
             if (u) { e = fa_utf8_put(b, u); i++; }
             else e = fa_utf8_put(b, 0xFFFD);       /* an unmapped pair: one replacement, the trail is read again */

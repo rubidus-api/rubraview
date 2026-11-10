@@ -30,7 +30,10 @@ static bool tar_num(const uint8_t *f, size_t len, uint64_t *out) {
     if (len == 0) { *out = 0; return true; }
     if (f[0] & 0x80) {                                   /* GNU base-256, big-endian, top bit of byte 0 cleared */
         uint64_t v = (uint64_t)(f[0] & 0x7F);
-        for (size_t i = 1; i < len; i++) v = (v << 8) | f[i];
+        for (size_t i = 1; i < len; i++) {
+            if (v >> 56) return false;                   /* more than 64 bits: not a size this reader can hold */
+            v = (v << 8) | f[i];
+        }
         *out = v;
         return true;
     }
@@ -82,8 +85,19 @@ static int64_t tar_dec(const char *s) {
     bool neg = *s == '-';
     if (neg) s++;
     uint64_t v = 0;
-    for (; *s >= '0' && *s <= '9'; s++) v = v * 10 + (uint64_t)(*s - '0');
+    for (; *s >= '0' && *s <= '9'; s++) {
+        if (v > (UINT64_C(1) << 62) / 10) return neg ? INT64_MIN / 2 : INT64_MAX / 2;   /* saturate, never wrap */
+        v = v * 10 + (uint64_t)(*s - '0');
+    }
     return neg ? -(int64_t)v : (int64_t)v;
+}
+
+/* Seconds to the entry's nanoseconds, saturating (an archive's 64-bit time must not overflow the product). */
+static int64_t secs_ns(int64_t t) {
+    const int64_t lim = INT64_MAX / INT64_C(1000000000);
+    if (t > lim) t = lim;
+    if (t < -lim) t = -lim;
+    return t * INT64_C(1000000000);
 }
 
 /* Find value for `key` in a pax record block ("<len> key=value\n" entries). Returns a heap copy or NULL. */
@@ -247,8 +261,8 @@ static fulta_arc_err_t tar_open(fulta_arc_t *arc, uint64_t offset) {
 
         uint64_t mode, mtime;
         if (tar_num(h + 100, 8, &mode) && (mode & 07777)) { en->pub.unix_mode = (uint32_t)(mode & 0xFFFFF); }
-        if (pax_has_mtime) { en->pub.mtime = pax_mtime * INT64_C(1000000000); en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME; }
-        else if (tar_num(h + 136, 12, &mtime)) { en->pub.mtime = (int64_t)mtime * INT64_C(1000000000); en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME; }
+        if (pax_has_mtime) { en->pub.mtime = secs_ns(pax_mtime); en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME; }
+        else if (tar_num(h + 136, 12, &mtime)) { en->pub.mtime = secs_ns(mtime > (uint64_t)INT64_MAX ? INT64_MAX : (int64_t)mtime); en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME; }
 
         /* the overrides are one-shot (pax 'x', GNU L/K) */
         fa_release(arc->alloc, long_name); long_name = NULL;

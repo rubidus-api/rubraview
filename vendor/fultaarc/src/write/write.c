@@ -74,7 +74,7 @@ static uint32_t crc32_of(const uint8_t *data, uint64_t size) {
 
 /* A name that may be stored: not empty or absolute, no drive, no "." or ".." part, no empty part, no control
  * character. A folder's name may end in '/'. */
-static bool name_ok(proven_u8str_view_t name) {
+bool fa_write_name_ok(proven_u8str_view_t name) {
     if (name.size && (name.ptr[name.size - 1] == '/' || name.ptr[name.size - 1] == '\\')) name.size--;
     if (name.size == 0 || name.ptr[0] == '/' || name.ptr[0] == '\\') return false;
     if (name.size >= 2 && name.ptr[1] == ':') return false;                     /* C:... */
@@ -85,8 +85,7 @@ static bool name_ok(proven_u8str_view_t name) {
         if (c == '/' || c == '\\') {
             size_t len = i - part;
             if (len == 0 && i < name.size) return false;                       /* "a//b" */
-            if (len == 2 && name.ptr[part] == '.' && name.ptr[part + 1] == '.') return false;
-            if (len == 1 && name.ptr[part] == '.') return false;
+            if (fa_name_part_is_dots((const char *)name.ptr + part, len)) return false;   /* ".", "..", ".. " */
             part = i + 1;
         }
     }
@@ -648,6 +647,7 @@ static fulta_arc_err_t write_zip(const fulta_arc_write_entry_t *entries, size_t 
         r->dir = dir;
         if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
         r->name_len = strlen(r->name);
+        if (r->name_len > 0xFFFF) { err = FULTA_ARC_ERR_BAD_NAME; break; }   /* ZIP keeps 16 bits */
         r->made_by_host = 0;                              /* MS-DOS */
         r->ext_attr = dir ? 0x10u : 0u;                   /* MS-DOS directory bit */
         r->size = dir ? 0 : e->size;
@@ -1321,6 +1321,7 @@ fulta_arc_err_t fa_write_zip_convert(const fa_edit_item_t *items, size_t count, 
         r->name = stored_name(k.alloc, uname, dir, true);
         if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
         r->name_len = strlen(r->name);
+        if (r->name_len > 0xFFFF) { err = FULTA_ARC_ERR_BAD_NAME; break; }   /* ZIP keeps 16 bits */
         r->flags = ascii(r->name) ? 0 : 0x0800;
         r->made_by_host = 0;
         r->ext_attr = dir ? 0x10u : 0u;
@@ -1373,12 +1374,14 @@ fulta_arc_err_t fa_write_zip_edited(const fa_edit_item_t *items, size_t count, i
                 r->name = stored_name(k.alloc, it->name, ci->is_dir, true);
                 if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
                 r->name_len = strlen(r->name);
+                if (r->name_len > 0xFFFF) { err = FULTA_ARC_ERR_BAD_NAME; break; }   /* ZIP keeps 16 bits */
                 r->flags = ascii(r->name) ? 0 : 0x0800;
             } else {                                      /* keep the raw name bytes and the UTF-8 flag bit */
                 r->name = fa_alloc(a, ci->name_raw_len ? ci->name_raw_len : 1);
                 if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
                 memcpy(r->name, ci->name_raw, ci->name_raw_len);
                 r->name_len = ci->name_raw_len;
+                if (r->name_len > 0xFFFF) { err = FULTA_ARC_ERR_BAD_NAME; break; }   /* ZIP keeps 16 bits */
                 r->flags = ci->flags & 0x0800;
             }
             r->method = ci->method; r->crc = ci->crc; r->size = ci->usize; r->packed = ci->csize;
@@ -1404,6 +1407,7 @@ fulta_arc_err_t fa_write_zip_edited(const fa_edit_item_t *items, size_t count, i
             r->name = stored_name(k.alloc, it->name, dir, true);
             if (!r->name) { err = FULTA_ARC_ERR_NOMEM; break; }
             r->name_len = strlen(r->name);
+            if (r->name_len > 0xFFFF) { err = FULTA_ARC_ERR_BAD_NAME; break; }   /* ZIP keeps 16 bits */
             r->flags = ascii(r->name) ? 0 : 0x0800;
             r->made_by_host = 0;
             r->ext_attr = dir ? 0x10u : 0u;
@@ -2768,7 +2772,7 @@ static fulta_arc_err_t write_any(fulta_arc_format_t format, const fulta_arc_writ
     if (!sink || !sink->write || !sink->patch || (count && !entries)) return FULTA_ARC_ERR_INVALID_ARG;
     for (size_t i = 0; i < count; ++i) {
         if (!entries[i].name) return FULTA_ARC_ERR_INVALID_ARG;
-        if (!name_ok(proven_u8str_view_from_cstr(entries[i].name))) return FULTA_ARC_ERR_BAD_NAME;
+        if (!fa_write_name_ok(proven_u8str_view_from_cstr(entries[i].name))) return FULTA_ARC_ERR_BAD_NAME;
         if (entries[i].size && !entries[i].data && !is_dir(&entries[i])) return FULTA_ARC_ERR_INVALID_ARG;
     }
     if (!fa_write_alloc_ok(options)) return FULTA_ARC_ERR_INVALID_ARG;   /* one or two allocator functions set */

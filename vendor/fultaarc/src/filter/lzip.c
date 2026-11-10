@@ -120,7 +120,7 @@ static fulta_arc_err_t lzip_extract(fulta_arc_t *arc, size_t index, const fulta_
     if (e) return e;
     uint8_t props[5] = { 93, 0, 0, 0, 0 };          /* lc=3,lp=0,pb=2 -> (pb*5+lp)*9+lc = 93; dict LE follows */
     fa_put_le32(props + 1, st->dict);
-    if ((e = fa_dec_lzma(s, props, st->out_size, &arc->limits, &d))) { fa_stream_destroy(s); return e; }
+    if ((e = fa_dec_lzma(s, props, st->out_size, &arc->limits, &d))) return e;   /* the decoder owns `s`: destroyed on failure too */
     e = fa_pump(d, st->out_size, st->has_crc, st->crc, sink, arc, arc->opt.keep_damaged);
     fa_stream_destroy(d);
     return e;

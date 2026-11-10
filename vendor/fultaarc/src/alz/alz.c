@@ -219,7 +219,7 @@ static fa_alz_err_t inflate_raw(packed_reader_t *r, uint8_t *out, uint64_t size)
         size_t out_bytes = room > SIZE_MAX ? SIZE_MAX : (size_t)room;
         mz_uint32 flags = TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF | (r->left > 0 ? TINFL_FLAG_HAS_MORE_INPUT : 0);
         tinfl_status st = tinfl_decompress(d, in_len ? in : (const mz_uint8*)"", &in_bytes, out, out + produced, &out_bytes, flags);
-        in += in_bytes;
+        if (in_bytes) in += in_bytes;              /* `in` is NULL until the first packed chunk: no offset on NULL */
         in_len -= in_bytes;
         produced += out_bytes;
         if (st == TINFL_STATUS_DONE || produced == size) {

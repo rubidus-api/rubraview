@@ -482,21 +482,32 @@ char *fa_utf16le_to_utf8(proven_allocator_t a, proven_mem_view_t bytes) {
     return (char *)b.data;
 }
 
+/* A path part that Windows would read as "." or "..": nothing left once trailing dots and spaces are trimmed (Win32
+ * path normalisation trims them), e.g. "..", ".. ", ". .", "  ". Only a bare "." is harmless (it is skipped). */
+static bool part_is_dots(const char *p, size_t len) {
+    size_t t = len;
+    while (t && (p[t - 1] == '.' || p[t - 1] == ' ')) t--;
+    return len && t == 0;
+}
+
 bool fa_sanitize_name(char *name) {
-    /* split on '/' and '\\', drop empty, "." and a leading drive "X:", reject "..", rejoin with '/' */
+    /* split on '/' and '\\', drop empty and "." parts and a leading drive ("X:" or "X:part", which Windows reads
+     * as drive-relative), reject a part Windows reads as ".." (part_is_dots), rejoin with '/' */
     size_t w = 0, i = 0, n = strlen(name);
-    bool first = true;
     while (i < n) {
         size_t j = i;
         while (j < n && name[j] != '/' && name[j] != '\\') j++;
         size_t len = j - i;
         const char *part = name + i;
+        /* the first part that is kept may not start with a drive, however many empty or "." parts come before it
+           and however many drive prefixes it carries ("C:D:x") - CBMC found "//.\\a:x" keeping "a:" */
+        while (w == 0 && len >= 2 && part[1] == ':' &&
+               ((part[0] >= 'A' && part[0] <= 'Z') || (part[0] >= 'a' && part[0] <= 'z'))) {
+            part += 2;
+            len -= 2;
+        }
         bool skip = len == 0 || (len == 1 && part[0] == '.');
-        if (first && len == 2 && part[1] == ':' &&
-            ((part[0] >= 'A' && part[0] <= 'Z') || (part[0] >= 'a' && part[0] <= 'z')))
-            skip = true;
-        if (len == 2 && part[0] == '.' && part[1] == '.') return false;
-        first = false;
+        if (!skip && part_is_dots(part, len)) return false;
         if (!skip) {
             if (w) name[w++] = '/';
             memmove(name + w, part, len);
@@ -507,6 +518,8 @@ bool fa_sanitize_name(char *name) {
     name[w] = 0;
     return w > 0;
 }
+
+bool fa_name_part_is_dots(const char *part, size_t len) { return part_is_dots(part, len); }
 
 /* ---- time ---------------------------------------------------------------------------------------------------- */
 

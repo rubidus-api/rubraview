@@ -2,6 +2,7 @@
  * LEA (KS X 3246 / KISA's specification), traditional PKWARE encryption (APPNOTE), and decrypting streams for
  * AES-CBC and the CTR variants of docs/specs/crypto.md. MIT. Written from those standards. */
 #include "../core/internal.h"
+#include "core/fa_once.h"
 
 #include "proven/random.h"
 
@@ -9,7 +10,7 @@
 
 static uint8_t sbox[256], inv_sbox[256];
 static uint32_t te[4][256];
-static bool aes_ready;
+static fa_once_t aes_once, aes_hw_once;
 
 static uint8_t xtime(uint8_t x) { return (uint8_t)((x << 1) ^ ((x & 0x80) ? 0x1B : 0)); }
 static uint8_t gmul(uint8_t a, uint8_t b) {
@@ -39,7 +40,6 @@ static void aes_tables(void) {
         te[2][i] = (t << 16) | (t >> 16);
         te[3][i] = (t << 24) | (t >> 8);
     }
-    aes_ready = true;
 }
 
 static uint32_t sub_word(uint32_t w) {
@@ -48,10 +48,8 @@ static uint32_t sub_word(uint32_t w) {
 }
 
 /* Enable AES-NI only after it reproduces the FIPS-197 known answers (AES-128 and AES-256, both directions). */
-static int aes_hw = -1;
-static int aes_hw_ok(void) {
-    if (aes_hw >= 0) return aes_hw;
-    aes_hw = 0;
+static int aes_hw;                     /* written once, under aes_hw_once */
+static int aes_hw_probe(void) {
     if (!fa_aes_hw_supported()) return 0;
     static const uint8_t pt[16] = {0x00,0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x88,0x99,0xaa,0xbb,0xcc,0xdd,0xee,0xff};
     static const uint8_t k128[16] = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
@@ -69,12 +67,16 @@ static int aes_hw_ok(void) {
         fa_aes_hw_decrypt(rk, nr, v[i].c, out);
         if (memcmp(out, pt, 16) != 0) return 0;
     }
-    aes_hw = 1;
     return 1;
+}
+static void aes_hw_init(void) { aes_hw = aes_hw_probe(); }
+static int aes_hw_ok(void) {
+    fa_once(&aes_hw_once, aes_hw_init);
+    return aes_hw;
 }
 
 void fa_aes_init_enc(fa_aes_t *a, const uint8_t *key, size_t keylen) {
-    if (!aes_ready) aes_tables();
+    fa_once(&aes_once, aes_tables);
     int nk = (int)keylen / 4;
     a->rounds = nk + 6;
     int total = 4 * (a->rounds + 1);
