@@ -1784,8 +1784,8 @@ whole; added to a list, it brings its pictures, films, music and text.
 
 **Progress.** While an archive is extracted, compressed or written again, or
 files are copied or moved, a card in the window shows it: a bar, the size done
-of the whole and the percent, the file it is on of how many, and about how long
-is left (worked out after the first second). **Stop** (or `Esc`) stops an
+of the whole and the percent, the file it is on of how many, about how long
+is left (worked out after the first second) and the speed a second. **Stop** (or `Esc`) stops an
 extraction, a compression or an archive being written; what is already written
 stays. Drag the card by its title to move it; it opens again where you left it,
 and the window keeps working under it. Copying and moving count files only.

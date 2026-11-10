@@ -109,6 +109,18 @@ void draw_progress_card(app_state_t *app, double win_w, double win_h, double dpi
     double left = rubraview_progress_left(&app->prog_rate, done, total, rubraview_pal_time_now_seconds());
     if (time_left_text(line, sizeof line, left) > 0)
         rubraview_pal_render_draw_text(app->renderer, cstr(line), row, 15.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+    if (app->prog_rate.have_rate && !v->stopping) {   /* (owner, 2026-11-10: "초당 처리속도") at the row's right */
+        char speed[64];
+        int n;
+        if (v->bytes) {
+            char per[32];
+            rubraview_picker_size_text(per, sizeof per, (uint64_t)(app->prog_rate.rate > 0.0 ? app->prog_rate.rate : 0.0));
+            n = rubraview_fmt(speed, sizeof speed, T("{}/s"), PROVEN_ARG(per));
+        } else {
+            n = rubraview_fmt(speed, sizeof speed, T("{:.1} files/s"), PROVEN_ARG(app->prog_rate.rate > 0.0 ? app->prog_rate.rate : 0.0));
+        }
+        if (n > 0) rubraview_pal_render_draw_text(app->renderer, cstr(speed), row, 15.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_RIGHT);
+    }
     app->prog_stop = (rubraview_pal_rect_t){0};
     if (v->can_stop && !v->stopping) {
         const char *words[1] = { T("Stop") };
