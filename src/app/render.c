@@ -1743,6 +1743,10 @@ uint64_t scene_signature(const app_state_t *app) {
         SIG(&h, (int64_t)app->card.rect.x); SIG(&h, (int64_t)app->card.rect.y);
         SIG(&h, (int64_t)app->card.rect.width); SIG(&h, (int64_t)app->card.rect.height); SIG(&h, app->card.focused);
     }
+    if (app->px_card.open) {   /* the size box's card, the same */
+        SIG(&h, (int64_t)app->px_card.rect.x); SIG(&h, (int64_t)app->px_card.rect.y);
+        SIG(&h, (int64_t)app->px_card.rect.width); SIG(&h, (int64_t)app->px_card.rect.height); SIG(&h, app->px_card.focused);
+    }
     SIG(&h, now < app->widget_wheel_until);
     SIG(&h, now < app->menu_confirm.until);   /* a menu item says "Delete?" until then */
     SIG(&h, app->transition.active);
