@@ -841,8 +841,11 @@ void panel_write_current(app_state_t *app, bool apply_edit) {
                                          ? source_format : options.format;
     proven_u8str_view_t ext = rubraview_export_extension(target);
     proven_u8str_view_t name = rubraview_batch_format_name(app->arena, PROVEN_LIT("{name}_edit.{ext}"), stem, ext, 0, 0, PROVEN_LIT(""));
-    proven_u8str_view_t out_path = rubraview_path_join(app->arena, rubraview_path_dirname(source), name);
-    if (out_path.size == 0) return;
+    /* RV-266 (owner, 2026-11-10: "이미 파일이 있습니다. 라고 알려주고 img1_edit_2.jpg 식으로"): a copy made before is
+       never in the way: the first of name_edit_2, _3 ... that is free, and the reader told */
+    proven_u8str_view_t out_path = rubraview_filing_target_underscore(app->arena, rubraview_path_dirname(source), name, filing_exists, NULL);
+    if (out_path.size == 0) { osd_say(app, TU8("not saved: no free name for the copy")); return; }
+    bool renumbered = !proven_u8str_view_eq(rubraview_path_basename(out_path), name);
 
     rubraview_export_route_t route = rubraview_export_plan(&options, source_format, pixels_change);
 
@@ -875,7 +878,15 @@ void panel_write_current(app_state_t *app, bool apply_edit) {
     job->thread = CreateThread(NULL, 0, save_job_run, job, 0, NULL);
     if (!job->thread) { rubraview_free(job); osd_say(app, TU8("not saved: could not start")); return; }
     app->save_job = job;
-    osd_say(app, TU8("saving a copy..."));
+    if (renumbered) {
+        char line[1200];
+        proven_u8str_view_t as = rubraview_path_basename(out_path);
+        int n = rubraview_fmt(line, sizeof line, T("{} is already there: saving the copy as {}"),
+                              PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)), PROVEN_ARG(rubraview_bytes_view(as.ptr, (int)as.size)));
+        osd_say(app, n > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n } : TU8("saving a copy..."));
+    } else {
+        osd_say(app, TU8("saving a copy..."));
+    }
 }
 
 /* Each pass: a finished copy says how it went and lets go of its thread. */

@@ -329,7 +329,7 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
                     int n = rubraview_fmt(name, sizeof(name), "{}{}{}.{}", PROVEN_ARG(job->prefix), PROVEN_ARG(rubraview_bytes_view(stem.ptr, (int)stem.size)), PROVEN_ARG(job->suffix), PROVEN_ARG(rubraview_bytes_view(ext.ptr, (int)ext.size)));
                     proven_arena_t *names = &lanes[steps.cursor % 2u];
                     proven_u8str_view_t target = n > 0 && (size_t)n < sizeof(name)
-                        ? rubraview_filing_target(names, rubraview_path_dirname(path), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = (size_t)n }, filing_exists, NULL)
+                        ? rubraview_filing_target_underscore(names, rubraview_path_dirname(path), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = (size_t)n }, filing_exists, NULL)
                         : PROVEN_LIT("");
                     ok = target.size > 0 && rubraview_pal_image_save(target, &px, &options);
                     if (ok) (void)details_keep(path, target, target, f, &options);   /* 1.17.0 */
@@ -352,7 +352,12 @@ static DWORD WINAPI apply_all_run(LPVOID param) {
    originals (owner, 2026-10-18), so a copy is not edited a second time. */
 static bool edit_is_copy_name(proven_u8str_view_t path, proven_u8str_view_t pattern) {
     if (pattern.size == 0) pattern = PROVEN_LIT("*_edit");
-    return rubraview_glob_match_list(rubraview_path_stem(rubraview_path_basename(path)), pattern);
+    proven_u8str_view_t stem = rubraview_path_stem(rubraview_path_basename(path));
+    if (rubraview_glob_match_list(stem, pattern)) return true;
+    size_t digits = 0;   /* RV-266: a copy numbered beside another, img1_edit_2, is a copy too */
+    while (digits < stem.size && stem.ptr[stem.size - 1 - digits] >= '0' && stem.ptr[stem.size - 1 - digits] <= '9') digits++;
+    if (digits == 0 || digits + 1 >= stem.size || stem.ptr[stem.size - 1 - digits] != '_') return false;
+    return rubraview_glob_match_list((proven_u8str_view_t){ .ptr = stem.ptr, .size = stem.size - 1 - digits }, pattern);
 }
 
 void apply_all_typed(app_state_t *app) {

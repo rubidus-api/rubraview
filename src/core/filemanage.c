@@ -212,8 +212,21 @@ rubraview_curation_t rubraview_curation_parse(proven_arena_t *arena, proven_u8st
     return curation;
 }
 
+static proven_u8str_view_t filing_target_in(proven_arena_t *arena, proven_u8str_view_t dir, proven_u8str_view_t filename,
+                                            rubraview_path_exists_fn exists, void *ctx, bool underscore);
+
 proven_u8str_view_t rubraview_filing_target(proven_arena_t *arena, proven_u8str_view_t dir, proven_u8str_view_t filename,
                                 rubraview_path_exists_fn exists, void *ctx) {
+    return filing_target_in(arena, dir, filename, exists, ctx, false);
+}
+
+proven_u8str_view_t rubraview_filing_target_underscore(proven_arena_t *arena, proven_u8str_view_t dir, proven_u8str_view_t filename,
+                                                       rubraview_path_exists_fn exists, void *ctx) {
+    return filing_target_in(arena, dir, filename, exists, ctx, true);   /* RV-266: an Edit copy's "_2", "_3" */
+}
+
+static proven_u8str_view_t filing_target_in(proven_arena_t *arena, proven_u8str_view_t dir, proven_u8str_view_t filename,
+                                            rubraview_path_exists_fn exists, void *ctx, bool underscore) {
     proven_u8str_view_t none = PROVEN_LIT("");
     if (!arena || !exists || dir.size == 0 || filename.size == 0) return none;
     proven_u8str_view_t target = rubraview_path_join(arena, dir, filename);
@@ -232,10 +245,15 @@ proven_u8str_view_t rubraview_filing_target(proven_arena_t *arena, proven_u8str_
         char *name = (char*)res.value.ptr;
         size_t at = 0;
         proven_sys_mem_copy(name, filename.ptr, stem); at = stem;
-        name[at++] = ' ';   /* RV-259 (D-311): "name (2).ext", as Windows */
-        name[at++] = '(';
-        while (d > 0) name[at++] = digits[--d];
-        name[at++] = ')';
+        if (underscore) {   /* RV-266: "name_2.ext" */
+            name[at++] = '_';
+            while (d > 0) name[at++] = digits[--d];
+        } else {
+            name[at++] = ' ';   /* RV-259 (D-311): "name (2).ext", as Windows */
+            name[at++] = '(';
+            while (d > 0) name[at++] = digits[--d];
+            name[at++] = ')';
+        }
         proven_sys_mem_copy(name + at, filename.ptr + stem, filename.size - stem); at += filename.size - stem;
         name[at] = '\0';
         target = rubraview_path_join(arena, dir, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = at });

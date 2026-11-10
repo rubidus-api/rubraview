@@ -167,6 +167,13 @@ proven_u8str_view_t rubraview_filing_target(proven_arena_t *arena, proven_u8str_
                                 rubraview_path_exists_fn exists, void *ctx);
 
 /**
+ * The same for a copy Edit makes (RV-266; owner, 2026-11-10: "img1_edit_2.jpg 식으로 ... 빈 숫자가 나올 때까지"):
+ * `img1_edit.jpg`, else `img1_edit_2.jpg`, `img1_edit_3.jpg` ... the first that is free.
+ */
+proven_u8str_view_t rubraview_filing_target_underscore(proven_arena_t *arena, proven_u8str_view_t dir, proven_u8str_view_t filename,
+                                                       rubraview_path_exists_fn exists, void *ctx);
+
+/**
  * A folder typed for a copy or a move (owner, 2026-10-16: "복사 및 이동할 때
  * 거기서 바로 새 폴더 추가"): what Enter does with it. A folder that is
  * there takes the files; one that is not is offered first, and made when
