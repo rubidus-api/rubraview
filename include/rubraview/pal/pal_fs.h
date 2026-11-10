@@ -248,7 +248,9 @@ bool rubraview_pal_fs_make_dirs(proven_u8str_view_t path);
 
 /** RV-258 (D-310): the file system as rubraview_fileop needs it — identity by volume serial and file id, a copy that
     never overwrites (CopyFileExW), a rename never over a name, a swap that recycles what it replaced (ReplaceFileW),
-    bytes compared, a file flushed to the disk. One for the program; its calls are safe from any one thread. */
+    bytes compared, a file flushed to the disk. One for the program; its calls are safe from any one thread.
+    RV-269: a copy of it whose `ctx` is an `_Atomic uint64_t *` has the copy store there the bytes of the file in
+    hand copied so far, and 0 when that file ends (NULL, as given: nothing kept). */
 struct rubraview_fileop_fs;
 const struct rubraview_fileop_fs *rubraview_pal_fileop_fs(void);
 

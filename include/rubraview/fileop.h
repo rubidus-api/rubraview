@@ -136,6 +136,11 @@ size_t rubraview_fileop_answer_all(rubraview_fileop_t *op, rubraview_fileop_answ
    the one coming alone (overwrite), the one there alone or neither (skip). */
 rubraview_fileop_answer_t rubraview_fileop_answer_of_checks(bool keep_coming, bool keep_there);
 
+/* RV-269 (owner, 2026-11-10: "복사 이동도 용량 기준으로도 표시해 주세요"): the bytes of the files it carries (folders
+   not counted, only items checked by prepare), and those of the ones ended — done, skipped or failed. A file being
+   copied is not in `done` until it ends: the copy's own progress is the caller's (the fs `copy`'s `ctx`). */
+void rubraview_fileop_bytes(const rubraview_fileop_t *op, uint64_t *done, uint64_t *total);
+
 /* RV-259 (owner, 2026-11-08: "윈도 스타일로 (2) (3)"): `path` with " (n)" before its extension (a folder: at its end), into `out`. */
 bool rubraview_fileop_suffix_name(const char *path, bool is_dir, unsigned n, char *out, size_t cap);
 

@@ -2,6 +2,7 @@
    manager begun before chose (../rubraman, src/pal/win32/rubraman_pal_win32.c): CopyFileExW that never overwrites,
    MoveFileExW never over a name, ReplaceFileW keeping what it replaced (then recycled), identity by volume serial and
    file id, FlushFileBuffers before a source is let go. */
+#include <stdatomic.h>
 #include "rubraview/core.h"
 #include "rubraview/fileop.h"
 #include "rubraview/pal/pal_fs.h"
@@ -84,11 +85,21 @@ static bool w_list(void *ctx, const char *dir, void (*each)(void *user, const ch
     return ok;
 }
 
+/* RV-269: the file in hand's bytes so far, for the progress card */
+static DWORD CALLBACK w_copy_progress(LARGE_INTEGER total, LARGE_INTEGER moved, LARGE_INTEGER stream_total, LARGE_INTEGER stream_moved,
+                                      DWORD stream, DWORD reason, HANDLE from, HANDLE to, LPVOID data) {
+    (void)total; (void)stream_total; (void)stream_moved; (void)stream; (void)reason; (void)from; (void)to;
+    atomic_store((_Atomic uint64_t *)data, (uint64_t)moved.QuadPart);
+    return PROGRESS_CONTINUE;
+}
+
 static bool w_copy(void *ctx, const char *from, const char *to) {
-    (void)ctx;
     WCHAR a[WPATH], b[WPATH];
     if (!wide(from, a) || !wide(to, b)) return false;
-    if (!CopyFileExW(a, b, NULL, NULL, NULL, COPY_FILE_FAIL_IF_EXISTS)) return false;
+    _Atomic uint64_t *copied = (_Atomic uint64_t *)ctx;
+    BOOL ok = CopyFileExW(a, b, copied ? w_copy_progress : NULL, copied, NULL, COPY_FILE_FAIL_IF_EXISTS);
+    if (copied) atomic_store(copied, 0);
+    if (!ok) return false;
     /* CopyFileExW carries the read-only flag over; a read-only staging file could not be swapped in or removed if
        the copy were given up (rubraman learnt it), so the copy is left writable */
     DWORD at = GetFileAttributesW(b);

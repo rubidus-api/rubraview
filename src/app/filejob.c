@@ -25,6 +25,7 @@ typedef struct fj_job {
     char    *viewer_path;   /* that page's file, to know it is still the one on screen */
     char    *temp_dir;      /* a page out of an archive, written there first: removed after */
     bool     prepared, finished, said_parked;
+    _Atomic uint64_t copied;   /* RV-269: the bytes of the file being copied so far (the fs copy's ctx) */
 } fj_job_t;
 
 typedef struct fj_row {
@@ -53,6 +54,7 @@ static struct {
     size_t   nrows;
     uint32_t version;
     size_t   total, done, failed, skipped;
+    uint64_t bytes_total, bytes_done;   /* RV-269 */
 } g = { .lock = SRWLOCK_INIT };
 
 /* the main thread's copy, drawn in the window */
@@ -66,6 +68,18 @@ static void rows_free(fj_row_t *rows, size_t n) {
     rubraview_free(rows);
 }
 
+/* RV-269: every job's bytes, ended and in all (under the lock) */
+static void publish_bytes(void) {
+    uint64_t bd = 0, bt = 0;
+    for (size_t j = 0; j < g.njobs; ++j) {
+        uint64_t d = 0, t = 0;
+        rubraview_fileop_bytes(&g.jobs[j]->op, &d, &t);
+        bd += d; bt += t;
+    }
+    g.bytes_done = bd;
+    g.bytes_total = bt;
+}
+
 /* Under the lock: the counts, and — when the parked ones changed — the parked items of every job as rows. */
 static size_t g_parked_sig = (size_t)-1;
 static void publish(void) {
@@ -75,6 +89,7 @@ static void publish(void) {
         size_t total = 0, done = 0, failed = 0, skipped = 0;
         for (size_t j = 0; j < g.njobs; ++j) { total += g.jobs[j]->op.count; done += g.jobs[j]->op.done; failed += g.jobs[j]->op.failed; skipped += g.jobs[j]->op.skipped; }
         g.total = total; g.done = done; g.failed = failed; g.skipped = skipped;
+        publish_bytes();
         return;
     }
     g_parked_sig = sig;
@@ -99,6 +114,7 @@ static void publish(void) {
     g.rows = rows;
     g.nrows = k;
     g.total = total; g.done = done; g.failed = failed; g.skipped = skipped;
+    publish_bytes();
     g.version++;
 }
 
@@ -173,6 +189,7 @@ bool filejob_start(app_state_t *app, proven_u8str_view_t dir, const proven_u8str
     char *d = rubraview_strndup_view(dir);
     if (!job || !d) { rubraview_free(job); rubraview_free(d); return false; }
     rubraview_fileop_init(&job->op, moving ? RUBRAVIEW_FILEOP_MOVE : RUBRAVIEW_FILEOP_COPY, rubraview_pal_fileop_fs(), d);
+    job->op.fs.ctx = (void *)&job->copied;   /* RV-269: the copy says how far it is in the file in hand */
     rubraview_free(d);
     for (size_t i = 0; i < n; ++i) {
         char *s = rubraview_strndup_view(sources[i]);
@@ -523,6 +540,8 @@ size_t filejob_pump(app_state_t *app) {
         changed = true;
     }
     total = g.total; done = g.done;
+    uint64_t bytes_total = g.bytes_total, bytes_done = g.bytes_done;
+    for (size_t j = 0; j < g.njobs; ++j) bytes_done += atomic_load(&g.jobs[j]->copied);   /* RV-269: the file in hand too */
     for (size_t j = 0; j < g.njobs;) {
         if (g.jobs[j]->finished) { ended[nended++] = g.jobs[j]; g.jobs[j] = g.jobs[--g.njobs]; }
         else ++j;
@@ -535,7 +554,8 @@ size_t filejob_pump(app_state_t *app) {
         if (m_nrows == 0 && app->clash_open) clashwin_close(app);
     }
     if (filejob_busy() && total > 0) {   /* RV-268: the progress card (it was a line at the top) */
-        progress_view_t v = { .source = PROGRESS_FILEJOB, .files_at = (uint32_t)done, .files_total = (uint32_t)total };
+        progress_view_t v = { .source = PROGRESS_FILEJOB, .files_at = (uint32_t)done, .files_total = (uint32_t)total,
+                              .bytes = bytes_total > 0, .done = bytes_done, .total = bytes_total };   /* RV-269: by bytes too */
         rubraview_fmt(v.title, sizeof v.title, "{}", PROVEN_ARG(T("Copying and moving files")));
         if (m_nrows) rubraview_fmt(v.note, sizeof v.note, T("{} names waiting for an answer (Ctrl+Shift+K)"), PROVEN_ARG(m_nrows));
         progress_show(app, &v);

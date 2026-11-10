@@ -377,3 +377,15 @@ bool rubraview_fileop_finished(const rubraview_fileop_t *op) {
         if (op->items[i].state == RUBRAVIEW_FILEOP_PENDING || op->items[i].state == RUBRAVIEW_FILEOP_PARKED || !op->items[i].prepared) return false;
     return true;
 }
+
+void rubraview_fileop_bytes(const rubraview_fileop_t *op, uint64_t *done, uint64_t *total) {
+    uint64_t d = 0, t = 0;
+    for (size_t i = 0; i < op->count; ++i) {
+        const rubraview_fileop_item_t *it = &op->items[i];
+        if (!it->prepared || it->is_dir || it->state == RUBRAVIEW_FILEOP_MERGED) continue;
+        t += it->size;
+        if (it->state == RUBRAVIEW_FILEOP_DONE || it->state == RUBRAVIEW_FILEOP_SKIPPED || it->state == RUBRAVIEW_FILEOP_FAILED) d += it->size;
+    }
+    *done = d;
+    *total = t;
+}
