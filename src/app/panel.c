@@ -626,6 +626,19 @@ void draw_panel(app_state_t *app) {
     }
 }
 
+/* (owner, 2026-11-10: "편집 목록에 새로 항목이 추가되는 추가: 버튼의 배경색을 구분되는 강조색으로") the Edit buttons that
+   add a step to the list of edits ("Add: ...", D-321), told from the rest by the accent. */
+static bool panel_adds_step(int32_t id) {
+    switch (id) {
+        case PANEL_AUTO_COLOUR: case PANEL_APPLY_SEL: case PANEL_EFFECT_APPLY: case PANEL_PLUGIN_APPLY: case PANEL_GMIC_APPLY:
+        case PANEL_FFMPEG_APPLY: case PANEL_CROP_SEL: case PANEL_TURN_LEFT: case PANEL_TURN_RIGHT: case PANEL_TURN_OVER:
+        case PANEL_MIRROR_H: case PANEL_MIRROR_V: case PANEL_RESIZE_APPLY:
+            return true;
+        default:
+            return false;
+    }
+}
+
 void draw_panel_of(app_state_t *app, const rubraview_panel_t *panel, bool numbers) {
     rubraview_pal_rect_t body = { panel->bounds.x, panel->bounds.y,
                                   panel->bounds.width, panel->bounds.height };
@@ -672,7 +685,10 @@ rows:
 
         if (row->kind == RUBRAVIEW_ROW_BUTTON) {
             rubraview_pal_rect_t button = { c.x, c.y + c.height * 0.15, c.width, c.height * 0.7 };
-            rubraview_pal_render_fill_rect(app->renderer, button, COLOR_TILE_FILL, 2.0);
+            bool adds = panel_adds_step(row->id);
+            rubraview_pal_render_fill_rect(app->renderer, button, adds ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 2.0);
+            if (adds && pal_rect_has(button, app->pointer_x, app->pointer_y))
+                rubraview_pal_render_fill_rect(app->renderer, button, 0x30FFFFFFu, 2.0);   /* lit under the pointer */
             rubraview_pal_render_stroke_rect(app->renderer, button, COLOR_BOX_BORDER, 1.0, 2.0);
             rubraview_pal_render_draw_text(app->renderer, row->label, button,
                                            text_size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
