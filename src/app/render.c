@@ -1712,8 +1712,8 @@ uint64_t scene_signature(const app_state_t *app) {
     SIG(&h, edge_column_shown((app_state_t *)app)); SIG(&h, app->edge_side);   /* RV-206 */
     if (app->tmenu_open) { SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y); }   /* RV-205: the hovered button */
     SIG(&h, app->chooser.open); SIG(&h, app->chooser.focus); SIG(&h, app->chooser.layout.first);   /* 1.24.0 */
-    SIG(&h, app->ctx_open); SIG(&h, app->ctx_focus); SIG(&h, app->slidepop_open); SIG(&h, app->slidepop_typing);
-    SIG(&h, app->volpop_open); SIG(&h, app->volpop_typing); SIG(&h, app->volpop_len);   /* RV-237 */
+    SIG(&h, app->ctx_open); SIG(&h, app->ctx_focus); SIG(&h, app->slidepop_open);
+    SIG(&h, app->volpop_open);   /* RV-237 */
     SIG(&h, app->extract_done);   /* RV-240 */
     SIG(&h, app->playlist_ask);   /* RV-255 */
     SIG(&h, app->list_del_ask);   /* RV-256 */
@@ -1723,7 +1723,7 @@ uint64_t scene_signature(const app_state_t *app) {
     if (app->volpop_open) { SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y); }
     if (app->ctx_open || app->slidepop_open) {   /* RV-116: a row or a button lights under the pointer */
         SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y);
-        SIG(&h, app->slidepop_len); SIG(&h, (int64_t)lround(app->slideshow.interval_seconds * 10.0));
+        SIG(&h, (int64_t)lround(app->slideshow.interval_seconds * 10.0));
         SIG(&h, app->slideshow.paused); SIG(&h, (int)app->slideshow.loop);
         SIG(&h, (int64_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("transition"))));
         SIG(&h, app->ctx_confirm.until);
@@ -1738,7 +1738,7 @@ uint64_t scene_signature(const app_state_t *app) {
     /* RV-262: what lights or moves in the grace after an input, now that it no longer draws every pass */
     if (app->pointer_inside) { SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y); }   /* a tile, a button lit under it */
     double now = rubraview_pal_time_now_seconds();
-    bool typing = app->ab_edit_open || app->volpop_typing || app->slidepop_typing || app->rename_active;
+    bool typing = app->ab_edit_open || app->rename_active;
     if (typing) SIG(&h, fmod(now, 1.0) < 0.5);   /* a caret blinks */
     if (app->card.open) {   /* RV-265: the card moved, sized, its focus */
         SIG(&h, (int64_t)app->card.rect.x); SIG(&h, (int64_t)app->card.rect.y);
@@ -1749,6 +1749,10 @@ uint64_t scene_signature(const app_state_t *app) {
         SIG(&h, (int64_t)app->prog_card.rect.x); SIG(&h, (int64_t)app->prog_card.rect.y);
         SIG(&h, (int64_t)app->prog_card.rect.width); SIG(&h, (int64_t)app->prog_card.rect.height);
         SIG(&h, (int64_t)(now - app->prog_rate.started));   /* the time left moves on a second at a time */
+    }
+    if (app->ab_card.open) {   /* RV-267: the A-B card, the same */
+        SIG(&h, (int64_t)app->ab_card.rect.x); SIG(&h, (int64_t)app->ab_card.rect.y);
+        SIG(&h, (int64_t)app->ab_card.rect.width); SIG(&h, (int64_t)app->ab_card.rect.height); SIG(&h, app->ab_card.focused);
     }
     if (app->px_card.open) {   /* the size box's card, the same */
         SIG(&h, (int64_t)app->px_card.rect.x); SIG(&h, (int64_t)app->px_card.rect.y);

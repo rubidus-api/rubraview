@@ -105,11 +105,11 @@ static rubraview_pal_rect_t answer_box_rect(const app_state_t *app, double box_w
     }
     return (rubraview_pal_rect_t){ x, (double)h * 0.62, box_w, box_h };
 }
-rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_pal_rect_t box) {
-    double s = 26.0 * rubraview_pal_window_dpi_scale(app->window);
-    return (rubraview_pal_rect_t){ box.x + box.width - s - 4.0, box.y + 4.0, s, s };
+/* RV-267: the A-B box is a card now (popups.c draws it): its rectangle where the reader left it */
+rubraview_pal_rect_t ab_box_rect(const app_state_t *app) {
+    if (app->ab_card.open) return (rubraview_pal_rect_t){ app->ab_card.rect.x, app->ab_card.rect.y, app->ab_card.rect.width, app->ab_card.rect.height };
+    return answer_box_rect(app, 600.0, 230.0);
 }
-rubraview_pal_rect_t ab_box_rect(const app_state_t *app) { return answer_box_rect(app, 560.0, 158.0); }
 /* RV-265: the size box is a card now (popups.c draws it): its rectangle where the reader left it */
 rubraview_pal_rect_t px_box_rect(const app_state_t *app) {
     if (app->px_card.open) return (rubraview_pal_rect_t){ app->px_card.rect.x, app->px_card.rect.y, app->px_card.rect.width, app->px_card.rect.height };
@@ -138,7 +138,7 @@ rubraview_pal_rect_t ab_box_button(const app_state_t *app, int32_t which) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double bw = 150.0 * dpi, bh = 30.0 * dpi, gap = 20.0 * dpi;
     double left = box.x + (box.width - 2.0 * bw - gap) * 0.5;
-    return (rubraview_pal_rect_t){ left + (double)which * (bw + gap), box.y + 80.0 * dpi, bw, bh };
+    return (rubraview_pal_rect_t){ left + (double)which * (bw + gap), box.y + 122.0 * dpi, bw, bh };   /* RV-267: under the card's title */
 }
 bool pal_rect_has(rubraview_pal_rect_t r, double x, double y) {
     return x >= r.x && y >= r.y && x < r.x + r.width && y < r.y + r.height;
@@ -153,7 +153,7 @@ rubraview_pal_rect_t ab_part_rect(const app_state_t *app, int32_t side, int32_t 
     double half = box.width * 0.5;
     double x = box.x + (double)side * half + (half - total * dpi) * 0.5 + AB_LABEL_W * dpi;
     for (int32_t k = 0; k < part; ++k) x += (AB_PART_W[k] + AB_UNIT_W) * dpi;
-    return (rubraview_pal_rect_t){ x, box.y + 38.0 * dpi, AB_PART_W[part] * dpi, 30.0 * dpi };
+    return (rubraview_pal_rect_t){ x, box.y + 80.0 * dpi, AB_PART_W[part] * dpi, 30.0 * dpi };   /* RV-267: under the card's title */
 }
 
 /* A point in three fields, hours, minutes and seconds (owner, 2026-10-15). An unset
@@ -207,6 +207,8 @@ void ab_edit_take(app_state_t *app, int32_t f) {
     ab_edit_goto(app, f, 2);
 }
 
+static bool ab_edit_commit(app_state_t *app);
+
 void ab_edit_begin(app_state_t *app) {
     if (!app->media && !anim_plays(app)) { osd_say(app, TU8("nothing is playing")); return; }
     app->ab_edit_open = true;
@@ -217,8 +219,42 @@ void ab_edit_begin(app_state_t *app) {
 }
 
 void ab_edit_close(app_state_t *app) {
+    if (app->ab_card.open) {   /* RV-267: where it was left, for the next */
+        int32_t w = 0, h = 0;
+        rubraview_pal_window_get_size(app->window, &w, &h);
+        if (w > 0 && h > 0) app->card_kept[CARD_REPEAT] = rubraview_card_share_of(&app->ab_card, (double)w, (double)h);
+    }
+    rubraview_card_close(&app->ab_card);
+    app->ab_btn[0] = app->ab_btn[1] = (rubraview_pal_rect_t){0};
     app->ab_edit_open = false;
     rubraview_pal_window_text_input(app->window, false);
+}
+
+/* RV-267: the card's keys while it has the focus */
+bool ab_has_keys(const app_state_t *app) {
+    return app->ab_edit_open && (!app->ab_card.open || app->ab_card.focused);
+}
+
+/* A press on the A-B card: its title or an edge moves or sizes it, OK, Cancel, the two "= now" buttons, a field;
+   a press outside is the window's (modeless), which takes the keys. */
+bool ab_card_press(app_state_t *app, double x, double y) {
+    if (!app->ab_edit_open) return false;
+    if (app->ab_card.open) {
+        bool was = app->ab_card.focused;
+        bool on = rubraview_card_press(&app->ab_card, x, y);
+        if (app->ab_card.focused != was) rubraview_pal_window_text_input(app->window, app->ab_card.focused);
+        if (!on) return false;
+        if (app->ab_card.drag != 0) return true;
+    }
+    if (pal_rect_has(app->ab_btn[0], x, y)) { if (ab_edit_commit(app)) ab_edit_close(app); return true; }
+    if (pal_rect_has(app->ab_btn[1], x, y)) { ab_edit_close(app); return true; }
+    if (pal_rect_has(ab_box_button(app, 0), x, y)) { ab_edit_take(app, 0); return true; }
+    if (pal_rect_has(ab_box_button(app, 1), x, y)) { ab_edit_take(app, 1); return true; }
+    rubraview_pal_rect_t box = ab_box_rect(app);
+    int32_t side = x < box.x + box.width * 0.5 ? 0 : 1, part = 2;   /* a field clicked is the one typed into; elsewhere in a half, its seconds */
+    for (int32_t k = 0; k < 3; ++k) if (pal_rect_has(ab_part_rect(app, side, k), x, y)) part = k;
+    ab_edit_goto(app, side, part);
+    return true;
 }
 
 /* What was typed becomes the points — or says why it cannot, and keeps
@@ -253,6 +289,10 @@ static bool ab_edit_commit(app_state_t *app) {
    a box that is taking a number must not also turn pages. */
 bool ab_edit_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (!app->ab_edit_open) return false;
+    if (!ab_has_keys(app)) {   /* RV-267: the window has the keys; Esc closes the card first */
+        if (key_is(combo, "Escape")) { ab_edit_close(app); return true; }
+        return false;
+    }
     if (key_is(combo, "Escape")) { ab_edit_close(app); return true; }
     if (key_is(combo, "Enter")) {
         if (ab_edit_commit(app)) ab_edit_close(app);

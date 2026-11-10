@@ -270,6 +270,7 @@ void rename_end(app_state_t *app) {
     app->rename_is_pack = false;
     app->rename_is_find = false;
     app->rename_is_value = false;
+    app->rename_is_number = false;
     app->rename_is_gmic = false;
     app->rename_is_ffmpeg = false;
     app->rename_is_address = false;
@@ -314,7 +315,7 @@ void password_eye_toggle(app_state_t *app) {
 
 void rename_text(app_state_t *app, const rubraview_window_event_t *event) {
     if (app->ab_edit_open) {
-        if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
+        if (event->kind == RUBRAVIEW_WINDOW_EVENT_TEXT && ab_has_keys(app)) {   /* RV-267: not while the window has the keys */
             ab_edit_text_typed(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event->text.utf8, .size = event->text.length });
         }
         return;
@@ -639,6 +640,7 @@ void rename_commit(app_state_t *app) {
     if (!app->rename_active) return;
     if (app->rename_is_find) { text_find_step(app, true); return; }   /* the box stays for the next */
     if (app->rename_is_value && app->batch_typing) { batch_typed(app); return; }   /* RV-200: Batch's own panel */
+    if (app->rename_is_number) { number_typed(app); return; }   /* RV-267: the volume, the slide show's delay */
     if (app->rename_is_value) { edit_value_typed(app); return; }
     if (app->rename_is_gmic) { gmic_typed(app); return; }   /* RFC-0009 C */
     if (app->rename_is_ffmpeg) { ffmpeg_typed(app); return; }   /* RFC-0009 D */
@@ -1076,7 +1078,7 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
    open-file screen alone holds nothing: it is a screen of the window's own (D-304). */
 bool window_taking_input(const app_state_t *app) {
     return app->rename_active || app->extract_done || app->pack_ask || app->playlist_ask || app->arc_ask != ARC_ASK_NONE ||
-           app->confirm_purge || app->list_del_ask || arcadd_asking() || app->tmenu_open || app->chooser.open || app->volpop_typing || app->arc_job != NULL;
+           app->confirm_purge || app->list_del_ask || arcadd_asking() || app->tmenu_open || app->chooser.open || app->arc_job != NULL;
 }
 
 static void heldq_said(app_state_t *app) {

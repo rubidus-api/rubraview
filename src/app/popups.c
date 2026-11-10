@@ -94,7 +94,6 @@ void ctx_close(app_state_t *app) {
 
 void slidepop_close(app_state_t *app) {
     app->slidepop_open = false;
-    app->slidepop_typing = false;
 }
 
 /* A right click on the picture: while the slide show runs, its settings; otherwise
@@ -206,24 +205,45 @@ void list_row_menu(app_state_t *app, size_t row, double x, double y, bool in_fil
     app->files_dirty = true;
 }
 
-/* What the field says when it is not being typed in: the delay, "3.5". */
+/* What the field says: the delay, "3.5 s" (RV-267: a press on it asks the number in the input card). */
 static proven_u8str_view_t slidepop_delay_text(const app_state_t *app, proven_mem_mut_t buffer_view) {
     char *buffer = (char *)buffer_view.ptr;
     size_t size = (size_t)buffer_view.size;
-    if (app->slidepop_typing) return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->slidepop_text, .size = app->slidepop_len };
     int n = rubraview_fmt(buffer, size, "{:.1} s", PROVEN_ARG((double)app->slideshow.interval_seconds));
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buffer, .size = n > 0 ? (size_t)n : 0 };
 }
 
-static void slidepop_type_end(app_state_t *app, bool keep) {
-    if (!app->slidepop_typing) return;
-    app->slidepop_typing = false;
-    double seconds = 0.0;
-    if (!keep) return;
-    if (rubraview_subwin_amount((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->slidepop_text, .size = app->slidepop_len }, &seconds)) {
-        interval_set(app, seconds);
+/* RV-267 (owner, 2026-11-10: "모든 어떤 입력창들이 공통 위젯을 쓰게"): the volume and the slide show's delay typed in
+   the input card (D-323), as every other value: moved, sized, OK and Cancel, modeless. */
+void number_card_begin(app_state_t *app, int32_t target) {
+    char now[32];
+    int n = target == NUMBER_VOLUME ? rubraview_fmt(now, sizeof now, "{}", PROVEN_ARG(volume_percent(app)))
+                                    : rubraview_fmt(now, sizeof now, "{:.1}", PROVEN_ARG((double)app->slideshow.interval_seconds));
+    if (target == NUMBER_VOLUME) volpop_close(app); else slidepop_close(app);
+    if (app->rename_active) rename_end(app);
+    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rubraview_textedit_set(&app->rename_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
+    rubraview_textedit_select_all(&app->rename_edit);
+    app->rename_active = true;
+    app->rename_is_number = true;
+    app->number_target = target;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+}
+
+void number_typed(app_state_t *app) {
+    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
+    app->rename_composing_length = 0;
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_edit);
+    double v = 0.0;
+    if (app->number_target == NUMBER_VOLUME) {
+        if (!rubraview_volpop_parse(typed, &v)) { osd_say(app, TU8("the volume is a percent, 0 to 100")); return; }   /* the card stays, to put it right */
+        rename_end(app);
+        volume_set(app, v);
     } else {
-        osd_say(app, TU8("the delay is a number of seconds, 0.1 to 300"));
+        if (!rubraview_subwin_amount(typed, &v)) { osd_say(app, TU8("the delay is a number of seconds, 0.1 to 300")); return; }
+        rename_end(app);
+        interval_set(app, v);
     }
 }
 
@@ -259,7 +279,7 @@ void draw_slidepop(app_state_t *app) {
         switch ((rubraview_slidepop_part_t)p) {
             case RUBRAVIEW_SLIDEPOP_DELAY_DOWN:  text = PROVEN_LIT("-"); break;
             case RUBRAVIEW_SLIDEPOP_DELAY_UP:    text = PROVEN_LIT("+"); break;
-            case RUBRAVIEW_SLIDEPOP_DELAY_FIELD: text = slidepop_delay_text(app, rubraview_mem_mut(buffer, sizeof(buffer))); current = app->slidepop_typing; break;
+            case RUBRAVIEW_SLIDEPOP_DELAY_FIELD: text = slidepop_delay_text(app, rubraview_mem_mut(buffer, sizeof(buffer))); break;
             case RUBRAVIEW_SLIDEPOP_FX_CUT:      text = TU8("Cut");   current = fx == 0; break;
             case RUBRAVIEW_SLIDEPOP_FX_FADE:     text = TU8("Fade");  current = fx == 1; break;
             case RUBRAVIEW_SLIDEPOP_FX_SLIDE:    text = TU8("Slide"); current = fx == 2; break;
@@ -284,7 +304,6 @@ static void slidepop_press(app_state_t *app, double x, double y) {
     double s = rubraview_pal_window_dpi_scale(app->window);
     rubraview_rect_t f = slidepop_frame(app);
     rubraview_slidepop_part_t part = rubraview_slidepop_part_at(f, s, x, y);
-    if (part != RUBRAVIEW_SLIDEPOP_DELAY_FIELD) slidepop_type_end(app, true);
     if (part == RUBRAVIEW_SLIDEPOP_NONE) {
         if (!rubraview_rect_contains(f, x, y)) slidepop_close(app);   /* a click away closes it */
         return;
@@ -292,13 +311,7 @@ static void slidepop_press(app_state_t *app, double x, double y) {
     switch (part) {
         case RUBRAVIEW_SLIDEPOP_DELAY_DOWN: interval_set(app, rubraview_slidepop_step(app->slideshow.interval_seconds, -1)); break;
         case RUBRAVIEW_SLIDEPOP_DELAY_UP:   interval_set(app, rubraview_slidepop_step(app->slideshow.interval_seconds, +1)); break;
-        case RUBRAVIEW_SLIDEPOP_DELAY_FIELD:
-            if (!app->slidepop_typing) {
-                int n = rubraview_fmt(app->slidepop_text, sizeof(app->slidepop_text), "{:.1}", PROVEN_ARG((double)app->slideshow.interval_seconds));
-                app->slidepop_len = n > 0 ? (size_t)n : 0;
-                app->slidepop_typing = true;
-            }
-            break;
+        case RUBRAVIEW_SLIDEPOP_DELAY_FIELD: number_card_begin(app, NUMBER_DELAY); break;   /* RV-267: in the input card */
         case RUBRAVIEW_SLIDEPOP_FX_CUT: case RUBRAVIEW_SLIDEPOP_FX_FADE:
         case RUBRAVIEW_SLIDEPOP_FX_SLIDE: case RUBRAVIEW_SLIDEPOP_FX_ZOOM: {
             const char *const SAY[4] = { T("slides change at once"), T("slides fade into the next"),
@@ -349,19 +362,6 @@ bool popups_press(app_state_t *app, double x, double y, bool right) {
 bool popups_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (volpop_key(app, combo)) return true;   /* RV-237 */
     if (app->slidepop_open) {
-        if (app->slidepop_typing) {
-            if (key_is(combo, "Escape")) { slidepop_type_end(app, false); return true; }
-            if (key_is(combo, "Enter")) { slidepop_type_end(app, true); return true; }
-            if (key_is(combo, "Backspace")) { if (app->slidepop_len > 0) app->slidepop_len--; return true; }
-            if (combo.key_name.size == 1 || key_is(combo, "Period") || key_is(combo, "Comma")) {
-                char c = key_is(combo, "Period") ? '.' : key_is(combo, "Comma") ? ',' : combo.key_name.ptr[0];
-                if (((c >= '0' && c <= '9') || c == '.' || c == ',') && app->slidepop_len + 1 < sizeof(app->slidepop_text)) {
-                    app->slidepop_text[app->slidepop_len++] = c;
-                }
-                return true;
-            }
-            return true;   /* while typing, the slide show's keys wait */
-        }
         if (key_is(combo, "Escape")) { slidepop_close(app); return true; }
         return false;
     }
@@ -1003,6 +1003,7 @@ int32_t card_kind_now(const app_state_t *app) {
     if (app->rename_is_password) return CARD_PASSWORD;
     if (app->rename_is_address) return CARD_ADDRESS;
     if (app->rename_is_apply) return CARD_COPIES;
+    if (app->rename_is_number) return app->number_target == NUMBER_VOLUME ? CARD_VOLUME : CARD_DELAY;   /* RV-267 */
     if (app->rename_is_value || app->rename_is_gmic || app->rename_is_ffmpeg || app->batch_typing) return CARD_VALUE;
     if (app->rename_is_archive) return CARD_ARCHIVE_PAGE;
     if (app->rename_is_picker) return CARD_PICKER_NAME;
@@ -1011,7 +1012,8 @@ int32_t card_kind_now(const app_state_t *app) {
 }
 
 static const char *const CARD_KEY[CARD_KINDS] = { "rename", "archive_page", "name", "extensions", "target", "extract", "password",
-                                                  "find", "list_filter", "address", "copies", "value", "favorite", "size", "progress" };
+                                                  "find", "list_filter", "address", "copies", "value", "favorite", "size", "progress",
+                                                  "volume", "delay", "repeat" };
 const char *card_kind_key(int32_t kind) { return kind >= 0 && kind < CARD_KINDS ? CARD_KEY[kind] : ""; }
 
 /* What the window had in hand when the card opened: the page, the open-file screen's folder and listing. A card
@@ -1046,6 +1048,12 @@ void card_close_keep(app_state_t *app) {
 }
 
 bool card_motion(app_state_t *app, int32_t host, double x, double y) {
+    if (app->ab_card.open && app->ab_card.drag != 0 && host == CARD_HOST_MAIN) {   /* RV-267: the A-B card */
+        int32_t w = 0, h = 0;
+        rubraview_pal_window_get_size(app->window, &w, &h);
+        (void)rubraview_card_motion(&app->ab_card, x, y, (double)w, (double)h);
+        return true;
+    }
     if (app->prog_card.open && app->prog_card.drag != 0 && host == CARD_HOST_MAIN) {   /* RV-268: the progress card */
         (void)rubraview_card_motion(&app->prog_card, x, y, app->prog_host_w, app->prog_host_h);
         return true;
@@ -1060,6 +1068,7 @@ bool card_motion(app_state_t *app, int32_t host, double x, double y) {
 }
 
 bool card_release(app_state_t *app, int32_t host) {
+    if (app->ab_card.open && host == CARD_HOST_MAIN && rubraview_card_release(&app->ab_card)) return true;
     if (app->prog_card.open && host == CARD_HOST_MAIN && rubraview_card_release(&app->prog_card)) return true;
     if (app->px_card.open && host == app->px_card_host && rubraview_card_release(&app->px_card)) return true;
     if (host != app->card_host) return false;
@@ -1136,6 +1145,8 @@ static void rename_card_words(const app_state_t *app, char *title, size_t capaci
     }
     else if (app->rename_is_address) { t = T("Add a station"); *hint = T("Its address, then a space and its title if you like"); }
     else if (app->rename_is_apply) { t = T("Name of the copies"); *hint = T("* is the picture's own name: *_edit, edited_*"); }
+    else if (app->rename_is_number && app->number_target == NUMBER_VOLUME) { t = T("Volume"); *hint = T("A percent, 0 to 100  ·  Enter keeps it  ·  Esc leaves it"); }
+    else if (app->rename_is_number) { t = T("Slide show delay"); *hint = T("Seconds, 0.1 to 300  ·  Enter keeps it  ·  Esc leaves it"); }
     else if (app->rename_is_value || app->rename_is_gmic || app->rename_is_ffmpeg || app->batch_typing) {
         t = T("Type it"); *hint = T("Enter keeps it  ·  Esc leaves it");
     }
@@ -1399,33 +1410,33 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
 
 /* The two points as text, side by side, with the one in hand marked and
    a line saying how the keys and the numbers cross over. */
-static void draw_answer_close(app_state_t *app, rubraview_pal_rect_t box, double dpi) {
-    rubraview_pal_rect_t x = answer_box_close(app, box);
-    if (pal_rect_has(x, app->pointer_x, app->pointer_y)) rubraview_pal_render_fill_rect(app->renderer, x, COLOR_CLOSE_HOVER, 2.0);
-    draw_sign(app->renderer, RUBRAVIEW_ICON_CLOSE, "X", x, 12.0 * dpi, COLOR_TEXT);
-}
 
 void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi) {
     if (!app->ab_edit_open) return;
-    (void)win_w; (void)win_h;
+    /* RV-267 (R296): the input card's kind — moved by its title, sized by its edges, OK and Cancel, modeless */
+    rubraview_card_t *cd = &app->ab_card;
+    double min_h = 122.0 * dpi + 30.0 * dpi + 18.0 * dpi + 38.0 * dpi + 20.0 * dpi;
+    if (!cd->open) {
+        cd->margin = 8.0 * dpi;
+        cd->edge = 6.0 * dpi;
+        cd->title_height = 46.0 * dpi;
+        rubraview_card_open(cd, win_w, win_h, 640.0 * dpi, min_h, 0.62, &app->card_kept[CARD_REPEAT]);
+    }
+    rubraview_card_fit(cd, win_w, win_h, 560.0 * dpi, min_h);
     rubraview_pal_rect_t box = ab_box_rect(app);
-    rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
-    rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
-    draw_answer_close(app, box, dpi);
+    bool focused = cd->focused;
+    (void)draw_card_frame(app, box, T("Repeat from A to B  (hours, minutes, seconds)"),
+                          T("Click a field or Tab  ·  : next field  ·  \\ empties  ·  [ ] take now  ·  Enter keeps  ·  Esc leaves"), focused, dpi);
     const char *const TAKE[2] = { T("A = now  ["), T("B = now  ]") };
     for (int32_t k = 0; k < 2; ++k) {
         rubraview_pal_rect_t b = ab_box_button(app, k);
         bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
-        rubraview_pal_render_fill_rect(app->renderer, b, over ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 3.0);
+        rubraview_pal_render_fill_rect(app->renderer, b, over ? 0x50FFFFFFu : COLOR_TILE_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 3.0);
         rubraview_pal_render_draw_text(app->renderer, cstr(TAKE[k]), b, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
-
-    rubraview_pal_rect_t title = { box.x + 12.0 * dpi, box.y + 4.0 * dpi, box.width - 60.0 * dpi, 26.0 * dpi };
-    rubraview_pal_render_draw_text(app->renderer, TU8("Repeat from A to B  (hours, minutes, seconds)"), title, 14.0 * dpi,
-                                   0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
     /* Each point in three fields, the one in hand lit with a caret (owner, 2026-10-15). */
-    bool caret_lit = fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
+    bool caret_lit = focused && fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
     static const char *const UNIT[3] = { "h", "m", "s" };
     for (int32_t side = 0; side < 2; ++side) {
         rubraview_pal_rect_t first = ab_part_rect(app, side, 0);
@@ -1434,7 +1445,7 @@ void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi) 
         for (int32_t part = 0; part < 3; ++part) {
             rubraview_pal_rect_t r = ab_part_rect(app, side, part);
             bool here = app->ab_edit_field == side && app->ab_edit_part == part;
-            rubraview_pal_render_fill_rect(app->renderer, r, here ? 0xFF3A3A3Au : COLOR_TILE_FILL, 3.0);
+            rubraview_pal_render_fill_rect(app->renderer, r, here ? 0xFF141414u : COLOR_TILE_FILL, 3.0);
             rubraview_pal_render_stroke_rect(app->renderer, r, here ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, here ? 2.0 : 1.0, 3.0);
             char shown[16];
             proven_u8str_view_t t = ab_part(app, side, part);
@@ -1445,10 +1456,8 @@ void draw_ab_edit_box(app_state_t *app, double win_w, double win_h, double dpi) 
             rubraview_pal_render_draw_text(app->renderer, cstr(UNIT[part]), unit, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
     }
-    rubraview_pal_rect_t hint = { box.x, box.y + 118.0 * dpi, box.width, 34.0 * dpi };
-    rubraview_pal_render_draw_text(app->renderer,
-                                   TU8("Click a field or Tab  ·  : next field  ·  \\ empties  ·  Enter keeps  ·  Esc or X leaves"),
-                                   hint, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+    const char *words[2] = { T("OK"), T("Cancel") };
+    draw_card_buttons(app, box, words, 2, app->ab_btn, dpi);
 }
 
 /* RV-187 (owner, 2026-10-29: "칸마다 px/비율 전환"): under each field, its unit, pressed to switch it. */
@@ -1990,7 +1999,7 @@ int volume_percent(const app_state_t *app) {
     return (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume")));
 }
 
-static void volume_set(app_state_t *app, double percent) {
+void volume_set(app_state_t *app, double percent) {
     if (percent < 0.0) percent = 0.0;
     if (percent > 100.0) percent = 100.0;
     rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume"), percent);
@@ -2009,7 +2018,7 @@ void volpop_open_at(app_state_t *app, rubraview_rect_t button) {
     ctx_close(app);
     slidepop_close(app);
     app->volpop_open = true;
-    app->volpop_typing = app->volpop_drag = false;
+    app->volpop_drag = false;
     app->volpop_button = button;
 }
 
@@ -2020,19 +2029,7 @@ void volpop_open_main(app_state_t *app) {   /* from a key, the menu or a Toolbar
     volpop_open_at(app, (rubraview_rect_t){ (double)w * 0.5 - 18.0 * s, (double)h - 80.0 * s, 36.0 * s, 36.0 * s });
 }
 
-static void volpop_type_end(app_state_t *app, bool keep) {
-    if (!app->volpop_typing) return;
-    app->volpop_typing = false;
-    double percent = 0.0;
-    if (!keep) return;
-    if (rubraview_volpop_parse((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->volpop_text, .size = app->volpop_len }, &percent))
-        volume_set(app, percent);
-    else
-        osd_say(app, TU8("the volume is a percent, 0 to 100"));
-}
-
 void volpop_close(app_state_t *app) {
-    volpop_type_end(app, true);
     app->volpop_open = app->volpop_drag = false;
 }
 
@@ -2067,16 +2064,11 @@ void draw_volpop(app_state_t *app) {
     rubraview_rect_t fr = rubraview_volpop_part(f, s, RUBRAVIEW_VOLPOP_FIELD);
     rubraview_pal_rect_t field = { fr.x, fr.y, fr.width, fr.height };
     char line[16];
-    proven_u8str_view_t text;
-    if (app->volpop_typing) {
-        text = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->volpop_text, .size = app->volpop_len };
-    } else {
-        int n = rubraview_fmt(line, sizeof(line), "{}%", PROVEN_ARG(volume_percent(app)));
-        text = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 };
-    }
+    int nl = rubraview_fmt(line, sizeof(line), "{}%", PROVEN_ARG(volume_percent(app)));
+    proven_u8str_view_t text = { .ptr = (const proven_byte_t *)line, .size = nl > 0 ? (size_t)nl : 0 };
     bool hover = rubraview_rect_contains(fr, app->pointer_x, app->pointer_y);
-    rubraview_pal_render_fill_rect(r, field, app->volpop_typing ? 0xFF101010u : hover ? 0x50FFFFFFu : 0x28FFFFFFu, 3.0 * s);
-    rubraview_pal_render_stroke_rect(r, field, app->volpop_typing ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, 1.0 * s, 3.0 * s);
+    rubraview_pal_render_fill_rect(r, field, hover ? 0x50FFFFFFu : 0x28FFFFFFu, 3.0 * s);
+    rubraview_pal_render_stroke_rect(r, field, COLOR_BOX_BORDER, 1.0 * s, 3.0 * s);
     rubraview_pal_render_draw_text(r, text, field, 14.0 * s, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
 }
 
@@ -2085,15 +2077,7 @@ bool volpop_press(app_state_t *app, double x, double y) {
     double s = rubraview_pal_window_dpi_scale(app->window);
     rubraview_rect_t f = volpop_frame(app);
     rubraview_volpop_part_t part = rubraview_volpop_part_at(f, s, x, y);
-    if (part != RUBRAVIEW_VOLPOP_FIELD) volpop_type_end(app, true);
-    if (part == RUBRAVIEW_VOLPOP_FIELD) {
-        if (!app->volpop_typing) {
-            int n = rubraview_fmt(app->volpop_text, sizeof(app->volpop_text), "{}", PROVEN_ARG(volume_percent(app)));
-            app->volpop_len = n > 0 ? (size_t)n : 0;
-            app->volpop_typing = true;
-        }
-        return true;
-    }
+    if (part == RUBRAVIEW_VOLPOP_FIELD) { number_card_begin(app, NUMBER_VOLUME); return true; }   /* RV-267: in the input card */
     if (part == RUBRAVIEW_VOLPOP_BAR) {
         app->volpop_drag = true;
         volume_set(app, rubraview_volpop_value_at(rubraview_volpop_part(f, s, RUBRAVIEW_VOLPOP_BAR), x));
@@ -2119,15 +2103,6 @@ bool volpop_release(app_state_t *app) {
 
 bool volpop_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (!app->volpop_open) return false;
-    if (app->volpop_typing) {
-        if (key_is(combo, "Escape")) { volpop_type_end(app, false); return true; }
-        if (key_is(combo, "Enter")) { volpop_type_end(app, true); return true; }
-        if (key_is(combo, "Backspace")) { if (app->volpop_len > 0) app->volpop_len--; return true; }
-        char c = combo.key_name.size == 1 ? (char)combo.key_name.ptr[0] :
-                 combo.key_name.size == 7 && proven_sys_mem_cmp(combo.key_name.ptr, "Numpad", 6) == 0 ? (char)combo.key_name.ptr[6] : 0;
-        if (c >= '0' && c <= '9' && app->volpop_len + 1 < sizeof(app->volpop_text)) app->volpop_text[app->volpop_len++] = c;
-        return true;   /* while typing, the viewer's keys wait */
-    }
     if (key_is(combo, "Escape") || key_is(combo, "Enter")) { volpop_close(app); return true; }
     return false;
 }

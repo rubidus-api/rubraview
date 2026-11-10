@@ -3836,3 +3836,10 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: the owner, 2026-11-10: "복사 이동도 용량 기준으로도 표시해 주세요". The copy / move jobs (D-310) counted their items only; D-324 showed them in the card by files.
 - Decision: `rubraview_fileop_bytes` (core, tested) gives a job's bytes, in all and ended; the Windows fs copy takes, as its `ctx`, an `_Atomic uint64_t` its `CopyFileExW` progress routine keeps at the bytes of the file in hand (each job's own copy of the fs struct carries its counter); `filejob` publishes the jobs' bytes under its lock and the main thread adds the counters in flight. The card shows the bytes and percent, the files of how many, the time left and the speed, as for an extraction.
 - Consequences: `test_fileop` (T393). Not seen on the VM: its disk copied 2.8 GB in about a second, before a pass drew the card.
+
+## D-327: The A-B Repeat, The Volume And The Slide Show's Delay In The Input Card (RV-267)
+
+- Date: 2026-11-11
+- Context: RV-265's rest (owner, 2026-11-10: "모든 어떤 입력창들이 공통 위젯을 쓰게"): D-323 left the A-B repeat box (a fixed box with an X), and the volume bar's and the slide show popup's number fields, typed in place.
+- Decision: the A-B box becomes a card of the size card's kind (moved, sized, kept, OK and Cancel, modeless; Esc with the window holding the keys closes it); the volume's percent and the delay, pressed, open the text card with the number chosen, kept by OK or Enter, a bad one said and the card left open. The in-place typing (`volpop_typing`, `slidepop_typing` and their buffers) goes.
+- Consequences: VM 2026-11-11: the A-B card moved, A = now and B = now, OK repeating 43.360 - 45.760 s; the volume card from the bar's field, 40 and Enter, the Toolbar saying vol 40%. The delay card not seen on the VM (the same path as the volume's).

@@ -87,7 +87,8 @@
 
 /* RV-265: the kinds of question the input card asks, each with its place kept, and the windows it is drawn in. */
 enum { CARD_RENAME, CARD_ARCHIVE_PAGE, CARD_PICKER_NAME, CARD_EXTENSIONS, CARD_TARGET, CARD_EXTRACT, CARD_PASSWORD,
-       CARD_FIND, CARD_LIST_FILTER, CARD_ADDRESS, CARD_COPIES, CARD_VALUE, CARD_FAVORITE, CARD_SIZE, CARD_PROGRESS, CARD_KINDS };
+       CARD_FIND, CARD_LIST_FILTER, CARD_ADDRESS, CARD_COPIES, CARD_VALUE, CARD_FAVORITE, CARD_SIZE, CARD_PROGRESS, CARD_VOLUME, CARD_DELAY, CARD_REPEAT, CARD_KINDS };
+enum { NUMBER_VOLUME = 1, NUMBER_DELAY };   /* RV-267 */
 /* RV-268: who fills the progress card */
 enum { PROGRESS_NONE = 0, PROGRESS_ARCHWORK, PROGRESS_ARCEDIT, PROGRESS_FILEJOB };
 typedef struct progress_view {
@@ -618,6 +619,8 @@ typedef struct app_state {
     /* RV-265 (R296; owner: "크기 설정하는 버튼 누르면, 확인 또는 취소가 버튼이 있어야"): the size / crop numbers in a card
        of their own, the same model as the text box's: moved, sized, OK and Cancel, modeless */
     rubraview_card_t       px_card;
+    rubraview_card_t       ab_card;            /* RV-267: the A-B repeat's numbers, the size card's kind */
+    rubraview_pal_rect_t   ab_btn[2];          /* its OK, Cancel, as last drawn */
     /* RV-268: a long job's progress in a card of the main window (moved by its title, kept where it was left) */
     progress_view_t        prog;
     rubraview_card_t       prog_card;
@@ -759,20 +762,16 @@ typedef struct app_state {
     bool                       tmenu_open;       /* 1.25.0: the title bar's ☰ pull-down */
     int32_t                    tmenu_focus;
     rubraview_confirm_t        ctx_confirm;        /* Delete asks twice, as in the menu */
-    bool                       slidepop_open, slidepop_typing;
+    bool                       slidepop_open;
     proven_u8str_view_t                    hint;               /* RV-116: what the box part under the pointer does */
     char                       hint_text[320];     /* what `hint` points at: a tile's words and keys */
     double                     hint_since;         /* when the pointer came to rest on it */
     double                     slidepop_x, slidepop_y;
-    char                       slidepop_text[16];
     /* RV-237: the volume's bar by the Toolbar's volume button, and the percent shown a moment by it after a wheel */
-    bool                       volpop_open, volpop_typing, volpop_drag;
+    bool                       volpop_open, volpop_drag;
     rubraview_rect_t           volpop_button;
-    char                       volpop_text[8];
-    size_t                     volpop_len;
     double                     vol_flash_until;
     rubraview_rect_t           vol_flash_at;
-    size_t                     slidepop_len;
     int32_t                    subs_frame[4];
     rubraview_listwin_t        subs_list;
     uint32_t                  *subs_rows;          /* the cue of each row (text subtitles) */
@@ -1209,6 +1208,8 @@ typedef struct app_state {
     bool                   rename_is_target;
     bool                   rename_is_find;         /* RFC-0005: the text page's Find (Ctrl+F) */
     bool                   rename_is_value;        /* the owner's edit: a panel's value typed */
+    bool                   rename_is_number;       /* RV-267: the volume or the slide show's delay typed (number_target) */
+    int32_t                number_target;          /* NUMBER_VOLUME, NUMBER_DELAY */
     struct text_page      *text;                   /* RFC-0005: the text page on screen, or NULL */
     bool                   target_moving;
     bool                   target_from_picker;
@@ -1860,7 +1861,6 @@ int anim_end_mode(const app_state_t *app);
 bool anim_plays(const app_state_t *app);
 void animation_prepare(app_state_t *app);
 void animation_tick(app_state_t *app, double dt);
-rubraview_pal_rect_t answer_box_close(const app_state_t *app, rubraview_pal_rect_t box);
 void app_end(app_state_t *app);
 proven_u8str_view_t app_keep(app_state_t *app, proven_u8str_view_t text);
 bool app_start(app_state_t *app, rubraview_mem_t *mem);
@@ -2046,6 +2046,11 @@ bool card_motion(app_state_t *app, int32_t host, double x, double y);
 bool card_release(app_state_t *app, int32_t host);
 double draw_card_frame(app_state_t *app, rubraview_pal_rect_t c, const char *title, const char *hint, bool focused, double dpi);
 void draw_card_buttons(app_state_t *app, rubraview_pal_rect_t c, const char *const *words, int32_t n, rubraview_pal_rect_t *out, double dpi);
+void number_card_begin(app_state_t *app, int32_t target);
+void volume_set(app_state_t *app, double percent);
+void number_typed(app_state_t *app);
+bool ab_card_press(app_state_t *app, double x, double y);
+bool ab_has_keys(const app_state_t *app);
 void progress_show(app_state_t *app, const progress_view_t *view);
 void progress_end(app_state_t *app, int32_t source);
 void draw_progress_card(app_state_t *app, double win_w, double win_h, double dpi);

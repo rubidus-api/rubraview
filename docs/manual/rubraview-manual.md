@@ -735,7 +735,7 @@ a copy or a rename, and `1`–`9` send it to a folder you chose.
 **Typing a name or a value.** Every box that asks for text or numbers —
 a new name, a folder to copy or extract to, a password, Find, the list's
 filter, a station, a value in Edit or Batch, the size or the area in
-Edit — is one card. Drag its title to move it, drag an edge or the dotted
+Edit, the A-B repeat, the volume and the slide show's delay typed — is one card. Drag its title to move it, drag an edge or the dotted
 corner to make it larger; it always stays inside its window, also when
 the window is made smaller, and opens again where you left it. It has
 **OK** and **Cancel** (`Enter` and `Esc`). The window under it keeps
@@ -2223,7 +2223,7 @@ listed under a later heading only means that while that is on screen.
 | Where | What it does |
 |---|---|
 | Toolbar `Stop`, Right click `Stop` | Stop, and back to the beginning |
-| Toolbar `Volume` | Volume: a bar by the button to set it, its percent typed at the end; the wheel over the button sets it at once |
+| Toolbar `Volume` | Volume: a bar by the button to set it, its percent pressed to type it in a card; the wheel over the button sets it at once |
 | Toolbar `Output` | Sound output: Windows' default for every app, or this app's sound alone to another device |
 | Toolbar `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time; a tap on its button lists them to choose from |
 | Toolbar `A-B` | A-B repeat: from here, to here, off |

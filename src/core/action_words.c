@@ -95,7 +95,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "media_speed_up", "Play faster" },
     { "media_stop", "Stop, and back to the beginning" },
     { "media_visualizer_cycle", "The analyser: bars, the wave, or none; a tap on its button lists them to choose from" },
-    { "media_volume", "Volume: a bar by the button to set it, its percent typed at the end; the wheel over the button sets it at once" },
+    { "media_volume", "Volume: a bar by the button to set it, its percent pressed to type it in a card; the wheel over the button sets it at once" },
     { "media_volume_down", "Volume down 5%" },
     { "media_volume_up", "Volume up 5%" },
     { "minimize_mute", "Esc: closes what is open; with nothing open, the sound off and the window down at once" },

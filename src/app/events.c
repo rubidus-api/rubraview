@@ -204,6 +204,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (arcadd_press(app, event->mouse.x, event->mouse.y)) break;     /* RV-260 */
             if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)) &&
                 rename_box_press(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y)) break;   /* 1.24.0: the box's buttons; RV-265: the card */
+            if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && ab_card_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-267: the A-B card */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && app->px_edit_open && !(app->edit_window && edit_panel_open(app)) &&
                 px_box_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-265: the size box's card, before what is under it */
             if (app->picker_open && app->favwin.open && event->mouse.button == RUBRAVIEW_MOUSE_LEFT &&
@@ -459,21 +460,6 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 bool on_box = app->toolbox.state != RUBRAVIEW_BOX_DETACHED && !app->chrome_hidden &&
                               rubraview_rect_contains(tb, event->mouse.x, event->mouse.y);
                 if (!on_box && strip_press(app, event->mouse.x, event->mouse.y)) break;
-            }
-            if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && app->ab_edit_open) {
-                rubraview_pal_rect_t box = ab_box_rect(app);
-                if (pal_rect_has(answer_box_close(app, box), event->mouse.x, event->mouse.y)) { ab_edit_close(app); break; }
-                if (pal_rect_has(ab_box_button(app, 0), event->mouse.x, event->mouse.y)) { ab_edit_take(app, 0); break; }
-                if (pal_rect_has(ab_box_button(app, 1), event->mouse.x, event->mouse.y)) { ab_edit_take(app, 1); break; }
-                if (pal_rect_has(box, event->mouse.x, event->mouse.y)) {
-                    /* A field clicked is the one typed into; elsewhere in a half, that point's seconds. */
-                    int32_t side = event->mouse.x < box.x + box.width * 0.5 ? 0 : 1, part = 2;
-                    for (int32_t k = 0; k < 3; ++k) {
-                        if (pal_rect_has(ab_part_rect(app, side, k), event->mouse.x, event->mouse.y)) part = k;
-                    }
-                    ab_edit_goto(app, side, part);
-                    break;
-                }
             }
 
             /* §3.13: with the workbench open, a drag on the picture
