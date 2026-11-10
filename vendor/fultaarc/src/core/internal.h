@@ -480,6 +480,12 @@ fulta_arc_err_t fa_vol_files(proven_allocator_t a, const char *path, fulta_arc_f
  * options' allocator is usable (not one or two of its functions set). src/write/write.c. */
 proven_allocator_t fa_write_alloc(const fulta_arc_write_options_t *opt);
 bool fa_write_alloc_ok(const fulta_arc_write_options_t *opt);
+/* The UTC offset (seconds east) a write puts into ZIP DOS fields and takes out of MTIME_LOCAL source times (D-040);
+ * fa_write_dos_ok refuses an unknown mode or an offset beyond 14 h. fa_write_mtime_utc gives a source entry's mtime
+ * in UTC seconds (0 when it has none). */
+int32_t fa_write_dos_offset(const fulta_arc_write_options_t *opt);
+bool fa_write_dos_ok(const fulta_arc_write_options_t *opt);
+int64_t fa_write_mtime_utc(const fulta_arc_entry_t *e, int32_t dos_offset);
 
 /* fulta_arc_write_file with options->volume_size set (src/write/write.c). */
 fulta_arc_err_t fa_write_file_split(const char *path, fulta_arc_format_t format, const fulta_arc_write_entry_t *entries,

@@ -25,7 +25,7 @@ came from is in its `vendor/<name>/VENDORED.md`.
 - It brings the parts below with it; its own list, with the Unicode
   licence's text, is `vendor/fultaarc/THIRD_PARTY_NOTICES.md`.
 
-### LZMA SDK 24.08 (inside FultaArc)
+### LZMA SDK 26.05 (inside FultaArc)
 
 - At `vendor/fultaarc/vendor/lzma/`
 - Written and placed in the **public domain** by Igor Pavlov. Some of it

@@ -191,6 +191,9 @@ typedef struct fulta_arc_options {
 #define FULTA_ARC_ENTRY_UNSUPPORTED 0x0080u  /* listed, but its method/encryption cannot be decoded */
 #define FULTA_ARC_ENTRY_UNKNOWN_SIZE 0x0100u /* the stored size is "unknown": decode to the stream's end */
 #define FULTA_ARC_ENTRY_NAME_NOT_UNICODE 0x0200u /* the name was not stored as Unicode; it was decoded through a code page (see name_raw, options.auto_codepage) */
+#define FULTA_ARC_ENTRY_MTIME_LOCAL 0x0400u /* mtime is the local wall clock counted as if UTC (a ZIP DOS time with no
+                                                UTC extra field, ALZ, RAR 1.5, EGG, LHA level 0/1): convert with the
+                                                zone of the machine that made the archive, usually the reader's */
 
 typedef struct fulta_arc_entry {
     const char *name;                 /* UTF-8, '/' between folders, NUL-terminated; never absolute, no ".." */
@@ -198,8 +201,8 @@ typedef struct fulta_arc_entry {
     size_t name_raw_size;
     uint64_t size;                    /* unpacked size */
     uint64_t packed_size;             /* bytes in the archive (0 when not known per entry, e.g. 7z solid) */
-    int64_t mtime;                    /* modification time, nanoseconds since 1970-01-01 UTC (or local time, when the
-                                         format stores local time: ZIP/ALZ/RAR4 DOS times, EGG) */
+    int64_t mtime;                    /* modification time, nanoseconds since 1970-01-01 UTC; with
+                                         FULTA_ARC_ENTRY_MTIME_LOCAL, the local wall clock counted as if UTC */
     uint32_t crc32;                   /* when FULTA_ARC_ENTRY_HAS_CRC32 */
     uint32_t attributes;              /* Windows attributes, or (attributes >> 16) = Unix mode when unix_mode != 0 */
     uint32_t unix_mode;               /* Unix st_mode when the archive gives one, else 0 */
@@ -314,6 +317,16 @@ typedef enum fulta_arc_filter {
     FULTA_ARC_FILTER_RISCV            /* RISC-V (7-Zip 24.03 and later write and read it) */
 } fulta_arc_filter_t;
 
+/* How a ZIP writer fills the DOS date and time of each entry (the 0x5455 extended timestamp beside it is always UTC).
+   Readers that see only the DOS field (Explorer among them) take it as local time, as 7-Zip, Info-ZIP and Windows
+   write it. 7z stores UTC FILETIMEs and ignores this. The same offset turns a source entry's
+   FULTA_ARC_ENTRY_MTIME_LOCAL time back into UTC when an edit or a conversion writes it. */
+typedef enum fulta_arc_dos_time {
+    FULTA_ARC_DOS_TIME_LOCAL = 0,     /* the machine's current UTC offset (as Windows' FileTimeToLocalFileTime) */
+    FULTA_ARC_DOS_TIME_OFFSET,        /* dos_utc_offset seconds east of UTC, e.g. 32400 for Korea */
+    FULTA_ARC_DOS_TIME_UTC            /* UTC as it is (FultaArc before 2026-11-10) */
+} fulta_arc_dos_time_t;
+
 /* 7z solid grouping (7-Zip's `-ms`). ZIP entries are always independent, so this is ignored for ZIP. */
 typedef enum fulta_arc_solid {
     FULTA_ARC_SOLID_DEFAULT = 0,      /* = ON: one solid folder for all files (best ratio; the previous behaviour) */
@@ -337,6 +350,8 @@ typedef struct fulta_arc_write_options {
     int encrypt_names;                /* 7z with a password: encrypt the header too (names hidden, like 7-Zip's
                                          -mhe=on); ignored without a password; INVALID_ARG for ZIP */
     fulta_arc_allocator_t allocator;  /* all-NULL: FultaArc's default (proven_c_lib's heap); see fulta_arc_allocator_t */
+    fulta_arc_dos_time_t dos_time;    /* ZIP: 0 = LOCAL; see fulta_arc_dos_time_t */
+    int32_t dos_utc_offset;           /* seconds east of UTC, with FULTA_ARC_DOS_TIME_OFFSET (-14 h .. +14 h) */
 } fulta_arc_write_options_t;
 
 /* The smallest volume: a ZIP header never spans two volumes, and one may be nearly 64 KiB. */

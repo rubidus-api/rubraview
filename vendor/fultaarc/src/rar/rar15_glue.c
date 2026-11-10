@@ -122,7 +122,7 @@ static fulta_arc_err_t list_entries(fulta_arc_t *arc, rar15_glue_t *g) {
         en->pub.size = dir ? 0 : re->size;
         en->pub.packed_size = re->packed_size;
         en->pub.mtime = fa_dos_time_ns(re->dos_date, re->dos_time);
-        en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME;
+        en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME | FULTA_ARC_ENTRY_MTIME_LOCAL;   /* a DOS time, local */
         if (dir) en->pub.flags |= FULTA_ARC_ENTRY_DIR;
         if (!a->old_format && !dir && !(re->flags & RAR15_FILE_TO_NEXT)) {
             en->pub.crc32 = re->crc;                       /* the older container holds a 16-bit sum instead */

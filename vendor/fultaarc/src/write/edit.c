@@ -126,6 +126,7 @@ static fulta_arc_err_t edit_write_to(fulta_arc_edit_t *edit, fulta_arc_format_t 
     if (format != FULTA_ARC_FORMAT_ZIP && format != FULTA_ARC_FORMAT_7Z) return FULTA_ARC_ERR_INVALID_ARG;
     if (opts && opts->volume_size && !fa_vol_of(sink)) return FULTA_ARC_ERR_INVALID_ARG;   /* one sink, one file */
     if (!fa_write_alloc_ok(opts)) return FULTA_ARC_ERR_INVALID_ARG;   /* one or two allocator functions set */
+    if (!fa_write_dos_ok(opts)) return FULTA_ARC_ERR_INVALID_ARG;
     if (format == FULTA_ARC_FORMAT_ZIP && opts && opts->password && opts->encrypt_names) return FULTA_ARC_ERR_INVALID_ARG;
     fulta_arc_editable_t v = fulta_arc_editable(edit->arc);
     if (v == FULTA_ARC_EDIT_ENCRYPTED) return FULTA_ARC_ERR_UNSUPPORTED;   /* editing encrypted is refused (D-015) */

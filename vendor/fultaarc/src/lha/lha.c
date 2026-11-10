@@ -250,7 +250,7 @@ static fulta_arc_err_t lha_emit(fulta_arc_t *arc, lha_state_t *st, const lha_ent
         en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME;
     } else if (le->flags & LHA_HAS_DOS_TIME) {   /* (date << 16) | time, local time (container §2) */
         en->pub.mtime = fa_dos_time_ns((uint16_t)(le->dos_time >> 16), (uint16_t)(le->dos_time & 0xFFFF));
-        en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME;
+        en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME | FULTA_ARC_ENTRY_MTIME_LOCAL;
     }
     if ((le->flags & LHA_HAS_UNIX_PERM) && (le->unix_perm & 07777)) en->pub.unix_mode = le->unix_perm;
     return FULTA_ARC_OK;

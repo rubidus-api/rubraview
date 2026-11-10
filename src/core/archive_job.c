@@ -137,9 +137,7 @@ static bool exists_fn(proven_u8str_view_t path) { return rubraview_pal_fs_exists
 static int64_t entry_seconds(const fulta_arc_entry_t *e) {
     if (!(e->flags & FULTA_ARC_ENTRY_HAS_MTIME)) return 0;
     int64_t s = e->mtime / 1000000000;
-#ifdef FULTA_ARC_ENTRY_MTIME_LOCAL
     if (e->flags & FULTA_ARC_ENTRY_MTIME_LOCAL) s = rubraview_pal_local_civil_to_utc(s);
-#endif
     return s;
 }
 

@@ -125,7 +125,44 @@ static void civil(int64_t days, int *y, int *m, int *d) {
     *y = (int)(yoe + era * 400 + (*m <= 2));
 }
 
-static void dos_time(int64_t t, uint16_t *out_time, uint16_t *out_date) {
+/* D-040: the DOS field is local time, as 7-Zip, Info-ZIP and Windows write it. The machine's offset is the current
+ * one (local wall clock now minus UTC now, to the quarter hour), which is what Windows' FileTimeToLocalFileTime and
+ * so Explorer use; the zone itself stays inside proven_c_lib. A build with no clock (proven_time_now() == 0) gets 0. */
+int32_t fa_write_dos_offset(const fulta_arc_write_options_t *opt) {
+    fulta_arc_dos_time_t m = opt ? opt->dos_time : FULTA_ARC_DOS_TIME_LOCAL;
+    if (m == FULTA_ARC_DOS_TIME_UTC) return 0;
+    if (m == FULTA_ARC_DOS_TIME_OFFSET) return opt->dos_utc_offset;
+    proven_time_t now = proven_time_now();
+    if (now == 0) return 0;
+    proven_datetime_t l = proven_time_now_datetime();
+    if (l.year < 1980 || l.year > 2107) return 0;      /* outside DOS dates: a clock that makes no sense */
+    uint16_t ld = (uint16_t)((l.year - 1980) << 9 | l.month << 5 | l.day);
+    uint16_t lt = (uint16_t)(l.hour << 11 | l.min << 5 | l.sec / 2);
+    int64_t local = fa_dos_time_ns(ld, lt) / 1000000000;  /* to 2 s; the offset is rounded to 15 min below */
+    int64_t off = local - now / 1000000000;
+    off = (off >= 0 ? off + 450 : off - 450) / 900 * 900;
+    if (off > 14 * 3600 || off < -14 * 3600) return 0;   /* a clock that makes no sense: write UTC */
+    return (int32_t)off;
+}
+
+bool fa_write_dos_ok(const fulta_arc_write_options_t *opt) {
+    if (!opt) return true;
+    if (opt->dos_time != FULTA_ARC_DOS_TIME_LOCAL && opt->dos_time != FULTA_ARC_DOS_TIME_OFFSET
+        && opt->dos_time != FULTA_ARC_DOS_TIME_UTC) return false;
+    return opt->dos_time != FULTA_ARC_DOS_TIME_OFFSET
+        || (opt->dos_utc_offset >= -14 * 3600 && opt->dos_utc_offset <= 14 * 3600);
+}
+
+int64_t fa_write_mtime_utc(const fulta_arc_entry_t *e, int32_t dos_offset) {
+    if (!(e->flags & FULTA_ARC_ENTRY_HAS_MTIME)) return 0;
+    int64_t t = e->mtime / 1000000000;
+    if (e->flags & FULTA_ARC_ENTRY_MTIME_LOCAL) t -= dos_offset;   /* local wall clock -> UTC */
+    return t ? t : 1;                                  /* 0 means "none" to the writer */
+}
+
+/* `t` UTC seconds (0 = none: the earliest DOS time), `off` the offset to local time. */
+static void dos_time(int64_t t, int32_t off, uint16_t *out_time, uint16_t *out_date) {
+    if (t) t += off;
     if (t < 315532800) t = 315532800;                  /* DOS time starts in 1980 */
     int y, m, d;
     int64_t days = t / 86400, secs = t % 86400;
@@ -616,7 +653,7 @@ static fulta_arc_err_t write_zip(const fulta_arc_write_entry_t *entries, size_t 
         r->size = dir ? 0 : e->size;
         r->crc = dir ? 0 : crc32_of(e->data, e->size);
         r->mtime = e->mtime;
-        dos_time(e->mtime, &r->time, &r->date);
+        dos_time(e->mtime, fa_write_dos_offset(opt), &r->time, &r->date);
         r->flags = ascii(r->name) ? 0 : 0x0800;
         r->offset = o->at;
         /* compress per the chosen method; a NULL result means store (STORE, empty, or no gain) */
@@ -1272,7 +1309,7 @@ fulta_arc_err_t fa_write_zip_convert(const fa_edit_item_t *items, size_t count, 
             if (!e) { err = FULTA_ARC_ERR_INVALID_ARG; break; }
             dir = (e->flags & FULTA_ARC_ENTRY_DIR) != 0;
             uname = it->name ? it->name : e->name;
-            mtime_sec = (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? e->mtime / 1000000000 : 0;
+            mtime_sec = fa_write_mtime_utc(e, fa_write_dos_offset(opt));
             known_usize = dir ? 0 : ((e->flags & FULTA_ARC_ENTRY_UNKNOWN_SIZE) ? UINT64_MAX : e->size);
         } else {
             dir = name_is_dir(it->name);
@@ -1289,7 +1326,7 @@ fulta_arc_err_t fa_write_zip_convert(const fa_edit_item_t *items, size_t count, 
         r->ext_attr = dir ? 0x10u : 0u;
         r->dir = dir;
         r->mtime = mtime_sec;
-        dos_time(mtime_sec, &r->time, &r->date);
+        dos_time(mtime_sec, fa_write_dos_offset(opt), &r->time, &r->date);
         err = zip_stream_entry(&o, r, it, known_usize, &k);
     }
     if (err == FULTA_ARC_OK) err = write_zip_central(&o, rec, count, force64);
@@ -1371,7 +1408,7 @@ fulta_arc_err_t fa_write_zip_edited(const fa_edit_item_t *items, size_t count, i
             r->made_by_host = 0;
             r->ext_attr = dir ? 0x10u : 0u;
             r->mtime = it->reader.mtime;
-            dos_time(it->reader.mtime, &r->time, &r->date);
+            dos_time(it->reader.mtime, fa_write_dos_offset(opt), &r->time, &r->date);
             err = zip_stream_entry(&o, r, it, dir ? 0 : (it->reader.read ? it->reader.size : 0), &k);
         }
         if (!err && o.failed) err = FULTA_ARC_ERR_IO;
@@ -2402,7 +2439,7 @@ fulta_arc_err_t fa_write_7z_convert(const fa_edit_item_t *items, size_t count, i
             if (!e) { err = FULTA_ARC_ERR_INVALID_ARG; break; }
             dir = (e->flags & FULTA_ARC_ENTRY_DIR) != 0;
             uname = it->name ? it->name : e->name;
-            mtime_sec = (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? e->mtime / 1000000000 : 0;
+            mtime_sec = fa_write_mtime_utc(e, fa_write_dos_offset(opt));
         } else {
             dir = name_is_dir(it->name);
             uname = it->name;
@@ -2687,7 +2724,7 @@ fulta_arc_err_t fa_write_7z_edited(const fa_edit_item_t *items, size_t count, in
             if (!e) { err = FULTA_ARC_ERR_INVALID_ARG; break; }
             dir = (e->flags & FULTA_ARC_ENTRY_DIR) != 0;
             uname = it->name ? it->name : e->name;
-            mtime_sec = (e->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? e->mtime / 1000000000 : 0;
+            mtime_sec = fa_write_mtime_utc(e, fa_write_dos_offset(opt));
         } else {
             dir = name_is_dir(it->name);
             uname = it->name;
@@ -2735,6 +2772,7 @@ static fulta_arc_err_t write_any(fulta_arc_format_t format, const fulta_arc_writ
         if (entries[i].size && !entries[i].data && !is_dir(&entries[i])) return FULTA_ARC_ERR_INVALID_ARG;
     }
     if (!fa_write_alloc_ok(options)) return FULTA_ARC_ERR_INVALID_ARG;   /* one or two allocator functions set */
+    if (!fa_write_dos_ok(options)) return FULTA_ARC_ERR_INVALID_ARG;
     int level = options ? options->level : 6;
     if (level < 0 || level > 9) level = 6;
     out_t o = { .sink = sink, .alloc = fa_write_alloc(options) };

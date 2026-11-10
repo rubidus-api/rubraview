@@ -1,5 +1,28 @@
 # Vendored LZMA SDK (decoders, LZMA encoder)
 
+## Current: LZMA SDK 26.05 (2026-11-02, D-037)
+
+- Upstream: 7-Zip LZMA SDK **26.05** (2026-10-21), from the 7-Zip author's GitHub release
+  (`https://github.com/ip7z/7zip/releases/tag/26.05`; www.7-zip.org did not resolve from this host):
+  `lzma2605.7z`, SHA-256 `668fda469b7f584f246008cf28359c66ef98d65fafb3b22a52672eebe6970c28`, and
+  `7z2605-src.7z`, SHA-256 `fa081a1a33186158d71e9e24f494ed852ef8d0c9d06e21a86fb4713d94b55ae9` (both equal to the
+  digests GitHub publishes for the release assets).
+- Every file below is byte-identical to `C/<name>` in `lzma2605.7z`, except `Ppmd7aDec.c`, `Ppmd8.c`, `Ppmd8.h`,
+  `Ppmd8Dec.c` and `Ppmd8Enc.c`, which the SDK does not ship and which are byte-identical to `C/<name>` in
+  `7z2605-src.7z`. `LICENSE.txt` is the SDK's `DOC/lzma-sdk.txt` (its licence statement).
+- Line endings are upstream's CRLF; `.gitattributes` exempts `vendor/` from git's whitespace check so the files
+  stay byte-identical.
+- Licence: public domain (Igor Pavlov; PPMd var.H and var.I by Dmitry Shkarin, public domain). Every vendored `.c` and
+  `.h` says "Public domain" in its header; none carries LGPL or GPL text. 7-Zip's own LGPL code (`CPP/7zip`) is not
+  used.
+- What changed from 24.08 in these files: the default LZMA/LZMA2 dictionary per level (7-Zip 24.09: level 5 32 MiB,
+  6 64 MiB, 7 128 MiB, 8 and 9 256 MiB on 64-bit; 32-bit builds stay at most 64 MiB); match-finder bound fixes in
+  `LzFind.c`; `Lzma2Enc.c` now returns an encoder error it used to drop; shift-overflow clean-ups in `LzmaDec.c`,
+  `LzmaEnc.c`, `Ppmd7Enc.c`, `Bcj2Enc.c`; `CpuArch`/`Compiler.h`/`Precomp.h` and `Sort.c` (unused by FultaArc)
+  updated; thread-group fields in `LzmaEnc.h`/`Lzma2Enc.h` (unused: built `-DZ7_ST`).
+
+## History (24.08, superseded by 26.05 above)
+
 - Upstream: 7-Zip LZMA SDK 24.08, https://www.7-zip.org/sdk.html, `lzma2408.7z`, SHA-256
   `105a12afcafcd5bdce70bc75e7f0e94eafd07293646278ea225e6601e048cf17`; `Ppmd7aDec.c` from 7-Zip 24.08's source
   (`7z2408-src.7z`, SHA-256 `4df7a62e5ce503892f500b1f96f0a954931c5266900c439102040957b25a90c6`, `C/Ppmd7aDec.c`).

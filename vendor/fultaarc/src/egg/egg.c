@@ -259,7 +259,7 @@ static fulta_arc_err_t egg_open(fulta_arc_t *arc, uint64_t search) {
         if (has_time) {
             /* egg.md 4.2: a FILETIME count of the local wall-clock time, whole seconds */
             en->pub.mtime = fa_filetime_ns(ft);
-            en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME;
+            en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME | FULTA_ARC_ENTRY_MTIME_LOCAL;
         }
         /* egg.md 4.2: 0x01 read-only, 0x02 hidden, 0x04 system, 0x80 folder -> Windows attribute bits */
         en->pub.attributes = (attr & 0x01 ? 0x01u : 0) | (attr & 0x02 ? 0x02u : 0)

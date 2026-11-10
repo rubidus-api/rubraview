@@ -118,7 +118,7 @@ static fulta_arc_err_t alz_open(fulta_arc_t *arc, uint64_t search) {
         en->pub.size = ae->size;
         en->pub.packed_size = ae->packed_size;
         en->pub.crc32 = ae->crc32;
-        en->pub.flags |= FULTA_ARC_ENTRY_HAS_CRC32 | FULTA_ARC_ENTRY_HAS_MTIME;
+        en->pub.flags |= FULTA_ARC_ENTRY_HAS_CRC32 | FULTA_ARC_ENTRY_HAS_MTIME | FULTA_ARC_ENTRY_MTIME_LOCAL;
         en->pub.mtime = fa_dos_time_ns((uint16_t)(ae->dos_time >> 16), (uint16_t)ae->dos_time);
         en->pub.attributes = ae->attributes;
         if (ae->attributes & 0x10) en->pub.flags |= FULTA_ARC_ENTRY_DIR;

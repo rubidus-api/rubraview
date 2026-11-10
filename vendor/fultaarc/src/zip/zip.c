@@ -217,6 +217,7 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
         if (p + 46u + nlen + xlen + klen > cd_size) { e = FULTA_ARC_ERR_CORRUPT; break; }
         const uint8_t *name = h + 46, *ex = h + 46 + nlen;
         int64_t mtime_ns = fa_dos_time_ns(it.mdate, it.mtime);
+        int mtime_rank = 0;                  /* 0 the DOS field (local time), 1 0x5455 (UTC s), 2 0x000a (UTC FILETIME) */
         for (size_t q = 0; q + 4 <= xlen;) {
             uint16_t id = fa_le16(ex + q), sz = fa_le16(ex + q + 2);
             const uint8_t *d = ex + q + 4;
@@ -228,7 +229,19 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
                 if (it.local == 0xFFFFFFFFu && r + 8 <= sz) { it.local = fa_le64(d + r); r += 8; }
                 if (dstart == 0xFFFF && r + 4 <= sz) dstart = fa_le32(d + r);
             } else if (id == 0x5455 && sz >= 5 && (d[0] & 1)) {
-                mtime_ns = (int64_t)(int32_t)fa_le32(d + 1) * 1000000000;
+                if (mtime_rank < 1) { mtime_ns = (int64_t)(int32_t)fa_le32(d + 1) * 1000000000; mtime_rank = 1; }
+            } else if (id == 0x000a && sz >= 4) {
+                /* NTFS (APPNOTE 4.5.5): 4 reserved bytes, then attributes tag(2) size(2); tag 1 holds the
+                   modification, access and creation FILETIMEs (UTC), 7-Zip's and Windows' exact time */
+                for (size_t t = 4; t + 4 <= sz;) {
+                    uint16_t tag = fa_le16(d + t), tsz = fa_le16(d + t + 2);
+                    if (t + 4u + tsz > sz) break;
+                    if (tag == 1 && tsz >= 24 && fa_le64(d + t + 4)) {
+                        mtime_ns = fa_filetime_ns(fa_le64(d + t + 4));
+                        mtime_rank = 2;
+                    }
+                    t += 4u + tsz;
+                }
             } else if (id == 0x9901 && sz >= 7) {
                 it.aes_version = (uint8_t)fa_le16(d);
                 it.aes_strength = d[4];
@@ -258,6 +271,7 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
         en->pub.crc32 = it.crc;
         en->pub.mtime = mtime_ns;
         en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME;
+        if (!mtime_rank) en->pub.flags |= FULTA_ARC_ENTRY_MTIME_LOCAL;
         if (!(it.method == 99 && it.aes_version == 2)) en->pub.flags |= FULTA_ARC_ENTRY_HAS_CRC32;
         uint16_t made = fa_le16(h + 4);
         uint8_t os = (uint8_t)(made >> 8);
@@ -304,7 +318,9 @@ fulta_arc_err_t fa_zip_copy_info(fulta_arc_t *arc, size_t index, fa_zip_copy_t *
         .made_by_host = pub->unix_mode ? 3 : 0, .crc = it->crc, .ext_attr = pub->attributes,
         .usize = it->usize, .csize = it->csize, .data_off = it->local + 30u + lnlen + lxlen,
         .name_raw = pub->name_raw, .name_raw_len = pub->name_raw_size,
-        .mtime = (pub->flags & FULTA_ARC_ENTRY_HAS_MTIME) ? pub->mtime / 1000000000 : 0,
+        /* a copy keeps the DOS field as it is; a 0x5455 is written only for a time known in UTC */
+        .mtime = (pub->flags & FULTA_ARC_ENTRY_HAS_MTIME) && !(pub->flags & FULTA_ARC_ENTRY_MTIME_LOCAL)
+                     ? pub->mtime / 1000000000 : 0,
         .is_dir = (pub->flags & FULTA_ARC_ENTRY_DIR) != 0,
     };
     return FULTA_ARC_OK;
