@@ -656,11 +656,11 @@ void draw_strip(app_state_t *app, int32_t win_w, int32_t win_h) {
         app_page_t *page = &app->pages[i];
         if (page->loaded && page->texture && !page->skipped) {
             double ow = 0.0, oh = 0.0;
-            rubraview_orientation_apply_size(app->orientation, (double)picture_w(page), (double)picture_h(page), &ow, &oh);
+            rubraview_orientation_apply_size(view_orientation(app), (double)picture_w(page), (double)picture_h(page), &ow, &oh);
             double scale = ow > 0.0 ? width / ow : 1.0;
             rubraview_mat3x2_t place = rubraview_mat3x2_multiply(
                 rubraview_mat3x2_multiply(
-                    rubraview_orientation_matrix(app->orientation, (double)picture_w(page), (double)picture_h(page)),
+                    rubraview_orientation_matrix(view_orientation(app), (double)picture_w(page), (double)picture_h(page)),
                     rubraview_mat3x2_scale(scale, scale)),
                 rubraview_mat3x2_translate(x0, y));
             rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture,
@@ -724,11 +724,11 @@ void draw_spread(app_state_t *app, size_t spread_index, double opacity,
 
         rubraview_page_size_t left_size = {0}, right_size = {0};
         if (left && left->loaded) {
-            rubraview_orientation_apply_size(app->orientation, (double)picture_w((left)), (double)picture_h((left)),
+            rubraview_orientation_apply_size(view_orientation(app), (double)picture_w((left)), (double)picture_h((left)),
                                              &left_size.width, &left_size.height);
         }
         if (right && right->loaded) {
-            rubraview_orientation_apply_size(app->orientation, (double)picture_w((right)), (double)picture_h((right)),
+            rubraview_orientation_apply_size(view_orientation(app), (double)picture_w((right)), (double)picture_h((right)),
                                              &right_size.width, &right_size.height);
         }
 
@@ -764,7 +764,7 @@ void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                 /* Source pixels -> oriented space -> screen. */
                 rubraview_mat3x2_t oriented = rubraview_mat3x2_multiply(
                     rubraview_mat3x2_multiply(page_texture_prescale(page),
-                        rubraview_orientation_matrix(app->orientation, (double)picture_w(page), (double)picture_h(page))),
+                        rubraview_orientation_matrix(view_orientation(app), (double)picture_w(page), (double)picture_h(page))),
                     cmd->transform);
                 if (cmd->page_index == app->media_page) {
                     /* A DVD's picture subtitles are drawn in the film's
@@ -787,7 +787,7 @@ void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                     /* D-40, D-81: zoomed past the texture, the sharper tiles on top. */
                     draw_page_tiles(app, (int)i, cmd->page_index, page,
                                     rubraview_mat3x2_multiply(
-                                        rubraview_orientation_matrix(app->orientation, (double)picture_w(page),
+                                        rubraview_orientation_matrix(view_orientation(app), (double)picture_w(page),
                                                                      (double)picture_h(page)),
                                         cmd->transform),
                                     cmd->scale, win_w, win_h, opacity, interp);
@@ -808,7 +808,7 @@ void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                 rubraview_mat3x2_t pre = page_texture_prescale(page);
                 double sl = 0.0, st = 0.0, sr = 0.0, sb = 0.0;
                 rubraview_mat3x2_t turn = rubraview_orientation_region(
-                    app->orientation, (double)picture_w(page), (double)picture_h(page),
+                    view_orientation(app), (double)picture_w(page), (double)picture_h(page),
                     cmd->src_left, cmd->src_top, cmd->src_right, cmd->src_bottom, &sl, &st, &sr, &sb);
                 rubraview_src_rect_t src = {
                     .left = sl / pre.a, .top = st / pre.d, .right = sr / pre.a, .bottom = sb / pre.d,

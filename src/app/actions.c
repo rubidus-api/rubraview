@@ -198,7 +198,7 @@ void aspect_refresh(app_state_t *app) {
         : rubraview_aspect_ratio(app->aspect, rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("aspect_width")),
                                  rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("aspect_height")), app->aspect_side);
     double w = 0.0, h = 0.0;
-    rubraview_orientation_apply_size(app->orientation, 1.0, 2.0, &w, &h);
+    rubraview_orientation_apply_size(view_orientation(app), 1.0, 2.0, &w, &h);
     bool turned = w > h;
     if (ratio == g_view_ratio && turned == g_view_turned) return;
     g_view_ratio = ratio;
@@ -427,7 +427,7 @@ static void pan_key(app_state_t *app, int dx, int dy) {
    from the toolbox, and said when a key or the menu asks for it. */
 bool edit_denies(proven_u8str_view_t action) {
     static const char *const NO[] = {
-        "rotate_cw", "rotate_ccw", "rotate_180", "flip_horizontal", "flip_vertical", "toggle_layout", "toggle_spread_detect",
+        "rotate_180", "toggle_layout", "toggle_spread_detect",   /* RV-265: turns and mirrors are Edit's steps there */
         "toggle_slideshow", "interval_cycle", "open_picker", "open_folder", "up_to_folder", "open_batch", "print",
         "rename_file", "delete_file", "purge_file", "copy_to_folder", "move_to_folder", "copy_to_other_folder",
         "move_to_other_folder", "convert_archive", "toggle_miniplayer", "toggle_subtitle_window", "toggle_subtitles",
@@ -634,6 +634,13 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         /* Turning changes which pages pair, so the spreads are made again,
            paired from the earlier page that was on screen (RV-224). */
         bool turn = true;
+        if (edit_panel_open(app)) {   /* RV-265 (D-321): in Edit a turn or a mirror is a step of the picture */
+            if (proven_u8str_view_eq(action, PROVEN_LIT("rotate_cw"))) edit_turn_apply(app, RUBRAVIEW_STEP_ROTATE, 1);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("rotate_ccw"))) edit_turn_apply(app, RUBRAVIEW_STEP_ROTATE, 3);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("flip_horizontal"))) edit_turn_apply(app, RUBRAVIEW_STEP_FLIP, 0);
+            else edit_turn_apply(app, RUBRAVIEW_STEP_FLIP, 1);
+            return;
+        }
         if (proven_u8str_view_eq(action, PROVEN_LIT("rotate_cw"))) {
             app->orientation = rubraview_orientation_rotate_cw(app->orientation);
         } else if (proven_u8str_view_eq(action, PROVEN_LIT("rotate_ccw"))) {

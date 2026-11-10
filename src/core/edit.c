@@ -4,6 +4,7 @@
 #include "rubraview/effects.h"
 #include "rubraview/ini.h"
 #include "rubraview/lang.h"
+#include "rubraview/transform.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -640,6 +641,10 @@ bool rubraview_edit_step_does_something(const rubraview_edit_step_t *step) {
         case RUBRAVIEW_STEP_GMIC:
         case RUBRAVIEW_STEP_FFMPEG:
             return step->command[0] != '\0';
+        case RUBRAVIEW_STEP_ROTATE:
+            return step->effect >= 1 && step->effect <= 3;
+        case RUBRAVIEW_STEP_FLIP:
+            return step->effect == 0 || step->effect == 1;
     }
     return false;
 }
@@ -819,6 +824,8 @@ void rubraview_edit_steps_size(const rubraview_edit_steps_t *steps, size_t upto,
         } else if (s->kind == RUBRAVIEW_STEP_RESIZE && s->values.resize_width > 0 && s->values.resize_height > 0) {
             w = s->values.resize_width;
             h = s->values.resize_height;
+        } else if (s->kind == RUBRAVIEW_STEP_ROTATE && (s->effect == 1 || s->effect == 3)) {
+            int32_t t = w; w = h; h = t;   /* a quarter turn swaps the sides */
         }
     }
     if (width) *width = w;
@@ -878,8 +885,25 @@ rubraview_pixbuf_t rubraview_edit_step_apply(proven_arena_t *arena, const rubrav
         int32_t h = clamp_i(area.rect.y + area.rect.height, y + 1, src->height) - y;
         return rubraview_pixbuf_crop(arena, src, x, y, w, h);
     }
+    if (step->kind == RUBRAVIEW_STEP_ROTATE || step->kind == RUBRAVIEW_STEP_FLIP) {   /* RV-265: whole picture */
+        rubraview_orientation_t o = rubraview_orientation_identity();
+        if (step->kind == RUBRAVIEW_STEP_ROTATE) o.rotation = (rubraview_rotation_t)(step->effect & 3);
+        else if (step->effect == 1) o.flip_vertical = true;
+        else o.flip_horizontal = true;
+        return rubraview_pixbuf_orient(arena, src, o);
+    }
     if (step->kind == RUBRAVIEW_STEP_RESIZE) {
-        int32_t w = (int32_t)lround(step->values.resize_width * scale), h = (int32_t)lround(step->values.resize_height * scale);
+        /* RV-265 (D-321): a preview made on a smaller copy makes the size asked whenever the copy holds that many
+           pixels (a reduction), and the copy's scale only past it: a 2000 px picture previewed at 0.5 and resized to
+           200 is 200 px on screen, as it saves, not 100 px drawn twice as large. */
+        double f = scale;
+        if (f < 1.0 && step->values.resize_width > 0 && step->values.resize_height > 0) {
+            double fit_w = (double)src->width / (double)step->values.resize_width;
+            double fit_h = (double)src->height / (double)step->values.resize_height;
+            double fit = fit_w < fit_h ? fit_w : fit_h;
+            if (fit > f) f = fit < 1.0 ? fit : 1.0;
+        }
+        int32_t w = (int32_t)lround(step->values.resize_width * f), h = (int32_t)lround(step->values.resize_height * f);
         if (w < 1) w = 1;
         if (h < 1) h = 1;
         rubraview_pixbuf_t out = step->values.resize_linear
@@ -951,8 +975,13 @@ rubraview_pixbuf_t rubraview_edit_steps_apply(proven_arena_t *arena, const rubra
     if (!arena || !steps || !rubraview_pixbuf_is_valid(src)) return empty;
     rubraview_pixbuf_t work = rubraview_pixbuf_clone(arena, src);
     for (size_t i = 0; i < steps->cursor && i < steps->count && rubraview_pixbuf_is_valid(&work); ++i) {
-        rubraview_pixbuf_t next = rubraview_edit_step_apply(arena, &steps->steps[i], &work, scale);
-        if (rubraview_pixbuf_is_valid(&next)) work = next;
+        const rubraview_edit_step_t *st = &steps->steps[i];
+        rubraview_pixbuf_t next = rubraview_edit_step_apply(arena, st, &work, scale);
+        if (!rubraview_pixbuf_is_valid(&next)) continue;
+        work = next;
+        /* D-321: after a resize the copy stands for the resized picture at its own scale (1 for a reduction) */
+        if (st->kind == RUBRAVIEW_STEP_RESIZE && st->values.resize_width > 0)
+            scale = (double)work.width / (double)st->values.resize_width;
     }
     return work;
 }
@@ -1024,7 +1053,7 @@ void rubraview_edit_auto_colour(rubraview_edit_session_t *session, const rubravi
 #define STEP_BOOLS(X) \
     X(blur_box, blur_box) X(sharpen_laplacian, sharpen_laplacian) X(resize_lock, resize_lock_aspect) X(resize_linear, resize_linear)
 
-static const char *const STEP_KINDS[] = { "adjust", "crop", "resize", "effect", "plugin", "gmic", "ffmpeg" };
+static const char *const STEP_KINDS[] = { "adjust", "crop", "resize", "effect", "plugin", "gmic", "ffmpeg", "rotate", "flip" };
 static const char *const AREA_SHAPES[] = { "all", "rect", "ellipse" };
 static const char *const CURVE_NAMES[5] = { "curve_rgb", "curve_red", "curve_green", "curve_blue", "curve_luma" };
 static const char *const RATIO_WORDS[6] = { "x", "y", "w", "h", "rw", "rh" };
@@ -1069,7 +1098,7 @@ proven_u8str_view_t rubraview_edit_steps_serialize(proven_arena_t *arena, const 
         if (!proven_is_ok(m.err)) return PROVEN_LIT("");
         proven_sys_mem_copy(m.value.ptr, name, proven_cstr_len(name) + 1);
         proven_u8str_view_t sec = { .ptr = m.value.ptr, .size = proven_cstr_len(name) };
-        rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("kind"), steps_cstr(STEP_KINDS[st->kind <= RUBRAVIEW_STEP_FFMPEG ? st->kind : 0]));
+        rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("kind"), steps_cstr(STEP_KINDS[st->kind <= RUBRAVIEW_STEP_FLIP ? st->kind : 0]));
         rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("area"), steps_cstr(AREA_SHAPES[st->area.shape <= RUBRAVIEW_AREA_ELLIPSE ? st->area.shape : 0]));
         rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("x"), st->area.rect.x);
         rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("y"), st->area.rect.y);
@@ -1115,6 +1144,8 @@ proven_u8str_view_t rubraview_edit_steps_serialize(proven_arena_t *arena, const 
             proven_sys_mem_copy(cm.value.ptr, line, at + 1);
             rubraview_ini_set_string(arena, &doc, sec, steps_cstr(CURVE_NAMES[c]), (proven_u8str_view_t){ .ptr = cm.value.ptr, .size = at });
         }
+        if (st->kind == RUBRAVIEW_STEP_ROTATE) rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("turns"), st->effect);   /* RV-265 */
+        if (st->kind == RUBRAVIEW_STEP_FLIP) rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("axis"), st->effect == 1 ? PROVEN_LIT("upside-down") : PROVEN_LIT("left-right"));
         if (st->kind == RUBRAVIEW_STEP_EFFECT) {
             rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("effect"), st->effect);
             steps_set_number(arena, &doc, sec, "amount", st->amount);
@@ -1185,7 +1216,7 @@ bool rubraview_edit_steps_parse(proven_arena_t *arena, proven_u8str_view_t text,
         st.values = rubraview_edit_begin((int32_t)w, (int32_t)h);
         int kind = 0, shape = 0;
         const proven_u8str_view_t *k = rubraview_ini_get(&doc, sec, PROVEN_LIT("kind"));
-        if (!k || !steps_word(*k, STEP_KINDS, 7, &kind)) { *why = N_("a step of a kind this version has not"); return false; }
+        if (!k || !steps_word(*k, STEP_KINDS, 9, &kind)) { *why = N_("a step of a kind this version has not"); return false; }
         st.kind = (rubraview_edit_step_kind_t)kind;
         const proven_u8str_view_t *a = rubraview_ini_get(&doc, sec, PROVEN_LIT("area"));
         if (a && !steps_word(*a, AREA_SHAPES, 3, &shape)) { *why = N_("a step's area is of no shape this version has"); return false; }
@@ -1242,6 +1273,17 @@ bool rubraview_edit_steps_parse(proven_arena_t *arena, proven_u8str_view_t text,
             if (curve.point_count >= 2) v->curves[c] = curve;
         }
         st.effect = (int32_t)held_d((double)rubraview_ini_get_int(&doc, sec, PROVEN_LIT("effect"), 0), 0, RUBRAVIEW_EFFECT_COUNT - 1);
+        if (st.kind == RUBRAVIEW_STEP_ROTATE) {   /* RV-265 */
+            long long t = rubraview_ini_get_int(&doc, sec, PROVEN_LIT("turns"), 0);
+            if (t < 1 || t > 3) { *why = N_("a turn of no quarter this version has"); return false; }
+            st.effect = (int32_t)t;
+        }
+        if (st.kind == RUBRAVIEW_STEP_FLIP) {
+            const proven_u8str_view_t *ax = rubraview_ini_get(&doc, sec, PROVEN_LIT("axis"));
+            if (ax && proven_u8str_view_eq(*ax, PROVEN_LIT("upside-down"))) st.effect = 1;
+            else if (ax && proven_u8str_view_eq(*ax, PROVEN_LIT("left-right"))) st.effect = 0;
+            else { *why = N_("a mirror of no axis this version has"); return false; }
+        }
         st.amount = held_d(rubraview_ini_get_float(&doc, sec, PROVEN_LIT("amount"), 0.0), -100000.0, 100000.0);
         const proven_u8str_view_t *pl = rubraview_ini_get(&doc, sec, PROVEN_LIT("plugin"));
         if (pl) {

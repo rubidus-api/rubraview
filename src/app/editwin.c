@@ -663,6 +663,20 @@ void edit_resize_apply(app_state_t *app) {
     osd_say(app, TU8("resized (Ctrl+Z undoes it)"));
 }
 
+static const char *turn_word(const rubraview_edit_step_t *s);
+/* RV-265 (D-321): a turn or a mirror of the whole picture, a step. kind ROTATE with quarter turns, FLIP with an axis. */
+void edit_turn_apply(app_state_t *app, int32_t kind, int32_t value) {
+    (void)edit_apply_pending(app, false);
+    rubraview_edit_step_t s = { .kind = (rubraview_edit_step_kind_t)kind, .area = { .shape = RUBRAVIEW_AREA_ALL }, .effect = value };
+    if (!edit_push(app, &s)) return;
+    app->edit.crop_active = false;
+    edit_values_fresh(app);
+    edit_steps_changed(app);
+    char said[160];
+    rubraview_fmt(said, sizeof(said), T("added: {} (Ctrl+Z undoes it)"), PROVEN_ARG(turn_word(&s)));
+    osd_say(app, cstr(said));
+}
+
 void edit_effect_apply(app_state_t *app) {
     if (app->edit_live && app->edit_live_kind == RUBRAVIEW_STEP_EFFECT) { edit_live_close(app); osd_say(app, TU8("effect applied (Ctrl+Z undoes it)")); return; }
     if (app->effect_choice <= RUBRAVIEW_EFFECT_NONE) { osd_say(app, TU8("choose an effect first")); return; }
@@ -728,6 +742,20 @@ static const char *edit_adjust_words(const rubraview_edit_step_t *s, char *buf, 
     return said ? buf : T("Adjust");   /* the curve alone, or nothing named */
 }
 
+/* RV-265 (owner 2026-11-10: "효과 목록에 추가되는 버튼의 경우에는 추가: (효과설명) 이렇게"): a button that adds a step
+   says so, and what it adds. A slot each, the panel keeping the view. */
+enum { ADD_AUTO, ADD_ADJUST, ADD_EFFECT, ADD_PLUGIN, ADD_GMIC, ADD_FFMPEG, ADD_CROP, ADD_RESIZE, ADD_TURN_L, ADD_TURN_R,
+       ADD_TURN_2, ADD_FLIP_H, ADD_FLIP_V, ADD_SLOTS };
+static proven_u8str_view_t add_label(int slot, proven_u8str_view_t what) {
+    static char labels[ADD_SLOTS][192];
+    int n = rubraview_fmt(labels[slot], sizeof(labels[slot]), T("Add: {}"), PROVEN_ARG(what));
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)labels[slot], .size = n > 0 ? ((size_t)n < sizeof(labels[slot]) ? (size_t)n : sizeof(labels[slot]) - 1) : 0 };
+}
+static const char *turn_word(const rubraview_edit_step_t *s) {
+    return s->kind == RUBRAVIEW_STEP_ROTATE ? (s->effect == 1 ? T("turn right (90°)") : s->effect == 3 ? T("turn left (90°)") : T("turn over (180°)"))
+                                            : (s->effect == 1 ? T("mirror upside down") : T("mirror left to right"));
+}
+
 static proven_u8str_view_t edit_step_words(const rubraview_edit_step_t *s, size_t number, proven_mem_mut_t buffer_view) {
     char *buffer = (char *)buffer_view.ptr;
     size_t size = (size_t)buffer_view.size;
@@ -737,11 +765,14 @@ static proven_u8str_view_t edit_step_words(const rubraview_edit_step_t *s, size_
                      : s->kind == RUBRAVIEW_STEP_PLUGIN ? s->plugin   /* RFC-0007: the plug-in's file */
                      : s->kind == RUBRAVIEW_STEP_GMIC ? gmic_step_name(s)   /* RFC-0009 C: its filter's name, or the command */
                      : s->kind == RUBRAVIEW_STEP_FFMPEG ? s->command   /* RFC-0009 D: the graph */
+                     : (s->kind == RUBRAVIEW_STEP_ROTATE || s->kind == RUBRAVIEW_STEP_FLIP) ? turn_word(s)   /* RV-265 */
                      : edit_adjust_words(s, moved, sizeof(moved));
     if (!what) what = T("Adjust");
     const char *where = s->area.shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : s->area.shape == RUBRAVIEW_AREA_RECT ? T("rectangle") : T("whole");
     int n;
-    if (s->kind == RUBRAVIEW_STEP_RESIZE) {
+    if (s->kind == RUBRAVIEW_STEP_ROTATE || s->kind == RUBRAVIEW_STEP_FLIP) {
+        n = rubraview_fmt(buffer, size, "{}. {}", PROVEN_ARG((size_t)number), PROVEN_ARG(what));
+    } else if (s->kind == RUBRAVIEW_STEP_RESIZE) {
         n = rubraview_fmt(buffer, size, "{}. {} {} x {}", PROVEN_ARG((size_t)number), PROVEN_ARG(what), PROVEN_ARG((int)s->values.resize_width), PROVEN_ARG((int)s->values.resize_height));
     } else if (s->kind == RUBRAVIEW_STEP_CROP || s->area.shape != RUBRAVIEW_AREA_ALL) {
         n = rubraview_fmt(buffer, size, "{}. {}: {} {},{} {}x{}", PROVEN_ARG((size_t)number), PROVEN_ARG(what), PROVEN_ARG(s->kind == RUBRAVIEW_STEP_CROP ? T("rectangle") : where),
@@ -877,7 +908,7 @@ static void edit_rows_tone(app_state_t *app) {
     rubraview_panel_add_slider(&app->panel, PANEL_BAL_R, TU8("Red"), e->params.balance_r, -100.0, 100.0, 1.0);
     rubraview_panel_add_slider(&app->panel, PANEL_BAL_G, TU8("Green"), e->params.balance_g, -100.0, 100.0, 1.0);
     rubraview_panel_add_slider(&app->panel, PANEL_BAL_B, TU8("Blue"), e->params.balance_b, -100.0, 100.0, 1.0);
-    rubraview_panel_add_button(&app->panel, PANEL_AUTO_COLOUR, TU8("Automatic colour correction"));
+    rubraview_panel_add_button(&app->panel, PANEL_AUTO_COLOUR, add_label(ADD_AUTO, TU8("Automatic colour correction")));
 }
 
 static void edit_rows_levels(app_state_t *app) {
@@ -896,6 +927,12 @@ static void edit_rows_detail(app_state_t *app) {
     rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_RADIUS, PROVEN_LIT("  radius"), e->sharpen_radius, 0.5, 10.0, 0.0);
     rubraview_panel_add_slider(&app->panel, PANEL_SHARPEN_THRESHOLD, PROVEN_LIT("  threshold"), (double)e->sharpen_threshold, 0.0, 255.0, 1.0);
     /* Changes are on the picture at once (owner, 2026-10-18): this only ends the step, so the next change is one of its own. */
+    if (app->edit_live && app->edit_live_kind == RUBRAVIEW_STEP_ADJUST && app->edit_steps.cursor > 0) {   /* RV-265 */
+        char moved[80], what[120];
+        const char *w = edit_adjust_words(&app->edit_steps.steps[app->edit_steps.cursor - 1], moved, sizeof(moved));
+        int n = rubraview_fmt(what, sizeof(what), "{} (Enter)", PROVEN_ARG(w));
+        rubraview_panel_add_button(&app->panel, PANEL_APPLY_SEL, add_label(ADD_ADJUST, rubraview_bytes_view(what, n > 0 ? n : 0)));
+    } else
     rubraview_panel_add_button(&app->panel, PANEL_APPLY_SEL, app->edit_window ? TU8("Done: the next change a new step (Enter)")   /* RV-188 */
                                                          : e->crop_active ? TU8("Done on the selection: next change a new step (Enter)")
                                                                           : TU8("Done: next change a new step (Enter)"));
@@ -1066,7 +1103,10 @@ static void edit_rows_effect(app_state_t *app) {
         rubraview_effect_range((rubraview_effect_t)app->effect_choice, &lo, &hi, NULL);
         rubraview_panel_add_slider(&app->panel, PANEL_EFFECT_AMOUNT, TU8("  amount"), app->effect_amount, lo, hi, 1.0);
     }
-    rubraview_panel_add_button(&app->panel, PANEL_EFFECT_APPLY, TU8("Keep this effect; the next is added on top"));
+    {   /* RV-265 */
+        const char *w = app->effect_choice > RUBRAVIEW_EFFECT_NONE ? effect_word(app->effect_choice) : NULL;
+        rubraview_panel_add_button(&app->panel, PANEL_EFFECT_APPLY, w ? add_label(ADD_EFFECT, cstr(w)) : TU8("Keep this effect; the next is added on top"));
+    }
     if (app->edit_window) {   /* RV-188: in the window, the outside tools are sections of their own */
         rubraview_panel_add_toggle(&app->panel, PANEL_COMPARE, TU8("Show the original"), app->edit_compare);
         return;
@@ -1096,7 +1136,12 @@ static void edit_rows_plugins(app_state_t *app) {
         else if (q->kind == RVF_CHOICE) rubraview_panel_add_choice(&app->panel, id, name, (int32_t)app->plugin_values[i], (int32_t)q->max + 1);
         else rubraview_panel_add_slider(&app->panel, id, name, app->plugin_values[i], q->min, q->max, q->kind == RVF_INT ? 1.0 : q->step);
     }
-    rubraview_panel_add_button(&app->panel, PANEL_PLUGIN_APPLY, TU8("Run the plug-in: a step (Esc cancels)"));
+    {   /* RV-265 */
+        const rubraview_plugin_t *list[RUBRAVIEW_PLUGIN_MAX];
+        size_t n = plugins_usable(list, RUBRAVIEW_PLUGIN_MAX);
+        rubraview_panel_add_button(&app->panel, PANEL_PLUGIN_APPLY, app->plugin_choice > 0 && (size_t)app->plugin_choice <= n
+            ? add_label(ADD_PLUGIN, cstr(list[app->plugin_choice - 1]->file)) : TU8("Run the plug-in: a step (Esc cancels)"));
+    }
 }
 
 /* The chosen plug-in, run on the picture as a step of its own. */
@@ -1376,7 +1421,12 @@ static void edit_rows_gmic(app_state_t *app) {
                     rubraview_panel_add_slider(&app->panel, id, name, app->gmic_values[i], q->min, q->max,
                                                q->kind == RUBRAVIEW_GMIC_INT ? 1.0 : (q->max - q->min) / 100.0);
             }
-            rubraview_panel_add_button(&app->panel, PANEL_GMIC_APPLY, TU8("Run G'MIC: a step (Esc cancels)"));
+            {   /* RV-265 */
+                const rubraview_gmic_filter_t *gf = gmic_chosen(app);
+                char what[160];
+                int wn = gf ? rubraview_fmt(what, sizeof(what), "G'MIC: {}", PROVEN_ARG(rubraview_bytes_view((const char *)gf->name.ptr, (int)gf->name.size))) : 0;
+                rubraview_panel_add_button(&app->panel, PANEL_GMIC_APPLY, wn > 0 ? add_label(ADD_GMIC, rubraview_bytes_view(what, wn)) : TU8("Run G'MIC: a step (Esc cancels)"));
+            }
         }
     }
     rubraview_panel_add_button(&app->panel, PANEL_GMIC_TYPE, TU8("Type a G'MIC command..."));
@@ -1696,7 +1746,12 @@ static void edit_rows_ffmpeg(app_state_t *app) {
             else rubraview_panel_add_slider(&app->panel, id, name, app->ffmpeg_values[i], q->min, q->max,
                                             q->kind == RUBRAVIEW_FFILTER_INT ? 1.0 : (q->max - q->min) / 100.0);
         }
-        rubraview_panel_add_button(&app->panel, PANEL_FFMPEG_APPLY, TU8("Run the FFmpeg filter: a step"));
+        {   /* RV-265 */
+            const rubraview_ffilter_t *ff = ffmpeg_chosen(app);
+            char what[160];
+            int wn = ff ? rubraview_fmt(what, sizeof(what), "FFmpeg: {}", PROVEN_ARG(rubraview_bytes_view((const char *)ff->name.ptr, (int)ff->name.size))) : 0;
+            rubraview_panel_add_button(&app->panel, PANEL_FFMPEG_APPLY, wn > 0 ? add_label(ADD_FFMPEG, rubraview_bytes_view(what, wn)) : TU8("Run the FFmpeg filter: a step"));
+        }
     }
     rubraview_panel_add_button(&app->panel, PANEL_FFMPEG_TYPE, TU8("Type an FFmpeg filter graph..."));
 }
@@ -1888,8 +1943,14 @@ static rubraview_pixbuf_t ffmpeg_runner(proven_arena_t *arena, const rubraview_e
 }
 
 static void edit_rows_crop(app_state_t *app) {
-    rubraview_panel_add_button(&app->panel, PANEL_CROP_SEL, TU8("Crop to the selection"));
+    rubraview_panel_add_button(&app->panel, PANEL_CROP_SEL, add_label(ADD_CROP, TU8("Crop to the selection")));
     rubraview_panel_add_button(&app->panel, PANEL_TRIM, TU8("Select the plain margins' inside"));
+    /* RV-265 (D-321): turns and mirrors, steps on the whole picture */
+    rubraview_panel_add_button(&app->panel, PANEL_TURN_LEFT, add_label(ADD_TURN_L, TU8("turn left (90°)")));
+    rubraview_panel_add_button(&app->panel, PANEL_TURN_RIGHT, add_label(ADD_TURN_R, TU8("turn right (90°)")));
+    rubraview_panel_add_button(&app->panel, PANEL_TURN_OVER, add_label(ADD_TURN_2, TU8("turn over (180°)")));
+    rubraview_panel_add_button(&app->panel, PANEL_MIRROR_H, add_label(ADD_FLIP_H, TU8("mirror left to right")));
+    rubraview_panel_add_button(&app->panel, PANEL_MIRROR_V, add_label(ADD_FLIP_V, TU8("mirror upside down")));
 }
 
 static void edit_rows_resize_only(app_state_t *app);
@@ -1911,7 +1972,12 @@ static void edit_rows_resize_only(app_state_t *app) {
     rubraview_panel_add_toggle(&app->panel, PANEL_RESIZE_LINEAR, TU8("  In linear light"), e->resize_linear);
     rubraview_panel_add_slider(&app->panel, PANEL_RESIZE_SHARPEN, TU8("  Sharpen after"), e->resize_sharpen, 0.0, 100.0, 1.0);
     rubraview_panel_add_slider(&app->panel, PANEL_RESIZE_DPI, TU8("  DPI (cm, in)"), e->resize_dpi > 0.0 ? e->resize_dpi : 300.0, 72.0, 1200.0, 1.0);
-    rubraview_panel_add_button(&app->panel, PANEL_RESIZE_APPLY, TU8("Resize"));
+    {   /* RV-265 */
+        char what[96];
+        int wn = e->resize_width > 0 && e->resize_height > 0
+            ? rubraview_fmt(what, sizeof(what), "{} {} x {}", PROVEN_ARG(T("Resize")), PROVEN_ARG((int)e->resize_width), PROVEN_ARG((int)e->resize_height)) : 0;
+        rubraview_panel_add_button(&app->panel, PANEL_RESIZE_APPLY, add_label(ADD_RESIZE, wn > 0 ? rubraview_bytes_view(what, wn) : TU8("Resize")));
+    }
 }
 
 static void edit_rows_save(app_state_t *app) {
@@ -1977,7 +2043,7 @@ static void edit_rows_windowed(app_state_t *app) {
                 rubraview_panel_add_slider(p, PANEL_BAL_R, TU8("Red"), app->edit.params.balance_r, -100.0, 100.0, 1.0);
                 rubraview_panel_add_slider(p, PANEL_BAL_G, TU8("Green"), app->edit.params.balance_g, -100.0, 100.0, 1.0);
                 rubraview_panel_add_slider(p, PANEL_BAL_B, TU8("Blue"), app->edit.params.balance_b, -100.0, 100.0, 1.0);
-                rubraview_panel_add_button(p, PANEL_AUTO_COLOUR, TU8("Automatic colour correction"));
+                rubraview_panel_add_button(p, PANEL_AUTO_COLOUR, add_label(ADD_AUTO, TU8("Automatic colour correction")));
                 break;
             case LEVELS:
                 edit_section_heading(app, T("Levels and curve"));

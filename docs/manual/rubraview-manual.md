@@ -487,13 +487,22 @@ negative, black and white, black and white dithered, fewer colours (2 to
 paint, pencil sketch, emboss, edges, 3D button), **Blur and noise**,
 **Distort** (swirl, wave, fragment, explosion) and **Fix and light** (red
 eye, colour fringe, vignette) — **Crop to the
-selection**, **Resize**. A change is done at once, to the selection or,
+selection**, the turns and mirrors (**turn left**, **turn right**, **turn
+over**, **mirror left to right**, **mirror upside down**, of the whole
+picture; `R`, `Shift+R` and the mirror keys do the same while Edit is
+open), **Resize**. Every button that adds a step says so: **Add: ...** and
+what it adds. A change is done at once, to the selection or,
 without one, to the whole picture, and is a step: moving more sliders
 changes that step, until **Done** (`Enter`), another kind of change, or
 another selection starts the next. `Ctrl+Z` undoes the last step,
 `Ctrl+Y` does it again, and the undo list (its own movable box, closed by
 its `X`) goes back to any of them. **Reset** goes back to the picture as
 it was. **Show the original** compares.
+
+**As it saves.** Edit shows the picture as it will be written: a turn or
+mirror of the view made before Edit opened is set aside while Edit is open
+(said once on screen) and comes back when it closes; turn the picture in
+Edit to keep the turn. A resize looks on screen as it saves.
 
 **What works with Edit open.** Turning the pages (over pictures only: a
 film, a sound or a text is passed by), the file list and the playlist,

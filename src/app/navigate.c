@@ -75,7 +75,7 @@ static void layout_compute(app_state_t *app) {
         double h = pg->loaded ? (double)picture_h(pg) : seen ? (double)pg->seen_h : fallback_h;
         /* Pagination sees the page as the reader does, so a rotated
            portrait page is treated as the landscape it now presents. */
-        rubraview_orientation_apply_size(app->orientation, w, h, &infos[i].width, &infos[i].height);
+        rubraview_orientation_apply_size(view_orientation(app), w, h, &infos[i].width, &infos[i].height);
         /* §3.8.5: a page the archive tagged as a cover never pairs. */
         infos[i].force_standalone = app->comic_page_flags ? app->comic_page_flags[i].force_standalone : false;
         infos[i].skip = false;
@@ -109,7 +109,7 @@ static void layout_compute(app_state_t *app) {
        side is one page shown whole, not a spread to cut in two. Turned
        upside down, each page is turned where it stands (owner, 2026-10-09). */
     rubraview_layout_opts_t opts = rubraview_layout_opts_turned(
-        app->layout_opts, rubraview_orientation_swaps_axes(app->orientation));
+        app->layout_opts, rubraview_orientation_swaps_axes(view_orientation(app)));
 
     app->layout = rubraview_layout_compute(app->arena, infos, page_count(app),
                                            (double)win_w, (double)win_h, opts);
@@ -336,7 +336,7 @@ double strip_width(app_state_t *app, double win_w) {
         app_page_t *page = ensure_page_loaded(app, (int32_t)app->spread_index);
         if (page && page->loaded) {
             double w = 0.0, h = 0.0;
-            rubraview_orientation_apply_size(app->orientation, (double)picture_w(page), (double)picture_h(page), &w, &h);
+            rubraview_orientation_apply_size(view_orientation(app), (double)picture_w(page), (double)picture_h(page), &w, &h);
             app->strip_base_w = w;
             app->strip_base_count = page_count(app);
         }
@@ -355,7 +355,7 @@ double strip_page_height(void *context, size_t index) {
     if (!page || page->failed) return width * 0.1;
     if (!page->loaded) return width * 1.5;      /* on its way: a page's usual shape until it is here */
     double w = 0.0, h = 0.0;
-    rubraview_orientation_apply_size(app->orientation, (double)picture_w(page), (double)picture_h(page), &w, &h);
+    rubraview_orientation_apply_size(view_orientation(app), (double)picture_w(page), (double)picture_h(page), &w, &h);
     return w > 0.0 ? width * h / w : width * 1.5;
 }
 

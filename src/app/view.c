@@ -18,11 +18,11 @@ bool spread_composition(app_state_t *app, rubraview_composition_t *out) {
     app_page_t *right = ensure_page_loaded(app, spread->right_index);
     rubraview_page_size_t left_size = {0}, right_size = {0};
     if (left && left->loaded) {
-        rubraview_orientation_apply_size(app->orientation, (double)picture_w((left)), (double)picture_h((left)),
+        rubraview_orientation_apply_size(view_orientation(app), (double)picture_w((left)), (double)picture_h((left)),
                                          &left_size.width, &left_size.height);
     }
     if (right && right->loaded) {
-        rubraview_orientation_apply_size(app->orientation, (double)picture_w((right)), (double)picture_h((right)),
+        rubraview_orientation_apply_size(view_orientation(app), (double)picture_w((right)), (double)picture_h((right)),
                                          &right_size.width, &right_size.height);
     }
     *out = compose_view(
@@ -62,6 +62,23 @@ bool page_screen_rect(app_state_t *app, rubraview_pal_rect_t *out_rect, double *
 /* The owner's edit: where the picture as the steps left it is on screen —
    the page's own place, or, after a crop or a resize, that shape fitted
    into it. */
+/* RV-265 (D-321): while Edit is open the page is drawn as it will be saved — the view's own turn and mirror set
+   aside (the edit's preview, its selection and crop are in the picture's pixels), and back when Edit closes. */
+rubraview_orientation_t view_orientation(const app_state_t *app) {
+    return app->orient_set_aside ? rubraview_orientation_identity() : app->orientation;
+}
+
+void view_orientation_follow_edit(app_state_t *app) {
+    bool aside = edit_panel_open(app);
+    if (aside == app->orient_set_aside) return;
+    app->orient_set_aside = aside;
+    rubraview_orientation_t o = app->orientation;
+    if (o.rotation == RUBRAVIEW_ROTATE_0 && !o.flip_horizontal && !o.flip_vertical) return;
+    rebuild_layout(app);
+    reset_view(app);
+    if (aside) osd_say(app, TU8("Edit shows the picture as it saves: the view's turn is set aside (turn it in Edit)"));
+}
+
 bool edit_view_rect(app_state_t *app, rubraview_pal_rect_t *out, double *out_scale, bool *changed) {
     rubraview_pal_rect_t rect;
     double scale = 1.0;

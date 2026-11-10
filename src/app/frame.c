@@ -95,6 +95,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     handled += clash_pump(app);   /* RV-258 */
     handled += filejob_pump(app);
     arcadd_poll(app);   /* RV-260 */
+    view_orientation_follow_edit(app);   /* RV-265 */
     handled += mini_pump(app);
     handled += files_pump(app);
     handled += fontpick_pump(app);

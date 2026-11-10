@@ -937,6 +937,7 @@ typedef struct app_state {
 
     /* M3 additions */
     rubraview_orientation_t orientation;   /* RV-041, per view rather than per file */
+    bool   orient_set_aside;               /* RV-265 (D-321): Edit open, the page drawn as it saves; read view_orientation() */
     int    frame_wanted;                   /* RV-108: FRAME_COPY or FRAME_SAVE, until the next frame is shown */
     bool   swipe_going;                    /* RV-107: a pan gesture under way, and how far it has gone */
     double swipe_dx, swipe_dy, swipe_pan_x, swipe_pan_y;
@@ -1568,7 +1569,7 @@ enum {
     PANEL_PRINT_PRINTER, PANEL_PRINT_PAPER, PANEL_PRINT_ORIENT, PANEL_PRINT_COPIES, PANEL_PRINT_SHEET, PANEL_PRINT_DIALOG,   /* 1.19.0 */
     PANEL_CONV_FORMAT, PANEL_CONV_METHOD, PANEL_CONV_LEVEL, PANEL_CONV_NOW,
     /* The owner's edit (2026-10-17) */
-    PANEL_APPLY_SEL, PANEL_CROP_SEL, PANEL_RESIZE_APPLY, PANEL_UNDO, PANEL_REDO, PANEL_STEPS, PANEL_SEL_BOX,
+    PANEL_APPLY_SEL, PANEL_CROP_SEL, PANEL_RESIZE_APPLY, PANEL_TURN_LEFT, PANEL_TURN_RIGHT, PANEL_TURN_OVER, PANEL_MIRROR_H, PANEL_MIRROR_V, PANEL_UNDO, PANEL_REDO, PANEL_STEPS, PANEL_SEL_BOX,
     PANEL_SAVE_ORIGINAL, PANEL_SEL_SHAPE, PANEL_SEL_X, PANEL_SEL_Y, PANEL_SEL_W, PANEL_SEL_H, PANEL_SEL_FEATHER,
     PANEL_SEL_ALL, PANEL_SEL_TYPE,
     PANEL_BAL_R, PANEL_BAL_G, PANEL_BAL_B, PANEL_AUTO_COLOUR, PANEL_EFFECT, PANEL_EFFECT_AMOUNT, PANEL_EFFECT_APPLY, PANEL_COMPARE,
@@ -2039,6 +2040,9 @@ void edit_value_typed(app_state_t *app);
 bool panel_type_value_at(app_state_t *app, double px, double py);   /* RV-200 */
 void edit_values_fresh(app_state_t *app);
 bool edit_view_rect(app_state_t *app, rubraview_pal_rect_t *out, double *out_scale, bool *changed);
+rubraview_orientation_t view_orientation(const app_state_t *app);   /* RV-265: the view's turn, none while Edit is open */
+void view_orientation_follow_edit(app_state_t *app);                /* RV-265: once a pass */
+void edit_turn_apply(app_state_t *app, int32_t kind, int32_t value);
 rubraview_edit_session_t edit_whole(const app_state_t *app);
 void edit_window_close(app_state_t *app);
 void edit_window_layout(app_state_t *app);

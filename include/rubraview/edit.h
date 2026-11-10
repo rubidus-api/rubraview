@@ -314,6 +314,8 @@ typedef enum rubraview_edit_step_kind {
     RUBRAVIEW_STEP_PLUGIN,       /* RFC-0007: a plug-in filter (`plugin`, its hash and values), on the area */
     RUBRAVIEW_STEP_GMIC,         /* RFC-0009 C: a G'MIC command (`command`), run by the user's gmic.exe, on the area */
     RUBRAVIEW_STEP_FFMPEG,       /* RFC-0009 D: an FFmpeg filter graph (`command`), run by avfilter, on the area */
+    RUBRAVIEW_STEP_ROTATE,       /* RV-265 (D-321): the whole picture turned `effect` quarter turns clockwise (1, 2, 3) */
+    RUBRAVIEW_STEP_FLIP,         /* RV-265 (D-321): the whole picture mirrored, `effect` 0 left to right, 1 upside down */
 } rubraview_edit_step_kind_t;
 
 /** A G'MIC step's command and its arguments, or an FFmpeg step's filter graph, NUL included. */

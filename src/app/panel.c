@@ -315,6 +315,11 @@ void panel_button(app_state_t *app, int32_t index) {
         case PANEL_AUTO_COLOUR:  edit_auto_colour(app); break;
         case PANEL_CROP_SEL:     edit_crop_to_selection(app); break;
         case PANEL_RESIZE_APPLY: edit_resize_apply(app); break;
+        case PANEL_TURN_LEFT:  edit_turn_apply(app, RUBRAVIEW_STEP_ROTATE, 3); break;   /* RV-265 */
+        case PANEL_TURN_RIGHT: edit_turn_apply(app, RUBRAVIEW_STEP_ROTATE, 1); break;
+        case PANEL_TURN_OVER:  edit_turn_apply(app, RUBRAVIEW_STEP_ROTATE, 2); break;
+        case PANEL_MIRROR_H:   edit_turn_apply(app, RUBRAVIEW_STEP_FLIP, 0); break;
+        case PANEL_MIRROR_V:   edit_turn_apply(app, RUBRAVIEW_STEP_FLIP, 1); break;
         case PANEL_UNDO:         edit_undo(app, false); break;
         case PANEL_REDO:         edit_undo(app, true); break;
         case PANEL_STEPS:        edit_steps_toggle(app); break;
