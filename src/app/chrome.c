@@ -780,6 +780,8 @@ void draw_spread(app_state_t *app, size_t spread_index, double opacity,
                     rubraview_pal_render_draw_texture_opacity(app->renderer, app->media_prev_texture, oriented, interp, 1.0);
                     rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture, oriented, interp,
                                                               1.0 - app->media_blend_weight);
+                } else if (cmd->page_index == app->media_page && film_upscale_draw(app, page, oriented, opacity)) {
+                    /* RV-270: the film drawn from its upscaled picture */
                 } else {
                     rubraview_pal_render_draw_texture_opacity(app->renderer, page->texture, oriented, interp, opacity);
                 }

@@ -43,6 +43,7 @@ static const GUID RV_IID_IDXGISurface =
 #include "rubraview/pal/pal_render.h"
 #include "rubraview/pal/pal_render_d2d_internal.h"
 #include "rubraview/pal/pal_hdr.h"
+#include "rubraview/pal/pal_vgrade.h"
 #include "rubraview/lang.h"
 #include "rubraview/screencopy.h"
 
@@ -130,7 +131,9 @@ struct rubraview_renderer {
     ID3D11ShaderResourceView *scene_view;
     ID3D11RenderTargetView *back_view;
     rubraview_hdr_present_t *hdr_present;
-    const char *hdr_why;           /* the last refusal (an N_ literal) */
+    const char *hdr_why;
+    rubraview_vgrade_gpu_t *vgrade;   /* RV-270: a film's adjustment and upscaler, made on first use */
+    const char *vgrade_why;           /* why it could not be (an N_ literal); not tried again */           /* the last refusal (an N_ literal) */
     IDWriteFactory *dwrite;      /* NULL when DirectWrite is unavailable: text is then skipped, not fatal */
     HWND hwnd;
     int32_t width, height;
@@ -491,6 +494,8 @@ void rubraview_pal_render_destroy(rubraview_renderer_t *renderer) {
     release_back_buffer(renderer);
     rubraview_pal_hdr_present_free(renderer->hdr_present);
     renderer->hdr_present = NULL;
+    rubraview_pal_vgrade_gpu_free(renderer->vgrade);
+    renderer->vgrade = NULL;
     if (renderer->frame_wait) { CloseHandle(renderer->frame_wait); renderer->frame_wait = NULL; }
     if (renderer->swap_chain) { IDXGISwapChain1_Release(renderer->swap_chain); renderer->swap_chain = NULL; }
     if (renderer->target) { ID2D1RenderTarget_Release((ID2D1RenderTarget*)renderer->target); renderer->target = NULL; }
@@ -650,6 +655,9 @@ bool rubraview_pal_render_end(rubraview_renderer_t *renderer) {
         renderer->hdr = false;   /* RV-153: the new chain starts in SDR; the caller asks again */
         rubraview_pal_hdr_present_free(renderer->hdr_present);
         renderer->hdr_present = NULL;
+        rubraview_pal_vgrade_gpu_free(renderer->vgrade);   /* RV-270: made again on the new device */
+        renderer->vgrade = NULL;
+        renderer->vgrade_why = NULL;
         if (renderer->frame_wait) { CloseHandle(renderer->frame_wait); renderer->frame_wait = NULL; }
     if (renderer->swap_chain) { IDXGISwapChain1_Release(renderer->swap_chain); renderer->swap_chain = NULL; }
         if (renderer->target) { ID2D1RenderTarget_Release((ID2D1RenderTarget*)renderer->target); renderer->target = NULL; }
@@ -2004,6 +2012,50 @@ bool rubraview_pal_texture_video_brightness(rubraview_texture_t *texture, double
         ID3D11DeviceContext_Release(context);
     }
     ID3D11Texture2D_Release(staging);
+    return ok;
+}
+
+/* ---- RV-270 (D-330): a film's adjustment and upscaler ---- */
+
+bool rubraview_pal_texture_on_card(const rubraview_texture_t *texture) {
+    return texture && texture->d3d && texture->owner;
+}
+
+bool rubraview_pal_texture_is_hdr(const rubraview_texture_t *texture) {
+    return texture && texture->fp16;
+}
+
+static rubraview_vgrade_gpu_t *vgrade_engine(rubraview_renderer_t *r) {
+    if (!r || !r->d3d) return NULL;
+    if (!r->vgrade && !r->vgrade_why) r->vgrade = rubraview_pal_vgrade_gpu_create(r->d3d, &r->vgrade_why);
+    if (!r->vgrade && !r->vgrade_why) r->vgrade_why = N_("the picture adjustment shader would not build");
+    return r->vgrade;
+}
+
+const char *rubraview_pal_render_vgrade_why(const rubraview_renderer_t *renderer) {
+    return renderer ? renderer->vgrade_why : NULL;
+}
+
+bool rubraview_pal_render_vgrade(rubraview_renderer_t *renderer, const rubraview_vgrade_prepared_t *prepared,
+                                 rubraview_texture_t *src, rubraview_texture_t *dst) {
+    if (!renderer || renderer->drawing || !prepared || !rubraview_pal_texture_on_card(src) || !rubraview_pal_texture_on_card(dst) ||
+        src == dst || src->width != dst->width || src->height != dst->height || src->fp16 != dst->fp16) return false;
+    rubraview_vgrade_gpu_t *engine = vgrade_engine(renderer);
+    if (!engine) return false;
+    bool ok = rubraview_pal_vgrade_gpu_grade(engine, prepared, src->d3d, dst->d3d, src->width, src->height, src->fp16);
+    if (ok) dst->content = ++renderer->content_serial;   /* RV-166 */
+    return ok;
+}
+
+bool rubraview_pal_render_vgrade_upscale(rubraview_renderer_t *renderer, float strength, rubraview_texture_t *src,
+                                         rubraview_texture_t *dst) {
+    if (!renderer || renderer->drawing || !rubraview_pal_texture_on_card(src) || !rubraview_pal_texture_on_card(dst) ||
+        src == dst || src->fp16 != dst->fp16) return false;
+    rubraview_vgrade_gpu_t *engine = vgrade_engine(renderer);
+    if (!engine) return false;
+    bool ok = rubraview_pal_vgrade_gpu_upscale(engine, strength, src->d3d, src->width, src->height, dst->d3d,
+                                               dst->width, dst->height, src->fp16);
+    if (ok) dst->content = ++renderer->content_serial;
     return ok;
 }
 

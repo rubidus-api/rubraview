@@ -1530,6 +1530,7 @@ void render_frame(app_state_t *app) {
     } else {
         rubraview_pal_render_set_hdr(app->renderer, false, 0.0, NULL);
     }
+    film_upscale_prepare(app);   /* RV-270: on the card, before Direct2D draws */
     rubraview_pal_render_begin(app->renderer, COLOR_CANVAS);
 
     if (!app->picker_open) draw_music_backdrop(app, win_w, win_h);

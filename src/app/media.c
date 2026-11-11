@@ -409,6 +409,7 @@ static app_page_t *media_page_ready(app_state_t *app) {
            frame is still to come. */
         app->media_has_frame = !app->media_info.has_video;
         app->needs_relayout = true;
+        if (app->media_info.has_video) film_adjust_load(app);   /* RV-270: the values kept for every film */
     }
     return page;
 }
@@ -1341,7 +1342,9 @@ static void media_adopt(app_state_t *app, int32_t index, proven_u8str_view_t pat
 static bool media_blend_swap(app_state_t *app, app_page_t *page) {
     if (!app->media_prev_texture) {
         int32_t w = page->width, h = page->height;
-        app->media_prev_texture = app->media_info.hardware_decode || app->media_info.hdr_tone_mapped
+        /* RV-270: of the page's own kind (on the card when the adjustment made it so) */
+        app->media_prev_texture = app->media_info.hardware_decode || app->media_info.hdr_tone_mapped ||
+                                  rubraview_pal_texture_on_card(page->texture)
             ? rubraview_pal_texture_create_video(app->renderer, w, h)
             : rubraview_pal_texture_create_bgra(app->renderer, w, h);
         if (!app->media_prev_texture) return false;
@@ -1354,6 +1357,7 @@ void media_blend_drop(app_state_t *app) {
     if (app->media_prev_texture) rubraview_pal_texture_destroy(app->media_prev_texture);
     app->media_prev_texture = NULL;
     app->media_blend_weight = 0.0;
+    film_grade_drop(app);   /* RV-270: the raw frame and the upscaled one go with the page's texture */
 }
 
 static bool media_blend_on(const app_state_t *app) {
@@ -1374,7 +1378,8 @@ static void media_show_blended(app_state_t *app, app_page_t *page, const rubravi
         /* RV-261: a seek's keyframe, drawn while the exact frame is decoded: neither the position, the clock,
            a frame asked to be saved nor the blend take it. */
         app->media_blend_weight = 0.0;
-        if (frame->gpu_texture) rubraview_pal_texture_copy_video_frame(page->texture, frame->gpu_texture, frame->gpu_subresource);
+        if (film_grade_frame(app, page, frame)) {}   /* RV-270: adjusted on the card */
+        else if (frame->gpu_texture) rubraview_pal_texture_copy_video_frame(page->texture, frame->gpu_texture, frame->gpu_subresource);
         else rubraview_pal_texture_upload_bgra(page->texture, frame->pixels, frame->stride);
         app->media_new_picture = true;
         return;
@@ -1385,8 +1390,9 @@ static void media_show_blended(app_state_t *app, app_page_t *page, const rubravi
     } else {
         app->media_blend_weight = 0.0;
     }
-    if (frame->gpu_texture) {
-        rubraview_pal_texture_copy_video_frame(page->texture, frame->gpu_texture, frame->gpu_subresource);
+    bool graded = film_grade_frame(app, page, frame);   /* RV-270: adjusted on the card, read back from there */
+    if (graded || frame->gpu_texture) {
+        if (!graded) rubraview_pal_texture_copy_video_frame(page->texture, frame->gpu_texture, frame->gpu_subresource);
         if (app->frame_wanted && frame->width > 0 && frame->height > 0) {
             /* RV-108: a frame on the card is read back from the page's texture. */
             size_t stride = (size_t)page->width * 4u;

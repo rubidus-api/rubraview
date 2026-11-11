@@ -26,16 +26,13 @@ static inline uint8_t get_pixel_lum(const uint8_t *px, rubraview_pixel_format_t 
     return (uint8_t)((2126 * r + 7152 * g + 722 * b + 5000) / 10000);
 }
 
-rubraview_pixbuf_t rubraview_filter_gaussian_blur(proven_arena_t *arena, const rubraview_pixbuf_t *src, float sigma) {
-    if (!rubraview_pixbuf_is_valid(src) || arena == NULL) return (rubraview_pixbuf_t){0};
-    if (sigma <= 0.1f) return rubraview_pixbuf_clone(arena, src);
-
+int32_t rubraview_filter_gaussian_kernel(float sigma, float *kernel, int32_t capacity) {
     int32_t radius = (int32_t)ceilf(3.0f * sigma);
     if (radius < 1) radius = 1;
     if (radius > MAX_KERNEL_RADIUS) radius = MAX_KERNEL_RADIUS;
+    if (capacity < 1) return 0;
+    if (2 * radius + 1 > capacity) radius = (capacity - 1) / 2;
     int32_t klen = 2 * radius + 1;
-
-    float kernel[2 * MAX_KERNEL_RADIUS + 1];
     float two_sig_sq = 2.0f * sigma * sigma;
     float sum = 0.0f;
     for (int32_t i = -radius; i <= radius; ++i) {
@@ -46,6 +43,15 @@ rubraview_pixbuf_t rubraview_filter_gaussian_blur(proven_arena_t *arena, const r
     for (int32_t i = 0; i < klen; ++i) {
         kernel[i] /= sum;
     }
+    return radius;
+}
+
+rubraview_pixbuf_t rubraview_filter_gaussian_blur(proven_arena_t *arena, const rubraview_pixbuf_t *src, float sigma) {
+    if (!rubraview_pixbuf_is_valid(src) || arena == NULL) return (rubraview_pixbuf_t){0};
+    if (sigma <= 0.1f) return rubraview_pixbuf_clone(arena, src);
+
+    float kernel[2 * MAX_KERNEL_RADIUS + 1];
+    int32_t radius = rubraview_filter_gaussian_kernel(sigma, kernel, 2 * MAX_KERNEL_RADIUS + 1);
 
     int32_t w = src->width;
     int32_t h = src->height;

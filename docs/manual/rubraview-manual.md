@@ -2072,7 +2072,7 @@ listed under a later heading only means that while that is on screen.
 | `O`, `Ctrl+O` | Open a file |
 | `Ctrl+Shift+O` | Open a folder |
 | `Ctrl+Shift+R` | The recent files in a list window: when each was opened, its size and folder; take files off the list |
-| `E` | Adjust the picture |
+| `E` | Adjust the picture; a playing film: Adjust film; a paused one: its frame in Edit |
 | `Ctrl+E` | Export |
 | `Ctrl+Shift+S` | Save a copy as |
 | `Ctrl+B` | Convert many files |
@@ -2234,6 +2234,7 @@ listed under a later heading only means that while that is on screen.
 | Toolbar `Centre` | The picture's middle on the window's, its size as it is (a double click does it too) |
 | Toolbar `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
 | Toolbar `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
+| Toolbar `Adjust` | Adjust the film: light, colour, a brightness curve, blur, sharpening and the upscaler, as it plays (E on a playing film) |
 | Toolbar `Send` | Send: where the file on screen goes, in a list (copy or move to the folder set or another, or Classify) |
 | Toolbar `Hide` | Hide the title bar and the Floating Widget until the picture is clicked |
 | Toolbar `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |

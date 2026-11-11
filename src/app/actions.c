@@ -299,6 +299,7 @@ static proven_u8str_view_t toolbox_caption_in(const app_state_t *app, const rubr
         int preset = eq_preset_now(app);
         return preset <= 0 ? TU8("EQ") : eq_preset_label(preset);
     }
+    if (proven_u8str_view_eq(tile->action, PROVEN_LIT("film_adjust"))) return film_adjust_caption(app);   /* RV-270 */
     if (proven_u8str_view_eq(tile->action, PROVEN_LIT("media_night_toggle"))) {
         return rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("night_mode")) > 0.5 ? TU8("Night on") : TU8("Night");
     }
@@ -542,6 +543,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_eq_window"))) {
         eqwin_toggle(app);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("film_adjust"))) {
+        film_panel_toggle(app);   /* RV-270 */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_night_toggle"))) {
         bool on = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("night_mode")) < 0.5;
         rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("night_mode"), on ? 1.0 : 0.0);
@@ -838,7 +841,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_edit"))) {
         if (app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print && !app->panel_is_convert) panel_close(app);
         else if (app->media && !(app->media_info.has_video && app->media_page >= 0)) osd_say(app, TU8("Edit is for pictures"));
-        else if (app->media && !app->media_paused) osd_say(app, TU8("pause the film first (Space): E then edits the frame on screen"));
+        /* RV-270 (owner, 2026-11-11: "이펙트의 e"; paused, as before): a playing film's E adjusts its picture */
+        else if (app->media && !app->media_paused) film_panel_toggle(app);
         else if (app->media) {
             /* The owner (2026-10-18): a paused film's frame, and only it — saved beside the film as a
                picture, which Edit opens; turning on, Edit passes the film by. */

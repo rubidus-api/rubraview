@@ -71,6 +71,7 @@
 #include "rubraview/ui_chrome.h"
 #include "rubraview/ui_edgenav.h"
 #include "rubraview/ui_subwin.h"
+#include "rubraview/vgrade.h"
 #include "rubraview/ui_ctxmenu.h"
 #include "rubraview/ui_chooser.h"
 #include "rubraview/action_words.h"
@@ -603,6 +604,17 @@ typedef struct app_state {
     rubraview_texture_t   *media_prev_texture;
     double                 media_blend_weight;
     double                 media_blend_at;
+    /* RV-270 (D-330): the film's adjustment (filmadjust.c): its values, what the card's passes take, the frame as
+       decoded (graded into the page's texture), the upscaled picture and the size on screen it was made for. */
+    rubraview_vgrade_t     film_adjust;
+    rubraview_vgrade_prepared_t film_adjust_prep;
+    bool                   film_adjust_film;      /* a pass at the film's size does something */
+    bool                   film_grade_refused, film_up_refused;   /* said once; not tried again this run */
+    rubraview_texture_t   *media_raw_texture;
+    bool                   media_raw_valid;       /* it holds the frame on screen */
+    rubraview_texture_t   *media_up_texture;
+    bool                   media_up_ready, media_up_dirty, media_up_retry;
+    double                 media_up_scale;
     double                 ab_a, ab_b;        /* D-15 A-B repeat points in file seconds, -1 when unset */
     /* The same two points, typed (owner, 2026-09-24). The box holds one
        field per point; a key stamps the playhead into the one in hand,
@@ -885,6 +897,7 @@ typedef struct app_state {
     bool                       export_from_edit;   /* Export opened from Edit: the edits are in what it writes, and Edit comes back */
     bool                       edit_kept;          /* Edit opened again with the edits it had */
     char                       edit_after[1024];   /* a film's frame saved to be edited: Edit opens when it is on screen */
+    size_t                     edit_reopen_at;     /* RV-270: nonzero: edit_after to be opened, after the frame loop */
     rubraview_renderer_t      *files_renderer;
     bool                       files_open, files_dirty;
     int32_t                    files_frame[4];
@@ -1129,6 +1142,7 @@ typedef struct app_state {
     /* RV-133: classifying, the files set aside for the nine folders (made on first use) */
     rubraview_classify_t     *classify;
     rubraview_panel_t         classify_panel;
+    rubraview_panel_t         film_panel;          /* RV-270: Adjust film */
     int32_t                   classify_shown_page;
     int32_t                   sel_grab;        /* 0 none; 2 moving; 3..10 a handle */
     int32_t                   sel_grab_x, sel_grab_y;
@@ -2651,6 +2665,20 @@ void speed_set(app_state_t *app, double speed);
 double media_rate(const app_state_t *app);   /* D-271: the speed asked times the match to the screen */
 void media_resample_follow(app_state_t *app);
 void media_blend_drop(app_state_t *app);
+/* RV-270 (D-330): filmadjust.c */
+void film_adjust_load(app_state_t *app);
+bool film_adjust_on(const app_state_t *app);
+void film_adjust_changed(app_state_t *app);
+void film_grade_drop(app_state_t *app);
+bool film_grade_frame(app_state_t *app, app_page_t *page, const rubraview_video_frame_t *frame);
+void film_upscale_prepare(app_state_t *app);
+bool film_upscale_draw(app_state_t *app, const app_page_t *page, rubraview_mat3x2_t oriented, double opacity);
+void film_panel_toggle(app_state_t *app);
+void film_panel_relayout(app_state_t *app);
+bool film_panel_press(app_state_t *app, double px, double py);
+bool film_panel_drag(app_state_t *app, double px, double py);
+void film_panel_draw(app_state_t *app);
+proven_u8str_view_t film_adjust_caption(const app_state_t *app);
 int speed_text(proven_mem_mut_t buffer_view, double speed);
 void speed_tile_move(app_state_t *app, double y, bool detached);
 void speed_tile_press(app_state_t *app, double y, bool detached, bool interval);

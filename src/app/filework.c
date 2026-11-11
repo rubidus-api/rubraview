@@ -1379,6 +1379,7 @@ bool classify_press(app_state_t *app, double px, double py) {
 /* The panel is placed against the window, so it is placed again whenever
    the window changes size. */
 void panel_relayout(app_state_t *app) {
+    film_panel_relayout(app);   /* RV-270 */
     if (!app->panel.open) return;
     if (owned_panel_relayout(app)) return;   /* RV-194: Batch's or its names' window */
     if (app->edit_window && edit_panel_open(app)) { edit_window_layout(app); return; }   /* RV-137: laid out in its own window */

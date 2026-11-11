@@ -270,6 +270,11 @@ void rubraview_edit_preview_size(const rubraview_edit_session_t *session,
 
 /* ---- commit ---- */
 
+/** RV-270: the commit's levels, curves, white balance, brightness, exposure and contrast on each channel's 256
+    codes, as values in 0..1 before saturation (`out[0]` red, `[1]` green, `[2]` blue), and the saturation factor
+    after (rubraview_color_saturate); 1 when the commit would not saturate. A film's adjustment is drawn with it. */
+void rubraview_edit_tone_tables(const rubraview_edit_session_t *session, float out[3][256], float *out_saturation);
+
 /**
  * Run the session over a pixel buffer, in §3.13's order: crop, then
  * levels and curves, then the colour sliders, then the spatial filters,

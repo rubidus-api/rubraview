@@ -45,6 +45,16 @@ uint8_t rubraview_linear_to_srgb(float lin);
 void rubraview_color_adjust(rubraview_pixbuf_t *pb, const rubraview_color_adjust_params_t *params);
 
 /**
+ * RV-270: steps 1-4 of rubraview_color_adjust (exposure, contrast, gamma), which act on each channel alone, as a
+ * table of the 256 codes: the value in 0..1 before saturation. rubraview_color_adjust looks it up.
+ */
+void rubraview_color_adjust_table(const rubraview_color_adjust_params_t *params, float out[256]);
+/** The saturation factor rubraview_color_adjust uses (the parameter, clamped to 0..4). */
+float rubraview_color_saturation_of(const rubraview_color_adjust_params_t *params);
+/** Step 5: the three values (0..1) mixed with their Rec. 709 luma by `sat`, clamped; nothing at 1. */
+void rubraview_color_saturate(float *r, float *g, float *b, float sat);
+
+/**
  * Compute 256-bin histograms for Red, Green, Blue, and Luminance channels.
  * Luminance is computed using standard Rec. 709 coefficients.
  */

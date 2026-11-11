@@ -143,6 +143,13 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     tiles_take_all(app);   /* D-40 */
     save_job_poll(app, false);
     apply_all_poll(app, false);
+    if (app->edit_reopen_at > 0 && app->edit_after[0]) {
+        /* RV-270: the frame loop is over: the saved frame opened as a file is (its folder's pictures, it on
+           screen). Not the folder opened again on it: opened from a film, the folder lists films, and the frame
+           was never among them, so the film came back instead (and closed under the frame loop, 1.40.1's crash). */
+        app->edit_reopen_at = 0;
+        open_path(app, app_keep(app, cstr(app->edit_after)));
+    }
     if (app->edit_after[0]) {   /* a film's frame saved for Edit: opened once it is on screen */
         int32_t page = current_page_index(app);
         if (page >= 0 && app->pages[page].loaded && rubraview_path_same(app->source.pages[page].path, cstr(app->edit_after))) {
@@ -240,6 +247,8 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
         fc->last_scene_signature = scene_signature(app);
         fc->last_render_seconds = now;
         app->media_new_picture = false;
+        /* RV-270: the film took another size on screen; its upscaled picture is made for it, and drawn, next pass */
+        if (app->media_up_retry) { app->media_up_retry = false; app->media_new_picture = true; }
         if (settled) fc->last_idle_frame_seconds = now;
     }
     if (app->info_open && now - app->stats_since >= 1.0) {   /* RV-215 (D-248): once a second, to the information window */

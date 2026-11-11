@@ -97,7 +97,8 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             }
             {
                 /* A box taken by its title follows the pointer. */
-                rubraview_panel_t *moving = app->edit_window ? (app->classify_panel.moving ? &app->classify_panel : NULL)
+                rubraview_panel_t *moving = app->film_panel.moving ? &app->film_panel   /* RV-270 */
+                                          : app->edit_window ? (app->classify_panel.moving ? &app->classify_panel : NULL)
                                           : app->panel.moving ? &app->panel : app->sel_panel.moving ? &app->sel_panel
                                           : app->steps_panel.moving ? &app->steps_panel
                                           : app->classify_panel.moving ? &app->classify_panel : NULL;
@@ -117,6 +118,11 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                     rubraview_edit_crop_drag(&app->edit, app->crop_drag_x0, app->crop_drag_y0, ix, iy);
                     crop_shown_again(app);
                 }
+                app->pointer_x = event->mouse.x;
+                app->pointer_y = event->mouse.y;
+                break;
+            }
+            if (film_panel_drag(app, event->mouse.x, event->mouse.y)) {   /* RV-270: a slider of Adjust film held */
                 app->pointer_x = event->mouse.x;
                 app->pointer_y = event->mouse.y;
                 break;
@@ -467,6 +473,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                whose "a click outside closes it" rule would otherwise
                shut the workbench at the first press on the picture. */
             /* The owner's edit: the boxes beside it, then the selection's handles and inside. */
+            if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && film_panel_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-270 */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && classify_press(app, event->mouse.x, event->mouse.y)) break;
             bool edit_away = app->edit_window && edit_panel_open(app);   /* RV-137: Edit's boxes are in their own window */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && !edit_away && edit_side_press(app, event->mouse.x, event->mouse.y)) break;
@@ -632,6 +639,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             rubraview_panel_release(&app->sel_panel);
             rubraview_panel_release(&app->steps_panel);
             rubraview_panel_release(&app->classify_panel);
+            rubraview_panel_release(&app->film_panel);   /* RV-270 */
             app->panel.moving = false;
             if (app->sel_grab) {
                 app->sel_grab = 0;
@@ -697,9 +705,9 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             }
             {
                 /* The owner's edit: a box taller than the window scrolls. */
-                rubraview_panel_t *boxes[4] = { &app->classify_panel, &app->steps_panel, &app->sel_panel, &app->panel };
+                rubraview_panel_t *boxes[5] = { &app->film_panel, &app->classify_panel, &app->steps_panel, &app->sel_panel, &app->panel };
                 bool took = false;
-                for (int b = 0; b < (app->edit_window ? 1 : 4) && !took; ++b) {   /* RV-137: Edit's scroll in its window */
+                for (int b = 0; b < (app->edit_window ? 2 : 5) && !took; ++b) {   /* RV-137: Edit's scroll in its window; RV-270 */
                     if (!boxes[b]->open || !rubraview_rect_contains(boxes[b]->bounds, event->mouse.x, event->mouse.y)) continue;
                     rubraview_panel_scroll_by(boxes[b], -event->mouse.wheel_delta * boxes[b]->row_height * 3.0);
                     took = true;

@@ -56,6 +56,7 @@ static const char *const PARTS[] = {
 "  tile center_picture           \"Centre\"\n"   /* RV-214 (owner, 2026-10-31): a film's too */
 "  tile zoom_cycle               \"100%\"\n"
 "  tile fit_cycle                \"Fit\"\n"
+"  tile film_adjust              \"Adjust\"\n"   /* RV-270 (owner, 2026-11-11: "아이콘도 동영상 모드에서") */
 "  group\n"
 "  tile open_picker              \"Open\"\n"
 "  tile toggle_playlist          \"List\"\n"

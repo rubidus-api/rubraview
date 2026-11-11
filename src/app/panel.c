@@ -624,6 +624,7 @@ void draw_panel(app_state_t *app) {
         if (app->classify_shown_page != current_page_index(app)) classify_build(app);
         draw_panel_of(app, &app->classify_panel, false);
     }
+    film_panel_draw(app);   /* RV-270 */
 }
 
 /* (owner, 2026-11-10: "편집 목록에 새로 항목이 추가되는 추가: 버튼의 배경색을 구분되는 강조색으로") the Edit buttons that

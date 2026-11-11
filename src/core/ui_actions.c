@@ -202,6 +202,7 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
         { "open_settings", 0xE713 },         /* Settings */
         { "toggle_help", 0xE897 },           /* Help */
         { "open_edit", 0xE70F },             /* Edit */
+        { "film_adjust", 0xE790 },           /* RV-270: a palette, Adjust film */
         { "text_edit_external", 0xE70F },    /* Edit: the text file in an editor (1.25.0) */
         { "text_reload", 0xE72C },           /* Refresh: the text file read again (1.25.0) */
         { "quick_export", 0xE74E },          /* Save */

@@ -15,6 +15,9 @@ extern "C" {
  * Kernel radius is dynamically computed as ceil(3.0 * sigma).
  * Allocates destination buffer in arena.
  */
+/** RV-270: the Gaussian blur's own kernel, `2 * radius + 1` weights summing to 1 written to `kernel`; the radius
+    (ceil(3 sigma), at least 1, at most 48 and what `capacity` holds). The film's blur on the card uses it. */
+int32_t rubraview_filter_gaussian_kernel(float sigma, float *kernel, int32_t capacity);
 rubraview_pixbuf_t rubraview_filter_gaussian_blur(proven_arena_t *arena, const rubraview_pixbuf_t *src, float sigma);
 
 /**

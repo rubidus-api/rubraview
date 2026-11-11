@@ -203,6 +203,23 @@ bool rubraview_pal_texture_read_video(rubraview_texture_t *texture, uint8_t *dst
 bool rubraview_pal_texture_copy_video_frame(rubraview_texture_t *texture, const void *frame_texture,
                                             uint32_t subresource);
 
+/* RV-270 (D-330): a film's adjustment and upscaler on the graphics card (vgrade.h's arithmetic). */
+struct rubraview_vgrade_prepared;
+/** A texture on the card (create_video, create_video_hdr), which the passes below read and draw into. */
+bool rubraview_pal_texture_on_card(const rubraview_texture_t *texture);
+/** An FP16 one (create_video_hdr). */
+bool rubraview_pal_texture_is_hdr(const rubraview_texture_t *texture);
+/** `src` adjusted into `dst`: both on the card, the same size and kind, not the same. Outside a frame's
+    drawing (between render_begin and render_end it refuses). False when nothing was drawn; then
+    rubraview_pal_render_vgrade_why says why, if the passes could not be made. */
+bool rubraview_pal_render_vgrade(rubraview_renderer_t *renderer, const struct rubraview_vgrade_prepared *prepared,
+                                 rubraview_texture_t *src, rubraview_texture_t *dst);
+/** `src` upscaled into `dst` (its own size), `strength` 0..1; the same conditions. */
+bool rubraview_pal_render_vgrade_upscale(rubraview_renderer_t *renderer, float strength, rubraview_texture_t *src,
+                                         rubraview_texture_t *dst);
+/** Why the passes could not be made on this device (an N_ literal), or NULL. */
+const char *rubraview_pal_render_vgrade_why(const rubraview_renderer_t *renderer);
+
 void rubraview_pal_texture_size(const rubraview_texture_t *texture, int32_t *out_width, int32_t *out_height);
 void rubraview_pal_texture_destroy(rubraview_texture_t *texture);
 

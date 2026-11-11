@@ -49,58 +49,57 @@ static inline float clampf(float val, float min_val, float max_val) {
     return val;
 }
 
+void rubraview_color_adjust_table(const rubraview_color_adjust_params_t *params, float out[256]) {
+    if (!s_lut_initialized) rubraview_color_lut_init();
+    float ev_factor = powf(2.0f, params->exposure_ev);
+    float contrast_factor = tanf((clampf(params->contrast, -100.0f, 100.0f) + 100.0f) * ((float)M_PI / 400.0f));
+    float inv_gamma = (params->gamma > 0.01f) ? (1.0f / params->gamma) : 1.0f;
+    for (int i = 0; i < 256; ++i) {
+        /* 1. Linearize sRGB and apply exposure in linear space */
+        float v_lin = s_srgb_to_lin[i] * ev_factor;
+        /* 2. Convert back to [0.0, 1.0] perceptual space */
+        float v = clampf(powf(v_lin, 1.0f / 2.2f), 0.0f, 1.0f);
+        /* 3. Contrast adjustment around 0.5 midtone */
+        if (params->contrast != 0.0f) v = clampf((v - 0.5f) * contrast_factor + 0.5f, 0.0f, 1.0f);
+        /* 4. Gamma midtone correction */
+        if (params->gamma != 1.0f) v = powf(v, inv_gamma);
+        out[i] = v;
+    }
+}
+
+float rubraview_color_saturation_of(const rubraview_color_adjust_params_t *params) {
+    return clampf(params->saturation, 0.0f, 4.0f);
+}
+
+void rubraview_color_saturate(float *r, float *g, float *b, float sat) {
+    if (sat == 1.0f) return;
+    float lum = 0.2126f * *r + 0.7152f * *g + 0.0722f * *b;
+    *r = clampf(lum + (*r - lum) * sat, 0.0f, 1.0f);
+    *g = clampf(lum + (*g - lum) * sat, 0.0f, 1.0f);
+    *b = clampf(lum + (*b - lum) * sat, 0.0f, 1.0f);
+}
+
 void rubraview_color_adjust(rubraview_pixbuf_t *pb, const rubraview_color_adjust_params_t *params) {
     if (!rubraview_pixbuf_is_valid(pb) || params == NULL) return;
     if (pb->format != RUBRAVIEW_PIXFMT_RGBA8 && pb->format != RUBRAVIEW_PIXFMT_BGRA8) return;
 
-    if (!s_lut_initialized) rubraview_color_lut_init();
-
-    float ev_factor = powf(2.0f, params->exposure_ev);
-    float contrast_factor = tanf((clampf(params->contrast, -100.0f, 100.0f) + 100.0f) * ((float)M_PI / 400.0f));
-    float sat = clampf(params->saturation, 0.0f, 4.0f);
-    float inv_gamma = (params->gamma > 0.01f) ? (1.0f / params->gamma) : 1.0f;
+    /* Steps 1-4 act on each channel alone, so they are one table of the 256 codes (RV-270: the film's
+       adjustment on the graphics card looks the same table up); saturation mixes the three after. */
+    float table[256];
+    rubraview_color_adjust_table(params, table);
+    float sat = rubraview_color_saturation_of(params);
 
     bool is_bgra = (pb->format == RUBRAVIEW_PIXFMT_BGRA8);
+    int idx_r = is_bgra ? 2 : 0;
+    int idx_b = is_bgra ? 0 : 2;
 
     for (int32_t y = 0; y < pb->height; ++y) {
         uint8_t *row = pb->pixels + ((ptrdiff_t)y * pb->stride);
         for (int32_t x = 0; x < pb->width; ++x) {
             uint8_t *px = row + (x * 4);
-            int idx_r = is_bgra ? 2 : 0;
-            int idx_b = is_bgra ? 0 : 2;
-
-            /* 1. Linearize sRGB and apply exposure in linear space */
-            float r_lin = s_srgb_to_lin[px[idx_r]] * ev_factor;
-            float g_lin = s_srgb_to_lin[px[1]] * ev_factor;
-            float b_lin = s_srgb_to_lin[px[idx_b]] * ev_factor;
-
-            /* 2. Convert back to [0.0, 1.0] perceptual space */
-            float r = clampf(powf(r_lin, 1.0f / 2.2f), 0.0f, 1.0f);
-            float g = clampf(powf(g_lin, 1.0f / 2.2f), 0.0f, 1.0f);
-            float b = clampf(powf(b_lin, 1.0f / 2.2f), 0.0f, 1.0f);
-
-            /* 3. Contrast adjustment around 0.5 midtone */
-            if (params->contrast != 0.0f) {
-                r = clampf((r - 0.5f) * contrast_factor + 0.5f, 0.0f, 1.0f);
-                g = clampf((g - 0.5f) * contrast_factor + 0.5f, 0.0f, 1.0f);
-                b = clampf((b - 0.5f) * contrast_factor + 0.5f, 0.0f, 1.0f);
-            }
-
-            /* 4. Gamma midtone correction */
-            if (params->gamma != 1.0f) {
-                r = powf(r, inv_gamma);
-                g = powf(g, inv_gamma);
-                b = powf(b, inv_gamma);
-            }
-
+            float r = table[px[idx_r]], g = table[px[1]], b = table[px[idx_b]];
             /* 5. Saturation */
-            if (sat != 1.0f) {
-                float lum = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-                r = clampf(lum + (r - lum) * sat, 0.0f, 1.0f);
-                g = clampf(lum + (g - lum) * sat, 0.0f, 1.0f);
-                b = clampf(lum + (b - lum) * sat, 0.0f, 1.0f);
-            }
-
+            rubraview_color_saturate(&r, &g, &b, sat);
             px[idx_r] = (uint8_t)(r * 255.0f + 0.5f);
             px[1]     = (uint8_t)(g * 255.0f + 0.5f);
             px[idx_b] = (uint8_t)(b * 255.0f + 0.5f);

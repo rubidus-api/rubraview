@@ -521,6 +521,58 @@ static void compose_lut(uint8_t out[256], const uint8_t first[256], const uint8_
     for (int i = 0; i < 256; ++i) out[i] = second[first[i]];
 }
 
+/* Step 2 of the commit: levels, the composite curve, each channel's curve, white balance and brightness, as
+   one 8-bit map a channel. */
+static void edit_channel_maps(const rubraview_edit_session_t *session, uint8_t chan[3][256]) {
+    uint8_t levels[256], curve_rgb[256], wb_r[256], wb_g[256], wb_b[256];
+    rubraview_levels_build_lut(levels, session->params.black_point, session->params.white_point,
+                               session->params.midtone_gamma);
+    rubraview_curve_build_lut(curve_rgb, session->curves[RUBRAVIEW_EDIT_CHANNEL_RGB].points,
+                              session->curves[RUBRAVIEW_EDIT_CHANNEL_RGB].point_count);
+    build_white_balance(&session->params, wb_r, wb_g, wb_b);
+
+    static const rubraview_edit_channel_t PER_CHANNEL[3] = {
+        RUBRAVIEW_EDIT_CHANNEL_RED, RUBRAVIEW_EDIT_CHANNEL_GREEN, RUBRAVIEW_EDIT_CHANNEL_BLUE
+    };
+    const uint8_t *wb[3] = { wb_r, wb_g, wb_b };
+
+    for (int c = 0; c < 3; ++c) {
+        uint8_t per[256], stage1[256], stage2[256];
+        rubraview_curve_build_lut(per, session->curves[PER_CHANNEL[c]].points,
+                                  session->curves[PER_CHANNEL[c]].point_count);
+        compose_lut(stage1, levels, curve_rgb);   /* levels, then the composite curve */
+        compose_lut(stage2, stage1, per);         /* then this channel's own curve */
+        compose_lut(chan[c], stage2, wb[c]);      /* then white balance and brightness */
+    }
+}
+
+/* Step 3's parameters. */
+static rubraview_color_adjust_params_t edit_adjust_params(const rubraview_edit_session_t *session) {
+    return (rubraview_color_adjust_params_t){
+        .exposure_ev = session->params.exposure_ev,
+        .contrast = session->params.contrast,
+        /* §3.13's -100..+100 is the engine's 0..2 factor. */
+        .saturation = 1.0f + session->params.saturation / 100.0f,
+        .gamma = 1.0f,
+    };
+}
+
+/* RV-270: what steps 2 and 3 of the commit do to one channel's 256 codes, as values in 0..1 before
+   saturation, and the saturation after: the commit's own arithmetic, so a film adjusted on the graphics card
+   and a picture committed here agree. Levels, curves, white balance and brightness first (one 8-bit map, as
+   the commit composes it), then rubraview_color_adjust's table when exposure, contrast or saturation is set. */
+void rubraview_edit_tone_tables(const rubraview_edit_session_t *session, float out[3][256], float *out_saturation) {
+    uint8_t chan[3][256];
+    edit_channel_maps(session, chan);
+    rubraview_color_adjust_params_t adjust = edit_adjust_params(session);
+    bool on = adjust.exposure_ev != 0.0f || adjust.contrast != 0.0f || adjust.saturation != 1.0f;
+    float table[256];
+    if (on) rubraview_color_adjust_table(&adjust, table);
+    for (int c = 0; c < 3; ++c)
+        for (int i = 0; i < 256; ++i) out[c][i] = on ? table[chan[c][i]] : (float)chan[c][i] / 255.0f;
+    if (out_saturation) *out_saturation = on ? rubraview_color_saturation_of(&adjust) : 1.0f;
+}
+
 rubraview_pixbuf_t rubraview_edit_commit(proven_arena_t *arena,
                                          const rubraview_edit_session_t *session,
                                          const rubraview_pixbuf_t *src) {
@@ -542,39 +594,14 @@ rubraview_pixbuf_t rubraview_edit_commit(proven_arena_t *arena,
     /* 2. Levels, curves and white balance are all 256-entry maps, so
        they are composed into one per channel and applied in a single
        pass. */
-    uint8_t levels[256], curve_rgb[256], wb_r[256], wb_g[256], wb_b[256];
-    rubraview_levels_build_lut(levels, session->params.black_point, session->params.white_point,
-                               session->params.midtone_gamma);
-    rubraview_curve_build_lut(curve_rgb, session->curves[RUBRAVIEW_EDIT_CHANNEL_RGB].points,
-                              session->curves[RUBRAVIEW_EDIT_CHANNEL_RGB].point_count);
-    build_white_balance(&session->params, wb_r, wb_g, wb_b);
-
     uint8_t chan[3][256];
-    static const rubraview_edit_channel_t PER_CHANNEL[3] = {
-        RUBRAVIEW_EDIT_CHANNEL_RED, RUBRAVIEW_EDIT_CHANNEL_GREEN, RUBRAVIEW_EDIT_CHANNEL_BLUE
-    };
-    const uint8_t *wb[3] = { wb_r, wb_g, wb_b };
-
-    for (int c = 0; c < 3; ++c) {
-        uint8_t per[256], stage1[256], stage2[256];
-        rubraview_curve_build_lut(per, session->curves[PER_CHANNEL[c]].points,
-                                  session->curves[PER_CHANNEL[c]].point_count);
-        compose_lut(stage1, levels, curve_rgb);   /* levels, then the composite curve */
-        compose_lut(stage2, stage1, per);         /* then this channel's own curve */
-        compose_lut(chan[c], stage2, wb[c]);      /* then white balance and brightness */
-    }
+    edit_channel_maps(session, chan);
     rubraview_lut_apply(&work, chan[0], chan[1], chan[2]);
 
     /* 3. Exposure, contrast, saturation and gamma go through the core
        engine, which the batch path uses too — one implementation, so a
        preview and a batch run cannot disagree. */
-    rubraview_color_adjust_params_t adjust = {
-        .exposure_ev = session->params.exposure_ev,
-        .contrast = session->params.contrast,
-        /* §3.13's -100..+100 is the engine's 0..2 factor. */
-        .saturation = 1.0f + session->params.saturation / 100.0f,
-        .gamma = 1.0f,
-    };
+    rubraview_color_adjust_params_t adjust = edit_adjust_params(session);
     if (adjust.exposure_ev != 0.0f || adjust.contrast != 0.0f || adjust.saturation != 1.0f) {
         rubraview_color_adjust(&work, &adjust);
     }

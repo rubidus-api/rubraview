@@ -154,7 +154,9 @@ void frame_take(app_state_t *app, const uint8_t *bgra, int32_t width, int32_t he
     if (wanted == FRAME_EDIT && written && target.size < sizeof(app->edit_after)) {
         proven_sys_mem_copy(app->edit_after, target.ptr, target.size);   /* Edit opens once it is the page on screen */
         app->edit_after[target.size] = '\0';
-        reopen_on_path(app, app_keep(app, target), (size_t)page + 1);
+        /* RV-270: not here: this runs inside the film's frame loop, and opening the folder again closes the film
+           the loop goes on to take the frame from (1.40.1 crashed in rubraview_pal_media_pop_frame) */
+        app->edit_reopen_at = (size_t)page + 2;
     }
     char line[600];
     rubraview_fmt(line, sizeof(line), written ? T("frame saved: {}") : T("could not write {}"), PROVEN_ARG(file));
