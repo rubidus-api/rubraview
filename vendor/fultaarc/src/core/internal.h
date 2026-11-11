@@ -5,6 +5,7 @@
 #include "fulta/arc.h"
 
 #include "proven/hash.h"
+#include "proven/sha2.h"
 #include "proven/allocator.h"
 #include "proven/heap.h"
 #include "proven/u8str.h"
@@ -268,7 +269,7 @@ void fa_sha1_init(fa_sha1_t *c);
 void fa_sha1_update(fa_sha1_t *c, const void *data, size_t n);
 void fa_sha1_final(fa_sha1_t *c, uint8_t out[20]);
 
-typedef struct fa_sha256 { proven_sha256_t pv; } fa_sha256_t;   /* SHA-256 is proven's (hash.h) */
+typedef struct fa_sha256 { proven_sha256_t pv; } fa_sha256_t;   /* SHA-256 is proven_crypto's (sha2.h) */
 void fa_sha256_init(fa_sha256_t *c);
 void fa_sha256_update(fa_sha256_t *c, const void *data, size_t n);
 void fa_sha256_final(fa_sha256_t *c, uint8_t out[32]);

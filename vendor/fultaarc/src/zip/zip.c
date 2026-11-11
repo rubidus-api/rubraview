@@ -145,8 +145,8 @@ static fulta_arc_err_t zip_open(fulta_arc_t *arc, uint64_t search) {
     arc->state = z;
 
     /* disks: .z01 .. .zNN, then this file (zip.md 7.4) */
+    if (disk >= 4096) return FULTA_ARC_ERR_CORRUPT;   /* before the +1: a Zip64 disk of 0xFFFFFFFF would wrap to 0 */
     uint32_t ndisks = disk + 1;
-    if (ndisks > 4096) return FULTA_ARC_ERR_CORRUPT;
     z->range.pieces = fa_zalloc(arc->alloc, ndisks, sizeof *z->range.pieces);
     if (!z->range.pieces) return FULTA_ARC_ERR_NOMEM;
     uint64_t *disk_start = fa_zalloc(arc->alloc, ndisks, sizeof *disk_start);

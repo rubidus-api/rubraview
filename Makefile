@@ -6,7 +6,7 @@ EXE_NAME := rubraview-v$(VERSION).exe
 PROBE_NAME := rubraview-mfprobe-v$(VERSION).exe
 
 CC ?= gcc
-CFLAGS ?= -std=c23 -Wall -Wextra -pedantic -Werror -Iinclude -Ivendor/fultaarc/include -Ivendor/proven/include -Ivendor/proven/platform -g -fsanitize=address,undefined
+CFLAGS ?= -std=c23 -Wall -Wextra -pedantic -Werror -Iinclude -Ivendor/fultaarc/include -Ivendor/proven/include -Ivendor/proven/platform -Ivendor/proven/crypto/include -g -fsanitize=address,undefined
 LDFLAGS ?= -lm -lpthread
 
 SRCS_CORE = src/core/number.c src/core/subbox.c src/core/thumb.c src/core/thumbq.c src/core/textedit.c src/core/pixbuf.c src/core/color.c src/core/resample.c src/core/filter.c src/core/path.c src/core/sort.c \
@@ -22,12 +22,7 @@ SRCS_CORE = src/core/number.c src/core/subbox.c src/core/thumb.c src/core/thumbq
 # untrusted input. The alignment check alone is off for the LZMA SDK, which
 # reads 32- and 64-bit fields straight out of a byte buffer by design.
 FULTA = vendor/fultaarc
-# proven v0.113.0 moved SHA-2 from proven/hash.h to proven_crypto's proven/sha2.h; FultaArc v0.1.0 still
-# reaches proven_sha256 through hash.h alone, so sha2.h is put before each of its own files (FULTA_SHA2; not
-# the C11 decoders it vendors) (D-328). Redundant once FultaArc's own tree includes sha2.h.
-FULTA_SHA2 = -include proven/sha2.h
-FULTA_INCLUDES = -I$(FULTA)/include -I$(FULTA)/src -Ivendor/proven/include -Ivendor/proven/platform \
-                 -Ivendor/proven/crypto/include \
+FULTA_INCLUDES = -I$(FULTA)/include -I$(FULTA)/src -Ivendor/proven/include -Ivendor/proven/platform -Ivendor/proven/crypto/include \
                  -I$(FULTA)/vendor/lzma -I$(FULTA)/vendor/miniz -I$(FULTA)/vendor/bzip2 -I$(FULTA)/vendor/zstd \
                  -I$(FULTA)/vendor/bzip2_alz
 FULTA_MINIZ_DEF = -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ARCHIVE_WRITING_APIS -DMINIZ_NO_ZLIB_COMPATIBLE_NAMES
@@ -114,8 +109,9 @@ JPEG16_OBJS_WIN = $(patsubst %,build/libjpeg16-win/%.o,$(JPEG16_NAMES))
 # proven_c_lib, whole, as a static library (FultaArc uses more of it than the
 # viewer does; the linker takes what is referred to). Without -pedantic:
 # float_decimal.c uses unsigned __int128 for its exact arithmetic. With
-# proven_crypto (crypto/, since v0.113.0) for FultaArc's SHA-256; not
-# proven_codec or proven_net, which nothing here calls (D-328).
+# proven_crypto (crypto/, since v0.113.0) for SHA-256 (FultaArc's 7z and
+# AES keys, the viewer's plugins); not proven_codec or proven_net, which
+# nothing here calls (D-328, D-329).
 PROVEN_SRCS = $(wildcard vendor/proven/src/proven/*.c vendor/proven/platform/*.c \
                          vendor/proven/crypto/src/*.c vendor/proven/crypto/platform/*.c)
 PROVEN_INCLUDES = -Ivendor/proven/include -Ivendor/proven/platform -Ivendor/proven/crypto/include -Ivendor/proven/crypto/platform
@@ -191,11 +187,11 @@ build/fulta/vendor/%.o: $(FULTA)/vendor/%.c
 # LHA's clean-room decoder takes FultaArc's shim first, as FultaArc's own Makefile builds it (LHADEC_SHIM).
 build/fulta/src/lha/lhadec/src/%.o: $(FULTA)/src/lha/lhadec/src/%.c
 	@mkdir -p $(dir $@)
-	$(CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) -include $(FULTA)/src/lha/lhadec_shim.h $(FULTA_SHA2) $(FULTA_INCLUDES) -g -fsanitize=address,undefined -c $< -o $@
+	$(CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) -include $(FULTA)/src/lha/lhadec_shim.h $(FULTA_INCLUDES) -g -fsanitize=address,undefined -c $< -o $@
 
 build/fulta/src/%.o: $(FULTA)/src/%.c
 	@mkdir -p $(dir $@)
-	$(CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_SHA2) $(FULTA_INCLUDES) -g -fsanitize=address,undefined -c $< -o $@
+	$(CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_INCLUDES) -g -fsanitize=address,undefined -c $< -o $@
 
 $(FULTA_LIB): $(FULTA_OBJS)
 	@rm -f $@
@@ -326,11 +322,11 @@ build/fulta-win/vendor/%.o: $(FULTA)/vendor/%.c
 
 build/fulta-win/src/lha/lhadec/src/%.o: $(FULTA)/src/lha/lhadec/src/%.c
 	@mkdir -p $(dir $@)
-	$(MINGW_CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) -include $(FULTA)/src/lha/lhadec_shim.h $(FULTA_SHA2) $(FULTA_INCLUDES) -c $< -o $@
+	$(MINGW_CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) -include $(FULTA)/src/lha/lhadec_shim.h $(FULTA_INCLUDES) -c $< -o $@
 
 build/fulta-win/src/%.o: $(FULTA)/src/%.c
 	@mkdir -p $(dir $@)
-	$(MINGW_CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_SHA2) $(FULTA_INCLUDES) -c $< -o $@
+	$(MINGW_CC) -std=c23 -O2 -w $(FULTA_VENDOR_DEF) $(FULTA_INCLUDES) -c $< -o $@
 
 $(FULTA_LIB_WIN): $(FULTA_OBJS_WIN)
 	@rm -f $@
@@ -421,7 +417,7 @@ win64: $(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) $(AVIF_LIB_WIN) $(JPEG
 	@mkdir -p dist
 	$(MINGW_CC) -std=c23 -O2 -Wall -Wextra -Werror -municode -mwindows \
 		$(JPEG_INCLUDE) $(WEBP_INCLUDE) $(AVIF_INCLUDE) \
-		-Iinclude -Ivendor/fultaarc/include -Ivendor/proven/include -Ivendor/proven/platform -Ivendor/rubrapack $(FFMPEG_INCLUDE) \
+		-Iinclude -Ivendor/fultaarc/include -Ivendor/proven/include -Ivendor/proven/platform -Ivendor/proven/crypto/include -Ivendor/rubrapack $(FFMPEG_INCLUDE) \
 		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) \
 		$(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) $(AVIF_LIB_WIN) -lbcrypt \
 		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid -limm32 -lcomdlg32 -lwinspool -lruntimeobject \

@@ -1,9 +1,12 @@
 # Vendored FultaArc
 
 - Upstream: `fultaarc_c_lib` (sibling checkout), MIT (see `LICENSE`); third-party parts in `THIRD_PARTY_NOTICES.md`
-- Snapshot: tag `v0.1.0`, commit `24cd434`, taken on 2026-11-10 with
-  `git archive 24cd434 LICENSE THIRD_PARTY_NOTICES.md include src vendor/lzma vendor/miniz vendor/bzip2 vendor/bzip2_alz vendor/zstd`
-  (owner, 2026-11-10: "fultaarc 의 재벤더링 요청합니다"; D-325). Since `f41b3a0`: FultaArc's security review (its
+- Snapshot: commit `0dccf16` (v0.1.0 and one commit, untagged), taken on 2026-11-11 with
+  `git archive 0dccf16 LICENSE THIRD_PARTY_NOTICES.md include src vendor/lzma vendor/miniz vendor/bzip2 vendor/bzip2_alz vendor/zstd`
+  (owner, 2026-11-11: "proven c lib 와 fultaarc 버젼 비교해서 새 버젼 있으면 벤더링"; D-329). Since `24cd434`
+  (v0.1.0, 2026-11-10, D-325): proven v0.113.0 with proven_crypto, `src/core/internal.h` including `proven/sha2.h`
+  (asked by Rubraview, D-328), and a Zip64 end record with disk number 0xFFFFFFFF no longer read past its disk table
+  (its D-043). Since `f41b3a0`, in v0.1.0: FultaArc's security review (its
   D-041): double frees and a heap over-read fixed, header injection and unsafe names refused (an entry's name never
   holds a drive or a ".." part as Windows reads one, "_" when nothing safe remains), one memory budget with a RAR
   window and an ALZ entry checked against it before they are allocated, 7z folders grown as parsed, exclusive and
@@ -28,7 +31,6 @@
   `-include vendor/bzip2_alz/alz_bzip2_rename.h` so that it stands beside the ordinary one; `src/lha/lhadec/src` with
   `-include src/lha/lhadec_shim.h`; Zstandard is the whole `zstd.c` (FultaArc reads `.zst` and writes none).
 - Not taken: its tests, tools and documents, and its `vendor/proven` — v0.112.3; FultaArc is built
-  here on Rubraview's `vendor/proven` (v0.113.0 since D-328), unchanged, its tests passing. proven v0.113.0 moved
-  SHA-2 to `proven/sha2.h`, which FultaArc v0.1.0 does not include yet: its C23 files are compiled with
-  `-include proven/sha2.h` (`FULTA_SHA2` in the Makefile) until its own tree does.
+  here on Rubraview's `vendor/proven` (v0.113.0 since D-328, the same as its own), with
+  `-Ivendor/proven/crypto/include`, unchanged, its tests passing.
 - Unmodified. Never edit it here; report defects upstream and resync.

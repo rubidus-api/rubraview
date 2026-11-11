@@ -5,6 +5,7 @@
 #include "rubraview/lang.h"
 #include "rubraview/path.h"
 #include "rubraview/version.h"
+#include "proven/hash.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -17,23 +18,6 @@ static uint32_t le16(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1]
 static uint32_t le32(const uint8_t *p) { return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24); }
 static void put_be32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)(v >> 24); p[1] = (uint8_t)(v >> 16); p[2] = (uint8_t)(v >> 8); p[3] = (uint8_t)v; }
 static void put_le32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
-
-static uint32_t crc32_of(const uint8_t *a, size_t an, const uint8_t *b, size_t bn) {
-    static uint32_t table[256];
-    static bool made;
-    if (!made) {
-        for (uint32_t n = 0; n < 256; ++n) {
-            uint32_t c = n;
-            for (int k = 0; k < 8; ++k) c = (c & 1u) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
-            table[n] = c;
-        }
-        made = true;
-    }
-    uint32_t c = 0xFFFFFFFFu;
-    for (size_t i = 0; i < an; ++i) c = table[(c ^ a[i]) & 0xFFu] ^ (c >> 8);
-    for (size_t i = 0; i < bn; ++i) c = table[(c ^ b[i]) & 0xFFu] ^ (c >> 8);
-    return c ^ 0xFFFFFFFFu;
-}
 
 /* A buffer grown in an arena: what is written, and whether it all fitted. */
 typedef struct out_buf {
@@ -592,7 +576,7 @@ static void png_chunk(out_buf_t *o, const char *type, const uint8_t *data, size_
     out_put(o, rubraview_mem_view(type, 4));
     out_put(o, rubraview_mem_view(data, n));
     uint8_t crc[4];
-    put_be32(crc, crc32_of((const uint8_t*)type, 4, data, n));
+    put_be32(crc, proven_crc32_update(proven_crc32(rubraview_mem_view(type, 4)), rubraview_mem_view(data, n)));   /* type and data */
     out_put(o, rubraview_mem_view(crc, 4));
 }
 

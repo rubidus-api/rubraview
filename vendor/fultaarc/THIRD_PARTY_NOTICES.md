@@ -4,7 +4,7 @@ FultaArc is MIT-licensed (`LICENSE`). It contains or derives data from the follo
 
 | Component | Where | Licence |
 |---|---|---|
-| proven_c_lib v0.112.3 | `vendor/proven/` | MIT (`vendor/proven/LICENSE`; its own notices in `vendor/proven/THIRD_PARTY_NOTICES.md`) |
+| proven_c_lib v0.113.0 (proven_base and proven_crypto) | `vendor/proven/` | MIT (`vendor/proven/LICENSE`; its own notices in `vendor/proven/THIRD_PARTY_NOTICES.md`) |
 | LZMA SDK 26.05 (Igor Pavlov; PPMd var.H by Dmitry Shkarin) | `vendor/lzma/` | public domain (`vendor/lzma/LICENSE.txt`) |
 | miniz 3.1.2 | `vendor/miniz/` | MIT (`vendor/miniz/LICENSE`) |
 | bzip2 1.0.8 (Julian Seward) | `vendor/bzip2/`, `vendor/bzip2_alz/` (altered, marked) | bzip2 licence (`vendor/bzip2/LICENSE`) |

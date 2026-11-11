@@ -266,7 +266,7 @@ void fa_sha1_final(fa_sha1_t *c, uint8_t out[20]) {
     }
 }
 
-/* ---- SHA-256 (FIPS 180-4): proven's implementation (vendor/proven, hash.h) ---------------------------------- */
+/* ---- SHA-256 (FIPS 180-4): proven_crypto's implementation (vendor/proven/crypto, sha2.h) -------------------- */
 void fa_sha256_init(fa_sha256_t *c) { proven_sha256_init(&c->pv); }
 void fa_sha256_update(fa_sha256_t *c, const void *data, size_t n) {
     proven_sha256_update(&c->pv, (proven_mem_view_t){.ptr = data, .size = n});
