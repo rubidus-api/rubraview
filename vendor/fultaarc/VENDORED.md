@@ -28,5 +28,7 @@
   `-include vendor/bzip2_alz/alz_bzip2_rename.h` so that it stands beside the ordinary one; `src/lha/lhadec/src` with
   `-include src/lha/lhadec_shim.h`; Zstandard is the whole `zstd.c` (FultaArc reads `.zst` and writes none).
 - Not taken: its tests, tools and documents, and its `vendor/proven` — v0.112.3; FultaArc is built
-  here on Rubraview's `vendor/proven` (v0.112.4 since D-320), unchanged, its tests passing.
+  here on Rubraview's `vendor/proven` (v0.113.0 since D-328), unchanged, its tests passing. proven v0.113.0 moved
+  SHA-2 to `proven/sha2.h`, which FultaArc v0.1.0 does not include yet: its C23 files are compiled with
+  `-include proven/sha2.h` (`FULTA_SHA2` in the Makefile) until its own tree does.
 - Unmodified. Never edit it here; report defects upstream and resync.
