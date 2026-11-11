@@ -41,8 +41,12 @@ bool film_adjust_on(const app_state_t *app) {
     return !rubraview_vgrade_is_neutral(&app->film_adjust);
 }
 
+/* Not with Blend frames (D-272): a blended refresh draws the page's texture under the one before, so the
+   upscaled picture would come and go with it; Blend frames is off with HDR output, as media_blend_on says. */
 static bool upscale_wanted(const app_state_t *app) {
-    return app->film_adjust_prep.upscale > 0.0f && !app->film_up_refused;
+    bool blending = !app->media_info.hdr_output &&
+                    rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("blend_frames")) > 0.5;
+    return app->film_adjust_prep.upscale > 0.0f && !app->film_up_refused && !blending;
 }
 
 void film_grade_drop(app_state_t *app) {

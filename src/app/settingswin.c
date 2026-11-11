@@ -62,6 +62,7 @@ void settings_read_file(app_state_t *app) {
     shell_menu_take_old(app, text);
     app->settings_saved = app->settings;
     skip_dirs_take_old(app);
+    film_adjust_load(app);   /* RV-270: the film's values from the start (the Toolbar's caption reads them) */
 }
 
 /* RV-184: the Keys table, by function (headings and bindings) or by key */
