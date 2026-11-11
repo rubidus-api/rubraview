@@ -609,7 +609,7 @@ typedef struct app_state {
     rubraview_vgrade_t     film_adjust;
     rubraview_vgrade_prepared_t film_adjust_prep;
     bool                   film_adjust_film;      /* a pass at the film's size does something */
-    bool                   film_grade_refused, film_up_refused;   /* said once; not tried again this run */
+    bool                   film_grade_refused, film_up_refused;   /* said once; not tried again for this film (D-332) */
     rubraview_texture_t   *media_raw_texture;
     bool                   media_raw_valid;       /* it holds the frame on screen */
     rubraview_texture_t   *media_up_texture;

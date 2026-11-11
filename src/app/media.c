@@ -400,6 +400,11 @@ static app_page_t *media_page_ready(app_state_t *app) {
                 ? rubraview_pal_texture_create_video(app->renderer, w, h)
                 : rubraview_pal_texture_create_bgra(app->renderer, w, h);
         if (!page->texture) return NULL;
+        rubraview_pal_media_log("app: page {} texture {}x{} made {} (hdr_output {}, hw {}, tone {})", PROVEN_ARG((int64_t)app->media_page),
+                                PROVEN_ARG((int64_t)w), PROVEN_ARG((int64_t)h),
+                                PROVEN_ARG(rubraview_pal_texture_is_hdr(page->texture) ? "FP16" : rubraview_pal_texture_on_card(page->texture) ? "BGRA on the card" : "BGRA"),
+                                PROVEN_ARG((int64_t)app->media_info.hdr_output), PROVEN_ARG((int64_t)app->media_info.hardware_decode),
+                                PROVEN_ARG((int64_t)app->media_info.hdr_tone_mapped));
         page->width = w;
         page->height = h;
         page->loaded = true;
@@ -409,7 +414,10 @@ static app_page_t *media_page_ready(app_state_t *app) {
            frame is still to come. */
         app->media_has_frame = !app->media_info.has_video;
         app->needs_relayout = true;
-        if (app->media_info.has_video) film_adjust_load(app);   /* RV-270: the values kept for every film */
+        if (app->media_info.has_video) {
+            film_adjust_load(app);   /* RV-270: the values kept for every film */
+            app->film_grade_refused = app->film_up_refused = false;   /* D-332: a refusal is the film's, said once for it */
+        }
     }
     return page;
 }
@@ -1374,6 +1382,16 @@ static void media_show(app_state_t *app, app_page_t *page, const rubraview_video
 
 static void media_show_blended(app_state_t *app, app_page_t *page, const rubraview_video_frame_t *frame, double weight,
                                double display_at) {
+    static int32_t logged_page = -2, logged_n = 0;   /* the first frames of each film, to the media log */
+    if (logged_page != app->media_page) { logged_page = app->media_page; logged_n = 0; }
+    if (logged_n < 3) {
+        logged_n++;
+        rubraview_pal_media_log("app: frame to page {} ({}x{} {}): {} {}x{} stride {}{}", PROVEN_ARG((int64_t)app->media_page),
+                                PROVEN_ARG((int64_t)page->width), PROVEN_ARG((int64_t)page->height),
+                                PROVEN_ARG(rubraview_pal_texture_is_hdr(page->texture) ? "FP16" : rubraview_pal_texture_on_card(page->texture) ? "BGRA on the card" : "BGRA"),
+                                PROVEN_ARG(frame->gpu_texture ? "on the card" : "in memory"), PROVEN_ARG((int64_t)frame->width),
+                                PROVEN_ARG((int64_t)frame->height), PROVEN_ARG((int64_t)frame->stride), PROVEN_ARG(frame->preview ? ", preview" : ""));
+    }
     if (frame->preview) {
         /* RV-261: a seek's keyframe, drawn while the exact frame is decoded: neither the position, the clock,
            a frame asked to be saved nor the blend take it. */

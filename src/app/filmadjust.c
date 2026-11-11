@@ -109,6 +109,9 @@ bool film_grade_frame(app_state_t *app, app_page_t *page, const rubraview_video_
                                  : rubraview_pal_texture_upload_bgra(app->media_raw_texture, frame->pixels, frame->stride);
     if (!in) return false;
     if (!rubraview_pal_render_vgrade(app->renderer, &app->film_adjust_prep, app->media_raw_texture, page->texture)) {
+        rubraview_pal_media_log("app: grade refused: raw {} card {}, page {} card {}", PROVEN_ARG((int64_t)rubraview_pal_texture_is_hdr(app->media_raw_texture)),
+                                PROVEN_ARG((int64_t)rubraview_pal_texture_on_card(app->media_raw_texture)),
+                                PROVEN_ARG((int64_t)rubraview_pal_texture_is_hdr(page->texture)), PROVEN_ARG((int64_t)rubraview_pal_texture_on_card(page->texture)));
         film_refused(app, &app->film_grade_refused, TU8("the picture adjustment could not run on this graphics card"));
         return false;
     }

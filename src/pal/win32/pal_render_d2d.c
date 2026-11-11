@@ -170,11 +170,12 @@ rubraview_texture_t *rubraview_d2d_texture_wrap(rubraview_renderer_t *renderer, 
         if (!tex) return NULL;
     }
 
+    /* D-332: every field from nothing — a struct off the free list kept an FP16 film's `fp16`, and the next film's
+       BGRA texture took its frames as halves (stripes) and refused the adjustment. */
+    proven_sys_mem_set(tex, 0, sizeof(*tex));
     /* The size comes from the caller, not from GetPixelSize — see the
        note on this function in pal_render_d2d_internal.h. */
     tex->bitmap = bitmap;
-    tex->d3d = NULL;
-    proven_sys_mem_set(tex->sources, 0, sizeof(tex->sources));
     tex->width = width;
     tex->height = height;
     tex->content = ++renderer->content_serial;
