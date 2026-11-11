@@ -1206,12 +1206,28 @@ static bool film_ahead_take(app_state_t *app, int32_t index, proven_u8str_view_t
     return true;
 }
 
-/* Once a pass: at a steady moment of a film (its picture shown for 3 s since the open or the last seek), the next
-   page, when it is a film, is opened ahead on a thread of its own and kept paused (owner, 2026-11-08: "적절하게
-   안정적인 타이밍에 다음 파일 버퍼링 해두게 합시다"). */
+/* D-333: the film in memory far enough past where it plays for the next to be opened: 30 s of it (at most three
+   quarters of its room, a window smaller than 30 s), or on to its end; a film not in memory waits for nothing more. */
+static bool film_ahead_memory_ready(const app_state_t *app) {
+    rubraview_filmcache_stats_t cs;
+    rubraview_pal_filmcache_stats(&cs);
+    if (cs.memory_room == 0 || cs.memory_ahead == UINT64_MAX) return true;
+    double per_second = app->media_info.bitrate_kbps > 0 ? (double)app->media_info.bitrate_kbps * 1000.0 / 8.0
+                                                         : (double)rubraview_filmbuf_head_bytes(0.0) / 20.0;
+    double need = per_second * 30.0, cap = (double)cs.memory_room * 0.75;
+    return (double)cs.memory_ahead >= (need < cap ? need : cap);
+}
+
+/* Once a pass: at a steady moment of a film (its picture shown for 3 s since the open or the last seek, and D-333 its
+   memory 30 s ahead), the next page, when it is a film, is opened ahead on a thread of its own and kept paused (owner,
+   2026-11-08: "적절하게 안정적인 타이밍에 다음 파일 버퍼링 해두게 합시다"). */
 void film_ahead_poll(app_state_t *app) {
     if (app->film_ahead || !app->media || !app->media_info.has_video || app->media_info.live) return;
-    if (!(app->media_settled_at > 0.0) || rubraview_pal_time_now_seconds() - app->media_settled_at < 3.0) return;
+    double now = rubraview_pal_time_now_seconds();
+    if (!(app->media_settled_at > 0.0) || now - app->media_settled_at < 3.0) return;
+    if (now - app->film_ahead_asked_at < 0.5) return;   /* the memory asked twice a second */
+    app->film_ahead_asked_at = now;
+    if (!film_ahead_memory_ready(app)) return;
     int32_t next = app->media_page + 1;
     if (next <= 0 || (size_t)next >= page_count(app) || app->pages[next].skipped || app->pages[next].failed) return;
     proven_u8str_view_t path = app->source.pages[next].path;

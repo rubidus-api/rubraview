@@ -52,7 +52,8 @@ void *rubraview_pal_filmcache_istream(rubraview_filmcache_stream_t *stream);
 typedef struct rubraview_filmcache_stats {
     uint64_t from_copy, from_source;   /* bytes served since the program started */
     uint64_t from_memory;              /* RV-261: bytes served from memory */
-    uint64_t memory_held, memory_room; /* RV-261: the film last opened: bytes in memory, of how many */
+    uint64_t memory_held, memory_room; /* RV-261: the film that plays (D-333): bytes in memory, of how many */
+    uint64_t memory_ahead;             /* D-333: its bytes held one after another from where it plays; UINT64_MAX to its end */
     uint64_t filled, blocks;           /* the copy last opened: its blocks filled, of how many */
     bool     open;                     /* a film is read through the cache now */
 } rubraview_filmcache_stats_t;

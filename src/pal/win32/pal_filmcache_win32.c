@@ -49,6 +49,9 @@ struct rubraview_filmcache_stream {
     _Atomic uint64_t ram_limit;             /* blocks memory reads at most from the start; UINT64_MAX all */
     _Atomic uint64_t read_at;               /* the block last read for playing */
     _Atomic bool ram_full_said;
+    /* D-333: opened ahead, the room is its head's until its page comes; the counts the Live rows show, this film's */
+    bool ram_grow;                          /* the ram thread's: room for the whole budget once reading goes on */
+    _Atomic uint64_t mem_held, mem_room, mem_ahead;
 };
 
 /* RUBRAVIEW_FILMCACHE_LOG set: what each process does with the cache, a line at a time, in that file. */
@@ -79,7 +82,8 @@ static SRWLOCK g_list_lock = SRWLOCK_INIT;
 static rubraview_filmcache_stream_t *g_list, *g_last;
 static _Atomic uint64_t g_from_copy, g_from_source, g_from_memory;
 static _Atomic uint64_t g_memory_setting;   /* RV-261 */
-static _Atomic uint64_t g_memory_held, g_memory_room;
+/* D-333: the film in memory that plays (the one opened ahead reads its head unshown); under g_list_lock */
+static rubraview_filmcache_stream_t *g_mem_playing;
 
 void rubraview_pal_filmcache_configure_memory(uint64_t bytes) { atomic_store(&g_memory_setting, bytes); }
 uint64_t rubraview_pal_filmcache_memory_setting(void) { return atomic_load(&g_memory_setting); }
@@ -388,8 +392,10 @@ static void stream_free(rubraview_filmcache_stream_t *s) {
     if (s->ram) {
         rubraview_pal_media_log("memory: let go, {} of {} blocks held", PROVEN_ARG((unsigned long long)s->ramw.held), PROVEN_ARG((unsigned long long)s->ramw.slots));
         rubraview_free(s->ram);
-        atomic_store(&g_memory_held, 0);
     }
+    AcquireSRWLockExclusive(&g_list_lock);
+    if (g_mem_playing == s) g_mem_playing = NULL;
+    ReleaseSRWLockExclusive(&g_list_lock);
     rubraview_filmbuf_free(&s->ramw);
     if (s->copy) {
         FlushFileBuffers(s->copy);   /* the bytes on the disk before the map that names them */
@@ -469,12 +475,48 @@ static bool memory_now(uint64_t *total, uint64_t *avail) {
     return true;
 }
 
+/* D-333: the film opened ahead, its page come: room for the budget the memory allows now, the head kept. On the ram
+   thread, the only writer: the held bytes copied into the larger room, then the room swapped under the lock. */
+static void ram_grow(rubraview_filmcache_stream_t *s) {
+    s->ram_grow = false;
+    uint64_t setting = atomic_load(&g_memory_setting), total = 0, avail = 0;
+    if (setting == 0 || !memory_now(&total, &avail)) return;
+    uint64_t budget = rubraview_filmbuf_budget(s->map.size, setting, total, avail + s->ramw.held * (uint64_t)BLOCK);
+    uint64_t slots = (budget + BLOCK - 1) / BLOCK;
+    if (slots > s->ramw.file_blocks) slots = s->ramw.file_blocks;
+    if (slots <= s->ramw.slots) return;
+    uint8_t *room = (uint8_t *)rubraview_alloc((size_t)(slots * (uint64_t)BLOCK));
+    if (!room) { rubraview_pal_media_log("memory: no room to grow to {} MB; the head's kept", PROVEN_ARG((unsigned long long)((slots * (uint64_t)BLOCK) >> 20))); return; }
+    proven_sys_mem_copy(room, s->ram, (size_t)(s->ramw.slots * (uint64_t)BLOCK));
+    uint8_t *old = room;
+    AcquireSRWLockExclusive(&s->ram_lock);
+    if (rubraview_filmbuf_grow(&s->ramw, budget)) { old = s->ram; s->ram = room; }
+    uint64_t now = s->ramw.slots, held = s->ramw.held;
+    ReleaseSRWLockExclusive(&s->ram_lock);
+    rubraview_free(old);
+    atomic_store(&s->mem_room, now * (uint64_t)BLOCK);
+    atomic_store(&s->ram_full_said, false);
+    rubraview_pal_media_log("memory: grown to {} MB for the film ({}), {} blocks of its head kept", PROVEN_ARG((unsigned long long)((now * (uint64_t)BLOCK) >> 20)),
+                            PROVEN_ARG(now == s->ramw.file_blocks ? "all of it" : "a window"), PROVEN_ARG((unsigned long long)held));
+}
+
+/* D-333: the bytes held one after another from where it plays (UINT64_MAX: on to its end). */
+static void ram_count_ahead(rubraview_filmcache_stream_t *s) {
+    bool to_end = false;
+    AcquireSRWLockShared(&s->ram_lock);
+    uint64_t run = rubraview_filmbuf_run(&s->ramw, atomic_load(&s->read_at), &to_end);
+    ReleaseSRWLockShared(&s->ram_lock);
+    atomic_store(&s->mem_ahead, to_end ? UINT64_MAX : run * (uint64_t)BLOCK);
+}
+
 static DWORD WINAPI ram_main(void *arg) {
     rubraview_filmcache_stream_t *s = (rubraview_filmcache_stream_t *)arg;
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
     uint32_t since_check = 0;
     bool held_back = false;
     while (!atomic_load(&s->closing)) {
+        if (s->ram_grow && atomic_load(&s->ram_limit) == UINT64_MAX) ram_grow(s);
+        if (since_check % 16 == 0) ram_count_ahead(s);
         if (since_check++ % 16 == 0) {   /* 4 MB: the memory free looked at */
             uint64_t total = 0, avail = 0;
             AcquireSRWLockShared(&s->ram_lock);
@@ -493,8 +535,9 @@ static DWORD WINAPI ram_main(void *arg) {
         uint64_t b = rubraview_filmbuf_next(&s->ramw, atomic_load(&s->read_at), atomic_load(&s->ram_limit));
         uint64_t held = s->ramw.held, slots = s->ramw.slots;
         ReleaseSRWLockShared(&s->ram_lock);
-        atomic_store(&g_memory_held, held * (uint64_t)BLOCK);
+        atomic_store(&s->mem_held, held * (uint64_t)BLOCK);
         if (b == UINT64_MAX) {
+            ram_count_ahead(s);
             if (held == slots && !atomic_exchange(&s->ram_full_said, true))
                 rubraview_pal_media_log("memory: {} of the film held ({} MB)", PROVEN_ARG(s->ramw.whole ? "all" : "a window"),
                                         PROVEN_ARG((unsigned long long)((held * (uint64_t)BLOCK) >> 20)));
@@ -524,14 +567,22 @@ static void ram_start(rubraview_filmcache_stream_t *s, const wchar_t *path, bool
     uint64_t setting = atomic_load(&g_memory_setting), total = 0, avail = 0;
     if (setting == 0 || !memory_now(&total, &avail)) return;
     uint64_t budget = rubraview_filmbuf_budget(s->map.size, setting, total, avail);
-    if (!rubraview_filmbuf_make(&s->ramw, s->map.size, budget)) return;
+    /* D-333: opened ahead, the room of its head only; the rest when its page comes (ram_grow) */
+    uint64_t room = head_only ? rubraview_filmbuf_ahead_budget(budget) : budget;
+    if (!rubraview_filmbuf_make(&s->ramw, s->map.size, room)) return;
+    s->ram_grow = room < budget;
     s->ram = (uint8_t *)rubraview_alloc((size_t)(s->ramw.slots * (uint64_t)BLOCK));
     s->ram_source = s->ram ? open_source(path) : INVALID_HANDLE_VALUE;
     if (s->ram_source == INVALID_HANDLE_VALUE) { s->ram_source = NULL; rubraview_free(s->ram); s->ram = NULL; rubraview_filmbuf_free(&s->ramw); return; }
     InitializeSRWLock(&s->ram_lock);
     uint64_t head = rubraview_filmbuf_head_bytes(0.0);
     atomic_store(&s->ram_limit, head_only ? (head + BLOCK - 1) / BLOCK : UINT64_MAX);
-    atomic_store(&g_memory_room, s->ramw.slots * (uint64_t)BLOCK);
+    atomic_store(&s->mem_room, s->ramw.slots * (uint64_t)BLOCK);
+    if (!head_only) {
+        AcquireSRWLockExclusive(&g_list_lock);
+        g_mem_playing = s;
+        ReleaseSRWLockExclusive(&g_list_lock);
+    }
     s->ram_thread = CreateThread(NULL, 0, ram_main, s, 0, NULL);
     rubraview_pal_media_log("memory: {} MB for a film of {} MB ({}), {}", PROVEN_ARG((unsigned long long)((s->ramw.slots * (uint64_t)BLOCK) >> 20)),
                             PROVEN_ARG((unsigned long long)(s->map.size >> 20)), PROVEN_ARG(s->ramw.whole ? "all of it" : "a window"),
@@ -543,6 +594,11 @@ void rubraview_pal_filmcache_read_limit(rubraview_filmcache_stream_t *s, uint64_
     uint64_t blocks = bytes == UINT64_MAX ? UINT64_MAX : (bytes + BLOCK - 1) / BLOCK;
     if (atomic_exchange(&s->ram_limit, blocks) != blocks)
         rubraview_pal_media_log("memory: reads {}", PROVEN_ARG(bytes == UINT64_MAX ? "on to the end" : "the head"));
+    if (bytes == UINT64_MAX) {   /* D-333: its page has come: the film that plays */
+        AcquireSRWLockExclusive(&g_list_lock);
+        g_mem_playing = s;
+        ReleaseSRWLockExclusive(&g_list_lock);
+    }
 }
 
 rubraview_filmcache_stream_t *rubraview_pal_filmcache_open(const wchar_t *path) {
@@ -627,9 +683,13 @@ rubraview_filmcache_stream_t *rubraview_pal_filmcache_open_ex(const wchar_t *pat
 void rubraview_pal_filmcache_own_stats(rubraview_filmcache_stats_t *out) {
     if (!out) return;
     *out = (rubraview_filmcache_stats_t){ .from_copy = atomic_load(&g_from_copy), .from_source = atomic_load(&g_from_source),
-                                          .from_memory = atomic_load(&g_from_memory),
-                                          .memory_held = atomic_load(&g_memory_held), .memory_room = atomic_load(&g_memory_held) ? atomic_load(&g_memory_room) : 0 };
+                                          .from_memory = atomic_load(&g_from_memory) };
     AcquireSRWLockShared(&g_list_lock);
+    if (g_mem_playing) {   /* D-333: the playing film's, not the one opened ahead */
+        out->memory_held = atomic_load(&g_mem_playing->mem_held);
+        out->memory_room = atomic_load(&g_mem_playing->mem_room);
+        out->memory_ahead = atomic_load(&g_mem_playing->mem_ahead);
+    }
     out->open = g_list != NULL;
     if (g_last) {
         AcquireSRWLockShared(&g_last->lock);

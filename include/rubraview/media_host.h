@@ -199,6 +199,7 @@ typedef struct rubraview_mhost_block {
     /* RV-216: the child's network film cache, for the viewer's Live rows (numbers only, clamped there) */
     _Atomic uint64_t cache_from_copy, cache_from_source, cache_filled, cache_blocks;
     _Atomic uint64_t cache_from_memory, cache_memory_held, cache_memory_room;   /* RV-261 */
+    _Atomic uint64_t cache_memory_ahead;                                         /* D-333 */
     _Atomic uint32_t cache_open;
     _Atomic uint32_t log_used;
     char     log[RUBRAVIEW_MHOST_LOG];   /* FFmpeg's last words */

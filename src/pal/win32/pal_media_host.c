@@ -269,6 +269,7 @@ void rubraview_mhost_children_cache(rubraview_filmcache_stats_t *add) {
         if (atomic_load(&b->cache_memory_room) > 0) {   /* RV-261: the film in a child's memory */
             add->memory_held = atomic_load(&b->cache_memory_held);
             add->memory_room = atomic_load(&b->cache_memory_room);
+            add->memory_ahead = atomic_load(&b->cache_memory_ahead);
         }
         uint64_t blocks = atomic_load(&b->cache_blocks), filled = atomic_load(&b->cache_filled);
         if (atomic_load(&b->cache_open) && blocks > 0) {
@@ -1617,6 +1618,7 @@ int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *re
             atomic_store(&b->cache_from_memory, cs.from_memory);
             atomic_store(&b->cache_memory_held, cs.memory_held);
             atomic_store(&b->cache_memory_room, cs.memory_room);
+            atomic_store(&b->cache_memory_ahead, cs.memory_ahead);
         }
         if (cp.media) {
             rubraview_ffmpeg_host_apply(cp.media, &b->wanted, &cp.applied);

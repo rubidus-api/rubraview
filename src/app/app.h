@@ -724,6 +724,7 @@ typedef struct app_state {
     /* RV-261 (owner, 2026-11-08): the next film opened ahead, off this thread, at a steady moment, and kept paused
        until its page comes; the film before closed off this thread too. */
     struct film_ahead         *film_ahead;
+    double                     film_ahead_asked_at;   /* D-333: when the playing film's memory was last asked */
     double                     media_settled_at;   /* when the first picture after an open or a seek was shown; 0 none */
     bool                       media_closing_for_next;   /* media_close keeps the film ahead and closes off this thread */
     char                      station_title[256];   /* RV-158: what the station playing says is on (ICY); "" none */

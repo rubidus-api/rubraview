@@ -112,6 +112,15 @@ void rubraview_filmbuf_drop(rubraview_filmbuf_t *w, uint64_t block);
    end of the film), then — when the whole film fits — the first missing one before it; only blocks under `limit`
    (a head). UINT64_MAX: nothing to read now. */
 uint64_t rubraview_filmbuf_next(const rubraview_filmbuf_t *w, uint64_t from, uint64_t limit);
+/* D-333: room made for `budget` bytes, where the film opened ahead had room for its head only. A held block keeps
+   its place when its slot is the same in the larger room (the bytes stay where they are, the caller having made
+   its memory larger first), else it is dropped. False (nothing changed) when the room would not grow or out of
+   memory. */
+bool rubraview_filmbuf_grow(rubraview_filmbuf_t *w, uint64_t budget);
+/* D-333: the blocks held one after another from `from`; `*to_end` when they reach the film's end. */
+uint64_t rubraview_filmbuf_run(const rubraview_filmbuf_t *w, uint64_t from, bool *to_end);
+/* D-333: the room the film opened ahead takes until its page comes: the largest head (128 MB), within `budget`. */
+uint64_t rubraview_filmbuf_ahead_budget(uint64_t budget);
 
 #ifdef __cplusplus
 }
