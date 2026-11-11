@@ -841,8 +841,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("open_edit"))) {
         if (app->panel.open && !app->panel_is_export && !app->panel_is_batch && !app->panel_is_print && !app->panel_is_convert) panel_close(app);
         else if (app->media && !(app->media_info.has_video && app->media_page >= 0)) osd_say(app, TU8("Edit is for pictures"));
-        /* RV-270 (owner, 2026-11-11: "이펙트의 e"; paused, as before): a playing film's E adjusts its picture */
-        else if (app->media && !app->media_paused) film_panel_toggle(app);
+        /* RV-270 (owner, 2026-11-11: "E를 기존의 동작으로 그대로 유지"): the picture adjustment is Shift+E, not E */
+        else if (app->media && !app->media_paused) osd_say(app, TU8("pause the film first (Space): E then edits the frame on screen"));
         else if (app->media) {
             /* The owner (2026-10-18): a paused film's frame, and only it — saved beside the film as a
                picture, which Edit opens; turning on, Edit passes the film by. */

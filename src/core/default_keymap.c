@@ -216,6 +216,9 @@ const char *rubraview_default_keymap(void) {
     "next_subtitle_track = \"C\"\n"
     /* RV-115: the subtitles as a list in a window of its own. */
     "toggle_subtitle_window = \"Shift+C\"\n"
+    /* RV-270 (owner, 2026-11-11: "E를 기존의 동작으로 그대로 유지하고, 새로 생긴 필터 기능은 다른 단축키로"): beside E,
+       which edits a paused film's frame; Shift+E was bound nowhere. */
+    "film_adjust = \"Shift+E\"\n"
     "\n"
 
     /* RFC-0005: a text page's own keys, before the rest (owner, 2026-10-17:

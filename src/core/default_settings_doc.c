@@ -325,7 +325,7 @@ static const char *const PARTS[] = {
 "  toggle video.arrow_seek_keyframes \"Arrows seek to keyframes\" = false wired\n"
 "  note   \"Left and Right land on a keyframe at once, as other players do. Off: the exact frame, its keyframe shown first.\"\n"
 "  info   \"FFmpeg\"                  {media.ffmpeg}\n",
-"  note   \"Picture adjustment: E on a playing film, or Adjust on the Toolbar. Its values are kept for every film.\"\n"
+"  note   \"Picture adjustment: Shift+E on a film, or Adjust on the Toolbar. Its values are kept for every film.\"\n"
 "  float  video.adjust_exposure \"Exposure\" -3.0..3.0 step 0.05 = 0.0 hidden wired\n"
 "  float  video.adjust_brightness \"Brightness\" -100.0..100.0 step 1 = 0.0 hidden wired\n"
 "  float  video.adjust_contrast \"Contrast\" -100.0..100.0 step 1 = 0.0 hidden wired\n"
