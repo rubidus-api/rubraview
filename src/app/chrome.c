@@ -649,9 +649,8 @@ void draw_strip(app_state_t *app, int32_t win_w, int32_t win_h) {
     if (app->pan_x < -slack) app->pan_x = -slack;
     double x0 = ((double)win_w - width) / 2.0 + app->pan_x;
     double y = content_top(app) - app->strip_offset;   /* RV-195: from under a pinned title bar */
-    rubraview_interpolation_t interp = page_interpolation(app);
-
     for (size_t i = app->spread_index; i < page_count(app) && y < (double)win_h; ++i) {
+        rubraview_interpolation_t interp = page_draw_interpolation(app, (int32_t)i);   /* RV-271 */
         double h = strip_page_height(app, i);
         app_page_t *page = &app->pages[i];
         if (page->loaded && page->texture && !page->skipped) {
@@ -749,11 +748,10 @@ void draw_spread(app_state_t *app, size_t spread_index, double opacity,
             }
         }
 
-        rubraview_interpolation_t interp = page_interpolation(app);
-
         for (size_t i = 0; i < comp.count; ++i) {
             const rubraview_draw_command_t *cmd = &comp.commands[i];
             if (cmd->page_index < 0 || (size_t)cmd->page_index >= page_count(app)) continue;
+            rubraview_interpolation_t interp = page_draw_interpolation(app, cmd->page_index);   /* RV-271: a film its own */
             app_page_t *page = &app->pages[cmd->page_index];
             if (!page->loaded) continue;
 

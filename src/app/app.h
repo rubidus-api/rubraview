@@ -2344,6 +2344,8 @@ size_t page_count(const app_state_t *app);
 proven_u8str_view_t page_display_name(const app_state_t *app, size_t index);
 void page_failure_notice(app_state_t *app);
 rubraview_interpolation_t page_interpolation(const app_state_t *app);
+rubraview_interpolation_t film_interpolation(const app_state_t *app);   /* RV-271 */
+rubraview_interpolation_t page_draw_interpolation(const app_state_t *app, int32_t index);
 void page_job_poll(app_state_t *app);
 void page_job_stop(app_state_t *app);
 bool page_moves(app_state_t *app, size_t index, const rubraview_page_bytes_t *bytes);

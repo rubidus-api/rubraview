@@ -637,6 +637,25 @@ rubraview_interpolation_t page_interpolation(const app_state_t *app) {
     }
 }
 
+/* RV-271 (owner, 2026-11-12: "mpv 처럼 가볍고 날씬한 느낌이 아닙니다"): a film is drawn with its own filter, bilinear
+   unless Video › Film scaling filter says otherwise. The pictures' high-quality cubic filters first when it shrinks:
+   once for a picture, but for a film every frame — on the VM's software renderer 1.3 cores of 2 for a 1080p film in a
+   1280-pixel window, against a few hundredths with bilinear. bicubic keeps that filter for whoever wants it. */
+rubraview_interpolation_t film_interpolation(const app_state_t *app) {
+    if (app->force_nearest) return RUBRAVIEW_INTERP_NEAREST;
+    switch ((int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("scaling")))) {
+        case 0:  return RUBRAVIEW_INTERP_NEAREST;
+        case 2:  return RUBRAVIEW_INTERP_HIGH_QUALITY_CUBIC;
+        default: return RUBRAVIEW_INTERP_LINEAR;
+    }
+}
+
+/* The filter page `index` is drawn with: the film's when it is the film that plays, the pictures' otherwise. */
+rubraview_interpolation_t page_draw_interpolation(const app_state_t *app, int32_t index) {
+    return (app->media && app->media_info.has_video && index == app->media_page) ? film_interpolation(app)
+                                                                                : page_interpolation(app);
+}
+
 void draw_titlebar(app_state_t *app, double win_w);
 
 /* Where the details view's columns begin (owner, 2026-10-16): Name, Type, Size, Created,

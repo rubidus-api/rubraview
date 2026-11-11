@@ -1680,6 +1680,12 @@ filename code page, the memory cap). Some worth knowing:
   a frame that starts within a refresh is shown at once, mixed with the one
   before it by how much of that refresh is still the earlier frame's, as
   mpv's interpolation does. Not with HDR output.
+- **Video** › **Film scaling filter** (bilinear): how a film is drawn when the
+  window shows it larger or smaller than it is. **bilinear** draws each frame
+  in one light pass, as players do; **bicubic** is the pictures' filter,
+  finer on a film made smaller but several times the work every frame
+  (without a graphics card, most of the processor); **nearest** keeps its
+  pixels square. Pictures keep **Viewer** › **Scaling filter**.
 - **Video** › **Arrows seek to keyframes** (off): `Left` and `Right` (and the
   long seeks) land on a keyframe at once, as other players do: forward the
   one at or after the place, back the one before. Off, a seek goes to the
