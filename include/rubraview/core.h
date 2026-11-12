@@ -182,7 +182,8 @@ static inline proven_u8str_view_t rubraview_spaces(int n) {
 }
 
 /* RV-220: printf's %.Ng (`sig` significant digits, the exponent form outside 1e-4 .. 1e`sig`, trailing zeros dropped),
-   which proven's `{:g}` (the shortest that reads back) is not, written into `buf` (32 bytes are enough); returns buf.
+   written (proven's `{:.Ng}` is the same since v0.114.0; `{:r}` is the shortest that reads back, which `{:g}` was before),
+   written into `buf` (32 bytes are enough); returns buf.
    For a format's argument: PROVEN_ARG(rubraview_g_text((char[32]){0}, x, 4)). */
 const char *rubraview_g_text(char *buf, double value, int sig);
 
