@@ -122,6 +122,10 @@ typedef struct rubraview_window_config {
      * keyboard from the viewer when clicked, and can be made see-through.
      */
     bool tool_window;
+    /** RV-272: made but not shown (the viewer behind an extraction asked from Explorer); `_set_visible` shows it. */
+    bool hidden;
+    /** RV-272: a top-level window of its own (its own taskbar button, no owner) whose end is not the program's. */
+    bool stands_alone;
 } rubraview_window_config_t;
 
 /* ---- §3.19 lifecycle and shell integration ---- */

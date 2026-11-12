@@ -20,6 +20,8 @@
 | 자막이 나오는 동영상 | 파일 열기 화면 |
 | <img src="docs/manual/images/screenshot-5-info.png" alt="정보 창" width="420"> | <img src="docs/manual/images/screenshot-6-settings.png" alt="설정" width="420"> |
 | 정보 창 | 설정 |
+| <img src="docs/manual/images/screenshot-7-extract.png" alt="탐색기에서 압축 풀기, 따로 뜨는 작은 창" width="420"> | |
+| 탐색기에서 압축 풀기, 따로 뜨는 작은 창 | |
 
 스크린샷 속 사진, 만화, 동영상은 이 스크린샷을 위해 프로그램으로 만든 것입니다.
 

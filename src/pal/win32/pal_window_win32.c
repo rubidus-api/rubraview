@@ -52,6 +52,7 @@ struct rubraview_window {
     bool frameless;
     bool should_close;
     bool owned;             /* §3.22: a window belonging to another; its end is not the program's */
+    bool stands_alone;      /* RV-272: no owner, and its end is not the program's either */
     bool tool;              /* RFC-0002 Q6: a detached toolbox */
     bool cursor_visible;
     int cursor_shape;      /* RV-137: an area is being chosen on the picture */   /* 1.25.0: rubraview_cursor_shape_t */
@@ -636,7 +637,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             w->should_close = true;
             /* Only the main window's end is the program's end. The
                settings window closing must not take the viewer with it. */
-            if (!w->owned) PostQuitMessage(0);
+            if (!w->owned && !w->stands_alone) PostQuitMessage(0);
             return 0;
 
         default:
@@ -684,6 +685,7 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
     proven_sys_mem_set(w, 0, sizeof(*w));
     w->frameless = config->frameless && !config->owner;
     w->owned = config->owner != NULL;
+    w->stands_alone = config->stands_alone;
     w->tool = config->tool_window;
     w->cursor_visible = true;
     w->dpi_scale = 1.0;
@@ -775,6 +777,7 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
     w->height = client.bottom - client.top;
 
     if (w->tool) SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+    if (config->hidden) return w;   /* RV-272: shown later, if ever */
     ShowWindow(hwnd, w->tool ? SW_SHOWNOACTIVATE : SW_SHOW);
     UpdateWindow(hwnd);
     return w;

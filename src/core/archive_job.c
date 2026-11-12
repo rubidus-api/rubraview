@@ -1079,3 +1079,17 @@ void rubraview_compress_run(rubraview_compress_job_t *job) {
     }
     list_free(&list);
 }
+
+/* RV-272 */
+rubraview_extract_after_t rubraview_extract_after(rubraview_extract_after_t setting, bool succeeded, bool names_asked) {
+    if (!succeeded || names_asked) return RUBRAVIEW_AFTER_STAY;
+    if ((int)setting < (int)RUBRAVIEW_AFTER_CLOSE || (int)setting > (int)RUBRAVIEW_AFTER_RUBRAVIEW) return RUBRAVIEW_AFTER_STAY;
+    return setting;
+}
+
+rubraview_extract_after_t rubraview_extract_after_box(rubraview_extract_after_t setting, bool ticked, rubraview_extract_after_t kept) {
+    if (ticked) return RUBRAVIEW_AFTER_CLOSE;
+    if (setting != RUBRAVIEW_AFTER_CLOSE) return setting;
+    if ((int)kept <= (int)RUBRAVIEW_AFTER_CLOSE || (int)kept > (int)RUBRAVIEW_AFTER_RUBRAVIEW) return RUBRAVIEW_AFTER_STAY;
+    return kept;
+}

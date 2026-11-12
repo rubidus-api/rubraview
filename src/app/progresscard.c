@@ -57,7 +57,7 @@ static size_t time_left_text(char *out, size_t cap, double seconds) {
 }
 
 void draw_progress_card(app_state_t *app, double win_w, double win_h, double dpi) {
-    if (app->prog.source == PROGRESS_NONE) return;
+    if (app->prog.source == PROGRESS_NONE || app->prog.windowed) return;   /* RV-272: that one is in its own window */
     const progress_view_t *v = &app->prog;
     double pad = 20.0 * dpi, line_h = 22.0 * dpi, bar_h = 14.0 * dpi, btn_h = 38.0 * dpi;
     int lines = (v->bytes ? 1 : 0) + (v->files_total > 0 ? 1 : 0) + 1;
@@ -77,6 +77,18 @@ void draw_progress_card(app_state_t *app, double win_w, double win_h, double dpi
 
     const char *note = v->stopping ? T("stopping...") : v->note[0] ? v->note : "";
     double y = draw_card_frame(app, c, v->title, note, true, dpi);
+    progress_rows(app, c, y, dpi);
+    app->prog_stop = (rubraview_pal_rect_t){0};
+    if (v->can_stop && !v->stopping) {
+        const char *words[1] = { T("Stop") };
+        draw_card_buttons(app, c, words, 1, &app->prog_stop, dpi);
+    }
+}
+
+/* The bar and the rows under it, from `y` in the card `c` (RV-272: the extraction's own window draws them too). */
+void progress_rows(app_state_t *app, rubraview_pal_rect_t c, double y, double dpi) {
+    const progress_view_t *v = &app->prog;
+    double pad = 20.0 * dpi, line_h = 22.0 * dpi, bar_h = 14.0 * dpi;
     uint64_t done = v->bytes ? v->done : v->files_at, total = v->bytes ? v->total : v->files_total;
     int pct = rubraview_progress_percent(done, total);
     rubraview_pal_rect_t bar = { c.x + pad, y, c.width - 2.0 * pad, bar_h };
@@ -120,10 +132,5 @@ void draw_progress_card(app_state_t *app, double win_w, double win_h, double dpi
             n = rubraview_fmt(speed, sizeof speed, T("{:.1} files/s"), PROVEN_ARG(app->prog_rate.rate > 0.0 ? app->prog_rate.rate : 0.0));
         }
         if (n > 0) rubraview_pal_render_draw_text(app->renderer, cstr(speed), row, 15.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_RIGHT);
-    }
-    app->prog_stop = (rubraview_pal_rect_t){0};
-    if (v->can_stop && !v->stopping) {
-        const char *words[1] = { T("Stop") };
-        draw_card_buttons(app, c, words, 1, &app->prog_stop, dpi);
     }
 }

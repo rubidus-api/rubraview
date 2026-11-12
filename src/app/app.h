@@ -100,6 +100,7 @@ typedef struct progress_view {
     bool bytes;
     uint32_t files_at, files_total;   /* files_total 0: not counted */
     bool stopping, can_stop;
+    bool windowed;               /* RV-272: drawn in the extraction's own window, not the main one */
 } progress_view_t;
 enum { CARD_HOST_NONE = 0, CARD_HOST_MAIN, CARD_HOST_EDIT, CARD_HOST_BATCH, CARD_HOST_NAMES };
 #include "rubraview/repeat.h"
@@ -447,7 +448,7 @@ typedef struct app_state {
     /* RFC-0006: a window that opens and closes is made, with its renderer, in a block of the
        windows pool, given back when it closes. */
     struct window_block { void *block; proven_arena_t arena; } mini_block, toolbox_block, info_block, help_block, files_block, fontpick_block, subs_block, edit_block,
-                                                               batch_block, names_block, log_block, clash_block;
+                                                               batch_block, names_block, log_block, clash_block, xw_block;
     rubraview_window_t *window;
     rubraview_renderer_t *renderer;
     rubraview_keymap_t keymap;
@@ -1475,6 +1476,24 @@ typedef struct app_state {
     double                 log_t0;
     bool                   log_open, log_dirty, log_follow;
     rubraview_window_t    *log_window;
+    /* RV-272: an extraction asked from Explorer, in a window of its own (extractwin.c) */
+    bool                   main_hidden;          /* the viewer's window made but not shown: this launch was for that */
+    bool                   xw_open;
+    rubraview_window_t    *xw_window;
+    rubraview_renderer_t  *xw_renderer;
+    int32_t                xw_state;             /* XW_* */
+    bool                   xw_dirty, xw_close_after, xw_ok;
+    double                 xw_px, xw_py, xw_drawn_at;
+    char                   xw_title[300];
+    char                   xw_line[512];
+    char                   xw_path[RUBRAVIEW_ARCHIVE_PATH];
+    rubraview_pal_rect_t   xw_box, xw_stop, xw_eye, xw_btn[3];
+    int32_t                xw_btn_n;
+    char                   xw_pw[256];           /* a password typed in it (wiped when used) */
+    size_t                 xw_pw_len;
+    char                   xw_composing[64];
+    size_t                 xw_composing_len;
+    bool                   xw_pw_shown;
     rubraview_renderer_t  *log_renderer;
     int32_t                log_frame[4];
     double                 log_font, log_cell_w, log_cell_h, log_px, log_py;
@@ -2609,6 +2628,20 @@ void app_log_limit(app_state_t *app);   /* general.log_limit_mb applied */
 void log_show(app_state_t *app);
 void log_close(app_state_t *app);
 void draw_log_window(app_state_t *app);
+/* RV-272: extractwin.c */
+enum { XW_WORKING = 0, XW_PASSWORD, XW_DONE };
+bool shell_verb_extracts(rubraview_shell_verb_t verb);
+void extractwin_request(app_state_t *app, rubraview_shell_verb_t verb, const proven_u8str_view_t *paths, size_t count);
+void extractwin_ask_password(app_state_t *app, proven_u8str_view_t archive, bool wrong);
+void extractwin_finished(app_state_t *app, bool succeeded, bool names_asked, proven_u8str_view_t line, proven_u8str_view_t root);
+size_t extractwin_pump(app_state_t *app);
+void draw_extract_window(app_state_t *app);
+void extractwin_check_end(app_state_t *app);
+void extractwin_window_close(app_state_t *app);
+void main_window_show(app_state_t *app);
+void archwork_extract_windowed(app_state_t *app, const proven_u8str_view_t *paths, size_t count, int mode, proven_u8str_view_t dest);
+bool archwork_windowed(const app_state_t *app);
+void progress_rows(app_state_t *app, rubraview_pal_rect_t c, double y, double dpi);
 size_t log_pump(app_state_t *app);
 bool log_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);   /* RV-264 */
 void log_sb_to(app_state_t *app, size_t first);

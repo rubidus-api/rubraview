@@ -1796,6 +1796,22 @@ extraction, a compression or an archive being written; what is already written
 stays. Drag the card by its title to move it; it opens again where you left it,
 and the window keeps working under it.
 
+**Extracting from Explorer.** Explorer's Extract, Extract here and Extract
+to... run in a small window of their own, "Rubraview - extracting": no viewer
+window opens, and a viewer already open (a film playing in it) is left as it
+is. The window shows the progress and **Stop** (or `Esc`); Extract to... first
+asks the folder with Windows' own picker; an archive with a password asks it
+in the window (`Enter`; **Show** lets you see it and type any letter). When it
+is done, what follows is **Settings** › **Files** › **When an extraction from
+Explorer is done**: **stay** (the default) shows what was done with **Open it
+here** (the folder in the open-file screen), **Show in Explorer** and
+**Close**; **close** closes it (and Rubraview, when nothing else is open);
+**explorer** and **rubraview** open the folder there and close it. The
+window's **Close when done** box sets close, and unticked gives back what was
+chosen before. A failure or a stop always stays, to say why; names already
+there are asked in the clashes window (Ctrl+Shift+K). More archives sent
+while one is extracted follow it in turn.
+
 **Archives.** The right click on an archive offers Extract into a folder of
 its name, Extract here (smart: as it is when everything in it is in one top
 folder) and Extract to...; on files and folders, Compress to a ZIP and

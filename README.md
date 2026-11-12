@@ -20,6 +20,8 @@ Unzip and run `rubraview.exe` — or download `rubraview.exe` alone and run it: 
 | A film with subtitles | The open-file screen |
 | <img src="docs/manual/images/screenshot-5-info.png" alt="The information window" width="420"> | <img src="docs/manual/images/screenshot-6-settings.png" alt="Settings" width="420"> |
 | The information window | Settings |
+| <img src="docs/manual/images/screenshot-7-extract.png" alt="Extracting from Explorer, in a window of its own" width="420"> | |
+| Extracting from Explorer, in a window of its own | |
 
 The pictures, the comic and the film in these screenshots were generated for them.
 

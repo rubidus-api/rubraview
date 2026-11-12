@@ -28,7 +28,10 @@ bool app_start(app_state_t *app, rubraview_mem_t *mem) {
         .width = 1280,
         .height = 800,
         .frameless = true, /* §2 invariant 5: zero-margin canvas */
+        /* RV-272: a launch for Explorer's Extract alone shows only the extraction's own window */
+        .hidden = g_launch_count > 0 && shell_verb_extracts(g_launch_verb),
     };
+    app->main_hidden = window_config.hidden;
     app->window = rubraview_pal_window_create(arena, &window_config);
     if (!app->window) {
         return false;

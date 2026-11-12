@@ -92,6 +92,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     handled += help_pump(app);
     handled += info_pump(app);
     handled += log_pump(app);   /* RV-256 */
+    handled += extractwin_pump(app);   /* RV-272 */
     handled += clash_pump(app);   /* RV-258 */
     handled += filejob_pump(app);
     arcadd_poll(app);   /* RV-260 */
@@ -233,6 +234,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     bool draw = paced ? rubraview_media_redraw_due(app->media_new_picture, now - fc->last_render_seconds)
                       : (input_now || (!settled && moving_alone) || now - fc->last_idle_frame_seconds >= 10.0 ||
                          app->media_new_picture || scene_signature(app) != fc->last_scene_signature);
+    if (draw && app->main_hidden) draw = false;   /* RV-272: nothing to see in a window not shown */
     if (draw) {
         double drawn_at = rubraview_pal_time_now_seconds();
         if (app->info_open && fc->last_render_seconds > 0.0 && now - fc->last_render_seconds > app->stats_worst)
@@ -264,6 +266,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     draw_help_window(app);
     draw_info_window(app);
     draw_log_window(app);   /* RV-256 */
+    draw_extract_window(app);   /* RV-272 */
     draw_clash_window(app);   /* RV-258 */
     /* The strip moves while the track does, so the little window is
        redrawn each pass it is playing. */

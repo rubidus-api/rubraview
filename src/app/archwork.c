@@ -18,6 +18,7 @@ typedef struct xpark {
 
 typedef struct archwork {
     bool compress;
+    bool windowed;                            /* RV-272: asked from Explorer: shown in its own window, not the viewer */
     /* extracting: the archives in turn */
     char **archives;
     size_t count, at;
@@ -259,6 +260,18 @@ void archwork_extract_paths(app_state_t *app, const proven_u8str_view_t *paths, 
     extract_start(app, w, mode, choose_folder);
 }
 
+/* RV-272: Explorer's Extract, in the extraction's own window: into `dest` when one was chosen, else beside each. */
+void archwork_extract_windowed(app_state_t *app, const proven_u8str_view_t *paths, size_t count, int mode, proven_u8str_view_t dest) {
+    archwork_t *w = rubraview_alloc_zero(1, sizeof *w);
+    if (!w) return;
+    w->windowed = true;
+    w->count = given_paths(paths, count, &w->archives, true);
+    if (w->count == 0) { work_free(w); extractwin_finished(app, false, false, TU8("no archive among them"), PROVEN_LIT("")); return; }
+    if (dest.size > 0 && dest.size < sizeof w->dest) { proven_sys_mem_copy(w->dest, dest.ptr, dest.size); w->dest[dest.size] = '\0'; }
+    w->mode = (rubraview_extract_mode_t)mode;
+    extract_go(app, w);
+}
+
 /* RV-207: what is picked in the archive looked into (all of it when nothing is), named from the folder it was picked
    in: a folder by everything in it. */
 void archwork_extract_inside(app_state_t *app, int mode, bool choose_folder) {
@@ -299,6 +312,10 @@ void archwork_extract_inside(app_state_t *app, int mode, bool choose_folder) {
 
 /* The password box answered for the archive the work stopped at: on from there with it. */
 static archwork_t *g_waiting;   /* the work kept while its password is asked */
+
+bool archwork_windowed(const app_state_t *app) {
+    return (app->archwork && app->archwork->windowed) || (g_waiting && g_waiting->windowed);
+}
 
 void archwork_password_typed(app_state_t *app, proven_u8str_view_t password) {
     archwork_t *w = g_waiting;
@@ -645,7 +662,7 @@ void archwork_pack_cancelled(app_state_t *app) {
 
 /* RV-268: where it is, for the progress card (it was a line at the top). */
 static void say_progress(app_state_t *app, archwork_t *w) {
-    progress_view_t v = { .source = PROGRESS_ARCHWORK, .bytes = true, .can_stop = true };
+    progress_view_t v = { .source = PROGRESS_ARCHWORK, .bytes = true, .can_stop = true, .windowed = w->windowed };
     if (w->compress) {
         int phase = atomic_load(&w->pk.phase);
         v.done = atomic_load(&w->pk.done);
@@ -714,6 +731,10 @@ void archwork_poll(app_state_t *app, bool quitting) {
         /* asked once, here; the work waits for it */
         secure_wipe(rubraview_mem_mut(w->password, sizeof w->password));
         g_waiting = w;
+        if (w->windowed) {   /* RV-272: asked in its own window */
+            extractwin_ask_password(app, proven_u8str_view_from_cstr(w->archives[w->at]), r == RUBRAVIEW_ARCHIVE_PASSWORD_WRONG);
+            return;
+        }
         if (app->rename_active) rename_end(app);
         app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
         app->rename_active = true;
@@ -742,6 +763,11 @@ void archwork_poll(app_state_t *app, bool quitting) {
             size_t len = proven_cstr_len(line);
             rubraview_fmt(line + len, sizeof line - len, T("; {} names already there are asked (Ctrl+Shift+K)"), PROVEN_ARG(asked));
         }
+        if (w->windowed) {   /* RV-272: its own window says it, and the setting decides what follows */
+            extractwin_finished(app, r == RUBRAVIEW_ARCHIVE_DONE && w->failed == 0, asked > 0, cstr(line), cstr(w->last_root));
+            work_free(w);
+            return;
+        }
         if (w->written > 0 && w->last_root[0]) {   /* RV-240: what next, asked */
             rubraview_fmt(app->extract_done_line, sizeof app->extract_done_line, "{}", PROVEN_ARG(line));
             rubraview_fmt(app->extract_done_path, sizeof app->extract_done_path, "{}", PROVEN_ARG(w->last_root));
@@ -749,6 +775,7 @@ void archwork_poll(app_state_t *app, bool quitting) {
         }
     } else {
         rubraview_fmt(line, sizeof line, "{}{}{}", PROVEN_ARG(rubraview_archive_result_text(r)), PROVEN_ARG(w->ex.why[0] ? "  -  " : ""), PROVEN_ARG(w->ex.why));
+        if (w->windowed) { extractwin_finished(app, false, false, cstr(line), cstr(w->last_root)); work_free(w); return; }   /* RV-272 */
     }
     osd_say(app, cstr(line));
     if (app->picker_open) picker_navigate(app, app->picker_dir);

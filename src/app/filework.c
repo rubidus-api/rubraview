@@ -1018,6 +1018,9 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
         if (n > 0) app_log(app, "explorer", (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         app_log(app, "explorer", paths[0]);
     }
+    /* RV-272: Explorer's Extract in a window of its own; anything else wants the viewer's window */
+    if (shell_verb_extracts(verb)) { extractwin_request(app, verb, paths, count); return; }
+    main_window_show(app);
     switch (verb) {
         case RUBRAVIEW_SHELL_VERB_NONE:
         case RUBRAVIEW_SHELL_VERB_OPEN:

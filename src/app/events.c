@@ -778,6 +778,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
 
         case RUBRAVIEW_WINDOW_EVENT_DROP:
         case RUBRAVIEW_WINDOW_EVENT_OPEN_REQUEST:
+            main_window_show(app);   /* RV-272: asked for something to see */
             handle_drop(app, event);
             break;
 

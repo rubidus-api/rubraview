@@ -221,6 +221,21 @@ typedef struct rubraview_compress_job {
 
 void rubraview_compress_run(rubraview_compress_job_t *job);
 
+/* RV-272: what follows an extraction asked from Explorer (`archive.after_extract`, in this order). */
+typedef enum rubraview_extract_after {
+    RUBRAVIEW_AFTER_CLOSE = 0,      /* its window closes; with no viewer open, Rubraview ends */
+    RUBRAVIEW_AFTER_STAY = 1,       /* the card stays, the result and three buttons on it (the default) */
+    RUBRAVIEW_AFTER_EXPLORER = 2,   /* the folder in Explorer, then as close */
+    RUBRAVIEW_AFTER_RUBRAVIEW = 3,  /* the folder in Rubraview's open-file screen, its window shown */
+} rubraview_extract_after_t;
+
+/* The setting, unless the work failed or was stopped, or names already there are still to be asked: then it stays. */
+rubraview_extract_after_t rubraview_extract_after(rubraview_extract_after_t setting, bool succeeded, bool names_asked);
+
+/* The card's "Close when done" box set to `ticked`: close when ticked; unticked, the choice kept (`kept`, the setting
+   it had before close), stay when that is close; a setting other than close is left as it is when unticked. */
+rubraview_extract_after_t rubraview_extract_after_box(rubraview_extract_after_t setting, bool ticked, rubraview_extract_after_t kept);
+
 #ifdef __cplusplus
 }
 #endif

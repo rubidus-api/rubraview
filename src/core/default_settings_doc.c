@@ -235,6 +235,9 @@ static const char *const PARTS[] = {
 "  table  thumb_dirs\n",
 "  section \"Extracting\"\n"
 "  choice archive.extract_mode     \"Extract (the open-file screen's button)\" folder | smart = folder wired\n"
+"  choice archive.after_extract    \"When an extraction from Explorer is done\" close | stay | explorer | rubraview = stay wired\n"
+"  choice archive.after_extract_open \"Unticked, the box gives back\" close | stay | explorer | rubraview = stay hidden wired\n"
+"  note \"Explorer's Extract runs in a small window of its own. close: it closes (Rubraview too, when nothing else is open); stay: it shows what was done, with Open it here, Show in Explorer and Close; explorer: the folder in Explorer; rubraview: the folder in Rubraview's open-file screen. Its Close when done box sets close. A failure or a stop always stays.\"\n",
 "  section \"Compressing (the Compress window's last choices)\"\n"
 "  choice archive.pack_format      \"Format\"                  zip | 7z = zip wired\n"
 "  choice archive.pack_level       \"Level\"                   store | fastest | fast | normal | maximum | ultra = normal wired\n"
@@ -566,6 +569,7 @@ static const char *const PARTS[] = {
 "help display.color_management \"On: a picture's embedded colour profile (ICC) is used, so photos from cameras and phones show their true colours.\"\n"
 "help display.gpu_resize \"On: pictures are scaled on the graphics card, faster for very large photos. Off if a picture looks wrong on this computer.\"\n"
 "help cache.memory_cap_mb \"How much memory the pages kept ready may take. More makes turning back and forth instant; less leaves room for other programs.\"\n"
+"help archive.after_extract \"What follows an extraction asked from Explorer's menu, which runs in a small window of its own with no viewer: close it, keep it showing the result, or open the folder in Explorer or in Rubraview. A failed or stopped extraction always stays to say why.\"\n"
 "help archive.extract_mode \"What the Extract button at the open-file screen's foot does: each archive into a folder of its name beside it, or smart: as it is when everything in it is in one top folder or it is one file, else into a folder of its name. The right click and Explorer's menu offer both.\"\n"
 "help cache.film_gb \"How much room the copies of films and songs on network drives may take; the least recently played go first. Nothing of a folder kept out of Recent is copied, nor anything when Recent keeps nothing.\"\n"
 "help cache.film_ahead \"On: while a network film plays, the rest of it is fetched as fast as the link allows, so a film the link is too slow for plays smoothly once enough is here.\"\n"
