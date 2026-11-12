@@ -427,58 +427,13 @@ int rubraview_cstr_cmp_ci(const char *a, const char *b) {
     }
 }
 
-/* RV-220: printf's %.Ng through proven's formatter. */
-static void strip_fraction_zeros(char *s) {
-    char *e = s;
-    while (*e && *e != 'e') e++;   /* the mantissa ends at an exponent, if any */
-    char *dot = NULL;
-    for (char *p = s; p < e; ++p) if (*p == '.') dot = p;
-    if (!dot) return;
-    char *last = e - 1;
-    while (last > dot && *last == '0') last--;
-    if (last == dot) last--;
-    size_t tail = proven_cstr_len(e);
-    proven_sys_mem_move(last + 1, e, tail + 1);
-}
-
+/* RV-220: printf's %.Ng. D-336: proven's {:.Ng} is exactly that since v0.114.0, so the hand-made one (the exponent read
+   from %e, then %f or %e and the zeros dropped) is gone; the name stays for its callers' translated lines. */
 const char *rubraview_g_text(char *buf, double value, int sig) {
-    static const char *const FIXED[18] = { "{:.0}", "{:.1}", "{:.2}", "{:.3}", "{:.4}", "{:.5}", "{:.6}", "{:.7}", "{:.8}",
-                                           "{:.9}", "{:.10}", "{:.11}", "{:.12}", "{:.13}", "{:.14}", "{:.15}", "{:.16}", "{:.17}" };
-    static const char *const SCI[18] = { "{:.0e}", "{:.1e}", "{:.2e}", "{:.3e}", "{:.4e}", "{:.5e}", "{:.6e}", "{:.7e}", "{:.8e}",
-                                         "{:.9e}", "{:.10e}", "{:.11e}", "{:.12e}", "{:.13e}", "{:.14e}", "{:.15e}", "{:.16e}", "{:.17e}" };
-    const size_t cap = 32;
+    static const char *const G[17] = { "{:.1g}", "{:.2g}", "{:.3g}", "{:.4g}", "{:.5g}", "{:.6g}", "{:.7g}", "{:.8g}", "{:.9g}",
+                                       "{:.10g}", "{:.11g}", "{:.12g}", "{:.13g}", "{:.14g}", "{:.15g}", "{:.16g}", "{:.17g}" };
     if (sig < 1) sig = 1;
     if (sig > 17) sig = 17;
-    if (value != value) { proven_sys_mem_copy(buf, "nan", 4); return buf; }
-    if (value == 0.0) {
-        bool negative = 1.0 / value < 0.0;
-        proven_sys_mem_copy(buf, negative ? "-0" : "0", negative ? 3 : 2);
-        return buf;
-    }
-    if (value > 1.7976931348623157e308 || value < -1.7976931348623157e308) {
-        proven_sys_mem_copy(buf, value > 0 ? "inf" : "-inf", value > 0 ? 4 : 5);
-        return buf;
-    }
-    /* the exponent as printf's %e would show it after rounding to `sig` digits */
-    char sci[40];
-    (void)proven_fmt_to(sci, sizeof sci, SCI[sig - 1], PROVEN_ARG(value));
-    int exponent = 0;
-    for (char *p = sci; *p; ++p) {
-        if (*p == 'e') {
-            int sign = 1, at = 1;
-            if (p[1] == '-') { sign = -1; at = 2; } else if (p[1] == '+') at = 2;
-            for (char *q = p + at; *q >= '0' && *q <= '9'; ++q) exponent = exponent * 10 + (*q - '0');
-            exponent *= sign;
-            break;
-        }
-    }
-    if (exponent < -4 || exponent >= sig) {
-        (void)proven_fmt_to(buf, cap, SCI[sig - 1], PROVEN_ARG(value));
-    } else {
-        int decimals = sig - 1 - exponent;
-        if (decimals > 17) decimals = 17;
-        (void)proven_fmt_to(buf, cap, FIXED[decimals], PROVEN_ARG(value));
-    }
-    strip_fraction_zeros(buf);
+    (void)proven_fmt_to(buf, 32, G[sig - 1], PROVEN_ARG(value));
     return buf;
 }
