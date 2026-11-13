@@ -57,7 +57,7 @@ typedef struct rubraview_pointer_context {
     bool comic_mode;             /* §3.7.3: the click zones only flip pages in comic viewing */
     bool zoomed_in;
     bool scrollable_vertically;
-    bool wheel_zooms;            /* a picture or a book, not a film or a song: the wheel zooms (owner, 2026-10-20) */
+    bool wheel_turns;            /* a picture or a book, not a film or a song: the wheel turns files and pages (RV-276) */
 } rubraview_pointer_context_t;
 
 rubraview_pointer_intent_t rubraview_pointer_click(const rubraview_pointer_context_t *ctx, double x, bool is_double_click);

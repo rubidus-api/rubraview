@@ -482,20 +482,27 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
     note_activity(app);
     /* D-88: while the archive on screen is being written again nothing is
        opened, closed or changed; Esc stops the writing, and a quit does too. */
-    if (app->arc_job && !proven_u8str_view_eq(action, PROVEN_LIT("quit"))) {
+    if (app->arc_job && !proven_u8str_view_eq(action, PROVEN_LIT("quit")) && !proven_u8str_view_eq(action, PROVEN_LIT("close_or_quit"))) {
         osd_say(app, TU8("the archive is being written (Esc stops it)"));
         return;
     }
     /* D-89: with the question of what the archive becomes open, doing something else is "no". */
-    if (app->arc_ask == ARC_ASK_FORMAT && !proven_u8str_view_eq(action, PROVEN_LIT("quit"))) panel_close(app);
+    if (app->arc_ask == ARC_ASK_FORMAT && !proven_u8str_view_eq(action, PROVEN_LIT("quit")) &&
+        !proven_u8str_view_eq(action, PROVEN_LIT("close_or_quit"))) panel_close(app);   /* Esc's own chain closes it */
 
     if (proven_u8str_view_eq(action, PROVEN_LIT("quit"))) {
         /* RV-245: Ctrl+Q ends the program; a subtitle not saved is still asked about */
         if (!subs_may_leave(app)) return;
         rubraview_pal_window_request_close(app->window);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("minimize_mute"))) {
-        /* Esc closes what is open first; with nothing open (RV-245, owner 2026-11-07: "ESC는 그냥 최소화+Mute
-           까지만 ... 즉각적으로 반응하게") the sound goes off at once and the window down. */
+        /* RV-245 (owner 2026-11-07: "즉각적으로 반응하게"): the sound off at once and the window down; on Backquote
+           since RV-276, nothing closed first */
+        rubraview_pal_audio_set_volume(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume")) / 100.0, true);   /* now, before anything else */
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute"), 1.0);
+        settings_took_effect(app);
+        rubraview_pal_window_minimize(app->window);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("close_or_quit"))) {
+        /* Esc closes what is open first; with nothing open the program ends (RV-276, as before RV-245) */
         if (archwork_busy(app)) { (void)archwork_stop(app); return; }   /* RV-207 */
         if (dragout_stop(app)) return;   /* RV-223 */
         if (app->arc_job && !atomic_load(&app->arc_job->job.cancel)) {
@@ -522,10 +529,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
             }
             if (folded) { rubraview_menu_reset(&app->menu); sync_menubox_tiles(app); return; }
         }
-        rubraview_pal_audio_set_volume(rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("volume")) / 100.0, true);   /* now, before anything else */
-        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute"), 1.0);
-        settings_took_effect(app);
-        rubraview_pal_window_minimize(app->window);
+        if (!subs_may_leave(app)) return;   /* a subtitle not saved is still asked about, as on Ctrl+Q */
+        rubraview_pal_window_request_close(app->window);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_page")) && cue_step(app, +1)) {
         /* a `.cue`'s next track, in the same file (owner, 2026-09-30) */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("prev_page")) && cue_step(app, -1)) {

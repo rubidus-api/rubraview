@@ -74,7 +74,8 @@ ships with, so it cannot drift from them.
 | `Ctrl+Shift+K` | The names already there that a copy or a move waits on: tick which to keep, or answer all at once |
 | `Shift+P` | Mini player |
 | `Ctrl+Q` | Quit |
-| `Esc` | Esc: closes what is open; with nothing open, the sound off and the window down at once |
+| `Esc` | Esc: closes what is open; with nothing open, ends the program |
+| `` ` `` | The sound off and the window down at once |
 | `Ctrl+Left` | Window narrower |
 | `Ctrl+Right` | Window wider |
 | `Ctrl+Up` | Window shorter |
@@ -316,7 +317,8 @@ ships with, so it cannot drift from them.
 | Middle click | Actual size, and back to fit |
 | The mouse's back / forward buttons | Previous / next page |
 | Click on a film or on music | Pause / play |
-| Wheel over a picture, `Ctrl` + wheel, or the wheel over the zoom button | Zoom in or out, 10 % a notch |
+| Wheel over a picture or a book | The next or the previous file or page (zoomed in: the picture up and down) |
+| `Ctrl` + wheel, or the wheel over the zoom button | Zoom in or out, 10 % a notch |
 | Click the zoom button | Real size (0%), 20% to 200% by twenties, real size again |
 | Wheel over a Toolbar button that chooses one of several | The one before or after |
 | Wheel over the Toolbar's bar | The size of file names and messages |

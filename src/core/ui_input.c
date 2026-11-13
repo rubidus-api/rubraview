@@ -64,10 +64,12 @@ rubraview_pointer_intent_t rubraview_pointer_wheel(const rubraview_pointer_conte
         return RUBRAVIEW_INTENT_SCROLL_VERTICAL;
     }
 
-    /* On a picture the wheel zooms, away from you in (owner, 2026-10-20: "휠을 돌리면 ... 줌 동작을 하게",
-     * turning pages before); a film or a song has its own wheel. */
-    if (ctx->wheel_zooms) {
-        return forward ? RUBRAVIEW_INTENT_ZOOM_IN : RUBRAVIEW_INTENT_ZOOM_OUT;
+    /* On a picture and in a book the wheel turns files and pages, away from you back, towards you on (RV-276, owner
+     * 2026-11-13: "사진과 만화만 휠로 다음/이전 파일"; it zoomed from 2026-10-20, Ctrl+wheel still does); a picture
+     * zoomed in moves up and down first. A film or a song has its own wheel, the volume. */
+    if (ctx->wheel_turns) {
+        if (ctx->zoomed_in) return RUBRAVIEW_INTENT_SCROLL_VERTICAL;
+        return forward ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE;
     }
     return RUBRAVIEW_INTENT_NONE;
 }

@@ -3932,3 +3932,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: since 1.25.0 (D-175, R234) every archive Rubraview registers showed the open book in Explorer, a ZIP of documents as much as a comic.
 - Decision: a seventh icon resource, `rubraview-archive.ico`, drawn by `scripts/make-icon.py` in the same white on the program's red: a box, its lid and a handle. `icon_for_ext` gives it to `.zip .rar .7z .tar .alz .egg .azo`; `.cbz .cbr .cb7 .cbt .epub .pdf` keep the book (5). The Store package associates only the comic types, so it keeps its five logos.
 - Consequences: a reader who registered the archives sees the box after Rubraview registers them again (Settings › Explorer, the installer, or `--register-shell`); Explorer's icon cache may show the book until it refreshes.
+
+## D-340: Esc Quits Again, Backquote Hides, The Wheel Turns Pictures, A List Empties
+
+- Date: 2026-11-13
+- Status: Accepted (owner 2026-11-13, RV-276 first part; the key and the wheel's reach asked and answered)
+- Context: RV-245 (2026-11-07) made Esc minimise and mute; the owner now wants Esc to quit and the hiding on a key seldom used. The wheel zoomed a picture since 2026-10-20; the owner wants it to turn files on pictures and comics, the volume staying on films and music. A list could not be emptied.
+- Decision: `close_or_quit` on Escape (RV-245's chain of closing first, then the program's end); `minimize_mute` on Backquote, at once; the retired list moves a keymap.ini's `minimize_mute = Escape`. The wheel's `wheel_turns` gives the previous page away from you and the next towards you; a picture zoomed in scrolls up and down instead (our choice: a turn while zoomed would lose the place), Ctrl+wheel zooms. Removing every row empties the list (`list_empty`).
+- Consequences: the README's and the manual's key tables regenerated (`` ` `` in a code span); R276 points to R303. The rest of RV-276 (a folder pasted, comics in a list read as one book, a ZIP's way asked) waits for the owner's choice of design.

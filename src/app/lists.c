@@ -59,7 +59,7 @@ void listwin_toggle(app_state_t *app) {
 /* A book's pages are not a list of files: only a folder's files or a
    playlist can be reordered, taken out of the list or added to. */
 bool list_editable(const app_state_t *app) {
-    return page_count(app) > 0 && app->source.archive_path.size == 0;
+    return app->source.archive_path.size == 0;   /* RV-276: an emptied list too, so Add, Load and a drop fill it again */
 }
 
 /* The window's shape for what is open, and a check mark for every page. */
@@ -218,7 +218,7 @@ void list_apply(app_state_t *app, const size_t *order, size_t n, const rubraview
         if (at >= 0 && old == (size_t)at) { start = entries[i].path; reading_stays = true; }
         if (at >= 0 && old > (size_t)at && after == SIZE_MAX) after = i;
     }
-    if (!reading_stays) start = entries[after != SIZE_MAX ? after : n - 1].path;
+    if (!reading_stays) start = entries[at < 0 ? 0 : after != SIZE_MAX ? after : n - 1].path;   /* an empty list: its first */
 
     bool playing = reading_stays && app->media != NULL && app->media_page == at && at >= 0 && (size_t)at < have;
     double position = playing ? play_position(app) : 0.0;
@@ -242,6 +242,29 @@ void list_apply(app_state_t *app, const size_t *order, size_t n, const rubraview
     }
 }
 
+/* RV-276: every row out of the list: nothing open, as at the start; the files stay on the disk. */
+void list_empty(app_state_t *app) {
+    size_t had = page_count(app);
+    media_close(app);
+    text_close(app);   /* a text page on screen is one of the rows */
+    history_remember(app);
+    unload_all_pages(app);
+    source_close(app);
+    app->source = (rubraview_page_source_t){ .kind = RUBRAVIEW_PAGE_SOURCE_FOLDER };
+    app->layout.count = 0;
+    app->spread_index = 0;
+    rubraview_free(app->list_checked);
+    app->list_checked = NULL;
+    app->list_checked_count = 0;
+    app->listwin.first = 0;
+    app->listwin_shown_page = -1;
+    update_window_title(app);
+    app->needs_relayout = true;
+    char line[96];
+    rubraview_fmt(line, sizeof(line), T("the list emptied ({} out of it); the files are where they were"), PROVEN_ARG(had));
+    osd_say(app, cstr(line));
+}
+
 /* The rows marked in `gone` leave the list; the files stay on the disk. */
 void list_remove(app_state_t *app, const bool *gone) {
     size_t count = page_count(app), n = 0;
@@ -251,7 +274,7 @@ void list_remove(app_state_t *app, const bool *gone) {
     if (n == count) {
         osd_say(app, TU8("check the rows to take out of the list first"));
     } else if (n == 0) {
-        osd_say(app, TU8("nothing taken out: a list cannot be left empty (uncheck one row)"));
+        list_empty(app);   /* RV-276 (owner, 2026-11-13: "모든 파일 다 목록에서 없애고 비우는 것도 허용") */
     } else {
         char line[128];
         rubraview_fmt(line, sizeof(line), T("{} out of the list ({} in it); the files are where they were"), PROVEN_ARG((size_t)(count - n)), PROVEN_ARG((size_t)n));

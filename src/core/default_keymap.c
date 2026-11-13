@@ -38,9 +38,12 @@ const char *rubraview_default_keymap(void) {
     /* §3.14.6 (owner, 2026-09-24): the music in a window of its own — a song's, or the one behind the pictures. */
     "toggle_miniplayer = \"Shift+P\"\n"
     /* RV-245 (owner, 2026-11-07: "ESC 대신에 Ctrl+Q로 종료하게 해 줘요. ESC는 그냥 최소화+Mute 까지만"): Esc closes what is
-       open, and with nothing open puts the window down and the sound off at once */
+       open, and with nothing open puts the window down and the sound off at once. RV-276 (owner, 2026-11-13: "ESC 키는
+       종료키로 바꾸고 숨기기(+뮤트) 키는 다른걸로 ... ` 가 좋겠어요"): Esc closes what is open, then the program;
+       Backquote puts the window down and the sound off at once. */
     "quit = \"Ctrl+Q\"\n"
-    "minimize_mute = \"Escape\"\n"
+    "close_or_quit = \"Escape\"\n"
+    "minimize_mute = \"Backquote\"\n"
     /* D-16 (owner, 2026-09-15): Ctrl + arrows size the window, Alt +
        arrows move it — everywhere, whatever is on screen. */
     "window_narrower = \"Ctrl+Left\"\n"
@@ -255,6 +258,7 @@ const char *rubraview_default_keymap_retired(void) {
     return
     "[common]\n"
     "quit = \"Escape\"\n"   /* RV-245: Esc minimises and mutes now; Ctrl+Q quits */
+    "minimize_mute = \"Escape\"\n"   /* RV-276: Esc closes, then quits (close_or_quit); Backquote minimises and mutes */
     "toggle_fullscreen = \"F, F11, Alt+Enter\"\n"
     "open_settings = \"F10, Ctrl+Comma\"\n"
     "toggle_help = \"F1\"\n"

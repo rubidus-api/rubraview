@@ -15,7 +15,7 @@ rubraview_pointer_context_t pointer_context(const app_state_t *app) {
         .comic_mode = (app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_SINGLE) || page_count(app) > 1,
         .zoomed_in = app->zoom > 1.001 || strip_active(app),   /* a drag moves the strip */
         .scrollable_vertically = (app->fit_mode == RUBRAVIEW_FIT_WIDTH),
-        .wheel_zooms = !app->media && !strip_active(app) && !app->text,
+        .wheel_turns = !app->media && !strip_active(app) && !app->text,
     };
 }
 

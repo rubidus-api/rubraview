@@ -294,7 +294,9 @@ settles the part on screen is drawn again more sharply — lines and letters
 crisper, with no halo beside them. Settings › Viewer › **Enlarging a small
 picture** set to `smooth` leaves it as first drawn. Zoomed past the
 window, hold the left button and drag to move the picture. The wheel
-zooms a picture (a film's and a song's wheel is the volume); a double
+turns to the next or the previous picture or page (zoomed in, it moves the
+picture up and down; `Ctrl` + wheel zooms; a film's and a song's wheel is
+the volume); a double
 click puts the picture's middle back on the window's. Holding the button
 still for a moment opens the right-click list, as a right click does.
 
@@ -443,7 +445,7 @@ drag there marks a part of it — a rectangle, or an ellipse (**Shape** in
 the selection's box), with a soft edge if you give it a **Feather**. Drag
 inside it to move it, drag one of its eight handles to size it, or type
 X, Y, W and H in the selection's box. Press the button again, or `Esc`, to
-stop choosing: a drag then moves the picture and the wheel zooms, as
+stop choosing: a drag then moves the picture and the wheel turns, as
 without Edit. With an area, what you do next is done to it alone; without
 one, to the whole picture. **Copy the area to the clipboard** puts that
 part of the picture, with the edits in force, on the clipboard (an
@@ -2075,7 +2077,8 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+Shift+K` | The names already there that a copy or a move waits on: tick which to keep, or answer all at once |
 | `Shift+P` | Mini player |
 | `Ctrl+Q` | Quit |
-| `Esc` | Esc: closes what is open; with nothing open, the sound off and the window down at once |
+| `Esc` | Esc: closes what is open; with nothing open, ends the program |
+| `` ` `` | The sound off and the window down at once |
 | `Ctrl+Left` | Window narrower |
 | `Ctrl+Right` | Window wider |
 | `Ctrl+Up` | Window shorter |
