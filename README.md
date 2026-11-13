@@ -319,6 +319,7 @@ ships with, so it cannot drift from them.
 | Middle click | Actual size, and back to fit |
 | The mouse's back / forward buttons | Previous / next page |
 | Click on a film or on music | Pause / play |
+| Pointer resting in the middle of the window | The navigator: a page bar and buttons for the page, the picture, first / last, the archive or folder beside, and X |
 | Wheel over a picture or a book | The next or the previous file or page (zoomed in: the picture up and down); which way is a setting (Settings › Viewer, and Video for the volume) |
 | `Ctrl` + wheel, or the wheel over the zoom button | Zoom in or out, 10 % a notch |
 | Click the zoom button | Real size (0%), 20% to 200% by twenties, real size again |

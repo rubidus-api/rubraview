@@ -1737,6 +1737,8 @@ uint64_t scene_signature(const app_state_t *app) {
     SIG(&h, app->extract_done);   /* RV-240 */
     SIG(&h, app->playlist_ask);   /* RV-255 */
     SIG(&h, app->book_ask);   /* RV-276 */
+    SIG(&h, app->navbox_shown);   /* RV-277 */
+    if (app->navbox_shown) { SIG(&h, (int32_t)rubraview_navbox_hit(&app->navbox, app->pointer_x, app->pointer_y)); SIG(&h, current_page_index(app)); }
     SIG(&h, app->list_del_ask);   /* RV-256 */
     { bool asking = arcadd_asking(); SIG(&h, asking); }   /* RV-260 */
     SIG(&h, rubraview_pal_time_now_seconds() < app->vol_flash_until);

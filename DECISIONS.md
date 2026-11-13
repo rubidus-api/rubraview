@@ -3956,3 +3956,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: after D-337 and D-338 the decoding threads looked for room every 2 to 5 ms on the high-resolution timer: a paused film with full rings, or a film opened ahead, still woke hundreds of times a second, and a freed slot was seen up to 5 ms late.
 - Decision: one auto-reset event a film; the thread waits on it where it slept (50 ms at most for room, 100 ms at its end); whoever makes room or changes the wish sets it (the picture taken, the sound read, seek, pause, track, quit). The sound thread finds it in the PCM ring (`rubraview_pcm_ring_t.room`, opaque to the core). FFmpeg's child gets it as a fourth inherited handle, `RUBRAVIEW_MHOST_VERSION` 3; a pooled child keeps it. The fall-backs keep a lost signal to a short stall; `RUBRAVIEW_ROOM_SLEEP` keeps D-338's sleeps to compare.
 - Consequences: a paused film's decoder wakes at most 10 to 20 times a second (the fall-back), less with the event; a slot taken is filled at once. The sound thread sets the event once a period it reads (10 ms), so while sound plays the decoder still wakes that often, as the sound engine does.
+
+## D-343: A Navigator At The Pointer In The Middle Of The Window
+
+- Date: 2026-11-13
+- Status: Accepted (owner 2026-11-13, RV-277's request; the X as "바로 종료", the program's end, to be confirmed)
+- Context: the edge columns (RV-206) are at the window's sides; the owner wants the moves at hand in the middle of the window, at the pointer, with a page bar, left before and right after whatever the reading direction.
+- Decision: a core module (`ui_navbox`) for the middle, the box's place and parts, the actions and when it shows (a rest of 0.3 s, gone 0.8 s after), tested on the host; the viewer draws it after the edge columns and gives it presses before the Toolbar's bar. The buttons run the actions there are (a picture is `page_over_*`, RV-224's step); the bar is the Toolbar's (`pagebar_press`). It never shows over a film, a text, a zoomed picture or while a press is held, so dragging and double clicks in the middle act as before. A setting turns it off.
+- Consequences: the box hides with the pointer (Windows' idle hiding of the cursor puts it away too). The X ends the program at once, as the owner wrote; if it is to close the box only, `rubraview_navbox_action` changes.

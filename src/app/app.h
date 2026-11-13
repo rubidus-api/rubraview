@@ -70,6 +70,7 @@
 #include "rubraview/boxes_doc.h"
 #include "rubraview/ui_chrome.h"
 #include "rubraview/ui_edgenav.h"
+#include "rubraview/ui_navbox.h"
 #include "rubraview/ui_subwin.h"
 #include "rubraview/vgrade.h"
 #include "rubraview/ui_ctxmenu.h"
@@ -597,6 +598,11 @@ typedef struct app_state {
     int32_t                book_ask_page;
     bool                   book_ask_back;
     rubraview_pal_rect_t   book_ask_btn[4];
+    /* RV-277: the navigator in the middle of the window */
+    bool                   navbox_shown;
+    rubraview_navbox_t     navbox;
+    double                 navbox_rest_since;    /* the pointer in the middle since (0: not there) */
+    double                 navbox_near_at;       /* the pointer last in the box or the middle */
     int32_t                folder_opened_kind;   /* RV-168/169: the kind of the file the folder came with (1 pictures, 2 films, 3 music; 0 a folder) */
     /* D-86: what Explorer's menu asked, gathered until the selection is whole. */
     rubraview_shellreq_collector_t shell_requests;
@@ -2326,6 +2332,10 @@ bool book_ask_press(app_state_t *app, double x, double y);
 void draw_book_ask(app_state_t *app, double win_w, double win_h, double dpi);
 size_t list_walk_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, proven_u8str_view_t **out);
 void list_paste(app_state_t *app);
+/* RV-277 (navbox.c) */
+void navbox_tick(app_state_t *app);
+bool navbox_press(app_state_t *app, double x, double y);
+void draw_navbox(app_state_t *app);
 bool list_del_press(app_state_t *app, double x, double y);
 bool list_editable(const app_state_t *app);
 bool list_ext_is_off(const app_state_t *app, proven_u8str_view_t ext);

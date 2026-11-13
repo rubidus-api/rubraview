@@ -195,6 +195,7 @@ static const char *const PARTS[] = {
 "  toggle viewer.wheel_strip       \"Thumbnails while the wheel turns pages\" = true wired\n"
 "  choice viewer.wheel_next        \"The next file or page by the wheel turned\" down | up = down wired\n"
 "  choice viewer.wheel_zoom        \"Ctrl+wheel enlarges turned\" up | down = up wired\n"
+"  toggle viewer.navigator         \"Navigator in the middle of the window\" = true wired\n"
 "  section \"Shape\"\n"
 "  int    viewer.aspect_width      \"Custom shape, width\"     1..10000 step 1 = 235 wired\n"
 "  int    viewer.aspect_height     \"Custom shape, height\"    1..10000 step 1 = 100 wired\n"
@@ -543,6 +544,7 @@ static const char *const PARTS[] = {
 "help viewer.wheel_strip \"On: turning pages with the wheel brings up a strip of thumbnails at the bottom for a moment. Off: the pages turn and nothing comes up (the filmstrip, Shift+F, is not changed).\"\n",
 "help viewer.wheel_next \"On a picture and in a book: down (towards you) shows the next file or page and up the one before, or the other way round. Films and music keep the wheel as the volume.\"\n"
 "help viewer.wheel_zoom \"Ctrl+wheel on a picture: up (away from you) enlarges and down shrinks, or the other way round.\"\n"
+"help viewer.navigator \"On a picture or a book, the pointer resting in the middle of the window brings up a box of buttons at it: a page bar, the page, the picture, the first and the last, the archive or folder before and after (left before, right after), and X to quit.\"\n"
 "help video.wheel_louder \"While a film or music plays: up (away from you) makes it louder and down quieter, or the other way round.\"\n"
 "help viewer.transition \"How one page gives way to the next: a cut, a fade, a slide, a zoom, or a dissolve (the new page laid over the old one, nothing dims in between).\"\n"
 "help files.at_ends \"Past the last or before the first file: say so and stay, go on to the next or previous folder or archive, or go round to the other end.\"\n"

@@ -10,6 +10,7 @@ void tick_timers(app_state_t *app, double dt) {
         int32_t side = (int32_t)edge_nav_side(app, app->pointer_x, app->pointer_y);
         if (side != app->edge_side) { app->edge_side = side; app->edge_since = rubraview_pal_time_now_seconds(); }
     }
+    navbox_tick(app);   /* RV-277 */
     rubraview_osd_tick(&app->osd, dt);
     hdr_screen_tick(app, dt);   /* RV-153 */
     media_stopped_tick(app);    /* RV-176 */

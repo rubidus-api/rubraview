@@ -320,7 +320,14 @@ picture up and down; `Ctrl` + wheel zooms; a film's and a song's wheel is
 the volume). Which way is which is set in Settings › Viewer (**The next
 file or page by the wheel turned** down or up, **Ctrl+wheel enlarges
 turned** up or down) and Settings › Video (**Louder by the wheel
-turned**); a double
+turned**). **The navigator**: rest the pointer in the middle of the
+window over a picture or a book and a box comes up at it: a page bar on
+top (click or drag), and below it, left the one before and right the one
+after whatever the reading direction, the page (a spread in two pages),
+the picture (one file), the first and the last, and the archive or folder
+beside; its X ends the program. It goes when the pointer leaves it
+(Settings › Viewer › **Navigator in the middle of the window** turns it
+off); a double
 click puts the picture's middle back on the window's. Holding the button
 still for a moment opens the right-click list, as a right click does.
 

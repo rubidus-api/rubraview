@@ -324,6 +324,7 @@ void draw_chrome(app_state_t *app, double win_w, double win_h) {
     draw_wheel_strip(app);
 
     draw_edge_nav(app, win_w, win_h);
+    draw_navbox(app);   /* RV-277 */
 
     /* Floating boxes (§3.6); none while they are hidden (D-110). */
     toolbox_refresh(app);

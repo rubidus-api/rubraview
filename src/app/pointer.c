@@ -220,6 +220,7 @@ bool handle_chrome_click(app_state_t *app, double x, double y) {
             return true;
         }
     }
+    if (navbox_press(app, x, y)) return true;   /* RV-277: the navigator in the middle */
     /* The same bar over a still picture: a click goes to that page. */
     if (toolbox_here && pagebar_shown(app)) {
         rubraview_rect_t bar = rubraview_box_timeline_rect(&app->toolbox, &metrics);
