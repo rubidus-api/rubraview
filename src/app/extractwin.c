@@ -2,7 +2,7 @@
    맞을 듯 합니다) 하고 압축 푸는 것이 끝나면 (창에 바로 종료 체크박스가 있으며, 기존 설정을 기억하고, 설정창에서도 옵션 설정
    가능) 옵션에 따라 바로 꺼지던가 아니면 미리 지정한 동작(바로 끄기, 카드 상태로 대기하기, 압축 푼 폴더 열기)을 수행"; asked:
    stay by default, the folder in Explorer or in Rubraview by choice, its own window when a viewer is open too):
-   Explorer's Extract, Extract here and Extract to... run in a small window of their own, the progress card's rows,
+   Explorer's Extract here, into a folder of its name, Smart extract and Extract to... run in a small window of their own, the progress card's rows,
    Stop and a "Close when done" box in it. A launch for them alone makes the viewer's window without showing it, and
    ends when this window closes. A locked archive's password is asked in it; names already there go to the clashes
    window. What follows is `archive.after_extract` (`rubraview_extract_after`); a failure or a stop stays. */
@@ -20,7 +20,7 @@ static xw_req_t g_queue[XW_QUEUE];
 static size_t g_queued;
 
 bool shell_verb_extracts(rubraview_shell_verb_t verb) {
-    return verb == RUBRAVIEW_SHELL_VERB_EXTRACT || verb == RUBRAVIEW_SHELL_VERB_EXTRACT_HERE || verb == RUBRAVIEW_SHELL_VERB_EXTRACT_TO;
+    return rubraview_shell_extract_mode(verb) >= 0;
 }
 
 void main_window_show(app_state_t *app) {
@@ -108,8 +108,7 @@ static void free_req(xw_req_t *r) {
 static void start(app_state_t *app, rubraview_shell_verb_t verb, const proven_u8str_view_t *paths, size_t count) {
     if (!xw_make(app)) {   /* no window of its own: the viewer's card, as before */
         main_window_show(app);
-        archwork_extract_paths(app, paths, count, verb == RUBRAVIEW_SHELL_VERB_EXTRACT_HERE ? RUBRAVIEW_EXTRACT_SMART : RUBRAVIEW_EXTRACT_FOLDER,
-                               verb == RUBRAVIEW_SHELL_VERB_EXTRACT_TO);
+        archwork_extract_paths(app, paths, count, rubraview_shell_extract_mode(verb), verb == RUBRAVIEW_SHELL_VERB_EXTRACT_TO);
         return;
     }
     app->xw_state = XW_WORKING;
@@ -128,7 +127,7 @@ static void start(app_state_t *app, rubraview_shell_verb_t verb, const proven_u8
         }
         dest = picked.paths[0];
     }
-    archwork_extract_windowed(app, paths, count, verb == RUBRAVIEW_SHELL_VERB_EXTRACT_HERE ? RUBRAVIEW_EXTRACT_SMART : RUBRAVIEW_EXTRACT_FOLDER, dest);
+    archwork_extract_windowed(app, paths, count, rubraview_shell_extract_mode(verb), dest);
 }
 
 /* Explorer's Extract: now, or after the one under way (in the order asked). */

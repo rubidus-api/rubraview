@@ -1,5 +1,6 @@
 #include "rubraview/core.h"
 #include "rubraview/shellreq.h"
+#include "rubraview/archive_job.h"
 #include "rubraview/lang.h"
 #include "rubraview/filemanage.h"
 #include <stdlib.h>
@@ -7,7 +8,7 @@
 
 static const char *const VERB_FLAGS[RUBRAVIEW_SHELL_VERB_COUNT] = {
     "", "--open", "--open-only", "--add", "--browse", "--convert", "--print", "--new-window",
-    "--extract", "--extract-here", "--extract-to", "--compress-zip", "--compress",
+    "--extract", "--extract-here", "--extract-to", "--compress-zip", "--compress", "--extract-smart",
 };
 
 const char *rubraview_shell_verb_flag(rubraview_shell_verb_t verb) {
@@ -19,6 +20,16 @@ rubraview_shell_verb_t rubraview_shell_verb_for_flag(proven_u8str_view_t arg) {
         if (proven_u8str_view_eq(arg, proven_u8str_view_from_cstr(VERB_FLAGS[verb]))) return (rubraview_shell_verb_t)verb;
     }
     return RUBRAVIEW_SHELL_VERB_NONE;
+}
+
+int rubraview_shell_extract_mode(rubraview_shell_verb_t verb) {
+    switch (verb) {
+        case RUBRAVIEW_SHELL_VERB_EXTRACT:       return RUBRAVIEW_EXTRACT_FOLDER;
+        case RUBRAVIEW_SHELL_VERB_EXTRACT_HERE:  return RUBRAVIEW_EXTRACT_AS_IS;   /* RV-278: everything here, no folder */
+        case RUBRAVIEW_SHELL_VERB_EXTRACT_SMART: return RUBRAVIEW_EXTRACT_SMART;
+        case RUBRAVIEW_SHELL_VERB_EXTRACT_TO:    return RUBRAVIEW_EXTRACT_FOLDER;  /* into a folder of its name there */
+        default:                                 return -1;
+    }
 }
 
 #define PLAYABLE (RUBRAVIEW_SHELL_PICTURES | RUBRAVIEW_SHELL_VIDEO | RUBRAVIEW_SHELL_MUSIC)
@@ -42,11 +53,14 @@ static const rubraview_shell_menu_item_t MENU_ITEMS[] = {
       RUBRAVIEW_SHELL_PICTURES, false },
     { RUBRAVIEW_SHELL_VERB_PRINT,      "7print",   "Print...",             "\xEC\x9D\xB8\xEC\x87\x84...",
       RUBRAVIEW_SHELL_PICTURES, false },
-    { RUBRAVIEW_SHELL_VERB_EXTRACT,      "8a_extract", "Extract into a folder of its name", "\xEA\xB0\x99\xEC\x9D\x80 \xEC\x9D\xB4\xEB\xA6\x84\xEC\x9D\x98 \xED\x8F\xB4\xEB\x8D\x94\xEC\x97\x90 \xED\x92\x80\xEA\xB8\xB0",
+    /* RV-278 (owner, 2026-11-14): here, a folder of its name, smart (one top folder here, else a folder of its name), elsewhere */
+    { RUBRAVIEW_SHELL_VERB_EXTRACT_HERE, "8a_here", "Extract here", "\xEC\x9D\xB4\xEA\xB3\xB3\xEC\x97\x90 \xED\x92\x80\xEA\xB8\xB0",
       BOOKS, false },
-    { RUBRAVIEW_SHELL_VERB_EXTRACT_HERE, "8b_here", "Extract here (smart)", "\xEC\x97\xAC\xEA\xB8\xB0\xEC\x97\x90 \xED\x92\x80\xEA\xB8\xB0 (\xEC\x8A\xA4\xEB\xA7\x88\xED\x8A\xB8)",
+    { RUBRAVIEW_SHELL_VERB_EXTRACT, "8b_extract", "Extract into a folder of its name", "\xED\x8C\x8C\xEC\x9D\xBC \xEC\x9D\xB4\xEB\xA6\x84 \xED\x8F\xB4\xEB\x8D\x94\xEC\x97\x90 \xED\x92\x80\xEA\xB8\xB0",
       BOOKS, false },
-    { RUBRAVIEW_SHELL_VERB_EXTRACT_TO,   "8c_to", "Extract to...", "\xEB\x8B\xA4\xEB\xA5\xB8 \xEA\xB3\xB3\xEC\x97\x90 \xED\x92\x80\xEA\xB8\xB0...",
+    { RUBRAVIEW_SHELL_VERB_EXTRACT_SMART, "8c_smart", "Smart extract", "\xEC\x98\x81\xEB\xA6\xAC\xED\x95\x98\xEA\xB2\x8C \xED\x92\x80\xEA\xB8\xB0",
+      BOOKS, false },
+    { RUBRAVIEW_SHELL_VERB_EXTRACT_TO, "8d_to", "Extract to...", "\xEB\x8B\xA4\xEB\xA5\xB8 \xEA\xB3\xB3\xEC\x97\x90 \xED\x92\x80\xEA\xB8\xB0...",
       BOOKS, false },
     { RUBRAVIEW_SHELL_VERB_COMPRESS_ZIP, "9a_zip", "Compress to a ZIP", "ZIP\xEC\x9C\xBC\xEB\xA1\x9C \xEC\x95\x95\xEC\xB6\x95",
       ANYTHING, false },

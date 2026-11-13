@@ -3964,3 +3964,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: the edge columns (RV-206) are at the window's sides; the owner wants the moves at hand in the middle of the window, at the pointer, with a page bar, left before and right after whatever the reading direction.
 - Decision: a core module (`ui_navbox`) for the middle, the box's place and parts, the actions and when it shows (a rest of 0.3 s, gone 0.8 s after), tested on the host; the viewer draws it after the edge columns and gives it presses before the Toolbar's bar. The buttons run the actions there are (a picture is `page_over_*`, RV-224's step); the bar is the Toolbar's (`pagebar_press`). It never shows over a film, a text, a zoomed picture or while a press is held, so dragging and double clicks in the middle act as before. A setting turns it off.
 - Consequences: the box hides with the pointer (Windows' idle hiding of the cursor puts it away too). The X closes the box only, and it stays closed until the pointer leaves the middle (built first as the program's end, changed on the owner's word the next day).
+
+## D-344: Explorer's Extract Here, Into A Folder Of Its Name, Smart, And Elsewhere
+
+- Date: 2026-11-14
+- Status: Accepted (owner 2026-11-14, RV-278: "윈도 탐색기에서 파일 하나만 선택하고 우클릭 했을 때 루브라뷰 메뉴에서, 이곳에 풀기와 파일 이름 폴더에 풀기 그리고 영리하게 풀기(내부에 폴더 하나로 있으면 여기에, 아니면 파일 이름대로 폴더 만들어서. )")
+- Context: Explorer's submenu had three ways, "Extract here (smart)" being the smart one; the owner wants a plain Extract here, the folder of its name, and a smart one under its own name.
+- Decision: four items in this order: Extract here (`--extract-here`, now everything straight into the archive's folder), Extract into a folder of its name (`--extract`), Smart extract (`--extract-smart`, a new verb numbered after the others: one top folder or a single file here, else a folder of its name) and Extract to... (kept). Korean labels in the owner's words. `rubraview_shell_extract_mode` is the one map from a verb to its way.
+- Consequences: `--extract-here` changes meaning; a script that relied on its smart way uses `--extract-smart`. The classic menu's keys are written again at each registration (the old tree removed first), and the Store package's rows follow the table (`check-store.py`). A single file in the archive counts as one top item for Smart extract, as before.

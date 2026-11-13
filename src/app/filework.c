@@ -1061,13 +1061,10 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
             break;
         /* RV-207 (D-252): Explorer's Rubraview menu, as the open-file screen's right click */
         case RUBRAVIEW_SHELL_VERB_EXTRACT:
-            archwork_extract_paths(app, paths, count, RUBRAVIEW_EXTRACT_FOLDER, false);
-            break;
         case RUBRAVIEW_SHELL_VERB_EXTRACT_HERE:
-            archwork_extract_paths(app, paths, count, RUBRAVIEW_EXTRACT_SMART, false);
-            break;
+        case RUBRAVIEW_SHELL_VERB_EXTRACT_SMART:   /* RV-278 */
         case RUBRAVIEW_SHELL_VERB_EXTRACT_TO:
-            archwork_extract_paths(app, paths, count, RUBRAVIEW_EXTRACT_FOLDER, true);
+            archwork_extract_paths(app, paths, count, rubraview_shell_extract_mode(verb), verb == RUBRAVIEW_SHELL_VERB_EXTRACT_TO);
             break;
         case RUBRAVIEW_SHELL_VERB_COMPRESS_ZIP:
             archwork_compress_paths(app, paths, count, false);
