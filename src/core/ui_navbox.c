@@ -17,7 +17,8 @@ rubraview_navbox_t rubraview_navbox_place(double px, double py, double view_w, d
     double s = dpi_scale > 0.0 ? dpi_scale : 1.0;
     rubraview_navbox_t nav = { .pad = 10.0 * s, .button = 44.0 * s, .button_h = 36.0 * s, .bar_h = 24.0 * s,
                                .gap = 14.0 * s, .label_h = 18.0 * s };
-    double w = 2.0 * nav.pad + 8.0 * nav.button + 4.0 * 2.0 * s + 3.0 * nav.gap;   /* four pairs, 2 px inside a pair */
+    double inner = nav.pad * 0.2;   /* half the space inside a pair, as part_rect has it */
+    double w = 2.0 * nav.pad + 8.0 * nav.button + 4.0 * 2.0 * inner + 3.0 * nav.gap;   /* four pairs (the VM: the last button was on the edge) */
     double h = 2.0 * nav.pad + nav.bar_h + 8.0 * s + nav.button_h + nav.label_h;
     double x = clampd(px - w * 0.5, 0.0, view_w - w);
     double y = clampd(py - h * 0.5, 0.0, view_h - h);
