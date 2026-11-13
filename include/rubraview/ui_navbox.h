@@ -15,7 +15,8 @@ extern "C" {
  * 플로팅 박스로"): the navigator, a wide box at the pointer once it rests in the middle of the window (the middle 25 %
  * of its width and of its height), over a picture or a book. On top a page bar and the X; under it four pairs, left
  * the one before and right the one after whatever the reading direction: the page (a spread in two pages), the
- * picture (one file, always), the first and the last, the archive or folder beside. Geometry and the actions only:
+ * picture (one file, always), the first and the last, the archive or folder beside; the X closes the box, which does
+ * not come back until the pointer has left the middle. Geometry and the actions only:
  * the viewer paints.
  */
 
@@ -49,7 +50,7 @@ rubraview_rect_t rubraview_navbox_part_rect(const rubraview_navbox_t *nav, rubra
 /** The part under the point; NONE outside the box or between its parts. */
 rubraview_navbox_part_t rubraview_navbox_hit(const rubraview_navbox_t *nav, double px, double py);
 
-/** The action a button runs ("" for the bar); the X is `quit`. */
+/** The action a button runs ("" for the bar and the X, which the viewer handles: the X closes the box). */
 const char *rubraview_navbox_action(rubraview_navbox_part_t part);
 
 /** Under each pair, its words: 0 the page, 1 the picture, 2 first and last, 3 the archive or folder. */
@@ -58,9 +59,10 @@ const char *rubraview_navbox_pair_caption(int32_t pair);
 /**
  * Whether the box is up after this pass. `shown`: up before it; `in_middle`, `in_box`: where the pointer is;
  * `rested`: seconds the pointer has been in the middle without leaving; `away`: seconds since it was last in the
- * box or the middle; `allowed`: a picture or a book, nothing held or asked.
+ * box or the middle; `allowed`: a picture or a book, nothing held or asked; `closed`: its X pressed and the pointer
+ * not out of the middle since.
  */
-bool rubraview_navbox_keep(bool shown, bool allowed, bool in_middle, bool in_box, double rested, double away);
+bool rubraview_navbox_keep(bool shown, bool allowed, bool in_middle, bool in_box, double rested, double away, bool closed);
 
 #ifdef __cplusplus
 }

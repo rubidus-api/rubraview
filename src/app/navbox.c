@@ -31,10 +31,10 @@ void navbox_tick(app_state_t *app) {
     bool in_middle = allowed && rubraview_rect_contains(rubraview_navbox_middle((double)w, (double)h), px, py) && !over_a_window(app, px, py);
     bool in_box = app->navbox_shown && rubraview_rect_contains(app->navbox.box, px, py);
     if (in_middle) { if (app->navbox_rest_since <= 0.0) app->navbox_rest_since = now; }
-    else app->navbox_rest_since = 0.0;
+    else { app->navbox_rest_since = 0.0; if (!in_box) app->navbox_closed = false; }   /* out of the middle: it may come again */
     if (in_middle || in_box) app->navbox_near_at = now;
     double rested = app->navbox_rest_since > 0.0 ? now - app->navbox_rest_since : 0.0;
-    bool keep = rubraview_navbox_keep(app->navbox_shown, allowed, in_middle, in_box, rested, now - app->navbox_near_at);
+    bool keep = rubraview_navbox_keep(app->navbox_shown, allowed, in_middle, in_box, rested, now - app->navbox_near_at, app->navbox_closed);
     if (keep && !app->navbox_shown)
         app->navbox = rubraview_navbox_place(px, py, (double)w, (double)h, rubraview_pal_window_dpi_scale(app->window));
     app->navbox_shown = keep;
@@ -54,6 +54,11 @@ bool navbox_press(app_state_t *app, double x, double y) {
     if (part == RUBRAVIEW_NAVBOX_BAR) {
         rubraview_rect_t bar = rubraview_navbox_part_rect(&app->navbox, RUBRAVIEW_NAVBOX_BAR);
         if (page_count(app) > 1) pagebar_press(app, bar.x, bar.width, x, false);
+        return true;
+    }
+    if (part == RUBRAVIEW_NAVBOX_CLOSE) {   /* owner, 2026-11-14: "X는 상자만 닫는 것으로" */
+        app->navbox_shown = false;
+        app->navbox_closed = true;
         return true;
     }
     handle_action(app, cstr(rubraview_navbox_action(part)));

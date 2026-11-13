@@ -603,6 +603,7 @@ typedef struct app_state {
     rubraview_navbox_t     navbox;
     double                 navbox_rest_since;    /* the pointer in the middle since (0: not there) */
     double                 navbox_near_at;       /* the pointer last in the box or the middle */
+    bool                   navbox_closed;        /* its X pressed: not again until the pointer leaves the middle */
     int32_t                folder_opened_kind;   /* RV-168/169: the kind of the file the folder came with (1 pictures, 2 films, 3 music; 0 a folder) */
     /* D-86: what Explorer's menu asked, gathered until the selection is whole. */
     rubraview_shellreq_collector_t shell_requests;

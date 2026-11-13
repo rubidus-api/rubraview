@@ -325,7 +325,8 @@ window over a picture or a book and a box comes up at it: a page bar on
 top (click or drag), and below it, left the one before and right the one
 after whatever the reading direction, the page (a spread in two pages),
 the picture (one file), the first and the last, and the archive or folder
-beside; its X ends the program. It goes when the pointer leaves it
+beside; its X closes the box until the pointer leaves the middle. It
+goes when the pointer leaves it
 (Settings › Viewer › **Navigator in the middle of the window** turns it
 off); a double
 click puts the picture's middle back on the window's. Holding the button

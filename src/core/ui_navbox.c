@@ -62,7 +62,7 @@ const char *rubraview_navbox_action(rubraview_navbox_part_t part) {
         case RUBRAVIEW_NAVBOX_LAST:         return "last_page";
         case RUBRAVIEW_NAVBOX_BOOK_PREV:    return "prev_archive";
         case RUBRAVIEW_NAVBOX_BOOK_NEXT:    return "next_archive";
-        case RUBRAVIEW_NAVBOX_CLOSE:        return "quit";   /* owner: "X버튼도 넣어서 바로 종료할 수 있게" */
+        case RUBRAVIEW_NAVBOX_CLOSE:        return "";   /* the box closes (owner, 2026-11-14: "X는 상자만 닫는 것으로") */
         default:                            return "";
     }
 }
@@ -72,8 +72,8 @@ const char *rubraview_navbox_pair_caption(int32_t pair) {
     return pair >= 0 && pair < 4 ? WORDS[pair] : "";
 }
 
-bool rubraview_navbox_keep(bool shown, bool allowed, bool in_middle, bool in_box, double rested, double away) {
-    if (!allowed) return false;
+bool rubraview_navbox_keep(bool shown, bool allowed, bool in_middle, bool in_box, double rested, double away, bool closed) {
+    if (!allowed || closed) return false;
     if (shown) return in_box || in_middle || away < RUBRAVIEW_NAVBOX_LINGER;
     return in_middle && rested >= RUBRAVIEW_NAVBOX_REST;
 }

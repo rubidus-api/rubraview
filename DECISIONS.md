@@ -3960,7 +3960,7 @@ Do not store credentials, private infrastructure details, personal data, private
 ## D-343: A Navigator At The Pointer In The Middle Of The Window
 
 - Date: 2026-11-13
-- Status: Accepted (owner 2026-11-13, RV-277's request; the X as "바로 종료", the program's end, to be confirmed)
+- Status: Accepted (owner 2026-11-13, RV-277's request; 2026-11-14 the X: "가운데 이동 상자의 X는 상자만 닫는 것으로 합시다.")
 - Context: the edge columns (RV-206) are at the window's sides; the owner wants the moves at hand in the middle of the window, at the pointer, with a page bar, left before and right after whatever the reading direction.
 - Decision: a core module (`ui_navbox`) for the middle, the box's place and parts, the actions and when it shows (a rest of 0.3 s, gone 0.8 s after), tested on the host; the viewer draws it after the edge columns and gives it presses before the Toolbar's bar. The buttons run the actions there are (a picture is `page_over_*`, RV-224's step); the bar is the Toolbar's (`pagebar_press`). It never shows over a film, a text, a zoomed picture or while a press is held, so dragging and double clicks in the middle act as before. A setting turns it off.
-- Consequences: the box hides with the pointer (Windows' idle hiding of the cursor puts it away too). The X ends the program at once, as the owner wrote; if it is to close the box only, `rubraview_navbox_action` changes.
+- Consequences: the box hides with the pointer (Windows' idle hiding of the cursor puts it away too). The X closes the box only, and it stays closed until the pointer leaves the middle (built first as the program's end, changed on the owner's word the next day).
