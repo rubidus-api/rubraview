@@ -21,6 +21,7 @@ void rubraview_mhost_init(rubraview_mhost_block_t *b, rubraview_mhost_mode_t mod
     atomic_init(&b->wanted.gain_millionths, 1000000);
     atomic_init(&b->wanted.audio_stream, -1);
     atomic_init(&b->wanted.audio_serial, 0);
+    atomic_init(&b->wanted.tap_asked, 0);
     atomic_init(&b->observed.seq, 0);
     atomic_init(&b->heartbeat, 0);
     atomic_init(&b->log_used, 0);
@@ -604,4 +605,11 @@ bool rubraview_mhost_catalog_unpack(proven_arena_t *arena, proven_mem_view_t dat
     out->filters = filters;
     out->filter_count = (int32_t)count;
     return true;
+}
+
+uint32_t rubraview_mhost_child_wait(bool playback, bool has_media, bool paused, double tap_seconds_ago) {
+    if (!playback) return RUBRAVIEW_MHOST_WAIT_SERVICE;
+    if (!has_media || paused) return RUBRAVIEW_MHOST_WAIT_IDLE;
+    if (tap_seconds_ago >= 0.0 && tap_seconds_ago < RUBRAVIEW_MHOST_TAP_HOLD) return RUBRAVIEW_MHOST_WAIT_ANALYSER;
+    return RUBRAVIEW_MHOST_WAIT_PLAYING;
 }

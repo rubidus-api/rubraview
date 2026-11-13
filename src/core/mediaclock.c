@@ -394,6 +394,25 @@ double rubraview_media_redraw_wait(double seconds_since_render) {
     return left > 0.0 ? left : 0.0;
 }
 
+double rubraview_media_frame_lead(double frame_pts, double frame_duration, double clock_seconds, bool blend,
+                                  double blend_period) {
+    if (!(frame_duration > 0.0)) frame_duration = FALLBACK_FRAME_SECONDS;
+    if (blend && blend_period > 0.0 && blend_period < 0.1) return frame_pts - blend_period - clock_seconds;
+    return frame_pts - frame_duration * 0.5 - clock_seconds;
+}
+
+double rubraview_media_next_wait(double lead, double rate, double period, double cap) {
+    if (!(cap > 0.0)) return 0.0;
+    if (isnan(lead)) return RUBRAVIEW_MEDIA_WAIT_EMPTY < cap ? RUBRAVIEW_MEDIA_WAIT_EMPTY : cap;
+    if (!(rate > 0.0 && rate < 100.0)) rate = 1.0;
+    if (!(period > 0.0 && period < 0.1)) period = 1.0 / 60.0;
+    if (lead <= 0.0) return 0.0;
+    double due = lead / rate;                /* showable at once from then on */
+    double wait = (lead - period) / rate;    /* showable with a whole refresh ahead from then on */
+    if (wait < RUBRAVIEW_MEDIA_WAIT_FLOOR) wait = due < RUBRAVIEW_MEDIA_WAIT_FLOOR ? due : RUBRAVIEW_MEDIA_WAIT_FLOOR;
+    return wait < cap ? wait : cap;
+}
+
 /* ---- RV-062: hardware decode ---- */
 
 const char *rubraview_ffmpeg_hw_refusal(int32_t mode, bool has_device, uint32_t decoder_profiles, int32_t hdr, bool api) {

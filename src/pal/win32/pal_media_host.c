@@ -445,7 +445,11 @@ typedef struct mh_play {
 
 static void audio_tell_all(void) {
     AcquireSRWLockShared(&g_audio_lock);
-    for (size_t i = 0; i < g_play_count; ++i) if (!g_plays[i]->stopped) audio_write(&g_plays[i]->child.block->audio);
+    for (size_t i = 0; i < g_play_count; ++i) {
+        if (g_plays[i]->stopped) continue;
+        audio_write(&g_plays[i]->child.block->audio);
+        if (g_plays[i]->child.request) SetEvent(g_plays[i]->child.request);   /* RV-273: taken at once */
+    }
     ReleaseSRWLockShared(&g_audio_lock);
 }
 
@@ -474,6 +478,7 @@ bool rubraview_mhost_remote_tap(float *out, size_t count, size_t *out_count) {
         mh_play_t *p = g_plays[i];
         if (p->stopped || !p->opened.info.audio_output) continue;
         *out_count = rubraview_mhost_tap_take(&p->child.block->tap, out, count);
+        atomic_fetch_add_explicit(&p->child.block->wanted.tap_asked, 1, memory_order_relaxed);   /* RV-273: the child hurries */
         found = true;
     }
     ReleaseSRWLockShared(&g_audio_lock);
@@ -538,6 +543,7 @@ static bool pool_take(mh_child_t *out, const rubraview_media_gpu_t *gpu) {
     atomic_store(&b->wanted.gain_millionths, 1000000);
     atomic_store(&b->wanted.audio_stream, -1);
     atomic_store(&b->wanted.audio_serial, 0);
+    atomic_store(&b->wanted.tap_asked, 0);
     proven_sys_mem_set(b->slots, 0, sizeof b->slots);
     proven_sys_mem_set(b->frame_map, 0, sizeof b->frame_map);
     b->frame_bytes = 0;
@@ -712,6 +718,12 @@ static size_t remote_frames_ready(void *handle) {
     return p && !p->stopped ? (size_t)remote_waiting(p) : 0;
 }
 
+/* RV-273 (D-337): what the viewer wrote in `wanted` taken at once: the child sleeps between passes now, and its
+   request event wakes it (a wake with no new request only applies and observes). */
+static void remote_wake(mh_play_t *p) {
+    if (p->child.request) SetEvent(p->child.request);
+}
+
 static void remote_seek(void *handle, double seconds, rubraview_seek_mode_t mode) {
     mh_play_t *p = (mh_play_t *)handle;
     if (!p || p->stopped || p->opened.info.live) return;
@@ -721,11 +733,12 @@ static void remote_seek(void *handle, double seconds, rubraview_seek_mode_t mode
     atomic_store_explicit(&w->seek_mode, (int32_t)mode, memory_order_relaxed);
     p->consumer_generation++;
     atomic_store_explicit(&w->seek_generation, p->consumer_generation, memory_order_release);
+    remote_wake(p);
 }
 
 static void remote_read_limit(void *handle, uint64_t bytes) {   /* RV-261 */
     mh_play_t *p = (mh_play_t *)handle;
-    if (p && !p->stopped && bytes) atomic_store_explicit(&p->child.block->wanted.read_limit, bytes, memory_order_release);
+    if (p && !p->stopped && bytes) { atomic_store_explicit(&p->child.block->wanted.read_limit, bytes, memory_order_release); remote_wake(p); }
 }
 
 static bool remote_seen(mh_play_t *p, rubraview_mhost_seen_t *seen) {
@@ -756,7 +769,7 @@ static bool remote_sound_over(void *handle) {
 
 static void remote_set_paused(void *handle, bool paused) {
     mh_play_t *p = (mh_play_t *)handle;
-    if (p && !p->stopped) atomic_store_explicit(&p->child.block->wanted.paused, paused ? 1 : 0, memory_order_release);
+    if (p && !p->stopped) { atomic_store_explicit(&p->child.block->wanted.paused, paused ? 1 : 0, memory_order_release); remote_wake(p); }
 }
 
 static bool remote_audio_position(void *handle, double *out_position, double *out_wall) {
@@ -815,6 +828,7 @@ static bool remote_select_audio_track(void *handle, int32_t stream_index) {
     rubraview_mhost_wanted_t *w = &p->child.block->wanted;
     atomic_store_explicit(&w->audio_stream, stream_index, memory_order_relaxed);
     atomic_store_explicit(&w->audio_serial, ++p->audio_serial, memory_order_release);
+    remote_wake(p);
     return true;
 }
 
@@ -823,6 +837,7 @@ static void remote_set_gain(void *handle, double gain) {
     if (!p || p->stopped || !(gain >= 0.0)) return;
     if (gain > 4.0) gain = 4.0;
     atomic_store_explicit(&p->child.block->wanted.gain_millionths, (int32_t)llround(gain * 1e6), memory_order_release);
+    remote_wake(p);
 }
 
 static proven_u8str_view_t remote_read_subtitle_stream(void *handle, proven_arena_t *arena, int32_t stream_index) {
@@ -1564,7 +1579,9 @@ static int32_t child_service(uint32_t kind, uint32_t *serial) {
 
 int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *request_text, const wchar_t *reply_text) {
     g_in_child = true;
-    rubraview_pal_time_fine(true);   /* RV-215: the child lives only while a film plays: its 4 ms waits are 4 ms */
+    /* RV-273 (D-337): no 1 ms system timer here. The child sleeps 15 to 250 ms between passes and the viewer's wants
+       wake it; its decoder's short waits for room are as long as Windows' tick, which the four slots and the
+       two seconds of sound cover. */
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     SetUnhandledExceptionFilter(child_crash);
     HANDLE mapping = (HANDLE)(uintptr_t)_wcstoui64(mapping_text, NULL, 10);
@@ -1581,10 +1598,15 @@ int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *re
                                      (proven_u8str_view_t){ (const proven_byte_t *)chosen, proven_cstr_len(chosen) });
     bool playback = b->mode == RUBRAVIEW_MHOST_PLAYBACK;
     child_play_t cp = { 0 };
-    uint32_t handled = 0, audio_applied = 0, tap_tick = 0;
-    ULONGLONG idle_since = 0;
+    uint32_t handled = 0, audio_applied = 0, tap_seen = 0;
+    ULONGLONG idle_since = 0, tap_at = 0;
     for (;;) {
-        DWORD r = WaitForSingleObject(g_child_request, playback ? 4 : 1000);
+        ULONGLONG now_ms = GetTickCount64();
+        uint32_t tap = atomic_load_explicit(&b->wanted.tap_asked, memory_order_relaxed);
+        if (tap != tap_seen) { tap_seen = tap; tap_at = now_ms; }
+        uint32_t wait = rubraview_mhost_child_wait(playback, cp.media != NULL, atomic_load_explicit(&b->wanted.paused, memory_order_relaxed) != 0,
+                                                   tap_at ? (double)(now_ms - tap_at) / 1000.0 : -1.0);
+        DWORD r = WaitForSingleObject(g_child_request, wait);
         atomic_store_explicit(&b->heartbeat, atomic_load(&b->heartbeat) + 1, memory_order_release);
         if (playback) {   /* the viewer's sound settings, and the latest sound for its analyser */
             uint32_t serial = atomic_load_explicit(&b->audio.serial, memory_order_acquire);
@@ -1600,7 +1622,7 @@ int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *re
                 rubraview_pal_audio_set_latency_ms(latency);
                 rubraview_pal_audio_set_chain(&chain);
             }
-            if (cp.media && ++tap_tick % 3 == 0) {
+            if (cp.media) {   /* RV-273: every pass, 15 ms apart while the analyser takes them */
                 static float samples[RUBRAVIEW_MHOST_TAP];
                 size_t n = rubraview_pal_audio_tap_read(samples, RUBRAVIEW_MHOST_TAP);
                 rubraview_mhost_tap_put(&b->tap, samples, n);

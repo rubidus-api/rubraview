@@ -79,6 +79,23 @@ bool   rubraview_media_redraw_due(bool new_picture, double seconds_since_render)
 double rubraview_media_redraw_wait(double seconds_since_render);
 
 /**
+ * RV-273 (D-337): how long the pass may wait while a film plays and nothing else moves, in the wall's seconds,
+ * instead of a 4 ms yield. `lead` is how far the next waiting frame is from being shown at once, in the film's
+ * seconds (rubraview_media_frame_lead). The pass comes back one refresh (`period`, the wall's) before the frame
+ * could be shown with that refresh ahead, so the screen's free buffer is waited for there; within that last refresh
+ * no sooner than RUBRAVIEW_MEDIA_WAIT_FLOOR, and never past the moment it is due. Due or late: 0. NaN (no frame
+ * waiting, the decoder behind): RUBRAVIEW_MEDIA_WAIT_EMPTY. Never past `cap` (NaN or below 0: 0). A nonsense
+ * `rate` counts as 1, a nonsense `period` as 1/60.
+ */
+#define RUBRAVIEW_MEDIA_WAIT_FLOOR 0.002
+#define RUBRAVIEW_MEDIA_WAIT_EMPTY 0.004
+double rubraview_media_next_wait(double lead, double rate, double period, double cap);
+/** The lead of a frame for rubraview_media_next_wait: as rubraview_media_schedule_at (within half the frame) or, with
+    `blend`, rubraview_media_schedule_blend (within `blend_period`, the refresh in the film's seconds). */
+double rubraview_media_frame_lead(double frame_pts, double frame_duration, double clock_seconds, bool blend,
+                                  double blend_period);
+
+/**
  * RV-062: whether to hand the graphics card to the decoder. `mode` is
  * [video] hardware_decode: 0 off, 1 on where the card offers decoders
  * (`decoder_profiles` > 0), 2 always (diagnostic). Anything else is off.

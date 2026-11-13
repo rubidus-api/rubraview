@@ -31,7 +31,7 @@ extern "C" {
  */
 
 #define RUBRAVIEW_MHOST_MAGIC     0x4D485652u   /* "RVHM" */
-#define RUBRAVIEW_MHOST_VERSION   1u
+#define RUBRAVIEW_MHOST_VERSION   2u   /* RV-273: wanted.tap_asked */
 #define RUBRAVIEW_MHOST_SLOTS     4
 #define RUBRAVIEW_MHOST_MAX_SIDE  16384
 #define RUBRAVIEW_MHOST_TEXT      64
@@ -116,6 +116,7 @@ typedef struct rubraview_mhost_wanted {
     _Atomic int32_t  gain_millionths;
     _Atomic int32_t  audio_stream;
     _Atomic uint32_t audio_serial;       /* a new track asked */
+    _Atomic uint32_t tap_asked;          /* RV-273: counted each time the analyser takes the samples */
 } rubraview_mhost_wanted_t;
 
 /* The viewer's process-wide sound settings, for the child's own sound (written by the viewer, `serial` last). */
@@ -204,6 +205,20 @@ typedef struct rubraview_mhost_block {
     _Atomic uint32_t log_used;
     char     log[RUBRAVIEW_MHOST_LOG];   /* FFmpeg's last words */
 } rubraview_mhost_block_t;
+
+/*
+ * RV-273 (D-337): the playback child's longest sleep between passes, in ms. Whatever the viewer writes in `wanted`
+ * or the sound settings it signals the request event with, so a seek, a pause or a speed is applied at once; the
+ * sleep only paces the heartbeat, the counters, what is observed, and the analyser's samples: 15 ms while the
+ * analyser took them in the last RUBRAVIEW_MHOST_TAP_HOLD seconds, 50 ms while a film plays, 250 ms paused or kept
+ * with nothing open, 1000 ms for the service child. A negative or NaN `tap_seconds_ago` is no analyser.
+ */
+#define RUBRAVIEW_MHOST_WAIT_ANALYSER 15u
+#define RUBRAVIEW_MHOST_WAIT_PLAYING  50u
+#define RUBRAVIEW_MHOST_WAIT_IDLE     250u
+#define RUBRAVIEW_MHOST_WAIT_SERVICE  1000u
+#define RUBRAVIEW_MHOST_TAP_HOLD      0.5
+uint32_t rubraview_mhost_child_wait(bool playback, bool has_media, bool paused, double tap_seconds_ago);
 
 /** The block's header, ready for a child of `mode`. */
 void rubraview_mhost_init(rubraview_mhost_block_t *b, rubraview_mhost_mode_t mode);

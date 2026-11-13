@@ -16,6 +16,7 @@
 #include <wctype.h>
 #include "rubraview/stream.h"
 #include "rubraview/pal/pal_window.h"
+#include "rubraview/pal/pal_time.h"
 #include "rubraview/path.h"
 #include "rubraview/filemanage.h"
 
@@ -1247,10 +1248,35 @@ void rubraview_pal_window_wake(rubraview_window_t *window) {
 }
 
 void rubraview_pal_window_wait_event(rubraview_window_t *window, uint32_t timeout_ms) {
+    rubraview_pal_window_wait_seconds(window, (double)timeout_ms / 1000.0);
+}
+
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+
+void rubraview_pal_window_wait_seconds(rubraview_window_t *window, double seconds) {
     if (!window || window->queue_count > 0 || window->should_close) return;
-    /* MWMO_INPUTAVAILABLE also wakes for input that an earlier Peek
-       already saw but left in the queue. */
-    MsgWaitForMultipleObjectsEx(0, NULL, timeout_ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    if (!(seconds > 0.0)) seconds = 0.0;
+    DWORD ms = seconds < 3600.0 ? (DWORD)(seconds * 1000.0) : 3600000u;
+    /* RV-273 (D-337): a short wait on the high-resolution timer, as fine as asked without the system's timer at
+       1 ms; MsgWait's own timeout goes by Windows' tick. One timer for the thread that waits (the viewer's). */
+    static thread_local HANDLE timer;
+    static thread_local bool tried;
+    if (seconds > 0.0 && seconds < 0.1 && rubraview_pal_time_high_resolution()) {
+        if (!tried) {
+            tried = true;
+            timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+        }
+        LARGE_INTEGER due = { .QuadPart = -(LONGLONG)(seconds * 1e7) };   /* relative, in 100 ns */
+        if (timer && SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE)) {
+            /* MWMO_INPUTAVAILABLE also wakes for input that an earlier Peek already saw but left in the queue. */
+            if (MsgWaitForMultipleObjectsEx(1, &timer, ms + 50u, QS_ALLINPUT, MWMO_INPUTAVAILABLE) != WAIT_OBJECT_0)
+                CancelWaitableTimer(timer);
+            return;
+        }
+    }
+    MsgWaitForMultipleObjectsEx(0, NULL, ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
 }
 
 void rubraview_pal_window_get_size(const rubraview_window_t *window, int32_t *out_width, int32_t *out_height) {

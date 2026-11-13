@@ -29,6 +29,7 @@ void frame_fit_boxes(app_state_t *app) {
 void live_start(app_state_t *app) {
     app->stats_since = rubraview_pal_time_now_seconds();
     app->stats_frames = app->stats_dropped = app->stats_taken = app->stats_shown = 0;
+    app->stats_passes = app->stats_frame_waits = 0;
     app->stats_worst = app->stats_draw = app->stats_present = app->stats_media = app->stats_late = 0.0;
     app->stats_read_known = rubraview_pal_process_read_bytes(&app->stats_read_from);
     rubraview_filmcache_stats_t cs;
@@ -68,6 +69,7 @@ static void live_second(app_state_t *app, double now) {
         .film_bits = film ? live_film_bits(app) : 0.0, .fine_timer = app->stats_fine,
         .resample = film ? app->media_resample : 1.0, .refresh_hz = film ? app->media_refresh_hz : 0.0,   /* D-271 */
         .frame_rate = film ? app->media_info.frame_rate : 0.0,
+        .passes = app->stats_passes, .frame_waits = app->stats_frame_waits,   /* RV-273 */
     };
     rubraview_filmcache_stats_t cs;   /* RV-216 */
     rubraview_pal_filmcache_stats(&cs);
@@ -82,6 +84,16 @@ static void live_second(app_state_t *app, double now) {
     rubraview_live_t keep = app->live;
     live_start(app);
     app->live = keep;
+}
+
+/* RV-273: RUBRAVIEW_WAIT_OLD keeps the 4 ms yield while a film plays alone, to compare (the Wake-ups row) */
+static bool wait_old(void) {
+    static int known;   /* 0 not read, 1 no, 2 yes */
+    if (!known) {
+        char value[4];
+        known = GetEnvironmentVariableA("RUBRAVIEW_WAIT_OLD", value, (DWORD)sizeof value) > 0 ? 2 : 1;
+    }
+    return known == 2;
 }
 
 void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
@@ -253,6 +265,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
         if (app->media_up_retry) { app->media_up_retry = false; app->media_new_picture = true; }
         if (settled) fc->last_idle_frame_seconds = now;
     }
+    app->stats_passes++;   /* RV-273 */
     if (app->info_open && now - app->stats_since >= 1.0) {   /* RV-215 (D-248): once a second, to the information window */
         live_second(app, now);
         info_live(app);
@@ -300,6 +313,15 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
            end and the A-B point are checked at least every 20 ms. */
         double wait = rubraview_media_redraw_wait(now - fc->last_render_seconds) * 1000.0;
         rubraview_pal_window_wait_event(app->window, wait < 1.0 ? 1u : wait > 20.0 ? 20u : (uint32_t)wait);
+    } else if (paced && !wait_old()) {
+        /* RV-273 (D-337): a film alone wakes the pass a refresh before its next frame, not every 4 ms */
+        double hud = rubraview_media_redraw_wait(rubraview_pal_time_now_seconds() - fc->last_render_seconds);
+        double wait = media_wait_seconds(app);
+        app->stats_frame_waits++;
+        if (hud < wait) wait = hud;
+        /* 1 ms at least, as the sound's wait: a due frame the next pass cannot take (its page not ready, the film
+           stopping) must not spin the loop */
+        rubraview_pal_window_wait_seconds(app->window, wait > 0.001 ? wait : 0.001);
     } else {
         rubraview_pal_window_wait_event(app->window, 4);   /* RV-215 (D-269): the same yield, but a key or a click wakes it */
     }

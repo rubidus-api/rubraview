@@ -321,6 +321,9 @@ bool rubraview_pal_window_poll_event(rubraview_window_t *window, rubraview_windo
  * idle viewer calls this instead of redrawing a frame nobody asked for.
  */
 void rubraview_pal_window_wait_event(rubraview_window_t *window, uint32_t timeout_ms);
+/** The same, in seconds, finer than a millisecond: under 0.1 s on the high-resolution timer where Windows has one
+    (RV-273, D-337). */
+void rubraview_pal_window_wait_seconds(rubraview_window_t *window, double seconds);
 
 /* Wakes a waiting rubraview_pal_window_wait_event from any thread — how a
    background worker says it has something for the loop (D-34). */

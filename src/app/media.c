@@ -1482,6 +1482,22 @@ void media_resample_follow(app_state_t *app) {
     rubraview_pal_audio_set_speed(media_rate(app));
 }
 
+/* RV-273 (D-337): how long the pass may wait with a film playing alone: until a refresh before its next frame can
+   be shown, the end and the A-B point looked at every 20 ms at least, each refresh with frames blended (the one
+   after a blended frame shows the new one alone). No frame waiting, or none shown yet: the short wait as before. */
+double media_wait_seconds(app_state_t *app) {
+    rubraview_media_t *m = app->media;
+    double period = rubraview_pal_render_refresh_seconds(app->renderer);
+    bool blend = media_blend_on(app);
+    double cap = blend && period < 0.020 ? period : 0.020, lead = NAN;
+    rubraview_video_frame_t frame;
+    if (m && app->media_info.has_video && app->media_has_frame && rubraview_pal_media_peek_frame(m, &frame) && !frame.preview) {
+        double clock = rubraview_media_clock_now(&app->media_clock, rubraview_pal_time_now_seconds());
+        lead = rubraview_media_frame_lead(frame.pts, frame.duration, clock, blend, period * media_rate(app));
+    }
+    return rubraview_media_next_wait(lead, media_rate(app), period, cap);
+}
+
 void media_tick(app_state_t *app) {
     app_page_t *page = media_page_ready(app);
     if (!page) return;

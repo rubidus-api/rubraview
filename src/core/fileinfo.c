@@ -428,5 +428,9 @@ void rubraview_info_add_live(proven_arena_t *arena, rubraview_info_t *info, cons
         rubraview_info_addf(arena, info, T("Film in memory"), T("{} of {} MB; {:.1} MB/s read from it"),
                             PROVEN_ARG((unsigned long long)(live->memory_held >> 20)), PROVEN_ARG((unsigned long long)(live->memory_room >> 20)),
                             PROVEN_ARG((double)live->from_memory / span / 1e6));
-    rubraview_info_addf(arena, info, T("Timer"), "{}", PROVEN_ARG(live->fine_timer ? T("1 ms") : T("Windows' default (15.6 ms)")));
+    rubraview_info_addf(arena, info, T("Timer"), "{}", PROVEN_ARG(live->fine_timer == 2 ? T("high-resolution waits")
+                                                             : live->fine_timer == 1 ? T("1 ms") : T("Windows' default (15.6 ms)")));
+    if (live->passes > 0)   /* RV-273 */
+        rubraview_info_addf(arena, info, T("Wake-ups"), T("{:.0} a second, {:.0} of them waiting for the film's next frame"),
+                            PROVEN_ARG((double)live->passes / span), PROVEN_ARG((double)live->frame_waits / span));
 }

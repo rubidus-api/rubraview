@@ -1524,7 +1524,8 @@ typedef struct app_state {
     uint32_t               stats_frames, stats_dropped, stats_taken, stats_shown;
     double                 stats_media;            /* time taking a film's picture in (its copy or upload) */
     double                 stats_late;             /* summed: how far behind the clock a picture was shown */
-    bool                   stats_fine;             /* Windows' timer at 1 ms in the last pass */
+    uint32_t               stats_passes, stats_frame_waits;   /* RV-273: the loop's passes, and those that waited for a frame */
+    int32_t                stats_fine;             /* rubraview_timer_kind_t in the last pass (RV-273) */
     bool                   stats_read_known;
     uint64_t               stats_read_from;        /* bytes read when the second began */
     int32_t                stats_size_page;        /* the page whose size is in stats_size_bytes, -1 none */
@@ -2332,6 +2333,7 @@ void media_seek_to_mode(app_state_t *app, double seconds, rubraview_seek_mode_t 
 void media_seek_arrow(app_state_t *app, double delta);   /* RV-261: Left / Right, to the keyframe when set */
 void media_step(app_state_t *app, bool forward);
 void media_tick(app_state_t *app);
+double media_wait_seconds(app_state_t *app);   /* RV-273: the pass's wait with a film playing alone */
 void media_toggle_pause(app_state_t *app);
 void memory_watch(app_state_t *app, double now);
 void menu_rebuild(app_state_t *app);

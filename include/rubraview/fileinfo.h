@@ -75,7 +75,7 @@ typedef struct rubraview_live {
     bool     read_known;         /* bytes read by the viewer and its FFmpeg child in the span */
     uint64_t read_bytes;
     double   film_bits;          /* the film's own rate (its size over its length), bits a second; 0 unknown */
-    bool     fine_timer;         /* Windows' timer at 1 ms */
+    int32_t  fine_timer;         /* rubraview_timer_kind_t: 0 Windows' tick, 1 the system's at 1 ms, 2 high-resolution waits (RV-273) */
     bool     cached;             /* RV-216: a network film read through its local copy */
     uint64_t from_copy, from_network;   /* bytes in the span, served from the copy and fetched */
     uint64_t copy_filled, copy_blocks;  /* the copy's blocks filled, of how many */
@@ -84,6 +84,8 @@ typedef struct rubraview_live {
     double   resample;           /* RV-215 step 3 (D-271): the film's speed matched to the screen; 1 when not */
     double   refresh_hz;         /* the screen's refresh it was matched to (0: not looked at, the setting off) */
     double   frame_rate;         /* the film's frames a second, as it was matched */
+    uint32_t passes;             /* RV-273: the loop's passes in the span (0: not counted, no row) */
+    uint32_t frame_waits;        /* of them, those that waited for the film's next frame */
 } rubraview_live_t;
 void rubraview_info_add_live(proven_arena_t *arena, rubraview_info_t *info, const rubraview_live_t *live);
 

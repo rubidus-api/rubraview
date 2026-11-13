@@ -1900,10 +1900,13 @@ static bool ff_vp_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
 
 static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double duration, uint64_t generation, bool preview) {
     size_t slot = 0;
-    for (int waited = 0; !rubraview_spsc_acquire_write(m->ringp, &slot); waited += 5) {
+    /* RV-273: the wait counted on the clock, not in sleeps: without the 1 ms system timer a Sleep(5) lasts a tick */
+    ULONGLONG since = GetTickCount64(), waited = 0;
+    for (; !rubraview_spsc_acquire_write(m->ringp, &slot); waited = GetTickCount64() - since) {
         if (atomic_load_explicit(&m->quit, memory_order_acquire) ||
             atomic_load_explicit(&m->seek_generation, memory_order_acquire) != generation) return false;
         bool paused = atomic_load_explicit(&m->paused, memory_order_acquire);
+        if (paused) { since = GetTickCount64(); waited = 0; }   /* a pause is no wait for room */
         if (!paused && waited >= VIDEO_ROOM_WAIT_MS) return true;   /* drop this picture */
         Sleep(5);
     }
