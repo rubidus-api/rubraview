@@ -95,7 +95,8 @@ static void layout_compute(app_state_t *app) {
            a sound or a text never pairs with its neighbour — a list of nothing but those, shown in two pages, went two
            at a time */
         if (other) infos[i].force_standalone = true;
-        if (!other) stills++;
+        if (list_row_is_book(app, i)) infos[i].force_standalone = true;   /* RV-276: opened in its place, never paired */
+        else if (!other) stills++;
     }
     for (size_t i = 0; i < page_count(app); ++i) {
         if (stills == 0) infos[i].skip = false;
@@ -388,6 +389,7 @@ void go_to_spread(app_state_t *app, size_t index) {
         while (index + 1 < app->layout.count && app->pages[index].skipped) index++;
         while (index > 0 && app->pages[index].skipped) index--;
     }
+    bool turned_back = index < app->spread_index;
     if (index != app->spread_index && !subs_may_leave(app)) return;
     if (index != app->spread_index) {
         /* Remember what is leaving the screen, so the cross-fade has
@@ -420,6 +422,7 @@ void go_to_spread(app_state_t *app, size_t index) {
     animation_prepare(app);
     media_prepare(app);
     update_window_title(app);
+    book_settle_request(app, turned_back);   /* RV-276: a book's row is opened in its place */
 }
 
 bool open_sibling_archive(app_state_t *app, bool forward);
@@ -430,6 +433,7 @@ bool open_sibling_folder(app_state_t *app, bool forward);
    next or the previous folder or archive (from its last page going back),
    or go round within what is open. */
 static void past_the_end(app_state_t *app, bool forward) {
+    if (book_leave(app, forward)) return;   /* RV-276: a book of the list: the list goes on */
     int mode = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("at_ends")));
     if (mode == 2 && app->layout.count > 1) {
         /* round to the first: paired from it as Home does, not the first spread as paired (D-281) */

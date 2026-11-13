@@ -101,7 +101,8 @@ bool slide_ready(const app_state_t *app) {
         if (pages[i] < 0 || (size_t)pages[i] >= page_count(app)) continue;
         const app_page_t *page = &app->pages[pages[i]];
         if (!page->loaded && !page->failed && !is_media_path(app->source.pages[pages[i]].path) &&
-            !is_text_path(app->source.pages[pages[i]].path) && !is_text_path(app->source.pages[pages[i]].name)) return false;
+            !is_text_path(app->source.pages[pages[i]].path) && !is_text_path(app->source.pages[pages[i]].name) &&
+            !list_row_is_book(app, (size_t)pages[i])) return false;
     }
     return true;
 }

@@ -21,6 +21,12 @@ double rubraview_pal_time_now_seconds(void);
 /** A sleep, used to yield between frames; under 16 ms on the high-resolution timer where Windows has one (RV-273). */
 void rubraview_pal_time_sleep_ms(uint32_t milliseconds);
 
+/* RV-274: a decoding thread waiting for room waits on `event` (set when room is made, a seek, a pause, quit) for at
+   most `fallback_ms`; RUBRAVIEW_ROOM_SLEEP, or no event, gives the short sleep of before (`sleep_ms`) to compare. */
+void rubraview_pal_time_wait_room(void *event, uint32_t fallback_ms, uint32_t sleep_ms);
+/* Sets the event, if there is one (and the events are in use). */
+void rubraview_pal_time_room_made(void *event);
+
 /**
  * RV-215: fine waits while `fine` (a film or an animation playing, the screen moving), Windows' own otherwise.
  * Windows' default tick is 15.6 ms: a sleep of 4 ms, or a wait of 2, lasted a whole tick, and a film's frames and a

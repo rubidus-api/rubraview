@@ -542,6 +542,14 @@ static void folder_gather(app_state_t *app, proven_u8str_view_t root, proven_u8s
     }
 }
 
+/* RV-276: every file under `dir`, folders walked down as Include subfolders does; the caller frees them. */
+size_t folder_files_deep(app_state_t *app, proven_u8str_view_t dir, rubraview_fs_entry_t **out) {
+    folder_files_t all = {0};
+    folder_gather(app, dir, dir, 0, true, &all);
+    *out = all.entries;
+    return all.count;
+}
+
 /* Another order each time: the fixed seed of the listing's shuffle is for tests. */
 static void source_shuffle(app_state_t *app) {
     uint64_t state = (uint64_t)(rubraview_pal_time_now_seconds() * 1000000.0) ^ ((uint64_t)GetCurrentProcessId() << 32);
@@ -669,7 +677,7 @@ static rubraview_fs_entry_t *playlist_gather(app_state_t *app, proven_u8str_view
         bool whole = item.ptr[0] == '/' || item.ptr[0] == '\\' || (item.size > 2 && item.ptr[1] == ':');
         if (!whole) item = rubraview_path_join(app->arena, dir, item);
         rubraview_fs_entry_t entry;
-        if (!rubraview_pal_fs_stat(app->arena, item, &entry) || entry.is_directory || !path_is_listed_kind(entry.path)) {
+        if (!rubraview_pal_fs_stat(app->arena, item, &entry) || entry.is_directory || !path_is_list_row_kind(entry.path)) {
             missing++;
             continue;
         }
@@ -779,6 +787,7 @@ void finish_open(app_state_t *app, size_t start_page) {
     animation_prepare(app);
     media_prepare(app);
     update_window_title(app);
+    book_after_open(app);   /* RV-276: a book of the list, or the list again */
 }
 
 void open_path(app_state_t *app, proven_u8str_view_t path) {

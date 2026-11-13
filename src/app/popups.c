@@ -573,6 +573,7 @@ void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi
     draw_pack_ask(app, win_w, win_h, chrome_dpi);   /* D-267 */
     draw_extract_done(app, win_w, win_h, chrome_dpi);   /* RV-240 */
     draw_playlist_ask(app, win_w, win_h, chrome_dpi);   /* RV-255 */
+    draw_book_ask(app, win_w, win_h, chrome_dpi);   /* RV-276 */
     draw_list_del(app, win_w, win_h, chrome_dpi);       /* RV-256 */
     draw_arcadd_card(app, win_w, win_h, chrome_dpi);    /* RV-260 */
     if (app->notice_seconds > 0.0 && app->notice_length > 0) {

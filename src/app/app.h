@@ -168,6 +168,8 @@ enum { CARD_HOST_NONE = 0, CARD_HOST_MAIN, CARD_HOST_EDIT, CARD_HOST_BATCH, CARD
 #define MEDIA_FILTER VIDEO_FILTER ";" AUDIO_FILTER
 /* Playlists; RV-157: and the lists internet radio comes in (.pls, and Windows Media's .asx, .wax, .wvx). */
 #define LIST_FILTER "*.m3u8;*.m3u;*.rvlist;*.pls;*.asx;*.wax;*.wvx"
+/* RV-276: books a list takes as rows (rubraview_list_row_kind's, which decides) */
+#define LIST_BOOK_FILTER "*.cbz;*.cb7;*.cbr;*.zip;*.7z;*.rar;*.alz;*.egg;*.7z.001"
 /* RFC-0005: text files are pages too (the owner, 2026-10-17: .txt, .log, .nfo, .md). */
 #define TEXT_FILTER "*.txt;*.log;*.nfo;*.md"
 /* 1.25.0 (owner, 2026-10-20: "텍스트 뷰어를 사용할지 안할지 ... 텍스트 파일을 목록 등에서도 받지 않고 보여주지도 않음"):
@@ -580,6 +582,21 @@ typedef struct app_state {
     proven_u8str_view_t               *cue_scan_paths;
     size_t                 cue_scan_count;
     bool                   list_is_set;          /* the pages are a playlist or picked files, not a folder or a book */
+    /* RV-276 (D-341): a book (a comic, an archive) that is a row of the list, read in the row's place */
+    rubraview_fs_entry_t  *book_list;            /* the list's rows while one of its books is open or opening; NULL: none */
+    size_t                 book_list_n;
+    size_t                 book_row;             /* the book's row in them */
+    bool                   book_active;          /* the book open is that row's: past its ends the list goes on */
+    bool                   book_wanted;          /* that row's book being opened (its password may be asked) */
+    bool                   book_back;            /* reached going back: it opens at its last page */
+    bool                   book_restoring;       /* the list opened again, leaving a book */
+    bool                   book_settle;          /* a turn landed: is it on a book's row? (looked at once a pass) */
+    bool                   book_settle_back;
+    size_t                 book_hold;            /* a row (+1) not entered again until another page is turned to; 0: none */
+    bool                   book_ask;             /* an archive's row reached: read it as a book, or skip it? */
+    int32_t                book_ask_page;
+    bool                   book_ask_back;
+    rubraview_pal_rect_t   book_ask_btn[4];
     int32_t                folder_opened_kind;   /* RV-168/169: the kind of the file the folder came with (1 pictures, 2 films, 3 music; 0 a folder) */
     /* D-86: what Explorer's menu asked, gathered until the selection is whole. */
     rubraview_shellreq_collector_t shell_requests;
@@ -2294,6 +2311,21 @@ void list_check_mark(rubraview_renderer_t *rr, rubraview_rect_t c, bool every, b
 size_t list_checked_total(const app_state_t *app);
 void list_delete_row(app_state_t *app, size_t row, rubraview_window_t *owner);
 void list_delete_answer(app_state_t *app, bool yes);   /* RV-256 */
+/* RV-276 (listbook.c): books as rows of the list, folders pasted into it */
+bool path_is_book_row(proven_u8str_view_t path);
+bool path_is_list_row_kind(proven_u8str_view_t path);
+bool list_row_is_book(const app_state_t *app, size_t page);
+void book_settle_request(app_state_t *app, bool back);
+void book_after_open(app_state_t *app);
+bool book_leave(app_state_t *app, bool forward);
+size_t book_pump(app_state_t *app);
+void book_forget(app_state_t *app);
+bool book_add_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count);
+void book_ask_answer(app_state_t *app, int which);
+bool book_ask_press(app_state_t *app, double x, double y);
+void draw_book_ask(app_state_t *app, double win_w, double win_h, double dpi);
+size_t list_walk_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, proven_u8str_view_t **out);
+void list_paste(app_state_t *app);
 bool list_del_press(app_state_t *app, double x, double y);
 bool list_editable(const app_state_t *app);
 bool list_ext_is_off(const app_state_t *app, proven_u8str_view_t ext);

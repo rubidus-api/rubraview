@@ -72,6 +72,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "list_copy_path", "A file of a list, right-clicked: its whole path to the clipboard" },
     { "list_delete_file", "A file of a list, right-clicked: to the recycle bin, after a warning and a yes" },
     { "list_open", "A file of a list, right-clicked: open it" },
+    { "list_paste", "Files and folders copied in Explorer join the list (what is under a folder, its subfolders too)" },
     { "list_reveal", "A file of a list, right-clicked: shown selected in Explorer" },
     { "list_take_out", "A file of a list, right-clicked: out of the list (the file stays)" },
     { "media_ab_a", "Repeat from here (A)" },

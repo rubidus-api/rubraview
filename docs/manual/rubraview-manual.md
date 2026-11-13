@@ -69,6 +69,27 @@ current list**, or **Open in place of the list** (`Enter`); `Esc` leaves
 it. A file opened brings only its folder's files of its own kind —
 pictures, films, music or texts.
 
+**Comics in the list.** A comic (`.cbz`, `.cb7`, `.cbr`) or an archive
+can be a row of the list beside pictures, films and music — added, dropped
+on the list, pasted, named in a playlist, or opened with other files at
+once. Turned to, the book opens in the row's place at its first page;
+past its last page the list goes on at the next row, and back from its
+first page to the row before (a book reached going back opens at its
+last page), so pictures and books read on one after another. Each book
+keeps its own page number, filmstrip and two-page spreads, and the list
+window shows its pages while it is read. An archive that is not a comic
+(`.zip`, `.7z`, `.rar`) asks when its row is reached: **Read it as a
+book** (`Enter`), **Skip it** (`Esc`), or always one of them (Settings ›
+Files › **An archive in the list**: ask, book, skip). A book that cannot
+be read, or whose password is not given, is passed over.
+
+**Folders pasted.** Copy files or folders in Explorer and press `Ctrl+V`
+in the viewer: everything under a folder that the viewer opens (films,
+music, pictures, texts, comics, archives; its subfolders too, folder by
+folder, by name, 20 000 files at most) joins the end of the list; with
+nothing open it becomes the list. A folder dropped on the list window
+goes in the same way at the row it is let go on.
+
 **Internet radio.** A playlist can also name radio stations by their
 address, each with its own title, and then it is a list of stations to
 choose from (`P` shows it). Write it as an Extended M3U, the format most
@@ -296,7 +317,10 @@ picture** set to `smooth` leaves it as first drawn. Zoomed past the
 window, hold the left button and drag to move the picture. The wheel
 turns to the next or the previous picture or page (zoomed in, it moves the
 picture up and down; `Ctrl` + wheel zooms; a film's and a song's wheel is
-the volume); a double
+the volume). Which way is which is set in Settings › Viewer (**The next
+file or page by the wheel turned** down or up, **Ctrl+wheel enlarges
+turned** up or down) and Settings › Video (**Louder by the wheel
+turned**); a double
 click puts the picture's middle back on the window's. Holding the button
 still for a moment opens the right-click list, as a right click does.
 
@@ -983,7 +1007,8 @@ While it does:
   past twelve pixels. A line of timed words is the one place a click on a
   song does something else: the song goes to that line.
   The wheel is the volume, 5 a notch (Settings > Video > **Wheel is the
-  volume while playing**; with it off the wheel zooms a film). `Ctrl` and
+  volume while playing**; with it off the wheel zooms a film; **Louder by
+  the wheel turned** up or down). `Ctrl` and
   the wheel zoom, and a drag moves the picture.
 - What happens when a film or a song ends is set by the Toolbar's end
   button, `Ctrl+R`, At the end in a song's right click, or Settings › Audio › When a
@@ -2133,6 +2158,7 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+L` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `Shift+F` | Filmstrip |
 | `P` | The playlist, or this folder's files, floating over the picture |
+| `Ctrl+V` | Files and folders copied in Explorer join the list (what is under a folder, its subfolders too) |
 | `Shift+N` | Read the open archive's file names in the next code page (Shift-JIS, GBK, Big5, ...), for that archive only |
 
 **Pictures (a picture, a comic's page, an animation, a film)**

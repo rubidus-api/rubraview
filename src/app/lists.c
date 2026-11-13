@@ -295,6 +295,9 @@ static void list_move(app_state_t *app, const bool *moving, size_t to) {
 /* Files from outside go into the list before what is row `to`: those
    the viewer opens, that are not in it already. */
 void list_insert_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, size_t to) {
+    proven_u8str_view_t *walked = NULL;   /* RV-276: a folder brings what is under it */
+    count = list_walk_paths(app, paths, count, &walked);
+    paths = walked;
     size_t have = page_count(app);
     if (to > have) to = have;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count ? count : 1, sizeof(rubraview_fs_entry_t));
@@ -304,7 +307,8 @@ void list_insert_paths(app_state_t *app, const proven_u8str_view_t *paths, size_
     size_t n = 0, skipped = 0;
     for (size_t i = 0; i < count; ++i) {
         rubraview_fs_entry_t entry;
-        if (!rubraview_pal_fs_stat(app->arena, paths[i], &entry) || entry.is_directory || !path_is_listed_kind(entry.path)) {
+        if (is_station_path(paths[i])) { skipped++; continue; }
+        if (!rubraview_pal_fs_stat(app->arena, paths[i], &entry) || entry.is_directory || !path_is_list_row_kind(entry.path)) {
             skipped++;
             continue;
         }
@@ -342,8 +346,18 @@ static const rubraview_file_filter_t LIST_FILTERS[] = {
 };
 
 static void list_save(app_state_t *app) {
-    size_t count = page_count(app);
+    /* RV-276: in a book of the list, the list it came from (its rows, the book's own path among them) */
+    bool outer = app->book_active && app->book_list;
+    size_t count = outer ? app->book_list_n : page_count(app);
     if (count == 0) return;
+    rubraview_fs_entry_t *rows = NULL;
+    {
+        proven_result_mem_mut_t rr = rubraview_arena_alloc_array(app->arena, count, sizeof(rubraview_fs_entry_t));
+        if (!proven_is_ok(rr.err)) return;
+        rows = (rubraview_fs_entry_t*)(void*)rr.value.ptr;
+        for (size_t i = 0; i < count; ++i)
+            rows[i] = outer ? app->book_list[i] : (rubraview_fs_entry_t){ .name = app->source.pages[i].name, .path = app->source.pages[i].path };
+    }
     rubraview_file_dialog_opts_t opts = {
         .title = T("Save the list"), .filters = LIST_FILTERS, .filter_count = 2,
         .parent_window_handle = rubraview_pal_window_native_handle(app->window),
@@ -361,12 +375,12 @@ static void list_save(app_state_t *app) {
     list.entries = (rubraview_playlist_entry_t*)(void*)res.value.ptr;
     bool whole = list_saves_whole_paths(app);
     for (size_t i = 0; i < count; ++i) {
-        if (is_station_path(app->source.pages[i].path)) {   /* RV-157: the address as it is, with its title */
-            list.entries[i] = (rubraview_playlist_entry_t){ .path = app->source.pages[i].path, .duration_seconds = -1.0,
-                                                            .title = app->source.pages[i].name };
+        if (is_station_path(rows[i].path)) {   /* RV-157: the address as it is, with its title */
+            list.entries[i] = (rubraview_playlist_entry_t){ .path = rows[i].path, .duration_seconds = -1.0,
+                                                            .title = rows[i].name };
             continue;
         }
-        proven_u8str_view_t path = rubraview_pal_fs_absolute(app->arena, app->source.pages[i].path);
+        proven_u8str_view_t path = rubraview_pal_fs_absolute(app->arena, rows[i].path);
         list.entries[i] = (rubraview_playlist_entry_t){ .path = whole ? path : rubraview_path_relative(app->arena, dir, path),
                                                         .duration_seconds = -1.0 };
     }

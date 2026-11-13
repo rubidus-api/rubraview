@@ -1,4 +1,5 @@
 #include "rubraview/ui_listwin.h"
+#include "rubraview/glob.h"
 
 rubraview_listwin_t rubraview_listwin_create(double dpi_scale) {
     if (dpi_scale <= 0.0) dpi_scale = 1.0;
@@ -328,4 +329,18 @@ rubraview_rect_t rubraview_filewin_fit(rubraview_rect_t box, double w, double h,
     if (scale > 1.0) scale = 1.0;
     double fw = w * scale, fh = h * scale;
     return (rubraview_rect_t){ box.x + (box.width - fw) * 0.5, box.y + (box.height - fh) * 0.5, fw, fh };
+}
+
+rubraview_list_row_kind_t rubraview_list_row_kind(proven_u8str_view_t name) {
+    if (rubraview_glob_match_list(name, PROVEN_LIT("*.cbz;*.cb7;*.cbr"))) return RUBRAVIEW_LIST_ROW_COMIC;
+    if (rubraview_glob_match_list(name, PROVEN_LIT("*.zip;*.7z;*.rar;*.alz;*.egg;*.7z.001"))) return RUBRAVIEW_LIST_ROW_ARCHIVE;
+    return RUBRAVIEW_LIST_ROW_FILE;
+}
+
+size_t rubraview_list_row_after(size_t row, size_t count, bool forward, bool round) {
+    if (count == 0 || row >= count) return SIZE_MAX;
+    if (forward && row + 1 < count) return row + 1;
+    if (!forward && row > 0) return row - 1;
+    if (!round || count < 2) return SIZE_MAX;
+    return forward ? 0 : count - 1;
 }

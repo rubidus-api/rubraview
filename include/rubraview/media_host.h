@@ -31,7 +31,7 @@ extern "C" {
  */
 
 #define RUBRAVIEW_MHOST_MAGIC     0x4D485652u   /* "RVHM" */
-#define RUBRAVIEW_MHOST_VERSION   2u   /* RV-273: wanted.tap_asked */
+#define RUBRAVIEW_MHOST_VERSION   3u   /* RV-273: wanted.tap_asked; RV-274: a fourth handle, the room event */
 #define RUBRAVIEW_MHOST_SLOTS     4
 #define RUBRAVIEW_MHOST_MAX_SIDE  16384
 #define RUBRAVIEW_MHOST_TEXT      64

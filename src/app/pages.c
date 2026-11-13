@@ -149,6 +149,7 @@ app_page_t *ensure_page_loaded_how(app_state_t *app, int32_t index, bool on_scre
        it is the page on screen: the pre-cache must not open videos. */
     if (is_media_path(app->source.pages[index].path)) return page;
     if (is_text_path(app->source.pages[index].path) || is_text_path(app->source.pages[index].name)) return page;   /* RFC-0005 */
+    if (list_row_is_book(app, (size_t)index)) return page;   /* RV-276: a book's row is opened, not decoded */
 
     if (app->page_job) {
         if (app->page_job->index == (size_t)index) return page;   /* on its way */

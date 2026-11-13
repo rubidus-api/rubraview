@@ -96,6 +96,8 @@ typedef struct ff_media {
     rubraview_audio_out_t *audio;
 
     _Atomic bool quit, paused;
+    HANDLE room;        /* RV-274: set when room is made, a seek, a pause, quit; a child's is the viewer's too */
+    bool   room_owned;
     _Atomic uint32_t played_rate, played_channels;   /* D-120: what `audio` plays at now, for the caller */
     _Atomic int32_t audio_gain_millionths;  /* what the caller last asked of the device, for one opened later */
     /* D-119: held exclusively by the decode thread while it exchanges the
@@ -1901,8 +1903,8 @@ static bool ff_vp_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
 
 static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double duration, uint64_t generation, bool preview) {
     size_t slot = 0;
-    /* RV-273: the wait counted on the clock, not in sleeps. The waits for room are on the high-resolution timer
-       (rubraview_pal_time_sleep_ms): a tick each, a slow decoder at 60 fps got a picture a tick and fell behind (T405) */
+    /* RV-273: the wait counted on the clock, not in sleeps. RV-274: it waits on the room event, set as the viewer takes
+       a picture (and by a seek, a pause, quit), 50 ms at most; RUBRAVIEW_ROOM_SLEEP gives D-338's short sleeps */
     ULONGLONG since = GetTickCount64(), waited = 0;
     for (; !rubraview_spsc_acquire_write(m->ringp, &slot); waited = GetTickCount64() - since) {
         if (atomic_load_explicit(&m->quit, memory_order_acquire) ||
@@ -1910,7 +1912,7 @@ static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double durati
         bool paused = atomic_load_explicit(&m->paused, memory_order_acquire);
         if (paused) { since = GetTickCount64(); waited = 0; }   /* a pause is no wait for room */
         if (!paused && waited >= VIDEO_ROOM_WAIT_MS) return true;   /* drop this picture */
-        rubraview_pal_time_sleep_ms(5);
+        rubraview_pal_time_wait_room(m->room, paused ? 100 : 50, 5);   /* RV-274: until a picture is taken */
     }
 
     /* RV-149: a picture of the card's is turned there; when the card cannot, it is brought back and turned here */
@@ -2027,7 +2029,7 @@ static void store_audio(ff_media_t *m, ff_decode_t *d, double pts, double *skip_
             if (count == 0) break;
             if (atomic_load_explicit(&m->quit, memory_order_acquire) ||
                 atomic_load_explicit(&m->seek_generation, memory_order_acquire) != generation) break;
-            rubraview_pal_time_sleep_ms(2);
+            rubraview_pal_time_wait_room(m->room, 50, 2);   /* RV-274: until the sound thread reads */
         }
     }
     rubraview_free(converted);
@@ -2184,7 +2186,7 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
             }
             read_out = false;
         }
-        if (ended) { Sleep(5); continue; }
+        if (ended) { rubraview_pal_time_wait_room(m->room, 100, 5); continue; }   /* RV-274: a seek wakes it */
 
         /* D-118: pictures read but not yet decoded. A transport stream
            holds a third of a second of pictures, then the sound for them;
@@ -2200,7 +2202,7 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
                 --waiting;
                 continue;
             }
-            if (!sound_runs_low(m, d)) { rubraview_pal_time_sleep_ms(2); continue; }
+            if (!sound_runs_low(m, d)) { rubraview_pal_time_wait_room(m->room, 50, 2); continue; }   /* RV-274 */
         }
         if (read_out) {
             atomic_store_explicit(&m->end_generation, generation, memory_order_release);
@@ -2248,6 +2250,7 @@ static void ff_close(void *handle) {
     ff_media_t *m = (ff_media_t*)handle;
     if (!m) return;
     atomic_store_explicit(&m->quit, true, memory_order_release);
+    rubraview_pal_time_room_made(m->room);
     if (m->thread) {
         WaitForSingleObject(m->thread, 10000);
         CloseHandle(m->thread);
@@ -2255,6 +2258,7 @@ static void ff_close(void *handle) {
     if (m->opened) CloseHandle(m->opened);
     rubraview_pal_audio_close(m->audio);
     rubraview_free(m->pcm_storage);
+    if (m->room && m->room_owned) CloseHandle(m->room);   /* a child's stays with the child, for its next film */
     for (int i = 0; i < SLOT_COUNT; ++i) {
         if (!m->pixels_shared) rubraview_free(m->slots[i].pixels);
         if (m->slots[i].mutex) IDXGIKeyedMutex_Release(m->slots[i].mutex);
@@ -2300,6 +2304,10 @@ static void *ff_open_with(proven_u8str_view_t path, rubraview_media_failure_t *o
     }
     m->ringp = hosting && hosting->ring ? hosting->ring : &m->ring;
     rubraview_spsc_init(m->ringp, SLOT_COUNT);
+    /* RV-274: a child's event is the one the viewer sets as it takes a picture; in the viewer, its own */
+    m->room = hosting && hosting->room ? (HANDLE)hosting->room : CreateEventW(NULL, FALSE, FALSE, NULL);
+    m->room_owned = !(hosting && hosting->room);
+    m->pcm.room = m->room;
 
     m->opened = CreateEventW(NULL, TRUE, FALSE, NULL);
     m->thread = m->opened ? CreateThread(NULL, 0, decode_thread, m, 0, NULL) : NULL;
@@ -2347,6 +2355,7 @@ static bool ff_peek_frame(void *handle, rubraview_video_frame_t *out_frame) {
         const ff_slot_t *s = &m->slots[slot];
         if (s->generation != m->consumer_generation) {
             rubraview_spsc_release_read(m->ringp);   /* decoded before the latest seek */
+            rubraview_pal_time_room_made(m->room);
             continue;
         }
         *out_frame = (rubraview_video_frame_t){
@@ -2363,6 +2372,7 @@ static void ff_pop_frame(void *handle) {
     ff_media_t *m = (ff_media_t*)handle;
     size_t slot;
     if (m && rubraview_spsc_peek_read(m->ringp, &slot)) rubraview_spsc_release_read(m->ringp);
+    if (m) rubraview_pal_time_room_made(m->room);   /* RV-274 */
 }
 
 static size_t ff_frames_ready(void *handle) {
@@ -2377,11 +2387,13 @@ static void ff_seek(void *handle, double seconds, rubraview_seek_mode_t mode) {
     atomic_store_explicit(&m->seek_target_100ns, (int64_t)llround(seconds * 1e7), memory_order_relaxed);
     atomic_store_explicit(&m->seek_mode, (int32_t)mode, memory_order_relaxed);
     m->consumer_generation = atomic_fetch_add_explicit(&m->seek_generation, 1, memory_order_release) + 1;
+    rubraview_pal_time_room_made(m->room);
 }
 
 static void ff_read_limit(void *handle, uint64_t bytes) {
     ff_media_t *m = (ff_media_t*)handle;
     if (m && bytes) atomic_store_explicit(&m->read_limit, bytes, memory_order_release);   /* the decode thread applies it */
+    if (m) rubraview_pal_time_room_made(m->room);
 }
 
 static bool ff_finished(void *handle) {
@@ -2414,6 +2426,7 @@ static void ff_set_paused(void *handle, bool paused) {
     atomic_store_explicit(&m->paused, paused, memory_order_release);
     rubraview_pal_audio_set_playing(m->audio, !paused);
     ReleaseSRWLockShared(&m->audio_lock);
+    rubraview_pal_time_room_made(m->room);
 }
 
 static bool ff_audio_format(void *handle, uint32_t *out_rate, uint32_t *out_channels) {
@@ -2572,6 +2585,7 @@ static bool ff_select_audio_track(void *handle, int32_t stream_index) {
     }
     if (!known) return false;
     atomic_store_explicit(&m->pending_audio_stream, stream_index, memory_order_release);
+    rubraview_pal_time_room_made(m->room);
     return true;
 }
 

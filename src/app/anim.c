@@ -287,6 +287,7 @@ void animation_prepare(app_state_t *app) {
        the whole file, twice, before it played — minutes over a network
        share (owner, 2026-10-11; since D-82, 0.0.39). */
     if (is_media_path(path) || is_text_path(path) || is_text_path(app->source.pages[page_index].name)) return;
+    if (list_row_is_book(app, page_index)) return;   /* RV-276 */
     rubraview_page_bytes_t bytes = { .data = PROVEN_LIT(""), .from_disk = true, .ok = false };
     void *mem = NULL;
     if (path.size == 0) {

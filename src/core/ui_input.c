@@ -55,7 +55,7 @@ rubraview_pointer_intent_t rubraview_pointer_wheel(const rubraview_pointer_conte
     bool forward = wheel_delta > 0.0; /* away from the user */
 
     if (modifiers & RUBRAVIEW_MOD_CTRL) {
-        return forward ? RUBRAVIEW_INTENT_ZOOM_IN : RUBRAVIEW_INTENT_ZOOM_OUT;
+        return forward != ctx->wheel_down_enlarges ? RUBRAVIEW_INTENT_ZOOM_IN : RUBRAVIEW_INTENT_ZOOM_OUT;
     }
     if (modifiers & RUBRAVIEW_MOD_SHIFT) {
         return forward ? RUBRAVIEW_INTENT_SKIP_BACKWARD : RUBRAVIEW_INTENT_SKIP_FORWARD;
@@ -66,10 +66,11 @@ rubraview_pointer_intent_t rubraview_pointer_wheel(const rubraview_pointer_conte
 
     /* On a picture and in a book the wheel turns files and pages, away from you back, towards you on (RV-276, owner
      * 2026-11-13: "사진과 만화만 휠로 다음/이전 파일"; it zoomed from 2026-10-20, Ctrl+wheel still does); a picture
-     * zoomed in moves up and down first. A film or a song has its own wheel, the volume. */
+     * zoomed in moves up and down first. A film or a song has its own wheel, the volume. Which way is next is a
+     * setting (owner, 2026-11-13: "휠 올리기와 휠 내리기 중 어떤 것으로 할지 설정하는 옵션"). */
     if (ctx->wheel_turns) {
         if (ctx->zoomed_in) return RUBRAVIEW_INTENT_SCROLL_VERTICAL;
-        return forward ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE;
+        return forward != ctx->wheel_up_next ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE;
     }
     return RUBRAVIEW_INTENT_NONE;
 }

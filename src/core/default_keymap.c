@@ -126,6 +126,9 @@ const char *rubraview_default_keymap(void) {
     "toggle_filmstrip = \"Shift+F\"\n"  /* RV-211: was F4; F is the whole screen */
     /* Owner, 2026-09-29: the playlist (or this folder's files), floating over the picture. */
     "toggle_playlist = \"P\"\n"
+    /* RV-276 (owner, 2026-11-13: "폴더를 루브라뷰에 붙여넣으면 그 밑의 동영상, 음악, 이미지, 만화파일, 압축파일 다 재생목록에"):
+       files and folders copied in Explorer join the list, folders walked down */
+    "list_paste = \"Ctrl+V\"\n"
     /* The open archive's names, read in the next code page (owner, 2026-10-01); a text's own is the same key. */
     "archive_names_cycle = \"Shift+N\"\n"
     "\n"

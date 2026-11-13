@@ -16,6 +16,8 @@ rubraview_pointer_context_t pointer_context(const app_state_t *app) {
         .zoomed_in = app->zoom > 1.001 || strip_active(app),   /* a drag moves the strip */
         .scrollable_vertically = (app->fit_mode == RUBRAVIEW_FIT_WIDTH),
         .wheel_turns = !app->media && !strip_active(app) && !app->text,
+        .wheel_up_next = lround(rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("wheel_next"))) == 1,
+        .wheel_down_enlarges = lround(rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("wheel_zoom"))) == 1,
     };
 }
 

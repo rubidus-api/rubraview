@@ -405,6 +405,7 @@ static bool run(rubraview_audio_out_t *out, device_t *d, double *io_base) {
                 hr = IAudioRenderClient_GetBuffer(render, space, &data);
                 if (SUCCEEDED(hr) && data) {
                     rubraview_pcm_ring_read(out->ring, scratch, k * out->channels);
+                    rubraview_pal_time_room_made(out->ring->room);   /* RV-274: once a period, the decoder may write */
                     size_t m = rubraview_speed_resample(&resampler, scratch, k, step, (float*)(void*)data, space);
                     LONG version = InterlockedCompareExchange(&g_chain_version, 0, 0);
                     if (version != chain_seen) {
@@ -503,6 +504,7 @@ static bool run_silent(rubraview_audio_out_t *out, device_t *d, double *io_base)
             while (due > 0) {
                 size_t n = due < CHUNK / out->channels ? due : CHUNK / out->channels;
                 rubraview_pcm_ring_read(out->ring, scratch, n * out->channels);
+                rubraview_pal_time_room_made(out->ring->room);   /* RV-274 */
                 due -= n;
                 used += (double)n;
             }

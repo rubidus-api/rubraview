@@ -22,7 +22,8 @@ void rubraview_pal_ffmpeg_set_isolated(bool on);
 bool rubraview_pal_ffmpeg_remote(void);
 
 /** The child's whole life: `--media-host <mapping> <request event> <reply event>`. Its exit code. */
-int rubraview_pal_media_host_main(const wchar_t *mapping, const wchar_t *request_event, const wchar_t *reply_event);
+int rubraview_pal_media_host_main(const wchar_t *mapping, const wchar_t *request_event, const wchar_t *reply_event,
+                                  const wchar_t *room_event);
 
 /** Why the last film handed to a child was not opened there, for --diag; empty when it was. */
 const char *rubraview_pal_media_host_why(void);
@@ -48,6 +49,7 @@ typedef struct rubraview_ffmpeg_hosting {
     rubraview_mhost_slot_t *slots;           /* each picture's word, in the block */
     uint8_t *(*pixels)(void *context, size_t bytes_each);   /* the four pictures' memory, shared */
     void *context;
+    void *room;                              /* RV-274: the event the viewer sets as it takes a picture (the child's) */
 } rubraview_ffmpeg_hosting_t;
 
 void *rubraview_ffmpeg_host_open(proven_u8str_view_t path, const rubraview_media_gpu_t *gpu,

@@ -142,6 +142,20 @@ void rubraview_listwin_resize_to(rubraview_listwin_t *lw, double px, double py, 
  */
 bool rubraview_list_move(size_t *order, size_t count, const bool *moving, size_t to);
 
+/** RV-276: what a row of a list is read as: a file of its own, a comic (read as a book in its place), or another
+ *  archive (a book when the reader says so: Settings > Files > An archive in the list). */
+typedef enum {
+    RUBRAVIEW_LIST_ROW_FILE = 0,
+    RUBRAVIEW_LIST_ROW_COMIC,     /* .cbz .cb7 .cbr */
+    RUBRAVIEW_LIST_ROW_ARCHIVE,   /* .zip .7z .rar .alz .egg, a 7z set by its first volume */
+} rubraview_list_row_kind_t;
+
+rubraview_list_row_kind_t rubraview_list_row_kind(proven_u8str_view_t name);
+
+/** RV-276: the row read after `row` of `count`, going forward or back: SIZE_MAX past either end, or the other end
+ *  when `round` (Settings > Files > At the first and last: go round). */
+size_t rubraview_list_row_after(size_t row, size_t count, bool forward, bool round);
+
 /** How many rows fit under the title. */
 size_t rubraview_listwin_rows_visible(const rubraview_listwin_t *lw);
 

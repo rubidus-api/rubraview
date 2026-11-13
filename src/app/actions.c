@@ -1028,6 +1028,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("at_end"), (double)mode);
         app->follow_for = -1;   /* decided again, in the new mode */
         osd_say(app, cstr(rubraview_repeat_sentence(mode)));
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("list_paste"))) {
+        list_paste(app);   /* RV-276 */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_playlist"))) {
         listwin_toggle(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_info"))) {
@@ -1689,6 +1691,13 @@ void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (app->list_del_ask) {   /* RV-256: Y recycles the file; Enter, N and Esc keep it */
         if (key_is(combo, "Y")) list_delete_answer(app, true);
         else if (key_is(combo, "Enter") || key_is(combo, "N") || key_is(combo, "Escape")) list_delete_answer(app, false);
+        return;
+    }
+    if (app->book_ask) {   /* RV-276: Enter reads the archive as a book, Esc skips it; 1 to 4 the buttons */
+        if (key_is(combo, "Enter") || key_is(combo, "1")) book_ask_answer(app, 0);
+        else if (key_is(combo, "Escape") || key_is(combo, "2")) book_ask_answer(app, 1);
+        else if (key_is(combo, "3")) book_ask_answer(app, 2);
+        else if (key_is(combo, "4")) book_ask_answer(app, 3);
         return;
     }
     if (app->playlist_ask) {   /* RV-255: Enter opens it in place of the list, Esc leaves it; 1 2 3 the buttons */

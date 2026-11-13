@@ -35,6 +35,7 @@ Rubraview is designed as a fast, bloat-free desktop tool that combines responsiv
 - **WebP Written Without A Codec To Install**: Export and `--batch --format=webp` write lossy or lossless WebP with the built-in libwebp; an animated GIF, PNG or WebP becomes an animated WebP.
 - **Universal Multimedia Playback**: Smooth video decoding, frame-by-frame stepping, and still frame capture via a decoupled FFmpeg (`libavcodec`/`libavformat`) Platform Abstraction Layer.
 - **Internet Radio From A Playlist**: station addresses (`http`, `https`, `mms`) in an `.m3u8` / `.m3u` with a title each (`#EXTINF:-1,Title`), or in a `.pls` or `.asx`, listed in the playlist (`P`) and played by FFmpeg, which may reach only the network for them.
+- **Comics In The List**: comics and archives are rows of the playlist beside pictures, films and music; a book opens in its row's place and the list reads on past its last page; `Ctrl+V` puts in the files and folders copied in Explorer, everything under a folder.
 - **G'MIC's Filters In Edit**: with G'MIC's own command-line program named in Settings › External, about a thousand filters by category with their own settings, or any G'MIC command typed; run as G'MIC's program, never inside ours.
 - **FFmpeg's Filters In Edit**: with `avfilter-12.dll` in the FFmpeg folder, about 160 FFmpeg video filters by name with their own options, or any filter graph typed; `--ffmpeg-filter` in the batch.
 - **Edit As Steps On A Selection**: a rectangle or an ellipse (with a soft edge) dragged, sized and typed; tones, colour balance, automatic colour, 21 effects, crop and resize as steps on it, undone and redone until saved; save over the original (to the Recycle Bin) or a copy.
@@ -130,6 +131,7 @@ ships with, so it cannot drift from them.
 | `Ctrl+L` | The files in the archive (or the folder) in a window of their own, with a preview; a click or Enter goes to one |
 | `Shift+F` | Filmstrip |
 | `P` | The playlist, or this folder's files, floating over the picture |
+| `Ctrl+V` | Files and folders copied in Explorer join the list (what is under a folder, its subfolders too) |
 | `Shift+N` | Read the open archive's file names in the next code page (Shift-JIS, GBK, Big5, ...), for that archive only |
 
 **Pictures (a picture, a comic's page, an animation, a film)**
@@ -317,7 +319,7 @@ ships with, so it cannot drift from them.
 | Middle click | Actual size, and back to fit |
 | The mouse's back / forward buttons | Previous / next page |
 | Click on a film or on music | Pause / play |
-| Wheel over a picture or a book | The next or the previous file or page (zoomed in: the picture up and down) |
+| Wheel over a picture or a book | The next or the previous file or page (zoomed in: the picture up and down); which way is a setting (Settings › Viewer, and Video for the volume) |
 | `Ctrl` + wheel, or the wheel over the zoom button | Zoom in or out, 10 % a notch |
 | Click the zoom button | Real size (0%), 20% to 200% by twenties, real size again |
 | Wheel over a Toolbar button that chooses one of several | The one before or after |

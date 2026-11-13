@@ -96,4 +96,23 @@ void rubraview_pal_time_sleep_ms(uint32_t milliseconds) {
     Sleep(milliseconds);
 }
 
+/* RUBRAVIEW_ROOM_SLEEP: the decoders' waits for room as they were before RV-274 (a short sleep, looked at again). */
+static bool room_sleep(void) {
+    static int known;
+    if (!known) {
+        WCHAR v[4];
+        known = GetEnvironmentVariableW(L"RUBRAVIEW_ROOM_SLEEP", v, 4) > 0 ? 2 : 1;
+    }
+    return known == 2;
+}
+
+void rubraview_pal_time_wait_room(void *event, uint32_t fallback_ms, uint32_t sleep_ms) {
+    if (!event || room_sleep()) { rubraview_pal_time_sleep_ms(sleep_ms); return; }
+    WaitForSingleObject((HANDLE)event, fallback_ms);
+}
+
+void rubraview_pal_time_room_made(void *event) {
+    if (event && !room_sleep()) SetEvent((HANDLE)event);
+}
+
 #endif /* _WIN32 */

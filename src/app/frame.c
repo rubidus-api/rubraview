@@ -100,6 +100,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     /* §3.22 / D-13: the settings window's own queue. Polling the main
        window pumped the thread's messages into it. */
     handled += shell_requests_pump(app);
+    handled += book_pump(app);   /* RV-276 */
     handled += settings_pump(app);
     handled += help_pump(app);
     handled += info_pump(app);

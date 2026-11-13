@@ -261,6 +261,7 @@ typedef struct rubraview_pcm_ring {
     size_t capacity;          /* in samples, not frames */
     _Atomic size_t written;   /* total ever written; producer only */
     _Atomic size_t read;      /* total ever read; consumer only */
+    void *room;               /* RV-274: the PAL's event the reader sets after it reads (room made); NULL: none */
 } rubraview_pcm_ring_t;
 
 bool   rubraview_pcm_ring_init(rubraview_pcm_ring_t *ring, float *storage, size_t capacity);

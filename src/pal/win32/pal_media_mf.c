@@ -94,6 +94,7 @@ typedef struct mf_media {
     media_slot_t slots[SLOT_COUNT];
 
     _Atomic bool quit;
+    HANDLE room;   /* RV-274: set when room is made (a picture taken, sound read), a seek, a pause, quit */
     _Atomic bool audio_playing;             /* what the caller last asked of the device, for one opened later */
     _Atomic int32_t audio_gain_millionths;  /* RV-075, likewise */
     _Atomic int32_t pending_audio_stream;   /* §3.16.2: -1 when nothing was asked */
@@ -973,7 +974,7 @@ static void push_audio(mf_media_t *m, const float *data, size_t count, uint64_t 
         if (count == 0) break;
         if (atomic_load_explicit(&m->quit, memory_order_acquire) ||
             atomic_load_explicit(&m->seek_generation, memory_order_acquire) != generation) return;
-        rubraview_pal_time_sleep_ms(2);
+        rubraview_pal_time_wait_room(m->room, 50, 2);   /* RV-274: until the sound thread reads */
     }
 }
 
@@ -1216,7 +1217,7 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
             audio_begun = false;
             video_done = audio_done = ended = false;
         }
-        if (ended || (!want_video && !want_audio)) { Sleep(5); continue; }
+        if (ended || (!want_video && !want_audio)) { rubraview_pal_time_wait_room(m->room, 100, 5); continue; }   /* RV-274 */
 
         /* Read only what there is room for. With the picture's ring full
            the sound is still read, and the other way round — otherwise a
@@ -1231,7 +1232,7 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
         bool video_can = want_video && !video_done && rubraview_spsc_acquire_write(&m->ring, &slot);
         bool audio_can = want_audio && !audio_done &&
                          rubraview_pcm_ring_space(&m->pcm) >= AUDIO_ROOM_SAMPLES;
-        if (!video_can && !audio_can) { rubraview_pal_time_sleep_ms(2); continue; }
+        if (!video_can && !audio_can) { rubraview_pal_time_wait_room(m->room, 50, 2); continue; }   /* RV-274: until room is made */
         DWORD which = (video_can && audio_can) ? (DWORD)MF_SOURCE_READER_ANY_STREAM
                     : video_can ? m->video_stream : m->audio_stream;
 
@@ -1484,6 +1485,7 @@ static void mf_close(void *handle) {
     mf_media_t *media = (mf_media_t*)handle;
     if (!media) return;
     atomic_store_explicit(&media->quit, true, memory_order_release);
+    rubraview_pal_time_room_made(media->room);
     if (media->thread) {
         WaitForSingleObject(media->thread, 10000);
         CloseHandle(media->thread);
@@ -1492,6 +1494,7 @@ static void mf_close(void *handle) {
     /* The output thread reads the PCM storage, so it goes before the storage does. */
     rubraview_pal_audio_close(media->audio);
     rubraview_free(media->pcm_storage);
+    if (media->room) CloseHandle(media->room);   /* after the sound thread, which sets it */
     for (int i = 0; i < SLOT_COUNT; ++i) {
         rubraview_free(media->slots[i].pixels);
         if (media->slots[i].mutex) IDXGIKeyedMutex_Release(media->slots[i].mutex);
@@ -1535,6 +1538,8 @@ static void *mf_open(proven_u8str_view_t path, rubraview_media_failure_t *out_fa
     rubraview_spsc_init(&m->ring, SLOT_COUNT);
     m->failure = RUBRAVIEW_MEDIA_FAIL_FILE;
 
+    m->room = CreateEventW(NULL, FALSE, FALSE, NULL);   /* RV-274; none: the sleeps of before */
+    m->pcm.room = m->room;
     m->opened = CreateEventW(NULL, TRUE, FALSE, NULL);
     m->thread = m->opened ? CreateThread(NULL, 0, decode_thread, m, 0, NULL) : NULL;
     if (!m->thread || WaitForSingleObject(m->opened, OPEN_TIMEOUT_MS) != WAIT_OBJECT_0) {
@@ -1563,6 +1568,7 @@ static bool mf_peek_frame(void *handle, rubraview_video_frame_t *out_frame) {
         if (s->generation != media->consumer_generation) {
             /* Decoded before the latest seek: nobody wants it now. */
             rubraview_spsc_release_read(&media->ring);
+            rubraview_pal_time_room_made(media->room);
             continue;
         }
         *out_frame = (rubraview_video_frame_t){
@@ -1585,6 +1591,7 @@ static void mf_pop_frame(void *handle) {
     if (!media) return;
     size_t slot;
     if (rubraview_spsc_peek_read(&media->ring, &slot)) rubraview_spsc_release_read(&media->ring);
+    rubraview_pal_time_room_made(media->room);   /* RV-274 */
 }
 
 static size_t mf_frames_ready(void *handle) {
@@ -1601,11 +1608,13 @@ static void mf_seek(void *handle, double seconds, rubraview_seek_mode_t mode) {
     /* The release on the generation is what carries the target with it. */
     media->consumer_generation =
         atomic_fetch_add_explicit(&media->seek_generation, 1, memory_order_release) + 1;
+    rubraview_pal_time_room_made(media->room);
 }
 
 static void mf_read_limit(void *handle, uint64_t bytes) {
     mf_media_t *media = (mf_media_t*)handle;
     if (media && bytes) atomic_store_explicit(&media->read_limit, bytes, memory_order_release);   /* the decode thread applies it */
+    if (media) rubraview_pal_time_room_made(media->room);
 }
 
 static bool mf_finished(void *handle) {
@@ -1639,6 +1648,7 @@ static void mf_set_paused(void *handle, bool paused) {
     atomic_store_explicit(&media->audio_playing, !paused, memory_order_release);
     rubraview_pal_audio_set_playing(media->audio, !paused);
     ReleaseSRWLockShared(&media->audio_lock);
+    rubraview_pal_time_room_made(media->room);
 }
 
 static bool mf_audio_position(void *handle, double *out_position, double *out_wall) {
@@ -1683,6 +1693,7 @@ static bool mf_select_audio_track(void *handle, int32_t stream_index) {
     }
     if (!known) return false;
     atomic_store_explicit(&m->pending_audio_stream, stream_index, memory_order_release);
+    rubraview_pal_time_room_made(m->room);
     return true;
 }
 

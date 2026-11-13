@@ -777,8 +777,9 @@ void open_set_ordered(app_state_t *app, rubraview_fs_entry_t *entries, size_t co
     if (as_given) mode = RUBRAVIEW_SORT_AS_GIVEN;
     app->list_is_set = true;   /* a playlist or picked files: the playlist window says so */
     char kinds_buf[1024];   /* 1.25.0: text files too while the text viewer is on (a sorted folder kept them out) */
+    /* RV-276: comics and archives are rows of a list too, read in their place (listbook.c) */
     app->source = rubraview_page_source_from_listing(app->arena, &listing,
-                                                     kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER), mode, ascending);
+                                                     kinds_with_text(kinds_buf, sizeof(kinds_buf), IMAGE_FILTER ";" MEDIA_FILTER ";" LIST_BOOK_FILTER), mode, ascending);
     if (app->source.page_count == 0) {
         osd_say(app, TU8("none of those files is a picture or a film"));
         return;
@@ -836,6 +837,11 @@ bool path_is_listed_kind(proven_u8str_view_t path) {
    turns to the first of them — what a file opened from Explorer asks —
    and without it the reader stays on the page being read. */
 void list_add_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, bool show) {
+    proven_u8str_view_t *walked = NULL;   /* RV-276: a folder brings what is under it */
+    count = list_walk_paths(app, paths, count, &walked);
+    paths = walked;
+    if (count == 0) { osd_say(app, TU8("nothing there the viewer opens")); return; }
+    if (book_add_paths(app, paths, count)) return;   /* in a book of the list: into that list */
     bool files_open = page_count(app) > 0 && app->source.archive_path.size == 0;
     if (!files_open) {
         open_paths_as_set(app, paths, count, count == 1 ? T("file opened as a list") : T("files opened as a list"));
@@ -861,7 +867,7 @@ void list_add_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t c
     for (size_t i = 0; i < count; ++i) {
         rubraview_fs_entry_t entry;
         if (!rubraview_pal_fs_stat(app->arena, paths[i], &entry) || entry.is_directory) continue;
-        if (!path_is_listed_kind(entry.path)) continue;
+        if (!path_is_list_row_kind(entry.path)) continue;
         bool there = false;
         for (size_t k = 0; k < n && !there; ++k) {
             there = rubraview_path_same(entries[k].path, entry.path);
@@ -1080,7 +1086,7 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
    from Explorer, another launch or a drop waits, and is worked through one a pass once it is free (D-308). The
    open-file screen alone holds nothing: it is a screen of the window's own (D-304). */
 bool window_taking_input(const app_state_t *app) {
-    return app->rename_active || app->extract_done || app->pack_ask || app->playlist_ask || app->arc_ask != ARC_ASK_NONE ||
+    return app->rename_active || app->extract_done || app->pack_ask || app->playlist_ask || app->book_ask || app->arc_ask != ARC_ASK_NONE ||
            app->confirm_purge || app->list_del_ask || arcadd_asking() || app->tmenu_open || app->chooser.open || app->arc_job != NULL;
 }
 

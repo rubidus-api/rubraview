@@ -206,6 +206,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (pack_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* D-267 */
             if (extract_done_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-240 */
             if (playlist_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-255 */
+            if (book_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-276 */
             if (list_del_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-256 */
             if (arcadd_press(app, event->mouse.x, event->mouse.y)) break;     /* RV-260 */
             if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)) &&
@@ -740,7 +741,8 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (event->mouse.modifiers == 0 && !app->media && strip_shown(app) > 0.0 &&
                 pal_rect_has(strip_rect(app), event->mouse.x, event->mouse.y)) {
                 /* Over the strip the wheel goes through the thumbnails, a page a notch. */
-                apply_intent(app, event->mouse.wheel_delta > 0.0 ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE);
+                bool back = (event->mouse.wheel_delta > 0.0) != pointer_context(app).wheel_up_next;   /* RV-276: the setting's way */
+                apply_intent(app, back ? RUBRAVIEW_INTENT_PREV_PAGE : RUBRAVIEW_INTENT_NEXT_PAGE);
                 strip_peek(app);
                 break;
             }
@@ -751,7 +753,8 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                off it zooms a film, as Ctrl + wheel does, as it did before. */
             if (app->media && wheel_mods == 0) {
                 if (rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("wheel_volume")) > 0.5) {
-                    handle_action(app, event->mouse.wheel_delta > 0.0 ? PROVEN_LIT("media_volume_up") : PROVEN_LIT("media_volume_down"));
+                    bool down_louder = lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("wheel_louder"))) == 1;   /* RV-276 */
+                    handle_action(app, (event->mouse.wheel_delta > 0.0) != down_louder ? PROVEN_LIT("media_volume_up") : PROVEN_LIT("media_volume_down"));
                     note_activity(app);
                     break;
                 }

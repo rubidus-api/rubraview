@@ -274,8 +274,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             LocalFree(wargv);
             return code;
         }
-        if (wargv && argc == 5 && rubraview_wcmp(wargv[1], L"--media-host") == 0) {   /* RV-176: FFmpeg's child (D-208) */
-            int code = rubraview_pal_media_host_main(wargv[2], wargv[3], wargv[4]);
+        if (wargv && argc == 6 && rubraview_wcmp(wargv[1], L"--media-host") == 0) {   /* RV-176: FFmpeg's child (D-208); RV-274: the room event */
+            int code = rubraview_pal_media_host_main(wargv[2], wargv[3], wargv[4], wargv[5]);
             LocalFree(wargv);
             return code;
         }

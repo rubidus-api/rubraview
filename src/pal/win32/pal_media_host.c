@@ -206,6 +206,7 @@ static bool map_open(mh_map_t *m, proven_u8str_view_t name_view, bool write) {
 
 typedef struct mh_child {
     HANDLE process, job, mapping, request, reply;
+    HANDLE room;                 /* RV-274: set as a picture is taken; the child's decoder waits on it */
     rubraview_mhost_block_t *block;
     bool dead;
     uint64_t beat;               /* the heartbeat last seen, and when it moved */
@@ -300,6 +301,7 @@ static void child_free(mh_child_t *c) {
     if (c->mapping) CloseHandle(c->mapping);
     if (c->request) CloseHandle(c->request);
     if (c->reply) CloseHandle(c->reply);
+    if (c->room) CloseHandle(c->room);
     *c = (mh_child_t){ 0 };
 }
 
@@ -327,7 +329,8 @@ static bool child_start(mh_child_t *c, rubraview_mhost_mode_t mode, const rubrav
     c->block = c->mapping ? (rubraview_mhost_block_t *)MapViewOfFile(c->mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(rubraview_mhost_block_t)) : NULL;
     c->request = CreateEventW(&sa, FALSE, FALSE, NULL);
     c->reply = CreateEventW(&sa, FALSE, FALSE, NULL);
-    if (!c->block || !c->request || !c->reply) { child_free(c); return false; }
+    c->room = CreateEventW(&sa, FALSE, FALSE, NULL);   /* RV-274 */
+    if (!c->block || !c->request || !c->reply || !c->room) { child_free(c); return false; }
     rubraview_mhost_block_t *b = c->block;
     rubraview_mhost_init(b, mode);
     AcquireSRWLockShared(&g_folders_lock);
@@ -356,16 +359,16 @@ static bool child_start(mh_child_t *c, rubraview_mhost_mode_t mode, const rubrav
         }
     }
 
-    WCHAR exe[MAX_PATH], line[MAX_PATH + 128];
+    WCHAR exe[MAX_PATH], line[MAX_PATH + 160];
     if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) { child_free(c); return false; }
-    rubraview_wfmt(line, sizeof line / sizeof line[0], "\"{}\" --media-host {} {} {}", PROVEN_ARG(rubraview_wide_view(exe)),
+    rubraview_wfmt(line, sizeof line / sizeof line[0], "\"{}\" --media-host {} {} {} {}", PROVEN_ARG(rubraview_wide_view(exe)),
                PROVEN_ARG((unsigned long long)((unsigned long long)(uintptr_t)c->mapping)), PROVEN_ARG((unsigned long long)((unsigned long long)(uintptr_t)c->request)),
-               PROVEN_ARG((unsigned long long)((unsigned long long)(uintptr_t)c->reply)));
+               PROVEN_ARG((unsigned long long)((unsigned long long)(uintptr_t)c->reply)), PROVEN_ARG((unsigned long long)((unsigned long long)(uintptr_t)c->room)));
     SIZE_T attr_size = 0;
     InitializeProcThreadAttributeList(NULL, 1, 0, &attr_size);
     LPPROC_THREAD_ATTRIBUTE_LIST attrs = (LPPROC_THREAD_ATTRIBUTE_LIST)rubraview_alloc(attr_size);
     if (!attrs || !InitializeProcThreadAttributeList(attrs, 1, 0, &attr_size)) { rubraview_free(attrs); child_free(c); return false; }
-    HANDLE inherit[3] = { c->mapping, c->request, c->reply };   /* these and nothing else of ours */
+    HANDLE inherit[4] = { c->mapping, c->request, c->reply, c->room };   /* these and nothing else of ours */
     UpdateProcThreadAttribute(attrs, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherit, sizeof inherit, NULL, NULL);
     STARTUPINFOEXW si = { .StartupInfo = { .cb = sizeof(STARTUPINFOEXW) }, .lpAttributeList = attrs };
     PROCESS_INFORMATION pi = { 0 };
@@ -685,6 +688,7 @@ static int32_t remote_waiting(mh_play_t *p) {
 static void remote_release(mh_play_t *p) {
     p->tail++;
     atomic_store_explicit(&p->child.block->ring.tail, p->tail, memory_order_release);
+    rubraview_pal_time_room_made(p->child.room);   /* RV-274: the child's decoder has room */
 }
 
 static bool remote_peek_frame(void *handle, rubraview_video_frame_t *out_frame) {
@@ -1227,7 +1231,7 @@ bool rubraview_mhost_remote_filter_run(const char *graph, const uint8_t *bgra, i
 /* ---- the child ---- */
 
 static rubraview_mhost_block_t *g_child_block;
-static HANDLE g_child_request, g_child_reply;
+static HANDLE g_child_request, g_child_reply, g_child_room;
 static mh_map_t g_child_reply_map;     /* held until the next request, so the viewer can open it */
 static mh_map_t g_child_frames;        /* the four pictures */
 
@@ -1330,7 +1334,7 @@ static int32_t child_open(child_play_t *cp) {
         if (b->gpu_mode > 0) gpu.device = cp->device;
         if (b->tone_mapping > 0) gpu.shader_device = cp->device;
     }
-    rubraview_ffmpeg_hosting_t hosting = { .ring = &b->ring, .slots = b->slots, .pixels = child_frames_room };
+    rubraview_ffmpeg_hosting_t hosting = { .ring = &b->ring, .slots = b->slots, .pixels = child_frames_room, .room = g_child_room };
     rubraview_media_failure_t failure = RUBRAVIEW_MEDIA_FAIL_FILE;
     rubraview_media_info_t info = { 0 };
     cp->media = rubraview_ffmpeg_host_open(path, &gpu, &hosting, &failure, &info);
@@ -1577,7 +1581,8 @@ static int32_t child_service(uint32_t kind, uint32_t *serial) {
     }
 }
 
-int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *request_text, const wchar_t *reply_text) {
+int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *request_text, const wchar_t *reply_text,
+                                  const wchar_t *room_text) {
     g_in_child = true;
     /* RV-273 (D-337, D-338): no 1 ms system timer here. The child sleeps 15 to 250 ms between passes and the viewer's
        wants wake it; its decoder's short waits for room are on the high-resolution timer (rubraview_pal_time_sleep_ms). */
@@ -1586,8 +1591,9 @@ int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *re
     HANDLE mapping = (HANDLE)(uintptr_t)_wcstoui64(mapping_text, NULL, 10);
     g_child_request = (HANDLE)(uintptr_t)_wcstoui64(request_text, NULL, 10);
     g_child_reply = (HANDLE)(uintptr_t)_wcstoui64(reply_text, NULL, 10);
+    g_child_room = (HANDLE)(uintptr_t)_wcstoui64(room_text, NULL, 10);   /* RV-274: the viewer sets it as it takes a picture */
     rubraview_mhost_block_t *b = (rubraview_mhost_block_t *)MapViewOfFile(mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(rubraview_mhost_block_t));
-    if (!b || !rubraview_mhost_block_ok(b, sizeof(*b)) || !g_child_request || !g_child_reply) return 2;
+    if (!b || !rubraview_mhost_block_ok(b, sizeof(*b)) || !g_child_request || !g_child_reply || !g_child_room) return 2;
     g_child_block = b;
     CoInitializeEx(NULL, COINIT_MULTITHREADED);   /* WASAPI */
     char imported[RUBRAVIEW_MHOST_PATH], chosen[RUBRAVIEW_MHOST_PATH];

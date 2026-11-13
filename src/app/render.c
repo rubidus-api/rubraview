@@ -1736,6 +1736,7 @@ uint64_t scene_signature(const app_state_t *app) {
     SIG(&h, app->volpop_open);   /* RV-237 */
     SIG(&h, app->extract_done);   /* RV-240 */
     SIG(&h, app->playlist_ask);   /* RV-255 */
+    SIG(&h, app->book_ask);   /* RV-276 */
     SIG(&h, app->list_del_ask);   /* RV-256 */
     { bool asking = arcadd_asking(); SIG(&h, asking); }   /* RV-260 */
     SIG(&h, rubraview_pal_time_now_seconds() < app->vol_flash_until);

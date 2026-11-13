@@ -58,6 +58,8 @@ typedef struct rubraview_pointer_context {
     bool zoomed_in;
     bool scrollable_vertically;
     bool wheel_turns;            /* a picture or a book, not a film or a song: the wheel turns files and pages (RV-276) */
+    bool wheel_up_next;          /* Settings: turned up (away) shows the next, not the previous (RV-276) */
+    bool wheel_down_enlarges;    /* Settings: Ctrl+wheel turned down (towards you) enlarges (RV-276) */
 } rubraview_pointer_context_t;
 
 rubraview_pointer_intent_t rubraview_pointer_click(const rubraview_pointer_context_t *ctx, double x, bool is_double_click);
