@@ -31,14 +31,28 @@ static bool timer_default(void) {
     return known == 2;
 }
 
+static bool g_period_on;   /* the system's timer at 1 ms asked by this process now */
+
 bool rubraview_pal_time_high_resolution(void) {
     static int known;   /* 0 not tried, 1 no, 2 yes */
+    if (g_period_on) return false;   /* waits are fine already: the plain ones, as before RV-273 (T405) */
     if (!known) {
-        WCHAR old[4];
-        HANDLE t = timer_default() || GetEnvironmentVariableW(L"RUBRAVIEW_TIMER_PERIOD", old, 4) > 0 ? NULL
+        HANDLE t = timer_default() ? NULL
                  : CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
-        known = t ? 2 : 1;   /* refused before Windows 10 1803; RUBRAVIEW_TIMER_PERIOD: the 1 ms timer as before */
+        known = t ? 2 : 1;   /* refused before Windows 10 1803 */
         if (t) CloseHandle(t);
+    }
+    return known == 2;
+}
+
+/* RUBRAVIEW_TIMER_NO_PERIOD: the high-resolution waits alone, the system's timer left at its tick, to compare. Not the
+   default: on the VM a 60 fps film fell further behind without it (T405), the process's other short waits (Media
+   Foundation's among them) going by the tick. */
+static bool timer_no_period(void) {
+    static int known;
+    if (!known) {
+        WCHAR v[4];
+        known = GetEnvironmentVariableW(L"RUBRAVIEW_TIMER_NO_PERIOD", v, 4) > 0 ? 2 : 1;
     }
     return known == 2;
 }
@@ -47,7 +61,7 @@ rubraview_timer_kind_t rubraview_pal_time_fine(bool fine) {
     static bool on, tried;
     static UINT (WINAPI *begin)(UINT), (WINAPI *end)(UINT);
     if (timer_default()) return RUBRAVIEW_TIMER_TICK;
-    if (rubraview_pal_time_high_resolution()) return fine ? RUBRAVIEW_TIMER_HIGH : RUBRAVIEW_TIMER_TICK;   /* RV-273 */
+    if (timer_no_period() && rubraview_pal_time_high_resolution()) return fine ? RUBRAVIEW_TIMER_HIGH : RUBRAVIEW_TIMER_TICK;
     if (fine == on) return on ? RUBRAVIEW_TIMER_PERIOD : RUBRAVIEW_TIMER_TICK;
     if (!tried) {   /* winmm loaded when first wanted: nothing else of it is used */
         tried = true;
@@ -60,6 +74,7 @@ rubraview_timer_kind_t rubraview_pal_time_fine(bool fine) {
     if (!begin || !end) return RUBRAVIEW_TIMER_TICK;
     if (fine) begin(1); else end(1);
     on = fine;
+    g_period_on = fine;
     return on ? RUBRAVIEW_TIMER_PERIOD : RUBRAVIEW_TIMER_TICK;
 }
 

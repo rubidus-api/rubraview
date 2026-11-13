@@ -1258,7 +1258,7 @@ void rubraview_pal_window_wait_event(rubraview_window_t *window, uint32_t timeou
 void rubraview_pal_window_wait_seconds(rubraview_window_t *window, double seconds) {
     if (!window || window->queue_count > 0 || window->should_close) return;
     if (!(seconds > 0.0)) seconds = 0.0;
-    DWORD ms = seconds < 3600.0 ? (DWORD)(seconds * 1000.0) : 3600000u;
+    DWORD ms = seconds < 3600.0 ? (DWORD)ceil(seconds * 1000.0) : 3600000u;   /* a part of a ms waits the whole ms */
     /* RV-273 (D-337): a short wait on the high-resolution timer, as fine as asked without the system's timer at
        1 ms; MsgWait's own timeout goes by Windows' tick. One timer for the thread that waits (the viewer's). */
     static thread_local HANDLE timer;

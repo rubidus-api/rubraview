@@ -1579,9 +1579,8 @@ static int32_t child_service(uint32_t kind, uint32_t *serial) {
 
 int rubraview_pal_media_host_main(const wchar_t *mapping_text, const wchar_t *request_text, const wchar_t *reply_text) {
     g_in_child = true;
-    /* RV-273 (D-337): no 1 ms system timer here. The child sleeps 15 to 250 ms between passes and the viewer's wants
-       wake it; its decoder's short waits for room are as long as Windows' tick, which the four slots and the
-       two seconds of sound cover. */
+    /* RV-273 (D-337, D-338): no 1 ms system timer here. The child sleeps 15 to 250 ms between passes and the viewer's
+       wants wake it; its decoder's short waits for room are on the high-resolution timer (rubraview_pal_time_sleep_ms). */
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     SetUnhandledExceptionFilter(child_crash);
     HANDLE mapping = (HANDLE)(uintptr_t)_wcstoui64(mapping_text, NULL, 10);

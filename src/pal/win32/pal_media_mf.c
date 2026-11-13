@@ -1,5 +1,6 @@
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/pal/pal_time.h"
 #include "rubraview/core.h"
 #include <windows.h>
 #include <mfapi.h>
@@ -972,7 +973,7 @@ static void push_audio(mf_media_t *m, const float *data, size_t count, uint64_t 
         if (count == 0) break;
         if (atomic_load_explicit(&m->quit, memory_order_acquire) ||
             atomic_load_explicit(&m->seek_generation, memory_order_acquire) != generation) return;
-        Sleep(2);
+        rubraview_pal_time_sleep_ms(2);
     }
 }
 
@@ -1230,7 +1231,7 @@ static void decode_loop(mf_media_t *m, IMFSourceReader *reader) {
         bool video_can = want_video && !video_done && rubraview_spsc_acquire_write(&m->ring, &slot);
         bool audio_can = want_audio && !audio_done &&
                          rubraview_pcm_ring_space(&m->pcm) >= AUDIO_ROOM_SAMPLES;
-        if (!video_can && !audio_can) { Sleep(2); continue; }
+        if (!video_can && !audio_can) { rubraview_pal_time_sleep_ms(2); continue; }
         DWORD which = (video_can && audio_can) ? (DWORD)MF_SOURCE_READER_ANY_STREAM
                     : video_can ? m->video_stream : m->audio_stream;
 

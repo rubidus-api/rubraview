@@ -24,10 +24,10 @@ void rubraview_pal_time_sleep_ms(uint32_t milliseconds);
 /**
  * RV-215: fine waits while `fine` (a film or an animation playing, the screen moving), Windows' own otherwise.
  * Windows' default tick is 15.6 ms: a sleep of 4 ms, or a wait of 2, lasted a whole tick, and a film's frames and a
- * picture's movement came a tick late now and then. RV-273 (D-337): where Windows has a high-resolution waitable
- * timer (Windows 10 1803 on), the waits of rubraview_pal_window_wait_event use it and the system's timer is left
- * alone; elsewhere it is set to 1 ms as before. Cheap to call every pass. Returns what waits are now
- * (D-248: the information window's Timer row).
+ * picture's movement came a tick late now and then. Cheap to call every pass. Returns what waits are now
+ * (D-248: the information window's Timer row). RV-273 (D-337): the short waits of rubraview_pal_window_wait_seconds
+ * and rubraview_pal_time_sleep_ms use a high-resolution waitable timer where Windows has one (10 1803 on); the
+ * system's timer is still set to 1 ms while `fine` (T405), unless RUBRAVIEW_TIMER_NO_PERIOD asks to compare without.
  */
 typedef enum rubraview_timer_kind {
     RUBRAVIEW_TIMER_TICK = 0,    /* Windows' default tick */

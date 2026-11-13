@@ -1,5 +1,6 @@
 #ifdef _WIN32
 #define COBJMACROS
+#include "rubraview/pal/pal_time.h"
 #include "rubraview/pal/pal_wide.h"
 #include "rubraview/core.h"
 #include <windows.h>
@@ -1900,7 +1901,8 @@ static bool ff_vp_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
 
 static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double duration, uint64_t generation, bool preview) {
     size_t slot = 0;
-    /* RV-273: the wait counted on the clock, not in sleeps: without the 1 ms system timer a Sleep(5) lasts a tick */
+    /* RV-273: the wait counted on the clock, not in sleeps. The waits for room are on the high-resolution timer
+       (rubraview_pal_time_sleep_ms): a tick each, a slow decoder at 60 fps got a picture a tick and fell behind (T405) */
     ULONGLONG since = GetTickCount64(), waited = 0;
     for (; !rubraview_spsc_acquire_write(m->ringp, &slot); waited = GetTickCount64() - since) {
         if (atomic_load_explicit(&m->quit, memory_order_acquire) ||
@@ -1908,7 +1910,7 @@ static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double durati
         bool paused = atomic_load_explicit(&m->paused, memory_order_acquire);
         if (paused) { since = GetTickCount64(); waited = 0; }   /* a pause is no wait for room */
         if (!paused && waited >= VIDEO_ROOM_WAIT_MS) return true;   /* drop this picture */
-        Sleep(5);
+        rubraview_pal_time_sleep_ms(5);
     }
 
     /* RV-149: a picture of the card's is turned there; when the card cannot, it is brought back and turned here */
@@ -2025,7 +2027,7 @@ static void store_audio(ff_media_t *m, ff_decode_t *d, double pts, double *skip_
             if (count == 0) break;
             if (atomic_load_explicit(&m->quit, memory_order_acquire) ||
                 atomic_load_explicit(&m->seek_generation, memory_order_acquire) != generation) break;
-            Sleep(2);
+            rubraview_pal_time_sleep_ms(2);
         }
     }
     rubraview_free(converted);
@@ -2198,7 +2200,7 @@ static void decode_loop(ff_media_t *m, ff_decode_t *d) {
                 --waiting;
                 continue;
             }
-            if (!sound_runs_low(m, d)) { Sleep(2); continue; }
+            if (!sound_runs_low(m, d)) { rubraview_pal_time_sleep_ms(2); continue; }
         }
         if (read_out) {
             atomic_store_explicit(&m->end_generation, generation, memory_order_release);
