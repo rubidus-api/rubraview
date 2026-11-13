@@ -1707,14 +1707,16 @@ static void delete_if_empty(HKEY root, const WCHAR *subkey) {
 }
 
 /* 1.25.0 (owner, 2026-10-20): the icon a type of file shows in Explorer — the resource ID in
-   rubraview.rc: 2 a film, 3 text, 4 a picture, 5 a book (an archive), 6 music (RV-189); the program's own (1) for the rest. */
+   rubraview.rc: 2 a film, 3 text, 4 a picture, 5 a book (a comic archive, EPUB, PDF), 6 music (RV-189), 7 a box (a plain
+   archive, RV-275); the program's own (1) for the rest. */
 static int icon_for_ext(const WCHAR *ext) {
     static const struct { int id; const WCHAR *list; } KINDS[] = {
         { 2, L".mp4.m4v.mkv.webm.avi.mov.wmv.flv.mpg.mpeg.ts.m2ts.mts.3gp.ogv.asf.vob." },
         { 3, L".txt.text.md.log.nfo.ini.csv.json.xml.srt.ass.smi.vtt." },
         { 4, L".jpg.jpeg.jpe.jfif.png.apng.gif.webp.bmp.dib.tif.tiff.avif.heic.heif.jxl.ico.tga.psd.svg.dds.qoi." },
-        { 5, L".cbz.cbr.cb7.cbt.zip.rar.7z.tar.alz.egg.azo.epub.pdf." },
+        { 5, L".cbz.cbr.cb7.cbt.epub.pdf." },
         { 6, L".mp3.flac.wav.ogg.oga.opus.m4a.aac.wma.ape.wv.mka.aiff.aif.m3u8.m3u.pls.rvlist." },   /* RV-189; RV-254 the playlists */
+        { 7, L".zip.rar.7z.tar.alz.egg.azo." },   /* RV-275 */
     };
     WCHAR probe[72];
     size_t n = rubraview_wlen(ext);
@@ -1764,7 +1766,8 @@ static bool register_one(const WCHAR *ext, const WCHAR *progid) {
     WCHAR icon[MAX_PATH * 2 + 8];
     rubraview_wcopy_a(icon, exe);
     int id = icon_for_ext(ext);
-    rubraview_wcat_a(icon, id == 2 ? L",-2" : id == 3 ? L",-3" : id == 4 ? L",-4" : id == 5 ? L",-5" : id == 6 ? L",-6" : L",0");
+    WCHAR which[4] = { L',', L'-', (WCHAR)(L'0' + id), 0 };   /* ",-2" to ",-7", the resource by ID; 1 is the first, ",0" */
+    rubraview_wcat_a(icon, id > 1 && id <= 9 ? which : L",0");
     write_key(g_shell_root, subkey, NULL, icon);
 
     /* RV-191: the same icon on the extension itself. While another program also offers to open the type (Photos for
