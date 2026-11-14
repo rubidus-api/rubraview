@@ -33,6 +33,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 if (edit_panel_open(app)) panel_build_edit(app);
                 break;
             }
+            if (key_is(event->key.combo, "Escape") && navbox_escape(app)) break;   /* RV-285: the navigator, not the program */
             dispatch_key(app, event->key.combo);
             break;
 
@@ -47,6 +48,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
             if (volpop_motion(app, event->mouse.x, event->mouse.y)) break;   /* RV-237: the volume's bar dragged */
+            if (edge_press_motion(app, event->mouse.x, event->mouse.y)) break;   /* RV-285: a side held, along its column */
             if (card_motion(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y)) {   /* RV-265: the card moved or sized */
                 app->pointer_x = event->mouse.x;
                 app->pointer_y = event->mouse.y;
@@ -557,6 +559,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && titlebar_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-257 */
             if (volpop_release(app)) break;   /* RV-237 */
+            if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && edge_press_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-285 */
             if (card_release(app, CARD_HOST_MAIN)) break;   /* RV-265 */
             if (app->picker_rhold && event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {   /* RV-223: a right click, not a drag */
                 app->picker_rhold = false;
@@ -582,10 +585,11 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             }
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && text_release(app, event->mouse.x, event->mouse.y)) break;
             if (app->view_pressed && !app->view_dragging && event->mouse.button == RUBRAVIEW_MOUSE_LEFT) {
-                /* D-109: a click. Over a film or music it pauses and plays; over a
-                   picture it is what it was (a page turned at the sides, the boxes
-                   shown), and nothing on one larger than the window. */
-                if (app->media) {
+                /* D-109: a click. RV-285: in the middle it opens the navigator; elsewhere over a film or music it
+                   pauses and plays, over a picture or a book it does nothing (a double click centres it). */
+                if (navbox_click(app, app->view_press_x, app->view_press_y)) {
+                    app->last_click_at = 0.0;
+                } else if (app->media) {
                     handle_action(app, PROVEN_LIT("media_play_pause"));
                 } else {
                     rubraview_pointer_context_t ctx = pointer_context(app);
@@ -786,6 +790,17 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             break;
 
         case RUBRAVIEW_WINDOW_EVENT_GESTURE_PAN:
+            if (!app->swipe_going && !app->picker_open && !app->edge_press.on) {
+                /* RV-285: a finger pressed at a side and drawn along it chooses a button of its column */
+                double x0 = event->gesture.center_x - event->gesture.dx, y0 = event->gesture.center_y - event->gesture.dy;
+                rubraview_edge_side_t side = edge_nav_side(app, x0, y0);
+                if (side != RUBRAVIEW_EDGE_NONE) rubraview_edge_press_begin(&app->edge_press, side, false, x0, y0);
+            }
+            if (app->edge_press.on) {
+                edge_press_motion(app, event->gesture.center_x, event->gesture.center_y);
+                note_activity(app);
+                break;
+            }
             if (app->picker_open) {
                 rubraview_picker_scroll_by(&app->picker, -event->gesture.dy);
             } else {
@@ -804,6 +819,10 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             break;
 
         case RUBRAVIEW_WINDOW_EVENT_GESTURE_END: {
+            if (app->edge_press.on) {   /* RV-285: the finger let go over a button of the side's column, or off it */
+                edge_press_release(app, event->gesture.center_x, event->gesture.center_y);
+                break;
+            }
             /* RV-107 (§3.7.4): a finger drawn sideways over a page that has nowhere
                to go — fitted, not the strip — turns it; the page goes back where it was. */
             bool was = app->swipe_going;

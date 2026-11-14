@@ -12,7 +12,6 @@ rubraview_pointer_context_t pointer_context(const app_state_t *app) {
     return (rubraview_pointer_context_t){
         .window_width = (double)win_w,
         .reading_direction = app->layout_opts.direction,
-        .comic_mode = (app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_SINGLE) || page_count(app) > 1,
         .zoomed_in = app->zoom > 1.001 || strip_active(app),   /* a drag moves the strip */
         .scrollable_vertically = (app->fit_mode == RUBRAVIEW_FIT_WIDTH),
         .wheel_turns = !app->media && !strip_active(app) && !app->text,
@@ -84,13 +83,27 @@ bool edge_column_shown(app_state_t *app) {
            rubraview_pal_time_now_seconds() - app->edge_since >= RUBRAVIEW_EDGE_COLUMN_DELAY;
 }
 
-static rubraview_edge_hit_t edge_nav_hit(app_state_t *app, double x, double y) {
-    rubraview_edge_hit_t none = { RUBRAVIEW_EDGE_NONE, -1 };
-    if (edge_nav_side(app, x, y) == RUBRAVIEW_EDGE_NONE) return none;
+/* RV-285: a side pressed and moved (a mouse held, or a finger drawn along it): the column shows past a slop. */
+bool edge_press_motion(app_state_t *app, double x, double y) {
+    if (!app->edge_press.on) return false;
+    rubraview_edge_press_move(&app->edge_press, x, y, 8.0 * rubraview_pal_window_dpi_scale(app->window));
+    app->pointer_x = x;
+    app->pointer_y = y;
+    return true;
+}
+
+/* RV-285: a side's press let go: the smallest move, the button under it, or nothing off the column. */
+bool edge_press_release(app_state_t *app, double x, double y) {
+    if (!app->edge_press.on) return false;
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->window, &w, &h);
     rubraview_edgenav_t nav = rubraview_edgenav_create(rubraview_pal_window_dpi_scale(app->window));
-    return rubraview_edgenav_hit(&nav, x, y, (double)w, (double)h);
+    const char *action = rubraview_edge_press_release(&app->edge_press, &nav, x, y, (double)w, (double)h, app->media != NULL);
+    if (action && action[0]) {
+        handle_action(app, cstr(action));
+        note_activity(app);
+    }
+    return true;
 }
 
 /* D-110: the title bar and the floating boxes go away — the toolbox in a
@@ -312,16 +325,11 @@ bool handle_chrome_click(app_state_t *app, double x, double y) {
         }
     }
 
-    /* The edge buttons (owner, 2026-09-29), under everything above. */
+    /* The edge buttons (owner, 2026-09-29), under everything above. RV-285: decided when let go (edge_press_release):
+       a plain press is the smallest move; with the column up, or dragged along it, the button let go on. */
     rubraview_edge_side_t at_side = edge_nav_side(app, x, y);
-    if (at_side != RUBRAVIEW_EDGE_NONE && !edge_column_shown(app)) {
-        /* RV-206: before the column shows, a press at a side is previous or next */
-        handle_action(app, cstr(rubraview_edgenav_plain_action(at_side)));
-        return true;
-    }
-    rubraview_edge_hit_t edge = edge_nav_hit(app, x, y);
-    if (edge.side != RUBRAVIEW_EDGE_NONE) {
-        handle_action(app, cstr(rubraview_edgenav_action(edge.side, edge.slot, app->media != NULL)));
+    if (at_side != RUBRAVIEW_EDGE_NONE) {
+        rubraview_edge_press_begin(&app->edge_press, at_side, edge_column_shown(app), x, y);
         return true;
     }
 

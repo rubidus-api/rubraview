@@ -11,7 +11,7 @@
  * video, music, animation, multipage, archive, image. `slideshow` is put
  * in front of whichever it is while a slide show runs, and the profile's
  * speed tile is left out then: the slide show's Delay tile stands for it.
- * `page_over_next` (+1 page, after Layout) and `toggle_first_page_alone` (RV-283) are shown in two pages only (RV-224).
+ * `page_over_next` (+1 file, after Layout; RV-285: a file turn) and `toggle_first_page_alone` (RV-283) are shown in two pages only (RV-224).
  * A `group` line starts a new group of tiles; the strip frames each group
  * and wraps them as words (D-124, D-137). The toolbox keeps what is used
  * most (owner, 2026-10-15). Captions of
@@ -179,7 +179,7 @@ static const char *const PARTS[] = {
 "  tile rotate_cw                \"Rotate\"\n"
 "  group\n"
 "  tile toggle_layout            \"Layout\"\n"
-"  tile page_over_next           \"+1 page\"\n"
+"  tile page_over_next           \"+1 file\"\n"
 "  tile toggle_first_page_alone  \"First alone\"\n"   /* RV-283 (owner, 2026-11-14): "툴바 쪽에", two pages only */
 "  tile toggle_spread_detect     \"Spreads\"\n"
 "  tile toggle_slideshow         \"Slides\"\n"
@@ -213,7 +213,7 @@ static const char *const PARTS[] = {
 "  tile rotate_cw                \"Rotate\"\n"
 "  group\n"
 "  tile toggle_layout            \"Layout\"\n"
-"  tile page_over_next           \"+1 page\"\n"
+"  tile page_over_next           \"+1 file\"\n"
 "  tile toggle_first_page_alone  \"First alone\"\n"   /* RV-283 (owner, 2026-11-14): "툴바 쪽에", two pages only */
 "  tile toggle_spread_detect     \"Spreads\"\n"
 "  tile toggle_slideshow         \"Slides\"\n"
@@ -412,7 +412,7 @@ static const char *const PARTS[] = {
 "  item layout_single            \"One page\"\n"
 "  item layout_dual              \"Two pages\"\n"
 "  item toggle_first_page_alone  \"First page alone\"\n"
-"  item page_over_back           \"One page back\"\n"
+"  item page_over_back           \"One file back\"\n"
 "  item layout_webtoon           \"Webtoon\"\n"
 "  group\n"
 "  item toggle_info              \"Info\"\n"

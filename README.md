@@ -118,13 +118,13 @@ ships with, so it cannot drift from them.
 
 | Keys | What it does |
 |---|---|
-| `PageDown`, `Space`, `.`, `Right` | Next page |
-| `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | Previous page |
+| `PageDown`, `Space`, `.`, `Right` | A page turn on: the next page, or the next two in two pages (over a film or music: the next file) |
+| `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | A page turn back: the page before, or the two before in two pages (over a film or music: the file before) |
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |
 | `Ctrl+PageDown` | Ten pages on |
-| `Shift+PageDown` | Two pages: paired one page later, so the facing pages come right (in any other layout: the next page) |
-| `Shift+PageUp` | Two pages: paired one page earlier (in any other layout: the previous page) |
+| `Shift+PageDown` | A file turn: exactly one file on, in any layout (in two pages the pairs move by one page, so the facing pages come right) |
+| `Shift+PageUp` | A file turn: exactly one file back, in any layout (in two pages the pairs move by one page) |
 | `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
 | `]` | Next folder or archive |

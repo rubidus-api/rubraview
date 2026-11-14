@@ -1666,8 +1666,10 @@ void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
 /* The edge buttons (owner, 2026-09-29): the revealed side's three, an
    icon or a short sign each, and the hovered one's caption beside it. */
 void draw_edge_nav(app_state_t *app, double win_w, double win_h) {
-    rubraview_edge_side_t side = edge_nav_side(app, app->pointer_x, app->pointer_y);
-    if (side == RUBRAVIEW_EDGE_NONE || !edge_column_shown(app)) return;   /* RV-206: after the pointer stayed */
+    /* RV-206: after the pointer stayed; RV-285: or while a press at the side is dragged along it (a finger) */
+    bool held = rubraview_edge_press_shows(&app->edge_press);
+    rubraview_edge_side_t side = held ? app->edge_press.side : edge_nav_side(app, app->pointer_x, app->pointer_y);
+    if (side == RUBRAVIEW_EDGE_NONE || (!held && !edge_column_shown(app))) return;
     bool media = app->media != NULL;
     /* [media][side][slot]: an icon of Segoe MDL2 Assets, or 0 and the sign. */
     static const uint32_t ICON[2][2][RUBRAVIEW_EDGE_SLOTS] = {   /* RV-179: the fourth, the folder or archive beside */
@@ -1680,6 +1682,7 @@ void draw_edge_nav(app_state_t *app, double win_w, double win_h) {
     };
     rubraview_edgenav_t nav = rubraview_edgenav_create(rubraview_pal_window_dpi_scale(app->window));
     rubraview_edge_hit_t hit = rubraview_edgenav_hit(&nav, app->pointer_x, app->pointer_y, win_w, win_h);
+    if (held) hit = (rubraview_edge_hit_t){ side, rubraview_edge_press_slot(&app->edge_press, &nav, app->pointer_x, app->pointer_y, win_w, win_h) };
     double opacity = box_opacity(app, &app->toolbox);
     for (int32_t slot = 0; slot < RUBRAVIEW_EDGE_SLOTS; ++slot) {
         rubraview_rect_t r = rubraview_edgenav_rect(&nav, side, slot, win_w, win_h);

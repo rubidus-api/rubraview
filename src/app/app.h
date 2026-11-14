@@ -603,9 +603,9 @@ typedef struct app_state {
     /* RV-277: the navigator in the middle of the window */
     bool                   navbox_shown;
     rubraview_navbox_t     navbox;
-    double                 navbox_rest_since;    /* the pointer in the middle since (0: not there) */
     double                 navbox_near_at;       /* the pointer last in the box or the middle */
-    bool                   navbox_closed;        /* its X pressed: not again until the pointer leaves the middle */
+    double                 navbox_opened_at;     /* RV-285: when a click opened it */
+    bool                   navbox_hint;          /* RV-285: the middle's see-through hint shows */
     int32_t                folder_opened_kind;   /* RV-168/169: the kind of the file the folder came with (1 pictures, 2 films, 3 music; 0 a folder) */
     /* D-86: what Explorer's menu asked, gathered until the selection is whole. */
     rubraview_shellreq_collector_t shell_requests;
@@ -1064,6 +1064,7 @@ typedef struct app_state {
     double last_frame_seconds;
     double pointer_x, pointer_y;
     bool   pointer_inside;   /* false after the pointer left the window (the edge buttons go with it) */
+    rubraview_edge_press_t edge_press;   /* RV-285: a press at a side, decided when let go */
     int32_t edge_side;        /* RV-206: the side the pointer is at (rubraview_edge_side_t), and since when */
     double  edge_since;
 
@@ -2371,6 +2372,10 @@ void list_paste(app_state_t *app);
 /* RV-277 (navbox.c) */
 void navbox_tick(app_state_t *app);
 bool navbox_press(app_state_t *app, double x, double y);
+bool navbox_click(app_state_t *app, double x, double y);
+bool navbox_escape(app_state_t *app);
+bool edge_press_motion(app_state_t *app, double x, double y);
+bool edge_press_release(app_state_t *app, double x, double y);
 void draw_navbox(app_state_t *app);
 bool list_del_press(app_state_t *app, double x, double y);
 bool list_editable(const app_state_t *app);

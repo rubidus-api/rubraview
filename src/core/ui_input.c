@@ -2,31 +2,8 @@
 #include "rubraview/ui_input.h"
 #include "rubraview/lang.h"
 
-rubraview_click_zone_t rubraview_click_zone_at(double x, double window_width) {
-    if (window_width <= 0.0) return RUBRAVIEW_ZONE_CENTER;
-    double ratio = x / window_width;
-    if (ratio < 0.30) return RUBRAVIEW_ZONE_LEFT;
-    if (ratio >= 0.70) return RUBRAVIEW_ZONE_RIGHT;
-    return RUBRAVIEW_ZONE_CENTER;
-}
-
-/* 1.25.0 (owner, 2026-10-20: "어떤 레이아웃에서도 우측 가운데가 다음파일/폴더 좌측 가운데가 이전파일/폴더입니다.
-   레이아웃이 바뀌었거나 rtl 모드라고 이게 바뀌면 안됩니다"): the left zone is always the one before, the right
-   always the next, whatever the reading order; the middle does nothing ("가운데 클릭 ... 아무것도 안하게"). */
-static rubraview_pointer_intent_t zone_to_page_intent(rubraview_click_zone_t zone, rubraview_reading_dir_t dir) {
-    (void)dir;
-    switch (zone) {
-        case RUBRAVIEW_ZONE_LEFT:
-            return RUBRAVIEW_INTENT_PREV_PAGE;
-        case RUBRAVIEW_ZONE_RIGHT:
-            return RUBRAVIEW_INTENT_NEXT_PAGE;
-        case RUBRAVIEW_ZONE_CENTER:
-        default:
-            return RUBRAVIEW_INTENT_NONE;
-    }
-}
-
 rubraview_pointer_intent_t rubraview_pointer_click(const rubraview_pointer_context_t *ctx, double x, bool is_double_click) {
+    (void)x;
     if (!ctx) return RUBRAVIEW_INTENT_NONE;
 
     if (is_double_click) return RUBRAVIEW_INTENT_CENTER_PICTURE;   /* 1.25.0: the picture back in the middle */
@@ -35,9 +12,10 @@ rubraview_pointer_intent_t rubraview_pointer_click(const rubraview_pointer_conte
        with panning, so they only apply when the whole image is visible. */
     if (ctx->zoomed_in) return RUBRAVIEW_INTENT_PAN;
 
-    if (!ctx->comic_mode) return RUBRAVIEW_INTENT_NONE;   /* 1.25.0: a click no longer opens the toolbar */
-
-    return zone_to_page_intent(rubraview_click_zone_at(x, ctx->window_width), ctx->reading_direction);
+    /* RV-285 (owner, 2026-11-14: "그림과 책에서 가운데와 양쪽 10% 밖을 클릭하면 아무것도 하지 않습니다"): the sides' 10 %
+       turn pages and the middle opens the navigator, both the viewer's before this; anywhere else a click does nothing
+       (the 30 % zones of 1.25.0 are gone). */
+    return RUBRAVIEW_INTENT_NONE;
 }
 
 rubraview_pointer_intent_t rubraview_pointer_middle_click(const rubraview_pointer_context_t *ctx) {

@@ -6,7 +6,7 @@ rubraview_edgenav_t rubraview_edgenav_create(double dpi_scale) {
     return (rubraview_edgenav_t){
         .button = 64.0 * dpi_scale,
         .gap = 8.0 * dpi_scale,
-        .reach = 96.0 * dpi_scale,
+        .reach = 80.0 * dpi_scale,   /* RV-285: the least; 10 % of the width when more */
     };
 }
 
@@ -25,9 +25,15 @@ static double slot_height(const rubraview_edgenav_t *nav, double view_h) {
     return (column_height(nav, view_h) - (RUBRAVIEW_EDGE_SLOTS - 1) * nav->gap) / RUBRAVIEW_EDGE_SLOTS;
 }
 
+double rubraview_edgenav_reach(const rubraview_edgenav_t *nav, double view_w) {
+    if (!nav) return 0.0;
+    double share = view_w * RUBRAVIEW_EDGE_SIDE_SHARE;
+    return share > nav->reach ? share : nav->reach;
+}
+
 /* Both columns, the reach on each side, and a picture's worth between them. */
 static bool room_for(const rubraview_edgenav_t *nav, double view_w, double view_h) {
-    return view_w >= 2.0 * nav->reach + nav->button && view_h >= column_height(nav, view_h) + 2.0 * nav->gap;
+    return view_w >= 2.0 * rubraview_edgenav_reach(nav, view_w) + nav->button && view_h >= column_height(nav, view_h) + 2.0 * nav->gap;
 }
 
 rubraview_rect_t rubraview_edgenav_rect(const rubraview_edgenav_t *nav, rubraview_edge_side_t side, int32_t slot,
@@ -45,8 +51,9 @@ rubraview_edge_side_t rubraview_edgenav_revealed(const rubraview_edgenav_t *nav,
     double top = stack_top(nav, view_h) - nav->gap * 2.0;   /* RV-206: the column's height, a little more */
     double bottom = view_h - stack_top(nav, view_h) + nav->gap * 2.0;
     if (py < top || py >= bottom) return RUBRAVIEW_EDGE_NONE;
-    if (px >= 0.0 && px < nav->reach) return RUBRAVIEW_EDGE_LEFT;
-    if (px < view_w && px >= view_w - nav->reach) return RUBRAVIEW_EDGE_RIGHT;
+    double reach = rubraview_edgenav_reach(nav, view_w);
+    if (px >= 0.0 && px < reach) return RUBRAVIEW_EDGE_LEFT;
+    if (px < view_w && px >= view_w - reach) return RUBRAVIEW_EDGE_RIGHT;
     return RUBRAVIEW_EDGE_NONE;
 }
 
@@ -71,14 +78,57 @@ static const char *const ACTIONS[2][2][RUBRAVIEW_EDGE_SLOTS] = {
       { "media_seek_forward", "media_seek_forward_percent", "next_page", "next_archive" } },
 };
 static const char *const CAPTIONS[2][2][RUBRAVIEW_EDGE_SLOTS] = {
-    { { N_("Previous"), N_("10 back"), N_("First"), N_("Folder or archive before") },
-      { N_("Next"), N_("10 on"), N_("Last"), N_("Folder or archive after") } },
+    { { N_("Page back"), N_("10 back"), N_("First"), N_("Folder or archive before") },   /* RV-285: a page turn */
+      { N_("Page on"), N_("10 on"), N_("Last"), N_("Folder or archive after") } },
     { { N_("Back 5 s"), N_("Back 5 %"), N_("Previous file"), N_("Folder or archive before") },
       { N_("On 5 s"), N_("On 5 %"), N_("Next file"), N_("Folder or archive after") } },
 };
 
-const char *rubraview_edgenav_plain_action(rubraview_edge_side_t side) {
-    return side == RUBRAVIEW_EDGE_LEFT ? "prev_page" : side == RUBRAVIEW_EDGE_RIGHT ? "next_page" : "";
+const char *rubraview_edgenav_plain_action(rubraview_edge_side_t side, bool media) {
+    if (side == RUBRAVIEW_EDGE_LEFT) return media ? "media_seek_back" : "prev_page";
+    if (side == RUBRAVIEW_EDGE_RIGHT) return media ? "media_seek_forward" : "next_page";
+    return "";
+}
+
+void rubraview_edge_press_begin(rubraview_edge_press_t *press, rubraview_edge_side_t side, bool column, double x, double y) {
+    if (!press) return;
+    *press = (rubraview_edge_press_t){ .on = side != RUBRAVIEW_EDGE_NONE, .side = side, .column = column, .x0 = x, .y0 = y };
+}
+
+void rubraview_edge_press_move(rubraview_edge_press_t *press, double x, double y, double slop) {
+    if (!press || !press->on || press->dragged) return;
+    double dx = x - press->x0, dy = y - press->y0;
+    if (dx * dx + dy * dy > slop * slop) press->dragged = true;
+}
+
+bool rubraview_edge_press_shows(const rubraview_edge_press_t *press) {
+    return press && press->on && (press->column || press->dragged);
+}
+
+int32_t rubraview_edge_press_slot(const rubraview_edge_press_t *press, const rubraview_edgenav_t *nav, double x, double y,
+                                  double view_w, double view_h) {
+    if (!press || !nav || !press->on) return -1;
+    for (int32_t slot = 0; slot < RUBRAVIEW_EDGE_SLOTS; ++slot) {
+        rubraview_rect_t r = rubraview_edgenav_rect(nav, press->side, slot, view_w, view_h);
+        /* the whole side's width counts, not only the drawn button: a finger is wide */
+        double left = press->side == RUBRAVIEW_EDGE_LEFT ? 0.0 : view_w - rubraview_edgenav_reach(nav, view_w);
+        rubraview_rect_t lane = { left, r.y, rubraview_edgenav_reach(nav, view_w), r.height };
+        if (rubraview_rect_contains(lane, x, y)) return slot;
+    }
+    return -1;
+}
+
+const char *rubraview_edge_press_release(rubraview_edge_press_t *press, const rubraview_edgenav_t *nav, double x, double y,
+                                         double view_w, double view_h, bool media) {
+    if (!press || !press->on) return NULL;
+    const char *action = "";
+    if (!press->column && !press->dragged) action = rubraview_edgenav_plain_action(press->side, media);
+    else {
+        int32_t slot = rubraview_edge_press_slot(press, nav, x, y, view_w, view_h);
+        if (slot >= 0) action = rubraview_edgenav_action(press->side, slot, media);
+    }
+    press->on = false;
+    return action;
 }
 
 const char *rubraview_edgenav_action(rubraview_edge_side_t side, int32_t slot, bool media) {

@@ -117,13 +117,13 @@
 
 | 키 | 하는 일 |
 |---|---|
-| `PageDown`, `Space`, `.`, `Right` | 다음 장 |
-| `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | 이전 장 |
+| `PageDown`, `Space`, `.`, `Right` | 페이지 넘김: 다음 쪽 (두 장 보기에서는 다음 두 장, 동영상·음악에서는 다음 파일) |
+| `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | 페이지 넘김: 이전 쪽 (두 장 보기에서는 이전 두 장, 동영상·음악에서는 이전 파일) |
 | `Home`, `Ctrl+Home` | 첫 장 |
 | `End`, `Ctrl+End` | 마지막 장 |
 | `Ctrl+PageDown` | 열 장 뒤로 |
-| `Shift+PageDown` | 두 장 보기: 한 장 뒤에서부터 짝짓기 — 마주 보는 쪽 맞추기 (다른 방식에서는 다음 장) |
-| `Shift+PageUp` | 두 장 보기: 한 장 앞에서부터 짝짓기 (다른 방식에서는 이전 장) |
+| `Shift+PageDown` | 파일 넘김: 어떤 방식에서도 정확히 한 파일 다음으로 (두 장 보기에서는 짝이 한 장 밀려 마주 보는 쪽이 맞춰짐) |
+| `Shift+PageUp` | 파일 넘김: 어떤 방식에서도 정확히 한 파일 앞으로 (두 장 보기에서는 짝이 한 장 당겨짐) |
 | `Ctrl+PageUp` | 열 장 앞으로 |
 | `Ctrl+Backspace` | 상위 폴더로 |
 | `]` | 다음 폴더 또는 압축 |

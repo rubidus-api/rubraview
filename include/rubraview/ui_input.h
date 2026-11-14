@@ -18,15 +18,6 @@ extern "C" {
  * the rules are testable without a window.
  */
 
-/** §3.7.3 point 1: the canvas splits into three click zones. */
-typedef enum rubraview_click_zone {
-    RUBRAVIEW_ZONE_LEFT = 0,  /* leftmost 30% */
-    RUBRAVIEW_ZONE_CENTER,    /* middle 40% */
-    RUBRAVIEW_ZONE_RIGHT,     /* rightmost 30% */
-} rubraview_click_zone_t;
-
-rubraview_click_zone_t rubraview_click_zone_at(double x, double window_width);
-
 /** The intent a click, wheel notch or side button resolves to. */
 typedef enum rubraview_pointer_intent {
     RUBRAVIEW_INTENT_NONE = 0,
@@ -54,7 +45,6 @@ typedef enum rubraview_pointer_intent {
 typedef struct rubraview_pointer_context {
     double window_width;
     rubraview_reading_dir_t reading_direction;
-    bool comic_mode;             /* §3.7.3: the click zones only flip pages in comic viewing */
     bool zoomed_in;
     bool scrollable_vertically;
     bool wheel_turns;            /* a picture or a book, not a film or a song: the wheel turns files and pages (RV-276) */

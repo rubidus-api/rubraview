@@ -309,10 +309,12 @@ alone** is on (as it comes; the Toolbar's Wide alone / Always two button
 is the same and is kept); off, every page pairs, whatever its shape. A
 page alone does so without moving the pages you are
 looking at, and the pages on screen stay put when the window is resized.
-When a book's facing pages come out wrong, **one page over** moves the
-pairing by a page: `Shift+PageDown` (later) and `Shift+PageUp` (earlier),
-or the Toolbar's `+1 page` button just after Layout, shown only in two
-pages (a book's right click has One page back). On a film `Shift+PageDown` / `Shift+PageUp` still jump 30 seconds;
+Two words for going on: a **page turn** goes one spread — one page, or
+two in two pages — and a **file turn** goes exactly one file. When a
+book's facing pages come out wrong, a file turn moves the pairing by a
+page: `Shift+PageDown` (on) and `Shift+PageUp` (back), or the Toolbar's
+`+1 file` button just after Layout, shown only in two pages (a book's
+right click has One file back). On a film `Shift+PageDown` / `Shift+PageUp` still jump 30 seconds;
 in the other layouts they turn a page. A settings file that said `book`
 opens as two pages with the first page alone.
 
@@ -329,16 +331,22 @@ picture up and down; `Ctrl` + wheel zooms; a film's and a song's wheel is
 the volume). Which way is which is set in Settings › Viewer (**The next
 file or page by the wheel turned** down or up, **Ctrl+wheel enlarges
 turned** up or down) and Settings › Video (**Louder by the wheel
-turned**). **The navigator**: rest the pointer in the middle of the
-window over a picture or a book and a box comes up at it: a page bar on
-top (click or drag), and below it, left the one before and right the one
-after whatever the reading direction, the page (a spread in two pages),
-the picture (one file), the first and the last, and the archive or folder
-beside; its X closes the box until the pointer leaves the middle. It
-goes when the pointer leaves it
-(Settings › Viewer › **Navigator in the middle of the window** turns it
-off); a double
-click puts the picture's middle back on the window's. Holding the button
+turned**).
+
+The window has three kinds of place. **The middle** (a quarter of its
+width and of its height): with the pointer over it a see-through box
+shows there, and a click opens **the navigator** at the pointer. Over a
+picture or a book it has a page bar on top (click or drag), and below
+it, left the one before and right the one after whatever the reading
+direction, the page turn, the file turn, the first and the last, and the
+archive or folder beside; over a film or music, play / pause and a time
+bar on top, then 5 s, 5 % of its length, the file, and the folder or
+archive. Its X, `Esc`, a click outside it (which does nothing else) or
+the pointer away from it for 2 seconds closes it (Settings › Viewer ›
+**Navigator in the middle of the window** turns it off). **The two
+sides** (a tenth of the width each) are below. **Anywhere else** a click
+plays or pauses a film or music and does nothing on a picture or a book;
+a double click puts the picture's middle back on the window's. Holding the button
 still for a moment opens the right-click list, as a right click does.
 
 Rotating (`R`, `Shift+R`) counts the pages as turned: laid on their side
@@ -1408,12 +1416,16 @@ open box before it closes anything else. While a box is open, a second square be
 three dots, sizes it: drag it sideways for more or fewer buttons a row, and away from the box or back for bigger or smaller ones; the
 size is kept, and Settings › Display has the same four numbers.
 
-At each side of the window, rest the pointer near the edge for a moment
-and a tall column of four buttons shows; a click at the edge before it
-shows simply goes to the previous or next page or file. For pictures the
-left ones go to the previous file, ten back and the first, the right ones
-to the next, ten on and the last; for a film or a song they go 5 s and 5 %
-of its length back or on, and to the previous or next file
+At each side of the window — a tenth of its width — a plain click is the
+smallest move: a page turn back or on, or 5 seconds for a film or a song.
+Rest the pointer there for a moment and a tall column of four buttons
+shows: a click then runs the one under it. With a finger (or the button
+held), press at the side and draw along it: the column shows, the button
+under the finger lights, and letting go runs it (letting go off the
+column runs nothing). For pictures the left ones are a page turn back,
+ten back and the first, the right ones a page turn on, ten on and the
+last; for a film or a song they go 5 s and 5 % of its length back or on,
+and to the previous or next file
 (`Shift+PageDown` / `Shift+PageUp` go 30 s). The fourth, |◁ or ▷|, opens the
 archive before or after this one in its folder — or, for files in a
 folder, the folder before or after — as `[` / `]` do, and the
@@ -2194,13 +2206,13 @@ listed under a later heading only means that while that is on screen.
 
 | Keys | What it does |
 |---|---|
-| `PageDown`, `Space`, `.`, `Right` | Next page |
-| `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | Previous page |
+| `PageDown`, `Space`, `.`, `Right` | A page turn on: the next page, or the next two in two pages (over a film or music: the next file) |
+| `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | A page turn back: the page before, or the two before in two pages (over a film or music: the file before) |
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |
 | `Ctrl+PageDown` | Ten pages on |
-| `Shift+PageDown` | Two pages: paired one page later, so the facing pages come right (in any other layout: the next page) |
-| `Shift+PageUp` | Two pages: paired one page earlier (in any other layout: the previous page) |
+| `Shift+PageDown` | A file turn: exactly one file on, in any layout (in two pages the pairs move by one page, so the facing pages come right) |
+| `Shift+PageUp` | A file turn: exactly one file back, in any layout (in two pages the pairs move by one page) |
 | `Ctrl+PageUp` | Ten pages back |
 | `Ctrl+Backspace` | Up to the folder |
 | `]` | Next folder or archive |

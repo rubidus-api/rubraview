@@ -1739,6 +1739,10 @@ uint64_t scene_signature(const app_state_t *app) {
     SIG(&h, app->book_ask);   /* RV-276 */
     SIG(&h, app->navbox_shown);   /* RV-277 */
     if (app->navbox_shown) { SIG(&h, (int32_t)rubraview_navbox_hit(&app->navbox, app->pointer_x, app->pointer_y)); SIG(&h, current_page_index(app)); }
+    SIG(&h, app->navbox_hint);   /* RV-285: the middle's hint */
+    if (app->navbox_shown && app->navbox.media) { SIG(&h, (int64_t)play_position(app)); SIG(&h, app->media_paused); }
+    SIG(&h, rubraview_edge_press_shows(&app->edge_press));   /* RV-285: a side dragged along its column */
+    if (app->edge_press.on) { SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y); }
     SIG(&h, app->list_del_ask);   /* RV-256 */
     { bool asking = arcadd_asking(); SIG(&h, asking); }   /* RV-260 */
     SIG(&h, rubraview_pal_time_now_seconds() < app->vol_flash_until);
