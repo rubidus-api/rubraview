@@ -24,10 +24,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-#include <wchar.h>
 #include <windows.h>
 #include <roapi.h>
 #include <winstring.h>
+
+#include "rp_wstr.h"
 
 static const GUID APPX_IID_ASYNC_INFO = { 0x00000036, 0x0000, 0x0000, { 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
 static const GUID APPX_IID_URI_FACTORY = { 0x44A9796F, 0x723E, 0x4FDF, { 0xA2, 0x18, 0x03, 0x3E, 0x75, 0xB0, 0xC0, 0x84 } };
@@ -53,8 +54,9 @@ enum {
     APPX_URI_CREATE = 6,            // IUriRuntimeClassFactory::CreateUri
     APPX_INFO_STATUS = 7,           // IAsyncInfo::get_Status (0 started, 1 completed, 2 canceled, 3 error)
     APPX_INFO_ERROR = 8,            // IAsyncInfo::get_ErrorCode
+    APPX_INFO_CANCEL = 9,           // IAsyncInfo::Cancel
     APPX_REMOVE_FOR_ALL_USERS = 0x80000,
-    APPX_WAIT_MS = 180000,
+    APPX_WAIT_MS = 60 * 60 * 1000,  // a package of several GB is added within this; then it is cancelled
 };
 
 // The method at `slot` of a COM object.
@@ -73,7 +75,7 @@ static HRESULT appx_query(void *obj, const GUID *iid, void **out) {
 static HRESULT appx_new(const wchar_t *cls, const GUID *iid, void **out) {
     *out = NULL;
     HSTRING name = NULL;
-    HRESULT hr = WindowsCreateString(cls, (UINT32)wcslen(cls), &name);
+    HRESULT hr = WindowsCreateString(cls, (UINT32)rp_wlen(cls), &name);
     if (FAILED(hr)) return hr;
     IInspectable *obj = NULL;
     hr = RoActivateInstance(name, &obj);
@@ -88,7 +90,7 @@ static HRESULT appx_new(const wchar_t *cls, const GUID *iid, void **out) {
 static HRESULT appx_uri(const wchar_t *path, void **out) {
     *out = NULL;
     static const wchar_t hex[] = L"0123456789ABCDEF";
-    size_t n = wcslen(path);
+    size_t n = rp_wlen(path);
     wchar_t *text = HeapAlloc(GetProcessHeap(), 0, (n * 9 + 16) * sizeof *text);
     if (text == NULL) return E_OUTOFMEMORY;
     size_t w = 0;
@@ -120,7 +122,7 @@ static HRESULT appx_uri(const wchar_t *path, void **out) {
     HSTRING cls = NULL, s = NULL;
     void *factory = NULL;
     static const wchar_t uri_class[] = L"Windows.Foundation.Uri";
-    HRESULT hr = WindowsCreateString(uri_class, (UINT32)wcslen(uri_class), &cls);
+    HRESULT hr = WindowsCreateString(uri_class, (UINT32)rp_wlen(uri_class), &cls);
     if (SUCCEEDED(hr)) hr = RoGetActivationFactory(cls, &APPX_IID_URI_FACTORY, &factory);
     if (SUCCEEDED(hr)) hr = WindowsCreateString(text, (UINT32)w, &s);
     if (SUCCEEDED(hr)) hr = ((HRESULT(STDMETHODCALLTYPE *)(void *, HSTRING, void **))APPX_SLOT(factory, APPX_URI_CREATE))(factory, s, out);
@@ -131,19 +133,28 @@ static HRESULT appx_uri(const wchar_t *path, void **out) {
     return hr;
 }
 
-// Waits for an asynchronous operation and releases it; its result as an HRESULT.
+// Waits for an asynchronous operation and releases it; its result as an HRESULT. One that has not
+// finished within APPX_WAIT_MS (by the clock) is cancelled, and waited for until it has stopped,
+// however long that takes: the caller (the chain's setup program deletes the package file next)
+// never goes on while it still runs.
 static HRESULT appx_wait(void *op) {
     if (op == NULL) return E_FAIL;
     void *info = NULL;
     HRESULT hr = appx_query(op, &APPX_IID_ASYNC_INFO, &info);
     if (SUCCEEDED(hr)) {
         int status = 0;
-        for (DWORD waited = 0; waited < APPX_WAIT_MS; waited += 100) {
+        bool cancelled = false;
+        const ULONGLONG start = GetTickCount64();
+        for (;;) {
             hr = ((HRESULT(STDMETHODCALLTYPE *)(void *, int *))APPX_SLOT(info, APPX_INFO_STATUS))(info, &status);
             if (FAILED(hr) || status != 0) break;
+            if (!cancelled && GetTickCount64() - start >= APPX_WAIT_MS) {
+                ((HRESULT(STDMETHODCALLTYPE *)(void *))APPX_SLOT(info, APPX_INFO_CANCEL))(info);
+                cancelled = true;
+            }
             Sleep(100);
         }
-        if (SUCCEEDED(hr) && status == 0) hr = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+        if (SUCCEEDED(hr) && (status == 0 || status == 2)) hr = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
         else if (SUCCEEDED(hr) && status != 1) {
             HRESULT code = E_FAIL;
             ((HRESULT(STDMETHODCALLTYPE *)(void *, HRESULT *))APPX_SLOT(info, APPX_INFO_ERROR))(info, &code);
@@ -158,7 +169,7 @@ static HRESULT appx_wait(void *op) {
 static HRESULT appx_hstring_call(void *obj, int slot, const wchar_t *text) {
     HSTRING s = NULL;
     void *op = NULL;
-    HRESULT hr = WindowsCreateString(text, (UINT32)wcslen(text), &s);
+    HRESULT hr = WindowsCreateString(text, (UINT32)rp_wlen(text), &s);
     if (SUCCEEDED(hr)) hr = ((HRESULT(STDMETHODCALLTYPE *)(void *, HSTRING, void **))APPX_SLOT(obj, slot))(obj, s, &op);
     if (s) WindowsDeleteString(s);
     return SUCCEEDED(hr) ? appx_wait(op) : hr;
@@ -192,7 +203,7 @@ static DWORD WINAPI appx_thread(void *arg) {
         if (j->machine) {
             hr = appx_query(pm, &APPX_IID_PM2, &pm2);
             HSTRING s = NULL;
-            if (SUCCEEDED(hr)) hr = WindowsCreateString(j->full_name, (UINT32)wcslen(j->full_name), &s);
+            if (SUCCEEDED(hr)) hr = WindowsCreateString(j->full_name, (UINT32)rp_wlen(j->full_name), &s);
             if (SUCCEEDED(hr)) {
                 hr = ((HRESULT(STDMETHODCALLTYPE *)(void *, HSTRING, UINT32, void **))APPX_SLOT(pm2, APPX_PM2_REMOVE))(pm2, s, APPX_REMOVE_FOR_ALL_USERS, &op);
             }

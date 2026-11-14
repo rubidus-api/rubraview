@@ -3996,3 +3996,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: D-279 pairs two pages from the page chosen, forward as turned and backward from it down to the first page, so an odd count before the page chosen left the first page alone; a comic's ComicInfo also made its cover, and a manga's first page, stand alone.
 - Decision: the pages before the page chosen pair from the first page forward; one left over stands alone just before the page chosen, which stays the first page shown. The last page chosen (reached going back from the next book, End) pairs the whole from the first page. Only the reader's own choice (Settings › Viewer › Two pages: the first page alone, the book's layout) or a wide scan leaves a page alone: ComicInfo's tags no longer do. The choice gets a Toolbar tile, First alone, beside +1 page, shown in two pages only.
 - Consequences: a book opened at its start shows pages 1 and 2 side by side even when its ComicInfo tags a cover; going back from the page chosen, the single page comes just before it rather than at the book's start.
+
+## D-348: Rubrapack 0.59.0 Vendored, And Packaging With It
+
+- Date: 2026-11-14
+- Status: Accepted (the owner's request, passed on by the Rubrapack session on 2026-11-14: re-vendor rubrapack 0.59.0 and build Rubraview's installer with it). Follows D-230.
+- Context: the 1.43.0 installer was built with rubrapack 0.51.0: its ready page did not name the choices made and its status line was 10 units high, its bottom cut.
+- Decision: `vendor/rubrapack/rp_appx.h` is taken again from `a16048b` (v0.59.0), unmodified, with the `rp_wstr.h` it now includes (wide strings on proven_c_lib's u16 views, from `vendor/proven/`). The installer is made with rubrapack 0.59.0 (`RUBRAPACK`). Upstream's menu DLL only moved its wide-string calls to `rp_wstr.h`; Rubraview's adapted menu keeps its own.
+- Consequences: the next release's installer names the install folder and "for everyone / for you only" on its ready page, has a 14-unit status line and lists what was done on its finished page. A package being registered is waited for up to an hour, then cancelled.
