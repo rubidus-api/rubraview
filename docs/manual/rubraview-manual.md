@@ -456,7 +456,21 @@ lists what Windows keeps about the file (title, rating, tags, authors,
 camera, the picture's and the film's facts); click a value to type
 another, or a star for the rating. **Apply** or **OK** writes what was
 changed; **Windows properties** opens Windows' own window. Picked
-several in the open-file screen, the window sums them. The mouse's back and
+several in the open-file screen, the window sums them.
+
+A program or a file signed in itself has **Digital Signatures**: each
+signature's signer, digest and timestamp, and for the chosen one whether
+it is OK, who signed it and when, who issued the certificate and for
+how long, and its countersignature; **View Certificate** opens Windows'
+own. **Security** lists the users and groups and, for the one chosen,
+Allow and Deny of each permission (a dim tick comes from the folder
+above); click a box to change it, **Add...** to type a user or group,
+**Remove** to take one away. **Advanced** shows the owner (**Change...**),
+whether the folder above's permissions pass on (turned off keeping or
+removing them), every entry, and what you yourself may do. When Windows
+refuses a change, **Apply as administrator** asks Windows for the rights
+and makes it. **Auditing (administrator)...** asks for them too, then
+lists the audit entries to add, remove or change, and **Write** saves them. The mouse's back and
 forward buttons turn the page, a middle click goes to real size and back,
 the wheel turns the page on a picture that fits the window (away from
 you the one before, towards you the next) and brings up the filmstrip
@@ -2150,7 +2164,7 @@ listed under a later heading only means that while that is on screen.
 | Keys | What it does |
 |---|---|
 | `F`, `Enter` | Full screen |
-| `Alt+Enter` | Rubraview's own properties window of the file (General, Details; Windows' own a button away) |
+| `Alt+Enter` | Rubraview's own properties window of the file (General, Digital Signatures, Security, Details; Windows' own a button away) |
 | `T` | Open or close the Toolbar |
 | `Shift+T` | Pin the Toolbar open |
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |

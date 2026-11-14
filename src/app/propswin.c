@@ -1,7 +1,8 @@
 /*
  * RV-281 (owner, 2026-11-14: "Alt+Enter가 파일의 속성 보기 메뉴입니다 ... Rubraview 자체 구현 속성창(일반, 디지털서명, 보안,
  * 자세히, 이전버젼 ...)이 뜨고, 그 안에 윈도 기본 속성창 보기 버튼을 달아서 윈도 기본 속성창으로도 볼 수 있게"):
- * Rubraview's own properties window. Phase 1: General and Details; Windows' own window a button away.
+ * Rubraview's own properties window: General and Details here; Digital Signatures and Security in propsec.c (phase 2);
+ * Windows' own window a button away.
  *
  * General is read in the viewer through Windows' system calls (pal_fileprops.h). Details is read and written by the
  * child (`--shell-menu-host props-read|props-write`, owner: "탐색기 메뉴처럼 별도 프로세스로 읽게"): Windows' property
@@ -10,52 +11,15 @@
 #include "app.h"
 #include "rubraview/pal/pal_fileprops.h"
 
-#define PROPS_FILES_MAX 256
-#define PROPS_ROWS_MAX  256
-#define PROPS_ASK_SECONDS 20.0      /* a child that has not answered by then is given up */
-#define PROPS_ROW_CHANGED (1u << 16)
+#include "propsview.h"
 
-enum { PB_WINDOWS = 0, PB_OK, PB_CANCEL, PB_APPLY, PB_CHANGE, PB_RENAME, PB_COUNT };
-enum { ASK_NONE = 0, ASK_WAITING, ASK_DONE, ASK_FAILED };
-
-typedef struct props_view {
-    char                       **paths;
-    size_t                       count;
-    int32_t                      origin;        /* PROPS_FROM_* */
-    size_t                       origin_index;  /* the tile or the row */
-    rubraview_fileprops_file_t  *files;
-    rubraview_fileprops_file_t   sum;
-    rubraview_tristate_t         want[6];       /* the boxes as the user left them */
-    uint32_t                     last_on;
-    bool                         unblock;
-    int32_t                      tab;
-    /* Details */
-    rubraview_props_row_t       *rows;
-    size_t                       row_count;
-    int32_t                      details;       /* ASK_* */
-    uint32_t                     read_ticket, write_ticket;
-    double                       asked_at, write_at;
-    bool                         writing, close_after_write;
-    int32_t                      scroll;
-    int32_t                      editing;       /* the row being typed in, -1 */
-    char                         edit_buf[512];
-    rubraview_textedit_t         edit;
-    char                         composing[64];
-    /* where things are drawn, for the pointer */
-    rubraview_pal_rect_t         tab_rect[RUBRAVIEW_PROPS_TAB_COUNT];
-    rubraview_pal_rect_t         button[PB_COUNT];
-    rubraview_pal_rect_t         box[8];        /* 0..5 the attributes, 6 Unblock */
-    rubraview_pal_rect_t         row_rect[PROPS_ROWS_MAX];
-    rubraview_pal_rect_t         star_rect[PROPS_ROWS_MAX][5];
-    size_t                       rows_drawn_from, rows_drawn;
-    char                         message[300];
-} props_view_t;
-
-static props_view_t *V(app_state_t *app) { return (props_view_t *)app->props; }
+props_view_t *V(app_state_t *app) { return (props_view_t *)app->props; }
 
 static bool tab_shown(const props_view_t *v, int32_t tab) {
-    (void)v;
-    return tab == RUBRAVIEW_PROPS_GENERAL || tab == RUBRAVIEW_PROPS_DETAILS;   /* phase 1 */
+    if (tab == RUBRAVIEW_PROPS_GENERAL || tab == RUBRAVIEW_PROPS_DETAILS) return true;
+    if (tab == RUBRAVIEW_PROPS_SIGNATURES) return propsec_sig_tab(v);   /* signed files only, as Windows */
+    if (tab == RUBRAVIEW_PROPS_SECURITY) return v->count == 1;          /* several files: Windows has none either */
+    return false;   /* Previous Versions: phase 3 */
 }
 
 static void props_free(props_view_t *v) {
@@ -64,6 +28,7 @@ static void props_free(props_view_t *v) {
     rubraview_free(v->paths);
     rubraview_free(v->files);
     rubraview_free(v->rows);
+    propsec_free(v);
     if (v->details == ASK_WAITING) rubraview_pal_shellhost_forget(v->read_ticket);
     if (v->writing) rubraview_pal_shellhost_forget(v->write_ticket);
     rubraview_free(v);
@@ -82,7 +47,7 @@ void props_close(app_state_t *app) {
     app->props = NULL;
 }
 
-static void say(props_view_t *v, const char *text) { (void)rubraview_fmt(v->message, sizeof v->message, "{}", PROVEN_ARG(text)); }
+void pw_say(props_view_t *v, const char *text) { (void)rubraview_fmt(v->message, sizeof v->message, "{}", PROVEN_ARG(text)); }
 
 /* General: every file read again, the boxes set from what they are now. */
 static void read_general(app_state_t *app) {
@@ -94,7 +59,7 @@ static void read_general(app_state_t *app) {
     for (uint32_t b = 0; b < 6; ++b) v->want[b] = rubraview_fileprops_attr_state(v->files, kept, 1u << b);
     v->last_on = 0;
     v->unblock = false;
-    if (kept < v->count) say(v, T("some of the files are no longer there"));
+    if (kept < v->count) pw_say(v, T("some of the files are no longer there"));
     app->props_dirty = true;
 }
 
@@ -141,6 +106,7 @@ void props_show(app_state_t *app, const char *const *paths, size_t count, int32_
     app->props = v;
     app->props_open = true;
     read_general(app);
+    propsec_read(app);
     ask_details(app);
     app_log(app, "properties", rubraview_bytes_view(v->paths[0], proven_cstr_len(v->paths[0])));
 }
@@ -180,7 +146,7 @@ static bool props_apply(app_state_t *app) {
             if (want != have && !rubraview_pal_fileprops_set_attributes(v->files[i].path, have, want, why, sizeof why)) failed++;
         }
         if (failed) (void)rubraview_fmt(v->message, sizeof v->message, T("not every change could be made: {}"), PROVEN_ARG(why));
-        else say(v, T("the attributes are changed"));
+        else pw_say(v, T("the attributes are changed"));
         app_log(app, "properties", failed ? TU8("attributes: not every change could be made") : TU8("attributes changed"));
         char keep[sizeof v->message];
         proven_sys_mem_copy(keep, v->message, sizeof keep);
@@ -188,6 +154,7 @@ static bool props_apply(app_state_t *app) {
         proven_sys_mem_copy(v->message, keep, sizeof keep);   /* what was said stays over the reading's */
         if (failed) return false;   /* OK leaves the window up, with why (VM: it closed and said nothing) */
     }
+    if (!propsec_apply(app)) return false;   /* Windows refused a permission: the window stays, with why and the shield */
     if (!details_changed(v)) return true;
     char *lines = (char *)rubraview_alloc(PROPS_ROWS_MAX * 1200);
     if (!lines) return true;
@@ -199,8 +166,8 @@ static bool props_apply(app_state_t *app) {
     v->writing = rubraview_pal_shellhost_ask("props-write", (const char *const *)v->paths, v->count, rubraview_bytes_view(lines, at), &v->write_ticket);
     rubraview_free(lines);
     v->write_at = rubraview_pal_time_now_seconds();
-    if (!v->writing) { say(v, T("the details could not be written: the helper did not start")); return true; }
-    say(v, T("writing the details..."));
+    if (!v->writing) { pw_say(v, T("the details could not be written: the helper did not start")); return true; }
+    pw_say(v, T("writing the details..."));
     app->props_dirty = true;
     return false;
 }
@@ -209,6 +176,7 @@ static bool props_apply(app_state_t *app) {
 static void props_poll(app_state_t *app) {
     props_view_t *v = V(app);
     double now = rubraview_pal_time_now_seconds();
+    propsec_poll(app);
     if (v->details == ASK_WAITING) {
         char *text = NULL;
         size_t n = 0;
@@ -229,7 +197,7 @@ static void props_poll(app_state_t *app) {
         if (rubraview_pal_shellhost_answer(v->write_ticket, &text, &n) == 1) {
             v->writing = false;
             bool bad = n > 0 && rubraview_cstr_str(text, "fail") != NULL;
-            say(v, bad ? T("not every detail could be written (the file may be read-only, open, or of a kind that keeps none)")
+            pw_say(v, bad ? T("not every detail could be written (the file may be read-only, open, or of a kind that keeps none)")
                        : T("the details are written"));
             app_log(app, "properties", bad ? TU8("details: not every one written") : TU8("details written"));
             rubraview_free(text);
@@ -241,7 +209,7 @@ static void props_poll(app_state_t *app) {
             rubraview_pal_shellhost_forget(v->write_ticket);
             v->writing = false;
             v->close_after_write = false;
-            say(v, T("the details could not be written: the helper did not answer"));
+            pw_say(v, T("the details could not be written: the helper did not answer"));
             app->props_dirty = true;
         }
     }
@@ -262,8 +230,33 @@ static void edit_begin(app_state_t *app, int32_t row) {
     app->props_dirty = true;
 }
 
+void pw_name_begin(app_state_t *app, int32_t name_for) {
+    props_view_t *v = V(app);
+    if (v->editing >= 0) edit_end(app, true);
+    v->editing = EDIT_NAME;
+    v->name_for = name_for;
+    v->edit = rubraview_textedit_make(v->edit_buf, sizeof v->edit_buf);
+    v->composing[0] = '\0';
+    rubraview_pal_window_text_input(app->props_window, true);
+    app->props_dirty = true;
+}
+
 static void edit_end(app_state_t *app, bool keep) {
     props_view_t *v = V(app);
+    if (v->editing == EDIT_NAME) {   /* the Security tab's name field: what was typed goes to propsec.c */
+        char typed[512];
+        proven_u8str_view_t t = rubraview_textedit_text(&v->edit);
+        size_t n = t.size < sizeof typed - 1 ? t.size : sizeof typed - 1;
+        proven_sys_mem_copy(typed, t.ptr, n);
+        typed[n] = '\0';
+        v->editing = -1;
+        v->composing[0] = '\0';
+        rubraview_pal_window_text_input(app->props_window, false);
+        if (keep && n > 0) propsec_name_done(app, typed);
+        v->name_for = NAME_NONE;
+        app->props_dirty = true;
+        return;
+    }
     if (v->editing < 0) return;
     rubraview_props_row_t *r = &v->rows[v->editing];
     proven_u8str_view_t t = rubraview_textedit_text(&v->edit);
@@ -281,7 +274,7 @@ static void edit_end(app_state_t *app, bool keep) {
 
 static bool edit_key(app_state_t *app, rubraview_key_combo_t k) {
     props_view_t *v = V(app);
-    if (v->editing < 0) return false;
+    if (v->editing == -1) return false;
     bool ctrl = (k.modifiers & RUBRAVIEW_MOD_CTRL) != 0, shift = (k.modifiers & RUBRAVIEW_MOD_SHIFT) != 0;
     if (key_is(k, "Enter")) edit_end(app, true);
     else if (key_is(k, "Escape")) edit_end(app, false);
@@ -305,19 +298,11 @@ static bool edit_key(app_state_t *app, rubraview_key_combo_t k) {
 
 /* ---- drawing ---- */
 
-#define PW_BACK    0xFF1B1E23u
-#define PW_PANEL   0xFF23272Du
-#define PW_TEXT    0xFFE6E6E6u
-#define PW_DIM     0xFF9AA0A8u
-#define PW_LINE    0xFF3A4048u
-#define PW_ACCENT  0xFF4A90D9u
-#define PW_HEADING 0xFF7FB2E5u
-
-static void text_at(rubraview_renderer_t *r, const char *s, rubraview_pal_rect_t box, double size, uint32_t color) {
+void pw_text_at(rubraview_renderer_t *r, const char *s, rubraview_pal_rect_t box, double size, uint32_t color) {
     rubraview_pal_render_draw_text(r, proven_u8str_view_from_cstr(s), box, size, color, RUBRAVIEW_TEXT_LEFT);
 }
 
-static void button_at(app_state_t *app, int which, const char *words, rubraview_pal_rect_t b, bool accent, bool enabled) {
+void pw_button_at(app_state_t *app, int which, const char *words, rubraview_pal_rect_t b, bool accent, bool enabled) {
     props_view_t *v = V(app);
     rubraview_renderer_t *r = app->props_renderer;
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
@@ -328,7 +313,7 @@ static void button_at(app_state_t *app, int which, const char *words, rubraview_
     rubraview_pal_render_draw_text(r, proven_u8str_view_from_cstr(words), b, 13.0 * dpi, enabled ? PW_TEXT : PW_DIM, RUBRAVIEW_TEXT_CENTER);
 }
 
-static void check_at(app_state_t *app, int which, const char *words, rubraview_tristate_t state, double x, double y, bool enabled) {
+void pw_check_at(app_state_t *app, int which, const char *words, rubraview_tristate_t state, double x, double y, bool enabled) {
     props_view_t *v = V(app);
     rubraview_renderer_t *r = app->props_renderer;
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
@@ -342,22 +327,22 @@ static void check_at(app_state_t *app, int which, const char *words, rubraview_t
     if (state == RUBRAVIEW_TRI_ON) rubraview_pal_render_draw_text(r, PROVEN_LIT("\xe2\x9c\x93"), box, 14.0 * dpi, enabled ? PW_TEXT : PW_DIM, RUBRAVIEW_TEXT_CENTER);
     if (state == RUBRAVIEW_TRI_MIXED)
         rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x + 4.0 * dpi, y + 6.0 * dpi, s - 8.0 * dpi, s - 8.0 * dpi }, enabled ? PW_TEXT : PW_DIM, 1.0);
-    text_at(r, words, (rubraview_pal_rect_t){ x + s + 8.0 * dpi, y, tw + 4.0 * dpi, 20.0 * dpi }, 13.0 * dpi, enabled ? PW_TEXT : PW_DIM);
+    pw_text_at(r, words, (rubraview_pal_rect_t){ x + s + 8.0 * dpi, y, tw + 4.0 * dpi, 20.0 * dpi }, 13.0 * dpi, enabled ? PW_TEXT : PW_DIM);
 }
 
 /* "label    value" a row; the value may run onto a second line */
-static double info_row(app_state_t *app, double y, const char *label, const char *value) {
+double pw_info_row(app_state_t *app, double y, const char *label, const char *value) {
     rubraview_renderer_t *r = app->props_renderer;
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->props_window, &w, &h);
     double lx = 18.0 * dpi, vx = 140.0 * dpi;
-    text_at(r, label, (rubraview_pal_rect_t){ lx, y, vx - lx - 6.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
-    text_at(r, value, (rubraview_pal_rect_t){ vx, y, (double)w - vx - 18.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_TEXT);
+    pw_text_at(r, label, (rubraview_pal_rect_t){ lx, y, vx - lx - 6.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
+    pw_text_at(r, value, (rubraview_pal_rect_t){ vx, y, (double)w - vx - 18.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_TEXT);
     return y + 24.0 * dpi;
 }
 
-static double separator(app_state_t *app, double y) {
+double pw_separator(app_state_t *app, double y) {
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->props_window, &w, &h);
@@ -383,58 +368,58 @@ static void draw_general(app_state_t *app, double y) {
     }
     rubraview_pal_render_draw_text(r, proven_u8str_view_from_cstr(text), (rubraview_pal_rect_t){ 18.0 * dpi, y, (double)w - 150.0 * dpi, 26.0 * dpi },
                                    16.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_LEFT);
-    if (one && v->origin != PROPS_FROM_NONE) button_at(app, PB_RENAME, T("Rename..."), (rubraview_pal_rect_t){ (double)w - 124.0 * dpi, y, 106.0 * dpi, 26.0 * dpi }, false, true);
+    if (one && v->origin != PROPS_FROM_NONE) pw_button_at(app, PB_RENAME, T("Rename..."), (rubraview_pal_rect_t){ (double)w - 124.0 * dpi, y, 106.0 * dpi, 26.0 * dpi }, false, true);
     else v->button[PB_RENAME] = (rubraview_pal_rect_t){0};
-    y = separator(app, y + 30.0 * dpi);
+    y = pw_separator(app, y + 30.0 * dpi);
     if (one) {
-        y = info_row(app, y, T("Type of file:"), f->type_name[0] ? f->type_name : T("(unknown)"));
+        y = pw_info_row(app, y, T("Type of file:"), f->type_name[0] ? f->type_name : T("(unknown)"));
         if (!f->is_folder) {
-            y = info_row(app, y, T("Opens with:"), f->opens_with[0] ? f->opens_with : T("(none)"));
-            button_at(app, PB_CHANGE, T("Change..."), (rubraview_pal_rect_t){ (double)w - 104.0 * dpi, y - 26.0 * dpi, 86.0 * dpi, 24.0 * dpi }, false, true);
+            y = pw_info_row(app, y, T("Opens with:"), f->opens_with[0] ? f->opens_with : T("(none)"));
+            pw_button_at(app, PB_CHANGE, T("Change..."), (rubraview_pal_rect_t){ (double)w - 104.0 * dpi, y - 26.0 * dpi, 86.0 * dpi, 24.0 * dpi }, false, true);
         } else v->button[PB_CHANGE] = (rubraview_pal_rect_t){0};
-        y = separator(app, y);
+        y = pw_separator(app, y);
         proven_u8str_view_t dir = rubraview_path_dirname(proven_u8str_view_from_cstr(f->path));
         (void)rubraview_fmt(text, sizeof text, "{}", PROVEN_ARG(dir));
-        y = info_row(app, y, T("Location:"), text);
+        y = pw_info_row(app, y, T("Location:"), text);
     } else {
         v->button[PB_CHANGE] = (rubraview_pal_rect_t){0};
-        y = info_row(app, y, T("Type:"), T("several kinds"));
+        y = pw_info_row(app, y, T("Type:"), T("several kinds"));
     }
     rubraview_info_bytes(a, sizeof a, f->size);
-    y = info_row(app, y, T("Size:"), a);
+    y = pw_info_row(app, y, T("Size:"), a);
     rubraview_info_bytes(b, sizeof b, f->on_disk);
-    y = info_row(app, y, T("Size on disk:"), b);
+    y = pw_info_row(app, y, T("Size on disk:"), b);
     if (f->is_folder || !one) {
         (void)rubraview_fmt(text, sizeof text, T("{} files, {} folders{}"), PROVEN_ARG(f->files), PROVEN_ARG(f->folders),
                             PROVEN_ARG(f->counted_all ? "" : T(" (counting stopped: too many)")));
-        y = info_row(app, y, T("Contains:"), text);
+        y = pw_info_row(app, y, T("Contains:"), text);
     }
-    y = separator(app, y);
+    y = pw_separator(app, y);
     if (one) {
-        info_local_time(a, sizeof a, f->created);  y = info_row(app, y, T("Created:"), a);
-        if (!f->is_folder) { info_local_time(a, sizeof a, f->modified); y = info_row(app, y, T("Modified:"), a); }
-        info_local_time(a, sizeof a, f->accessed); y = info_row(app, y, T("Accessed:"), a);
-        y = separator(app, y);
+        info_local_time(a, sizeof a, f->created);  y = pw_info_row(app, y, T("Created:"), a);
+        if (!f->is_folder) { info_local_time(a, sizeof a, f->modified); y = pw_info_row(app, y, T("Modified:"), a); }
+        info_local_time(a, sizeof a, f->accessed); y = pw_info_row(app, y, T("Accessed:"), a);
+        y = pw_separator(app, y);
     }
-    text_at(r, T("Attributes:"), (rubraview_pal_rect_t){ 18.0 * dpi, y, 120.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
-    check_at(app, 0, T("Read-only"), v->want[0], 140.0 * dpi, y, true);
-    check_at(app, 1, T("Hidden"), v->want[1], 270.0 * dpi, y, true);
+    pw_text_at(r, T("Attributes:"), (rubraview_pal_rect_t){ 18.0 * dpi, y, 120.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
+    pw_check_at(app, 0, T("Read-only"), v->want[0], 140.0 * dpi, y, true);
+    pw_check_at(app, 1, T("Hidden"), v->want[1], 270.0 * dpi, y, true);
     y += 28.0 * dpi;
-    text_at(r, T("Advanced:"), (rubraview_pal_rect_t){ 18.0 * dpi, y, 120.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
-    check_at(app, 2, T("Ready for archiving"), v->want[2], 140.0 * dpi, y, true);
+    pw_text_at(r, T("Advanced:"), (rubraview_pal_rect_t){ 18.0 * dpi, y, 120.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
+    pw_check_at(app, 2, T("Ready for archiving"), v->want[2], 140.0 * dpi, y, true);
     y += 26.0 * dpi;
-    check_at(app, 3, T("Contents indexed besides its properties"), v->want[3], 140.0 * dpi, y, true);
+    pw_check_at(app, 3, T("Contents indexed besides its properties"), v->want[3], 140.0 * dpi, y, true);
     y += 26.0 * dpi;
-    check_at(app, 4, T("Compress contents to save disk space"), v->want[4], 140.0 * dpi, y, f->can_compress);
+    pw_check_at(app, 4, T("Compress contents to save disk space"), v->want[4], 140.0 * dpi, y, f->can_compress);
     y += 26.0 * dpi;
-    check_at(app, 5, T("Encrypt contents to secure data"), v->want[5], 140.0 * dpi, y, f->can_encrypt);
+    pw_check_at(app, 5, T("Encrypt contents to secure data"), v->want[5], 140.0 * dpi, y, f->can_encrypt);
     y += 28.0 * dpi;
     if (f->blocked) {
-        y = separator(app, y);
-        text_at(r, T("Security:"), (rubraview_pal_rect_t){ 18.0 * dpi, y, 120.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
-        text_at(r, T("It came from another computer and may be blocked to protect this one."),
+        y = pw_separator(app, y);
+        pw_text_at(r, T("Security:"), (rubraview_pal_rect_t){ 18.0 * dpi, y, 120.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
+        pw_text_at(r, T("It came from another computer and may be blocked to protect this one."),
                 (rubraview_pal_rect_t){ 140.0 * dpi, y, (double)w - 158.0 * dpi, 20.0 * dpi }, 12.0 * dpi, PW_TEXT);
-        check_at(app, 6, T("Unblock"), v->unblock ? RUBRAVIEW_TRI_ON : RUBRAVIEW_TRI_OFF, 140.0 * dpi, y + 24.0 * dpi, true);
+        pw_check_at(app, 6, T("Unblock"), v->unblock ? RUBRAVIEW_TRI_ON : RUBRAVIEW_TRI_OFF, 140.0 * dpi, y + 24.0 * dpi, true);
     } else v->box[6] = (rubraview_pal_rect_t){0};
 }
 
@@ -447,13 +432,13 @@ static void draw_details(app_state_t *app, double y, double bottom) {
     v->rows_drawn = 0;
     if (v->details != ASK_DONE) {
         const char *say_it = v->details == ASK_WAITING ? T("reading the details...") : T("the details could not be read");
-        text_at(r, say_it, (rubraview_pal_rect_t){ 18.0 * dpi, y, (double)w - 36.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
+        pw_text_at(r, say_it, (rubraview_pal_rect_t){ 18.0 * dpi, y, (double)w - 36.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
         return;
     }
     double rh = 24.0 * dpi, lx = 18.0 * dpi, vx = 190.0 * dpi;
-    text_at(r, T("Property"), (rubraview_pal_rect_t){ lx, y, vx - lx, 20.0 * dpi }, 12.0 * dpi, PW_DIM);
-    text_at(r, T("Value"), (rubraview_pal_rect_t){ vx, y, (double)w - vx, 20.0 * dpi }, 12.0 * dpi, PW_DIM);
-    y = separator(app, y + 20.0 * dpi);
+    pw_text_at(r, T("Property"), (rubraview_pal_rect_t){ lx, y, vx - lx, 20.0 * dpi }, 12.0 * dpi, PW_DIM);
+    pw_text_at(r, T("Value"), (rubraview_pal_rect_t){ vx, y, (double)w - vx, 20.0 * dpi }, 12.0 * dpi, PW_DIM);
+    y = pw_separator(app, y + 20.0 * dpi);
     int32_t fits = (int32_t)((bottom - y) / rh);
     if (v->scroll > (int32_t)v->row_count - fits) v->scroll = (int32_t)v->row_count - fits;
     if (v->scroll < 0) v->scroll = 0;
@@ -465,14 +450,14 @@ static void draw_details(app_state_t *app, double y, double bottom) {
         v->row_rect[at] = line;
         v->rows_drawn++;
         if (row->flags & RUBRAVIEW_PROPS_ROW_HEADING) {
-            text_at(r, row->label, (rubraview_pal_rect_t){ lx, y + 2.0 * dpi, (double)w - 2.0 * lx, rh }, 13.0 * dpi, PW_HEADING);
+            pw_text_at(r, row->label, (rubraview_pal_rect_t){ lx, y + 2.0 * dpi, (double)w - 2.0 * lx, rh }, 13.0 * dpi, PW_HEADING);
             y += rh;
             continue;
         }
         bool editable = (row->flags & RUBRAVIEW_PROPS_ROW_EDITABLE) != 0;
         if (editable && pal_rect_has(line, app->props_px, app->props_py) && (int32_t)at != v->editing)
             rubraview_pal_render_fill_rect(r, line, 0x18FFFFFFu, 3.0 * dpi);
-        text_at(r, row->label, (rubraview_pal_rect_t){ lx, y + 2.0 * dpi, vx - lx - 8.0 * dpi, rh }, 13.0 * dpi, PW_DIM);
+        pw_text_at(r, row->label, (rubraview_pal_rect_t){ lx, y + 2.0 * dpi, vx - lx - 8.0 * dpi, rh }, 13.0 * dpi, PW_DIM);
         rubraview_pal_rect_t val = { vx, y + 2.0 * dpi, (double)w - vx - lx, rh - 4.0 * dpi };
         if ((int32_t)at == v->editing) {
             rubraview_pal_render_fill_rect(r, val, 0xFF101215u, 2.0 * dpi);
@@ -482,7 +467,7 @@ static void draw_details(app_state_t *app, double y, double bottom) {
             size_t caret = v->edit.caret;
             (void)rubraview_fmt(shown, sizeof shown, "{}{}|{}", PROVEN_ARG(rubraview_bytes_view(t.ptr, caret)), PROVEN_ARG(v->composing),
                                 PROVEN_ARG(rubraview_bytes_view(t.ptr + caret, t.size - caret)));
-            text_at(r, shown, (rubraview_pal_rect_t){ val.x + 4.0 * dpi, val.y, val.width - 8.0 * dpi, val.height }, 13.0 * dpi, PW_TEXT);
+            pw_text_at(r, shown, (rubraview_pal_rect_t){ val.x + 4.0 * dpi, val.y, val.width - 8.0 * dpi, val.height }, 13.0 * dpi, PW_TEXT);
         } else if (row->flags & RUBRAVIEW_PROPS_ROW_RATING) {
             int32_t stars = rubraview_props_rating_stars((int32_t)rubraview_parse_long(row->value, NULL, 10));
             for (int s = 0; s < 5; ++s) {
@@ -492,12 +477,12 @@ static void draw_details(app_state_t *app, double y, double bottom) {
                                                s < stars ? 0xFFE8C46Fu : PW_DIM, RUBRAVIEW_TEXT_CENTER);
             }
         } else {
-            text_at(r, row->value, val, 13.0 * dpi, (row->flags & PROPS_ROW_CHANGED) ? 0xFFE8C46Fu : PW_TEXT);
+            pw_text_at(r, row->value, val, 13.0 * dpi, (row->flags & PROPS_ROW_CHANGED) ? 0xFFE8C46Fu : PW_TEXT);
         }
         y += rh;
     }
     if ((size_t)v->scroll + (size_t)(fits > 0 ? fits : 0) < v->row_count)
-        text_at(r, T("(more below: the wheel)"), (rubraview_pal_rect_t){ lx, bottom - 2.0 * dpi, 300.0 * dpi, 18.0 * dpi }, 11.0 * dpi, PW_DIM);
+        pw_text_at(r, T("(more below: the wheel)"), (rubraview_pal_rect_t){ lx, bottom - 2.0 * dpi, 300.0 * dpi, 18.0 * dpi }, 11.0 * dpi, PW_DIM);
 }
 
 void draw_props_window(app_state_t *app) {
@@ -530,18 +515,22 @@ void draw_props_window(app_state_t *app) {
     }
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0, 38.0 * dpi, (double)w, 1.0 * dpi }, PW_LINE, 0.0);
     double foot = (double)h - 48.0 * dpi;
+    for (int b = 0; b < PB_COUNT; ++b) v->button[b] = (rubraview_pal_rect_t){0};   /* only what this tab draws answers */
+    if (!tab_shown(v, v->tab)) v->tab = RUBRAVIEW_PROPS_GENERAL;
     if (v->tab == RUBRAVIEW_PROPS_DETAILS) draw_details(app, 50.0 * dpi, foot - 52.0 * dpi);   /* the hint above the message line */
+    else if (v->tab == RUBRAVIEW_PROPS_SIGNATURES) propsec_draw_signatures(app, 50.0 * dpi, foot - 30.0 * dpi);
+    else if (v->tab == RUBRAVIEW_PROPS_SECURITY) propsec_draw_security(app, 50.0 * dpi, foot - 30.0 * dpi);
     else draw_general(app, 50.0 * dpi);
     /* what was said, and the foot's buttons */
     if (v->message[0])
-        text_at(r, v->message, (rubraview_pal_rect_t){ 18.0 * dpi, foot - 26.0 * dpi, (double)w - 36.0 * dpi, 20.0 * dpi }, 12.0 * dpi, 0xFFE8C46Fu);
+        pw_text_at(r, v->message, (rubraview_pal_rect_t){ 18.0 * dpi, foot - 26.0 * dpi, (double)w - 36.0 * dpi, 20.0 * dpi }, 12.0 * dpi, 0xFFE8C46Fu);
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0, foot - 4.0 * dpi, (double)w, 1.0 * dpi }, PW_LINE, 0.0);
     double bw = 84.0 * dpi, bh = 28.0 * dpi, by = foot + 6.0 * dpi;
-    bool changed = general_changed(v) || details_changed(v) || v->editing >= 0;
-    button_at(app, PB_WINDOWS, T("Windows properties"), (rubraview_pal_rect_t){ 12.0 * dpi, by, 150.0 * dpi, bh }, false, true);
-    button_at(app, PB_OK, T("OK"), (rubraview_pal_rect_t){ (double)w - 3.0 * (bw + 8.0 * dpi), by, bw, bh }, true, !v->writing);
-    button_at(app, PB_CANCEL, T("Cancel"), (rubraview_pal_rect_t){ (double)w - 2.0 * (bw + 8.0 * dpi), by, bw, bh }, false, true);
-    button_at(app, PB_APPLY, T("Apply"), (rubraview_pal_rect_t){ (double)w - (bw + 8.0 * dpi), by, bw, bh }, false, changed && !v->writing);
+    bool changed = general_changed(v) || details_changed(v) || propsec_changed(v) || v->editing >= 0;
+    pw_button_at(app, PB_WINDOWS, T("Windows properties"), (rubraview_pal_rect_t){ 12.0 * dpi, by, 150.0 * dpi, bh }, false, true);
+    pw_button_at(app, PB_OK, T("OK"), (rubraview_pal_rect_t){ (double)w - 3.0 * (bw + 8.0 * dpi), by, bw, bh }, true, !v->writing);
+    pw_button_at(app, PB_CANCEL, T("Cancel"), (rubraview_pal_rect_t){ (double)w - 2.0 * (bw + 8.0 * dpi), by, bw, bh }, false, true);
+    pw_button_at(app, PB_APPLY, T("Apply"), (rubraview_pal_rect_t){ (double)w - (bw + 8.0 * dpi), by, bw, bh }, false, changed && !v->writing);
     if (!rubraview_pal_render_end(r)) app->props_dirty = true;
 }
 
@@ -551,11 +540,11 @@ static void props_button(app_state_t *app, int which) {
     props_view_t *v = V(app);
     if (which == PB_WINDOWS) {
         if (!rubraview_pal_shellhost_show("properties", (const char *const *)v->paths, v->count, rubraview_pal_window_native_handle(app->props_window)))
-            say(v, T("Windows' properties window could not be started"));
+            pw_say(v, T("Windows' properties window could not be started"));
     } else if (which == PB_CHANGE) {
         if (!rubraview_pal_shellhost_show("openwith", (const char *const *)v->paths, 1, rubraview_pal_window_native_handle(app->props_window)))
-            say(v, T("Windows' Open with box could not be started"));
-        else say(v, T("after choosing a program, the window shows it the next time it is opened"));
+            pw_say(v, T("Windows' Open with box could not be started"));
+        else pw_say(v, T("after choosing a program, the window shows it the next time it is opened"));
     } else if (which == PB_APPLY) {
         if (!v->writing) (void)props_apply(app);
     } else if (which == PB_OK) {
@@ -566,6 +555,8 @@ static void props_button(app_state_t *app, int which) {
     } else if (which == PB_CANCEL) {
         props_close(app);
         return;
+    } else if (which >= PB_CERT) {
+        if (!propsec_button(app, which)) return;
     } else if (which == PB_RENAME) {
         int32_t origin = v->origin;
         size_t index = v->origin_index;
@@ -588,6 +579,11 @@ static void props_press(app_state_t *app, double x, double y) {
         }
     for (int b = 0; b < PB_COUNT; ++b)
         if (v->button[b].width > 0 && pal_rect_has(v->button[b], x, y)) { props_button(app, b); return; }
+    if (v->tab == RUBRAVIEW_PROPS_SIGNATURES || v->tab == RUBRAVIEW_PROPS_SECURITY) {
+        if (v->editing == EDIT_NAME) edit_end(app, true);
+        (void)propsec_press(app, x, y);
+        return;
+    }
     if (v->tab == RUBRAVIEW_PROPS_GENERAL) {
         for (uint32_t b = 0; b < 6; ++b) {
             if (!pal_rect_has(v->box[b], x, y)) continue;
@@ -659,14 +655,14 @@ size_t props_pump(app_state_t *app) {
                 if (!app->props_open) return handled;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_TEXT:
-                if (v->editing >= 0) {
+                if (v->editing != -1) {
                     rubraview_textedit_insert(&v->edit, rubraview_bytes_view(event.text.utf8, event.text.length));
                     v->composing[0] = '\0';
                     app->props_dirty = true;
                 }
                 break;
             case RUBRAVIEW_WINDOW_EVENT_COMPOSITION:
-                if (v->editing >= 0) {
+                if (v->editing != -1) {
                     size_t n = event.text.length < sizeof v->composing - 1 ? event.text.length : sizeof v->composing - 1;
                     proven_sys_mem_copy(v->composing, event.text.utf8, n);
                     v->composing[n] = '\0';

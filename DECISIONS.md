@@ -4028,3 +4028,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: on the VM two clicks at a film's side 0.8 s apart went 5 s once: by the second the column was up and the press fell between two buttons.
 - Decision: a press at the side of the last plain press, within 1 s of its release, is plain again, whatever the column shows; past a second, or at the other side, a press with the column up chooses a button as before.
 - Consequences: to choose a button just after a plain click at that side, wait a second.
+
+## D-352: The Properties Window's Signatures And Security, Built In
+
+- Date: 2026-11-15
+- Status: Accepted (owner 2026-11-14, RV-281's plan: "디지털서명, 보안 ... 모든 기능들을 자체 구현"; "감사는 별도 프로세스에서 관리자 권한 획득하여 자체 구현한 동작을 수행하는 것으로"; 2026-11-15: "계속 진행해 주세요"). Phase 2 of D-346.
+- Context: Windows' Digital Signatures and Security tabs, with their Edit and Advanced windows, are Explorer's; the owner wants them Rubraview's own, the auditing done by an elevated process of Rubraview's.
+- Decision: both tabs read and write through Windows' own system calls in the viewer (crypt32 and wintrust for the signatures, offline; advapi32 and authz for the permissions), the model in core (`fileprops.h`: rights from a mask, Windows' click rules, the ACEs merged by SID and written back Deny first with unchanged principals' ACEs as they were). The Edit window is folded into the tab (boxes clickable there) and Advanced is a second view of it. The audit entries, and a permission change Windows refused, go to `--shell-menu-host` started elevated (`runas`; Windows asks each time) with tab-separated lines; the viewer never runs elevated. View Certificate is Windows' own window, from the child.
+- Consequences: the advanced view's per-entry editing (applies to, special rights one by one) is not built: Special shows, and is changed in Windows' own window (Windows properties); the object picker is a typed name; catalogue-signed files have no tab, as in Windows.

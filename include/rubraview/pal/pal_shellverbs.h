@@ -53,7 +53,15 @@ int rubraview_pal_shellhost_answer(uint32_t ticket, char **text, size_t *length)
 /** The ticket's files removed (its answer will not be read). */
 void rubraview_pal_shellhost_forget(uint32_t ticket);
 
-/** RV-281: Windows' own window from the child: "properties" (the files' properties), "openwith" (Open with's box). */
+/**
+ * RV-281 phase 2: as rubraview_pal_shellhost_ask, the child started with administrator rights (Windows asks, UAC):
+ * "sec-write", "audit-read", "audit-write". False when it could not start (the user said no).
+ */
+bool rubraview_pal_shellhost_ask_elevated(const char *kind, const char *const *paths, size_t count, proven_u8str_view_t input,
+                                          uint32_t *ticket, void *native_window);
+
+/** RV-281: Windows' own window from the child: "properties" (the files' properties), "openwith" (Open with's box),
+    "certificate:<n>" (the certificate of the file's signature n). */
 bool rubraview_pal_shellhost_show(const char *kind, const char *const *paths, size_t count, void *native_window);
 
 /** Whether Shift is down with the input being handled now (a right click with it opens the classic menu at once). */

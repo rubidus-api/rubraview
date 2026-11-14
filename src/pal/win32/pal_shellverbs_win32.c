@@ -9,6 +9,7 @@
 
 #include <windows.h>
 #include <shlwapi.h>
+#include <shellapi.h>
 
 #define WKEY 700
 #define WTEXT 2200
@@ -159,6 +160,54 @@ static bool start_child_with(const WCHAR *kind, const char *const *paths, size_t
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);   /* not waited for: the viewer forgets it */
     return true;
+}
+
+/* RV-281 phase 2: the same request, the child elevated through ShellExecuteEx's "runas" (UAC asks). */
+static bool start_elevated(const WCHAR *kind, const char *const *paths, size_t count, proven_u8str_view_t input, uint32_t *out_serial,
+                           HWND owner) {
+    WCHAR exe[MAX_PATH * 2], list[MAX_PATH * 2];
+    DWORD got = GetModuleFileNameW(NULL, exe, MAX_PATH * 2);
+    if (got == 0 || got >= MAX_PATH * 2) return false;
+    static LONG serial = 1000000;   /* apart from start_child_with's */
+    uint32_t mine = (uint32_t)InterlockedIncrement(&serial);
+    if (out_serial) *out_serial = mine;
+    if (!list_path(mine, NULL, list, MAX_PATH * 2)) return false;
+    if (input.size > 0) {
+        WCHAR in[MAX_PATH * 2];
+        if (!list_path(mine, L".in", in, MAX_PATH * 2) || !write_whole(in, input.ptr, input.size)) return false;
+    }
+    size_t total = 0;
+    for (size_t i = 0; i < count; ++i) total += proven_cstr_len(paths[i]) + 1;
+    char *all = (char *)rubraview_alloc(total + 1);
+    if (!all) return false;
+    size_t at = 0;
+    for (size_t i = 0; i < count; ++i) {
+        size_t n = proven_cstr_len(paths[i]);
+        proven_sys_mem_copy(all + at, paths[i], n);
+        at += n;
+        all[at++] = '\n';
+    }
+    bool wrote = write_whole(list, all, at);
+    rubraview_free(all);
+    if (!wrote) return false;
+    static WCHAR args[MAX_PATH * 6];
+    args[0] = 0;
+    if (!(rubraview_wcat(args, MAX_PATH * 6, L"--shell-menu-host \"") && rubraview_wcat(args, MAX_PATH * 6, kind) &&
+          rubraview_wcat(args, MAX_PATH * 6, L"\" \"") && rubraview_wcat(args, MAX_PATH * 6, list) && rubraview_wcat(args, MAX_PATH * 6, L"\" 0 0"))) {
+        DeleteFileW(list);
+        return false;
+    }
+    SHELLEXECUTEINFOW sei = { .cbSize = sizeof sei, .fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI, .hwnd = owner, .lpVerb = L"runas",
+                              .lpFile = exe, .lpParameters = args, .nShow = SW_HIDE };
+    if (!ShellExecuteExW(&sei)) { DeleteFileW(list); return false; }   /* said no to Windows' question */
+    return true;
+}
+
+bool rubraview_pal_shellhost_ask_elevated(const char *kind, const char *const *paths, size_t count, proven_u8str_view_t input,
+                                          uint32_t *ticket, void *native_window) {
+    WCHAR wkind[64];
+    if (!kind || !paths || count == 0 || !to_wide(kind, wkind, 64)) return false;
+    return start_elevated(wkind, paths, count, input, ticket, (HWND)native_window);
 }
 
 static bool start_child(const WCHAR *kind, const char *const *paths, size_t count, int32_t x, int32_t y) {

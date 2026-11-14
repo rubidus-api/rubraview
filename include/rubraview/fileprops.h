@@ -104,6 +104,139 @@ size_t rubraview_props_changes_read(proven_u8str_view_t text, rubraview_props_ro
 int32_t rubraview_props_rating_stars(int32_t rating);
 int32_t rubraview_props_rating_value(int32_t stars);
 
+/* ---- RV-281 phase 2: Digital Signatures ---- */
+
+typedef enum rubraview_sig_status {
+    RUBRAVIEW_SIG_UNCHECKED = 0,   /* not verified (a nested signature on a system without per-signature checks) */
+    RUBRAVIEW_SIG_OK,
+    RUBRAVIEW_SIG_BAD,             /* the file changed since it was signed, or the signature is broken */
+    RUBRAVIEW_SIG_UNTRUSTED,       /* well formed, but its chain ends at a root this computer does not trust */
+} rubraview_sig_status_t;
+
+/** One of a file's signatures, as the Digital Signatures tab and its details show it (Windows' fields). */
+typedef struct rubraview_props_sig {
+    char     signer[256];          /* the signer's name */
+    char     email[128];           /* "" when the certificate has none */
+    char     issuer[256];
+    char     serial[96];           /* hex, as Windows shows it */
+    char     algorithm[32];        /* the digest: "sha256" */
+    char     countersigner[256];   /* the timestamp's signer, "" without one */
+    int64_t  signed_at;            /* the timestamp (Unix seconds), 0 without one */
+    int64_t  valid_from, valid_to;
+    int32_t  status;               /* rubraview_sig_status_t */
+    uint32_t error;                /* Windows' code when not OK (0x800B0100 none, ...) */
+} rubraview_props_sig_t;
+
+/** The words of a signature's status, Windows' ("This digital signature is OK."), not translated. */
+const char *rubraview_props_sig_status_words(int32_t status);
+
+/* ---- RV-281 phase 2: Security ---- */
+
+/* The basic permissions of the Security tab, as Windows groups a file's access mask (FILE_GENERIC_* and the rest). */
+typedef enum rubraview_right {
+    RUBRAVIEW_RIGHT_FULL = 0,
+    RUBRAVIEW_RIGHT_MODIFY,
+    RUBRAVIEW_RIGHT_READ_EXECUTE,
+    RUBRAVIEW_RIGHT_LIST,          /* folders only: Read & execute, inherited by folders only */
+    RUBRAVIEW_RIGHT_READ,
+    RUBRAVIEW_RIGHT_WRITE,
+    RUBRAVIEW_RIGHT_SPECIAL,       /* shown, never set from the tab: what the others do not cover */
+    RUBRAVIEW_RIGHT_COUNT
+} rubraview_right_t;
+
+#define RUBRAVIEW_SPECIAL_COUNT 13
+
+/* The ACE flags the model keeps (Windows' values). */
+enum {
+    RUBRAVIEW_ACE_OBJECT_INHERIT    = 0x01,
+    RUBRAVIEW_ACE_CONTAINER_INHERIT = 0x02,
+    RUBRAVIEW_ACE_NO_PROPAGATE      = 0x04,
+    RUBRAVIEW_ACE_INHERIT_ONLY      = 0x08,
+    RUBRAVIEW_ACE_INHERITED         = 0x10,
+};
+
+/** A user or group of the list, its explicit and inherited Allow and Deny masks merged as the tab shows them. */
+typedef struct rubraview_props_principal {
+    char     sid[192];             /* "S-1-5-32-544" */
+    char     name[256];            /* "BUILTIN\Administrators", or the SID when it has no name */
+    uint32_t allow, deny;          /* explicit */
+    uint32_t allow_inherited, deny_inherited;
+    uint32_t elsewhere;            /* ACEs that only pass on to what is inside (inherit-only): shown as Special */
+    uint8_t  flags;                /* the explicit ACEs' inheritance flags (RUBRAVIEW_ACE_*), kept when written back */
+    bool     changed;              /* its boxes were clicked (or it was added): its explicit ACEs are written anew */
+} rubraview_props_principal_t;
+
+/** The right's words (Windows': "Full control", ...); `folder` for List folder contents. */
+const char *rubraview_props_right_name(int32_t right);
+
+/** Whether the right shows for a file or a folder (List folder contents: folders). */
+bool rubraview_props_right_shown(int32_t right, bool folder);
+
+/** The bits a basic right stands for (0 for Special). */
+uint32_t rubraview_props_right_mask(int32_t right);
+
+/** Whether `mask` holds the right (Special: bits no shown basic right covers, beyond SYNCHRONIZE). */
+bool rubraview_props_right_held(uint32_t mask, int32_t right, bool folder);
+
+/**
+ * A box clicked, Windows' way: turned on, the right's bits are added (Full control turns every one on); turned off,
+ * its bits and those of each right holding it go, but those of each smaller right still ticked stay (Modify off
+ * under Full control leaves Read & execute and Write, nothing special).
+ */
+uint32_t rubraview_props_right_set(uint32_t mask, int32_t right, bool on, bool folder);
+
+/** The Advanced view's thirteen rights: their bit and their words (a file's or a folder's). */
+uint32_t rubraview_props_special_bit(int32_t i);
+const char *rubraview_props_special_name(int32_t i, bool folder);
+
+/**
+ * The list's principals from a security descriptor's ACEs, in Windows' order (as read): each ACE once,
+ * `allow`, `mask`, `flags` as Windows has them; merged by SID. Returns the count (at most `cap`).
+ */
+typedef struct rubraview_props_ace {
+    char     sid[192];
+    char     name[256];
+    bool     allow;
+    uint32_t mask;
+    uint8_t  flags;
+    uint8_t  audit;                /* an audit entry (SACL): 1 success, 2 failure, 3 both; 0 a permission */
+} rubraview_props_ace_t;
+
+size_t rubraview_props_principals_from(const rubraview_props_ace_t *aces, size_t count, rubraview_props_principal_t *out, size_t cap);
+
+/**
+ * The explicit ACEs to write back, in canonical order (every Deny before every Allow). A principal not changed keeps
+ * its explicit ACEs from `original` as they were; a changed one gets one Deny and one Allow for what it has (its
+ * flags, or this folder, subfolders and files for a new one on a folder), and keeps its inherit-only ACEs; a principal
+ * no longer in the list loses its explicit ones. Inherited ACEs are never written (Windows adds them).
+ * Returns the count (at most `cap`).
+ */
+size_t rubraview_props_explicit_aces(const rubraview_props_ace_t *original, size_t original_count,
+                                     const rubraview_props_principal_t *list, size_t count, bool folder,
+                                     rubraview_props_ace_t *out, size_t cap);
+
+/*
+ * What the elevated child is asked to write, and what it answers (`--shell-menu-host sec-write|audit-read|audit-write`),
+ * one entry a line, fields split by tabs: "O<TAB>sid" a new owner, "P<TAB>1" inheritance off ("0" on),
+ * "A<TAB>a|d<TAB>sid<TAB>mask<TAB>flags<TAB>name" a permission, "U<TAB>s|f|b<TAB>sid<TAB>mask<TAB>flags<TAB>name" an
+ * audit entry, "E<TAB>words" an error; masks and flags in hex.
+ */
+typedef struct rubraview_props_sec {
+    char owner_sid[192];           /* "" keeps the owner */
+    int32_t protect;               /* -1 unchanged, 0 inherit, 1 inheritance off */
+    bool write_dacl;               /* "D<TAB>1": the permissions given are written (else only the owner) */
+    char error[256];
+} rubraview_props_sec_t;
+
+/** The lines for `sec` and `aces` into `out` (NUL-terminated); false when they do not fit. */
+bool rubraview_props_sec_lines(const rubraview_props_sec_t *sec, const rubraview_props_ace_t *aces, size_t count, char *out, size_t cap);
+
+/** The lines read back: `sec` filled, the entries into `aces`. Returns how many entries (at most `cap`). */
+size_t rubraview_props_sec_read(proven_u8str_view_t text, rubraview_props_sec_t *sec, rubraview_props_ace_t *aces, size_t cap);
+
+/** The bits Windows' generic rights in an ACE stand for on a file (GENERIC_READ ...), mapped. */
+uint32_t rubraview_props_map_generic(uint32_t mask);
+
 #ifdef __cplusplus
 }
 #endif

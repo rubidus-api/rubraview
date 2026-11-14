@@ -61,7 +61,7 @@ ships with, so it cannot drift from them.
 | Keys | What it does |
 |---|---|
 | `F`, `Enter` | Full screen |
-| `Alt+Enter` | Rubraview's own properties window of the file (General, Details; Windows' own a button away) |
+| `Alt+Enter` | Rubraview's own properties window of the file (General, Digital Signatures, Security, Details; Windows' own a button away) |
 | `T` | Open or close the Toolbar |
 | `Shift+T` | Pin the Toolbar open |
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |

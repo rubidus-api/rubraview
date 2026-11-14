@@ -160,9 +160,10 @@ SRCS_PAL_WIN32 = src/pal/win32/pal_fs_win32.c \
                  src/pal/win32/pal_ffilter_win32.c src/pal/win32/pal_media_host.c \
                  src/pal/win32/pal_process_win32.c src/pal/win32/pal_filmcache_win32.c \
                  src/pal/win32/pal_shellmenu_win32.c src/pal/win32/pal_fileop_win32.c \
-                 src/pal/win32/pal_shellverbs_win32.c src/pal/win32/pal_shellhost_win32.c src/pal/win32/pal_fileprops_win32.c
+                 src/pal/win32/pal_shellverbs_win32.c src/pal/win32/pal_shellhost_win32.c src/pal/win32/pal_fileprops_win32.c \
+                 src/pal/win32/pal_security_win32.c
 
-SRCS_APP = src/app/main.c src/app/dragout.c src/app/media.c src/app/player.c src/app/subtitles.c src/app/editwin.c src/app/batchwin.c src/app/pickerwin.c src/app/lists.c src/app/settingswin.c src/app/infowin.c src/app/textpage.c src/app/headless.c src/app/opening.c src/app/render.c src/app/textview.c src/app/popups.c src/app/chrome.c src/app/filework.c src/app/pagesave.c src/app/toolbox.c src/app/panel.c src/app/fileswin.c src/app/actions.c src/app/pointer.c src/app/pickernav.c src/app/diagnostics.c src/app/pagetiles.c src/app/wheelstrip.c src/app/timers.c src/app/view.c src/app/startup.c src/app/boxdrag.c src/app/pages.c src/app/anim.c src/app/navigate.c src/app/shutdown.c src/app/frame.c src/app/events.c src/app/cmdline.c src/app/appstart.c src/app/scrollbars.c src/app/shapes.c src/app/archwork.c src/app/logwin.c src/app/filejob.c src/app/arcadd.c src/app/progresscard.c src/app/filmadjust.c src/app/extractwin.c src/app/listbook.c src/app/navbox.c src/app/explorermenu.c src/app/propswin.c
+SRCS_APP = src/app/main.c src/app/dragout.c src/app/media.c src/app/player.c src/app/subtitles.c src/app/editwin.c src/app/batchwin.c src/app/pickerwin.c src/app/lists.c src/app/settingswin.c src/app/infowin.c src/app/textpage.c src/app/headless.c src/app/opening.c src/app/render.c src/app/textview.c src/app/popups.c src/app/chrome.c src/app/filework.c src/app/pagesave.c src/app/toolbox.c src/app/panel.c src/app/fileswin.c src/app/actions.c src/app/pointer.c src/app/pickernav.c src/app/diagnostics.c src/app/pagetiles.c src/app/wheelstrip.c src/app/timers.c src/app/view.c src/app/startup.c src/app/boxdrag.c src/app/pages.c src/app/anim.c src/app/navigate.c src/app/shutdown.c src/app/frame.c src/app/events.c src/app/cmdline.c src/app/appstart.c src/app/scrollbars.c src/app/shapes.c src/app/archwork.c src/app/logwin.c src/app/filejob.c src/app/arcadd.c src/app/progresscard.c src/app/filmadjust.c src/app/extractwin.c src/app/listbook.c src/app/navbox.c src/app/explorermenu.c src/app/propswin.c src/app/propsec.c
 
 TEST_BINS = build/tests/test_pixbuf build/tests/test_color build/tests/test_resample build/tests/test_filters build/tests/test_path build/tests/test_number build/tests/test_subbox build/tests/test_thumb build/tests/test_thumbq build/tests/test_textedit build/tests/test_sort \
             build/tests/test_utf8 build/tests/test_glob build/tests/test_ini build/tests/test_nfc build/tests/test_encoding \
@@ -422,7 +423,7 @@ win64: $(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) $(AVIF_LIB_WIN) $(JPEG
 		-Iinclude -Ivendor/fultaarc/include -Ivendor/proven/include -Ivendor/proven/platform -Ivendor/proven/crypto/include -Ivendor/rubrapack $(FFMPEG_INCLUDE) \
 		$(SRCS_CORE) $(SRCS_PAL_COMMON) $(SRCS_PAL_WIN32) $(SRCS_APP) $(JPEG_OBJS_WIN) $(JPEG12_OBJS_WIN) $(JPEG16_OBJS_WIN) $(RES_WIN) \
 		$(FULTA_LIB_WIN) $(PROVEN_LIB_WIN) $(WEBP_LIB_WIN) $(AVIF_LIB_WIN) -lbcrypt \
-		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid -limm32 -lcomdlg32 -lwinspool -lruntimeobject -lshlwapi -lpropsys \
+		-ld2d1 -ld3d11 -ldxgi -ldwrite -lole32 -loleaut32 -luuid -lwindowscodecs -lshcore -ldwmapi -lshell32 -lgdi32 -lmfuuid -limm32 -lcomdlg32 -lwinspool -lruntimeobject -lshlwapi -lpropsys -lwintrust -lcrypt32 -lcryptui -lauthz \
 		-static \
 		-o dist/$(EXE_NAME)
 	@echo "Linked: dist/$(EXE_NAME)"

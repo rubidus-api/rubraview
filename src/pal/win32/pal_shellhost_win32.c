@@ -29,6 +29,9 @@
 #include <tlhelp32.h>
 #include <propsys.h>
 #include "rubraview/fileprops.h"
+#include "rubraview/pal/pal_fileprops.h"
+#include <wincrypt.h>
+#include <cryptuiapi.h>
 
 #define WIDE2(x) L##x
 #define WIDE(x) WIDE2(x)
@@ -766,6 +769,137 @@ static int props_write(WCHAR **paths, size_t count, const WCHAR *list_file) {
     return code;
 }
 
+/* ---- RV-281 phase 2: the elevated child's work, and a signature's certificate ---- */
+
+static char *read_in(const WCHAR *list_file) {
+    WCHAR in[MAX_PATH * 2 + 8];
+    if (!rubraview_wcopy(in, MAX_PATH * 2 + 8, list_file) || !rubraview_wcat(in, MAX_PATH * 2 + 8, L".in")) return NULL;
+    char *input = NULL;
+    HANDLE f = CreateFileW(in, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+    LARGE_INTEGER size = {0};
+    DWORD got = 0;
+    if (f != INVALID_HANDLE_VALUE && GetFileSizeEx(f, &size) && size.QuadPart < 4 * 1024 * 1024 &&
+        (input = (char *)rubraview_alloc((size_t)size.QuadPart + 1)) != NULL && ReadFile(f, input, (DWORD)size.QuadPart, &got, NULL))
+        input[got] = '\0';
+    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+    DeleteFileW(in);
+    if (!input) input = (char *)rubraview_alloc_zero(1, 1);   /* nothing asked: an empty request */
+    return input;
+}
+
+static void answer_sec(answer_t *a, const rubraview_props_sec_t *sec, const rubraview_props_ace_t *aces, size_t n) {
+    size_t cap = 4096 + n * 1200;
+    char *text = (char *)rubraview_alloc(cap);
+    if (text && rubraview_props_sec_lines(sec, aces, n, text, cap)) answer_add(a, text, proven_cstr_len(text));
+    rubraview_free(text);
+}
+
+#define SEC_ACES_MAX 256
+
+/* sec-write: the owner and the permissions the viewer could not write, written here as administrator. */
+static int sec_write(const WCHAR *path, const WCHAR *list_file) {
+    char *input = read_in(list_file);
+    if (!input) return 11;
+    static rubraview_props_ace_t aces[SEC_ACES_MAX];
+    rubraview_props_sec_t change;
+    size_t n = rubraview_props_sec_read(proven_u8str_view_from_cstr(input), &change, aces, SEC_ACES_MAX);
+    rubraview_free(input);
+    char path8[2048];
+    WideCharToMultiByte(CP_UTF8, 0, path, -1, path8, sizeof path8, NULL, NULL);
+    rubraview_props_sec_t answer = { .protect = -1 };
+    if (!rubraview_pal_fileprops_security_write(path8, &change, aces, n, change.write_dacl, answer.error, sizeof answer.error) && !answer.error[0])
+        (void)rubraview_fmt(answer.error, sizeof answer.error, "failed");
+    hlog("sec-write", answer.error[0] ? 1 : 0);
+    answer_t a = {0};
+    answer_sec(&a, &answer, NULL, 0);
+    answer_add(&a, "", 0);
+    answer_put(list_file, &a);
+    rubraview_free(a.buf);
+    return answer.error[0] ? 20 : 0;
+}
+
+/* audit-read: the audit entries, and whether they inherit; audit-write: the entries given, written. */
+static int audit_rw(const WCHAR *path, const WCHAR *list_file, bool write) {
+    static rubraview_props_ace_t aces[SEC_ACES_MAX];
+    char path8[2048];
+    WideCharToMultiByte(CP_UTF8, 0, path, -1, path8, sizeof path8, NULL, NULL);
+    rubraview_props_sec_t answer = { .protect = -1 };
+    size_t n = 0;
+    if (write) {
+        char *input = read_in(list_file);
+        if (!input) return 11;
+        rubraview_props_sec_t change;
+        n = rubraview_props_sec_read(proven_u8str_view_from_cstr(input), &change, aces, SEC_ACES_MAX);
+        rubraview_free(input);
+        if (!rubraview_pal_fileprops_audit_write(path8, aces, n, change.protect == 1, answer.error, sizeof answer.error) && !answer.error[0])
+            (void)rubraview_fmt(answer.error, sizeof answer.error, "failed");
+        n = 0;
+    } else {
+        bool protect = false;
+        n = rubraview_pal_fileprops_audit_read(path8, aces, SEC_ACES_MAX, &protect, answer.error, sizeof answer.error);
+        if (!answer.error[0]) answer.protect = protect ? 1 : 0;
+    }
+    hlog(write ? "audit-write" : "audit-read", (long long)n);
+    answer_t a = {0};
+    answer_sec(&a, &answer, aces, n);
+    answer_add(&a, "", 0);
+    answer_put(list_file, &a);
+    rubraview_free(a.buf);
+    return answer.error[0] ? 21 : 0;
+}
+
+/* certificate:<n>: Windows' own certificate window for the file's signature n (0 the primary). */
+static int show_certificate(const WCHAR *path, int index, int32_t x, int32_t y) {
+    HCERTSTORE store = NULL;
+    HCRYPTMSG msg = NULL;
+    DWORD enc = 0, content = 0, format = 0;
+    if (!CryptQueryObject(CERT_QUERY_OBJECT_FILE, path, CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED, CERT_QUERY_FORMAT_FLAG_BINARY, 0,
+                          &enc, &content, &format, &store, &msg, NULL))
+        return 16;
+    HCRYPTMSG use = msg, inner = NULL;
+    HCERTSTORE use_store = store, inner_store = NULL;
+    DWORD n = 0;
+    CMSG_SIGNER_INFO *si = NULL;
+    if (CryptMsgGetParam(msg, CMSG_SIGNER_INFO_PARAM, 0, NULL, &n) && (si = (CMSG_SIGNER_INFO *)rubraview_alloc(n)) != NULL &&
+        CryptMsgGetParam(msg, CMSG_SIGNER_INFO_PARAM, 0, si, &n) && index > 0) {
+        for (DWORD i = 0; i < si->UnauthAttrs.cAttr; ++i) {
+            CRYPT_ATTRIBUTE *at = &si->UnauthAttrs.rgAttr[i];
+            if (!proven_u8str_view_eq(proven_u8str_view_from_cstr(at->pszObjId), PROVEN_LIT("1.3.6.1.4.1.311.2.4.1")) || (DWORD)index - 1 >= at->cValue) continue;
+            inner = CryptMsgOpenToDecode(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, 0, 0, NULL, NULL);
+            if (inner && CryptMsgUpdate(inner, at->rgValue[index - 1].pbData, at->rgValue[index - 1].cbData, TRUE)) {
+                use = inner;
+                inner_store = CertOpenStore(CERT_STORE_PROV_MSG, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, 0, inner);
+                if (inner_store) use_store = inner_store;
+            }
+            break;
+        }
+    }
+    rubraview_free(si);
+    si = NULL;
+    int code = 17;
+    if (CryptMsgGetParam(use, CMSG_SIGNER_INFO_PARAM, 0, NULL, &n) && (si = (CMSG_SIGNER_INFO *)rubraview_alloc(n)) != NULL &&
+        CryptMsgGetParam(use, CMSG_SIGNER_INFO_PARAM, 0, si, &n)) {
+        CERT_INFO ci = { .Issuer = si->Issuer, .SerialNumber = si->SerialNumber };
+        PCCERT_CONTEXT cert = CertFindCertificateInStore(use_store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_CERT, &ci, NULL);
+        if (cert) {
+            HWND hwnd = make_window(x, y);
+            SetForegroundWindow(hwnd);
+            CRYPTUI_VIEWCERTIFICATE_STRUCTW view = { .dwSize = sizeof view, .hwndParent = hwnd, .pCertContext = cert };
+            BOOL changed = FALSE;
+            hlog("CryptUIDlgViewCertificateW", CryptUIDlgViewCertificateW(&view, &changed));
+            if (hwnd) DestroyWindow(hwnd);
+            CertFreeCertificateContext(cert);
+            code = 0;
+        }
+    }
+    rubraview_free(si);
+    if (inner_store) CertCloseStore(inner_store, 0);
+    if (inner) CryptMsgClose(inner);
+    CryptMsgClose(msg);
+    CertCloseStore(store, 0);
+    return code;
+}
+
 /* Windows' own properties of the files, or its Open with box, then stay while it is up. */
 static int show_windows_box(const WCHAR *kind, WCHAR **paths, size_t count, int32_t x, int32_t y) {
     HWND hwnd = make_window(x, y);
@@ -813,6 +947,10 @@ int rubraview_pal_shellmenu_host_main(const wchar_t *kind, const wchar_t *list_f
         else if (rubraview_wcmp(kind, L"props-read") == 0) code = props_read(paths[0], list_file);   /* RV-281 */
         else if (rubraview_wcmp(kind, L"props-write") == 0) code = props_write(paths, count, list_file);
         else if (rubraview_wcmp(kind, L"properties") == 0 || rubraview_wcmp(kind, L"openwith") == 0) code = show_windows_box(kind, paths, count, px, py);
+        else if (rubraview_wcmp(kind, L"sec-write") == 0) code = sec_write(paths[0], list_file);   /* RV-281 phase 2: elevated */
+        else if (rubraview_wcmp(kind, L"audit-read") == 0) code = audit_rw(paths[0], list_file, false);
+        else if (rubraview_wcmp(kind, L"audit-write") == 0) code = audit_rw(paths[0], list_file, true);
+        else if (rubraview_wcmp_n(kind, L"certificate:", 12, false) == 0) code = show_certificate(paths[0], StrToIntW(kind + 12), px, py);
         else code = show_menu(kind, paths, count, px, py);
     }
     for (size_t i = 0; i < count; ++i) rubraview_free(paths[i]);
