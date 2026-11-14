@@ -610,10 +610,11 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         picker_open(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_spread_detect"))) {
         /* §3.3.4: with detection off, a wide scan pairs like any other
-           page instead of standing alone. */
-        app->spread_detect = !app->spread_detect;
-        app->layout_opts.spread_ar_threshold = app->spread_detect ? 1.15 : 1.0e9;
-        app->needs_relayout = true;
+           page instead of standing alone. RV-284 (owner, 2026-11-14: "설정창의 관련 옵션에 따라 ... 첫장에도 적용"): it is
+           Settings › Viewer › Two pages: a wide page alone, kept, the first page as any other. */
+        bool on = !app->spread_detect;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("wide_alone"), on ? 1.0 : 0.0);
+        settings_took_effect(app);
         osd_say(app, app->spread_detect ? TU8("two pages: a wide page stands alone, by its shape")
                                         : TU8("two pages: always two, whatever their shape"));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("interval_up"))) {

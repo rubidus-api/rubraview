@@ -303,7 +303,11 @@ shown, with the next one beside it; the pages before it are paired from
 the first page (1-2, 3-4...), and one left over stands alone just before
 the page you picked. Picking the last page pairs the whole book from the
 first page. A comic's own tags (a cover, a manga) never leave the first
-page alone; only the setting above does. A wide scan stands alone without moving the pages you are
+page alone; only the setting above does. A wide scan stands alone — the
+first page too — while Settings › Viewer › **Two pages: a wide page
+alone** is on (as it comes; the Toolbar's Wide alone / Always two button
+is the same and is kept); off, every page pairs, whatever its shape. A
+page alone does so without moving the pages you are
 looking at, and the pages on screen stay put when the window is resized.
 When a book's facing pages come out wrong, **one page over** moves the
 pairing by a page: `Shift+PageDown` (later) and `Shift+PageUp` (earlier),
