@@ -83,7 +83,8 @@ printf '%s\n' "package: $out ready (version $version)"
 # (https://github.com/rubidus-api/rubrapack/releases — one program, no
 # install). RUBRAPACK names it when it is not on the PATH. Without it the
 # zip and the executable are still made, and this says the .msi was not.
-rubrapack=${RUBRAPACK:-rubrapack}
+# R314: without RUBRAPACK, the newest release beside this checkout (scripts/rubrapack-latest.sh), else the PATH's.
+rubrapack=${RUBRAPACK:-$(sh scripts/rubrapack-latest.sh bin 2>/dev/null || echo rubrapack)}
 msi="dist/rubraview-v$version.msi"
 rm -f "$msi"
 if command -v "$rubrapack" >/dev/null 2>&1; then

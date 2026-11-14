@@ -4004,3 +4004,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: the 1.43.0 installer was built with rubrapack 0.51.0: its ready page did not name the choices made and its status line was 10 units high, its bottom cut.
 - Decision: `vendor/rubrapack/rp_appx.h` is taken again from `a16048b` (v0.59.0), unmodified, with the `rp_wstr.h` it now includes (wide strings on proven_c_lib's u16 views, from `vendor/proven/`). The installer is made with rubrapack 0.59.0 (`RUBRAPACK`). Upstream's menu DLL only moved its wide-string calls to `rp_wstr.h`; Rubraview's adapted menu keeps its own.
 - Consequences: the next release's installer names the install folder and "for everyone / for you only" on its ready page, has a 14-unit status line and lists what was done on its finished page. A package being registered is waited for up to an hour, then cancelled.
+
+## D-349: Rubrapack Always At Its Newest Release, Checked
+
+- Date: 2026-11-14
+- Status: Accepted (owner 2026-11-14: "루브라팩 항상 최신 버젼으로 벤더링되게 해 주세요"). Follows D-348.
+- Context: each Rubrapack release was taken in only when someone asked (0.39.0, 0.47.0, 0.51.0, 0.59.0), and the release script named the program's path by hand, so the installer was built with an old Rubrapack for weeks.
+- Decision: `scripts/rubrapack-latest.sh` names the newest release (the highest `dist/vX.Y.Z` with its Linux program in the Rubrapack checkout beside this one). project-check runs its `check` (VENDORED.md's and THIRD_PARTY_NOTICES' version, no network) and fails when it is older; the release runs `verify` (the files byte for byte against the release's tag, looked up on its origin when the tag is not local) before it changes anything; `make package` and `make store` default RUBRAPACK to that program. `update` copies the files; VENDORED.md's words and a re-diff of the adapted menu DLL stay by hand.
+- Consequences: a Rubrapack release stops the next gate here until it is taken in. Without the checkout (a clone of the public repository) the check says so and passes, and packaging uses the PATH's rubrapack.

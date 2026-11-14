@@ -1,7 +1,7 @@
 # Rubrapack (part)
 
 - Source: Rubrapack, https://github.com/rubidus-api/rubrapack — MIT (see `LICENSE` here).
-- Taken at: commit `a16048b` (v0.59.0), 2026-11-14 (vendored again at the owner's request, passed on by the
+- Taken at: commit `2f97d43` (v0.59.0, its tag), 2026-11-14 (vendored again at the owner's request, passed on by the
   Rubrapack session: the installer is built with 0.59.0, whose ready page names the folder and "for everyone / for
   you only" and whose status line is no longer cut). `rp_appx.h` changed since `d85da48` (v0.51.0): its strings go
   through `rp_wstr.h` (proven_c_lib's u16 views, from `vendor/proven/`) instead of `wcslen`, it waits up to an

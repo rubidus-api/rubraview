@@ -20,7 +20,8 @@ set -eu
 version=${1:-$(sed -n 's/^#define RUBRAVIEW_VERSION_STRING "\(.*\)".*/\1/p' include/rubraview/version.h)}
 stage="dist/rubraview-v$version"
 out="dist/rubraview-v$version-store.msix"
-rubrapack=${RUBRAPACK:-rubrapack}
+# R314: without RUBRAPACK, the newest release beside this checkout (scripts/rubrapack-latest.sh), else the PATH's.
+rubrapack=${RUBRAPACK:-$(sh scripts/rubrapack-latest.sh bin 2>/dev/null || echo rubrapack)}
 
 fail() { printf '%s\n' "package-store: $1" >&2; exit 1; }
 
