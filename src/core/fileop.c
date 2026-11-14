@@ -389,3 +389,42 @@ void rubraview_fileop_bytes(const rubraview_fileop_t *op, uint64_t *done, uint64
     *done = d;
     *total = t;
 }
+
+/* ---- RV-286: a drop on a folder ---- */
+
+static uint8_t fold(uint8_t c) {
+    if (c == '\\') return '/';
+    return c >= 'A' && c <= 'Z' ? (uint8_t)(c - 'A' + 'a') : c;
+}
+
+static proven_u8str_view_t trim_slash(proven_u8str_view_t p) {
+    while (p.size > 1 && (p.ptr[p.size - 1] == '/' || p.ptr[p.size - 1] == '\\')) p.size--;
+    return p;
+}
+
+/* `a` is `b`, or `a` lies inside `b` (`inside` false: only the same). */
+static bool path_at_or_in(proven_u8str_view_t a, proven_u8str_view_t b, bool inside) {
+    a = trim_slash(a);
+    b = trim_slash(b);
+    if (a.size < b.size) return false;
+    for (size_t i = 0; i < b.size; ++i) if (fold(a.ptr[i]) != fold(b.ptr[i])) return false;
+    if (a.size == b.size) return true;
+    return inside && (fold(a.ptr[b.size]) == '/' || (b.size > 0 && fold(b.ptr[b.size - 1]) == '/'));
+}
+
+static proven_u8str_view_t parent_of(proven_u8str_view_t p) {
+    p = trim_slash(p);
+    size_t i = p.size;
+    while (i > 0 && p.ptr[i - 1] != '/' && p.ptr[i - 1] != '\\') --i;
+    return proven_u8str_view_slice(p, 0, i);
+}
+
+rubraview_drop_check_t rubraview_fileop_drop_check(proven_u8str_view_t dest, const proven_u8str_view_t *sources, size_t count) {
+    if (!sources || count == 0 || dest.size == 0) return RUBRAVIEW_DROP_NONE;
+    bool all_here = true;
+    for (size_t i = 0; i < count; ++i) {
+        if (path_at_or_in(dest, sources[i], true)) return RUBRAVIEW_DROP_INTO_ITSELF;
+        if (!path_at_or_in(parent_of(sources[i]), dest, false)) all_here = false;
+    }
+    return all_here ? RUBRAVIEW_DROP_SAME_FOLDER : RUBRAVIEW_DROP_OK;
+}

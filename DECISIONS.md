@@ -4036,3 +4036,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: Windows' Digital Signatures and Security tabs, with their Edit and Advanced windows, are Explorer's; the owner wants them Rubraview's own, the auditing done by an elevated process of Rubraview's.
 - Decision: both tabs read and write through Windows' own system calls in the viewer (crypt32 and wintrust for the signatures, offline; advapi32 and authz for the permissions), the model in core (`fileprops.h`: rights from a mask, Windows' click rules, the ACEs merged by SID and written back Deny first with unchanged principals' ACEs as they were). The Edit window is folded into the tab (boxes clickable there) and Advanced is a second view of it. The audit entries, and a permission change Windows refused, go to `--shell-menu-host` started elevated (`runas`; Windows asks each time) with tab-separated lines; the viewer never runs elevated. View Certificate is Windows' own window, from the child.
 - Consequences: the advanced view's per-entry editing (applies to, special rights one by one) is not built: Special shows, and is changed in Windows' own window (Windows properties); the object picker is a typed name; catalogue-signed files have no tab, as in Windows.
+
+## D-353: A Drag Onto A Folder Of The Open-File Screen Moves, A Right Drag Asks
+
+- Date: 2026-11-15
+- Status: Accepted (owner 2026-11-15: "내부 파일 관리자에서, 선택된 파일들을 폴더로 드래그하면 옮겨가게 하고, 우클릭 드래그하면 이동 또는 복사를 선택할 수 있는 컨텍스트 메뉴가 뜨게 해 줘요").
+- Context: a drag out of the open-file screen (D-278) runs Windows' own drag (OLE), which the viewer's window refused for its own files, but on the basket button (D-282).
+- Decision: the same drag is taken by the viewer's window over a folder tile or `..` that may take the files (core `rubraview_fileop_drop_check`); the drop itself does nothing and only notes the point, and the viewer then moves (Ctrl copies) through the file job (D-310: names checked first, clashes asked, one undo), or for a right drag shows its own menu, Move here / Copy here / Cancel, as Explorer does at a right drag's drop. A move, even to another drive, as Explorer does inside one window list.
+- Consequences: the folder under the pointer is not lit while dragging (Windows' cursor shows Move or nothing); a drag inside an archive or a book is not taken by folders.

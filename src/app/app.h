@@ -418,7 +418,7 @@ typedef struct apply_all_job {
 
 /* 1.24.0 (owner, 2026-10-19): the list a one-of-many choice opens, in the window where it was pressed. */
 enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_ORDER, CHOOSE_LISTEXT, CHOOSE_LISTSORT, CHOOSE_SHAPE,
-       CHOOSE_PICKEXT /* RV-204 */, CHOOSE_BASKET /* RV-227 */, CHOOSE_BASKET_FILES /* D-286 */ };
+       CHOOSE_PICKEXT /* RV-204 */, CHOOSE_BASKET /* RV-227 */, CHOOSE_BASKET_FILES /* D-286 */, CHOOSE_DROP /* RV-286 */ };
 enum { SHAPE_FOR_PICKER = 1, SHAPE_FOR_LIST };   /* RV-192 */
 /* RV-202: what a reading of sizes and lengths is for: the shape's choice, the list sorted by length, the open-file
    screen sorted by length or by resolution */
@@ -1559,6 +1559,9 @@ typedef struct app_state {
     rubraview_pal_rect_t   list_del_btn[2];                   /* RV-256: requests waiting while the window asks or takes input */
     proven_u8str_view_t   *basket_pending;
     size_t                 basket_pending_count;
+    proven_u8str_view_t   *drop_pending;           /* RV-286: right-dragged onto a folder, waiting for Move here / Copy here */
+    size_t                 drop_pending_count;
+    proven_u8str_view_t    drop_dir;
     bool                   basket_moving;            /* the list's Move here, Copy here each time it opens */
     double                 picker_tap_at;          /* RV-213: the last tap, for a second one that opens */
     /* RV-215 (D-248): measured while the information window is open, listed at its top once a second */
@@ -2521,6 +2524,7 @@ void basket_chosen(app_state_t *app, int which);   /* from the list: into it, or
 size_t basket_total(const app_state_t *app);
 enum { BASKET_LIST_PUT_IN = 0, BASKET_LIST_PUT_HERE, BASKET_LIST_SEE };   /* D-286: the last, a basket chosen to see its files */
 void chooser_open_basket(app_state_t *app, int mode, double x, double y, double above_y);
+void chooser_open_drop(app_state_t *app, double x, double y);   /* RV-286: Move here / Copy here / Cancel */
 void chooser_open_basket_files(app_state_t *app, int which, double x, double y, double above_y);
 void picker_filter_follow(app_state_t *app);
 void picker_filter_forget(app_state_t *app);

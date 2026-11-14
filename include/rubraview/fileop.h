@@ -33,6 +33,20 @@ extern "C" {
 
 typedef enum { RUBRAVIEW_FILEOP_COPY = 0, RUBRAVIEW_FILEOP_MOVE = 1 } rubraview_fileop_kind_t;
 
+/*
+ * RV-286 (owner, 2026-11-15: "내부 파일 관리자에서, 선택된 파일들을 폴더로 드래그하면 옮겨가게 하고, 우클릭 드래그하면 이동 또는
+ * 복사를 선택할 수 있는 컨텍스트 메뉴"): whether the files dragged may be let go on folder `dest`. Paths compare without
+ * case, `\` and `/` alike, as Windows' do.
+ */
+typedef enum {
+    RUBRAVIEW_DROP_OK = 0,
+    RUBRAVIEW_DROP_INTO_ITSELF,   /* dest is one of them, or inside one of them */
+    RUBRAVIEW_DROP_SAME_FOLDER,   /* every one is already in dest: nothing would move */
+    RUBRAVIEW_DROP_NONE,          /* nothing dragged, or no folder */
+} rubraview_drop_check_t;
+
+rubraview_drop_check_t rubraview_fileop_drop_check(proven_u8str_view_t dest, const proven_u8str_view_t *sources, size_t count);
+
 typedef enum {
     RUBRAVIEW_FILEOP_PENDING = 0,
     RUBRAVIEW_FILEOP_PARKED,      /* its name is taken: waiting for an answer */

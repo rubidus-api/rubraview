@@ -3154,6 +3154,20 @@ void chooser_open_basket(app_state_t *app, int mode, double x, double y, double 
     chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
 }
 
+/* RV-286 (owner, 2026-11-15: "우클릭 드래그하면 이동 또는 복사를 선택할 수 있는 컨텍스트 메뉴"): files right-dragged onto
+   a folder of the open-file screen, as Explorer's menu at the drop. */
+void chooser_open_drop(app_state_t *app, double x, double y) {
+    chooser_t *c = &app->chooser;
+    *c = (chooser_t){ .kind = CHOOSE_DROP, .current = -1 };
+    proven_u8str_view_t name = rubraview_path_basename(app->drop_dir);
+    rubraview_fmt(c->title, sizeof(c->title), T("{} file(s) into {}"), PROVEN_ARG((uint32_t)app->drop_pending_count), PROVEN_ARG(name));
+    chooser_word(c, 1.0, "{}", PROVEN_ARG(T("Move here")));
+    chooser_word(c, 2.0, "{}", PROVEN_ARG(T("Copy here")));
+    chooser_word(c, 0.0, "{}", PROVEN_ARG(T("Cancel")));
+    c->focus = 0;
+    chooser_show(app, CHOOSE_IN_MAIN, x, y, y);
+}
+
 /* D-286 (owner, 2026-11-07: "장바구니 버튼에서 누르면 그 안의 파일들 목록을 볼 수 있는 기능"; "보기 + 하나씩 빼기"): basket
    `which`'s files, each its name and the folder it is in; a click takes that one out of the basket (the file stays where
    it is) and the list stays open. */
@@ -3387,6 +3401,13 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             } else {
                 basket_chosen(app, value);
             }
+            break;
+        }
+        case CHOOSE_DROP: {   /* RV-286 */
+            int value = (int)lround(c->values[index]);
+            if (value == 1 || value == 2)
+                (void)filejob_start(app, app->drop_dir, app->drop_pending, app->drop_pending_count, value == 1, -1, false);
+            app->drop_pending_count = 0;
             break;
         }
         case CHOOSE_BASKET_FILES: {   /* D-286: one taken out, the list stays open */

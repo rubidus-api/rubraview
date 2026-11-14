@@ -361,6 +361,12 @@ void rubraview_pal_drag_out_forget(void);
     by rubraview_pal_window_own_drop_taken after the drag. `on` false: our own drag is taken nowhere, as before. */
 void rubraview_pal_window_set_own_drop(rubraview_window_t *window, bool on, double x, double y, double w, double h);
 bool rubraview_pal_window_own_drop_taken(rubraview_window_t *window);
+/** RV-286: besides that rectangle, wherever `hit` says yes (client pixels; a folder of the open-file screen): our own
+    drag shows a move there (a copy with Ctrl, as Explorer), and a drop is noted with its point, read once after the
+    drag by rubraview_pal_window_own_drop_point. NULL turns it off. */
+typedef bool (*rubraview_own_drop_hit_fn)(void *ctx, double x, double y);
+void rubraview_pal_window_set_own_drop_hit(rubraview_window_t *window, rubraview_own_drop_hit_fn hit, void *ctx);
+bool rubraview_pal_window_own_drop_point(rubraview_window_t *window, double *x, double *y, bool *copy);
 /** RV-223: the same on the clipboard as a data object of ours, so a paste tells what it did: the effect the last
     paste reported (0 none since), read once. Taking it back leaves the clipboard empty (never written out first). */
 bool rubraview_pal_clipboard_set_files_told(rubraview_window_t *window, const proven_u8str_view_t *paths, size_t count, bool moving);

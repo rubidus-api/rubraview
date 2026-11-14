@@ -9,6 +9,7 @@
  * viewer closes, an older crash's at the next start.
  */
 #include "app.h"
+#include "rubraview/fileop.h"
 #include "rubraview/archive_job.h"
 #include "rubraview/arcedit.h"
 #include "rubraview/dragout.h"
@@ -352,6 +353,54 @@ static void drag_done(app_state_t *app, pick_t *p, uint32_t done) {
     pick_free(p);
 }
 
+/* ---- RV-286: dropped on a folder of the open-file screen ---- */
+
+typedef struct folder_drop { app_state_t *app; const proven_u8str_view_t *views; size_t count; } folder_drop_t;
+
+/* The folder tile at (x, y) of the open-file screen and its path; false elsewhere. */
+static bool folder_at(app_state_t *app, double x, double y, proven_u8str_view_t *dir) {
+    if (!app->picker_open || app->picker_in_book || picker_in_archive(app)) return false;
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    int32_t pw = 0, ph = 0;
+    rubraview_pal_window_get_size(app->window, &pw, &ph);
+    double grid_top = picker_grid_top(app, dpi);
+    if (y < grid_top || x < 0.0 || app->picker.columns <= 0 || app->picker.tile_extent <= 0.0) return false;
+    size_t columns = (size_t)app->picker.columns;
+    size_t column = (size_t)(x / ((double)pw / (double)columns));
+    size_t index = (size_t)((y - grid_top + app->picker.scroll_offset) / app->picker.tile_extent) * columns + column;
+    if (column >= columns || index >= app->picker_listing.count) return false;
+    if (picker_is_up(app, index)) {   /* "..": the folder above */
+        *dir = rubraview_picker_parent(app->picker_dir);
+        return dir->size > 0;
+    }
+    const rubraview_fs_entry_t *e = &app->picker_listing.entries[index];
+    if (!e->is_directory) return false;
+    *dir = e->path;
+    return true;
+}
+
+static bool folder_drop_hit(void *ctx, double x, double y) {
+    folder_drop_t *f = (folder_drop_t *)ctx;
+    proven_u8str_view_t dir;
+    return folder_at(f->app, x, y, &dir) && rubraview_fileop_drop_check(dir, f->views, f->count) == RUBRAVIEW_DROP_OK;
+}
+
+/* What was dragged, let go on folder `dir`: moved (a left drag; Ctrl copies), or for a right drag a menu asks. */
+static void folder_dropped(app_state_t *app, const proven_u8str_view_t *views, size_t count, proven_u8str_view_t dir, bool copy, bool right,
+                           double x, double y) {
+    if (!right) {
+        (void)filejob_start(app, dir, views, count, !copy, -1, false);
+        return;
+    }
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(proven_u8str_view_t));
+    if (!proven_is_ok(res.err)) return;
+    app->drop_pending = (proven_u8str_view_t *)(void *)res.value.ptr;
+    for (size_t i = 0; i < count; ++i) app->drop_pending[i] = app_keep(app, views[i]);
+    app->drop_pending_count = count;
+    app->drop_dir = app_keep(app, dir);
+    chooser_open_drop(app, x, y);
+}
+
 void picker_drag_out(app_state_t *app, size_t pressed, bool right) {
     if (rubraview_pal_dragging_out() || archwork_busy(app)) return;
     pick_t *p = pick_make(app, pressed);
@@ -364,8 +413,19 @@ void picker_drag_out(app_state_t *app, size_t pressed, bool right) {
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     rubraview_pal_rect_t basket = picker_basket_rect(app, rubraview_pal_window_dpi_scale(app->window), (double)win_w, 0);
     rubraview_pal_window_set_own_drop(app->window, !p->from_archive && picker_basket_shown(app), basket.x, basket.y, basket.width, basket.height);
+    folder_drop_t fd = { .app = app, .views = views, .count = p->count };
+    if (views && !p->from_archive) rubraview_pal_window_set_own_drop_hit(app->window, folder_drop_hit, &fd);   /* RV-286 */
     uint32_t done = views ? rubraview_pal_drag_out(app->window, views, p->count, allowed, right, drag_ready, &ctx) : 0u;
     rubraview_pal_window_set_own_drop(app->window, false, 0.0, 0.0, 0.0, 0.0);
+    rubraview_pal_window_set_own_drop_hit(app->window, NULL, NULL);
+    double dx = 0.0, dy = 0.0;
+    bool dcopy = false;
+    proven_u8str_view_t dir;
+    if (views && rubraview_pal_window_own_drop_point(app->window, &dx, &dy, &dcopy)) {   /* RV-286: on a folder here */
+        if (folder_at(app, dx, dy, &dir)) folder_dropped(app, views, p->count, app_keep(app, dir), dcopy, right, dx, dy);
+        pick_free(p);
+        return;
+    }
     if (views && rubraview_pal_window_own_drop_taken(app->window)) {
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, p->count, sizeof(proven_u8str_view_t));
         if (proven_is_ok(res.err)) {

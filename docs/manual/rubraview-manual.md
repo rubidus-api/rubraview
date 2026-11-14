@@ -1974,6 +1974,13 @@ shortcuts here for files on disk), Cancel. A right click that does not
 move still opens this screen's own list. While Explorer copies what you
 let go — or asks about a name already there — the viewer goes on.
 
+**Onto a folder here.** Let what is picked go on a folder of this screen
+(or on `..`, the folder above) and it moves there; hold `Ctrl` to copy.
+A right drag let go on a folder asks: Move here, Copy here, Cancel. A
+folder cannot take itself or what is inside it, nor files already in it.
+Names already there are asked about, as with Paste, and `Ctrl+Z` takes
+it back.
+
 **Out of an archive.** Inside an archive the same works. A drag takes what
 is picked out of the archive when you let go over a place that takes it (a
 small window counts the share; `Esc` stops it), so a drag let go nowhere
