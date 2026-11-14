@@ -279,6 +279,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             LocalFree(wargv);
             return code;
         }
+        if (wargv && argc == 6 && rubraview_wcmp(wargv[1], L"--shell-menu-host") == 0) {   /* RV-279: Explorer's own menus, away from the viewer */
+            int code = rubraview_pal_shellmenu_host_main(wargv[2], wargv[3], wargv[4], wargv[5]);
+            LocalFree(wargv);
+            return code;
+        }
         if (wargv) LocalFree(wargv);
     }
     rubraview_edit_set_plugin_runner(plugin_runner, NULL);

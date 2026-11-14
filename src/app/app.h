@@ -42,6 +42,7 @@
 #include "rubraview/pal/pal_thumbs.h"
 #include "rubraview/pal/pal_tiles.h"
 #include "rubraview/pal/pal_gpu_resample.h"
+#include "rubraview/shellverbs.h"
 #include "rubraview/resample_mt.h"
 #include "rubraview/core.h"
 #include "rubraview/path.h"
@@ -151,6 +152,7 @@ enum { CARD_HOST_NONE = 0, CARD_HOST_MAIN, CARD_HOST_EDIT, CARD_HOST_BATCH, CARD
 #include "rubraview/plugin_filter.h"
 #include "rubraview/pal/pal_plugin.h"
 #include "rubraview/pal/pal_media_host.h"
+#include "rubraview/pal/pal_shellverbs.h"
 #include "rubraview/pal/pal_gmic.h"
 #include "rubraview/gmic.h"
 #include "rubraview/pal/pal_ffilter.h"
@@ -793,6 +795,12 @@ typedef struct app_state {
        접근 불가능한 기능이 있다면 ... 우클릭 컨텍스트 메뉴 쪽으로"): the menu's tree is the right click's lower
        rows, entered in place: the menu item shown (-1: the list itself), and the way back */
     bool                       ctx_on_picture;   /* opened on the picture: what the toolbox has is left out */
+    /* RV-279: the files the right-click list is about, on disk (an archive for its pages), and their registry verbs */
+    char                     **shell_targets;
+    size_t                     shell_target_count;
+    bool                       shell_folder;
+    rubraview_shellverb_t     *shell_verbs;      /* RUBRAVIEW_SHELLVERBS_MAX, from the heap the first time */
+    size_t                     shell_verb_count;
     chooser_t                  chooser;          /* 1.24.0 */
     rubraview_texture_t       *logo_tex;         /* 1.25.0: the icon on an empty window */
     bool                       logo_failed;
@@ -2259,6 +2267,17 @@ void archwork_extract_paths(app_state_t *app, const proven_u8str_view_t *paths, 
 void archwork_compress_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, bool ask);
 void archwork_extract_inside(app_state_t *app, int mode, bool choose_folder);
 bool picker_in_archive(const app_state_t *app);
+/* RV-279: Explorer's menu inside Rubraview (explorermenu.c) */
+void explorer_targets_page(app_state_t *app);
+void explorer_targets_picker(app_state_t *app, size_t index);
+void explorer_targets_list_row(app_state_t *app, size_t row);
+bool explorer_rows_shown(const app_state_t *app);
+void explorer_menu_from_list(app_state_t *app, bool classic, rubraview_window_t *window, double x, double y);
+void explorer_menu_action(app_state_t *app, bool classic);
+bool explorer_shift_click_page(app_state_t *app, double x, double y);
+bool explorer_shift_click_picker(app_state_t *app, size_t index, double x, double y);
+bool explorer_shift_click_row(app_state_t *app, size_t row, rubraview_window_t *window, double x, double y);
+void explorer_verb_run(app_state_t *app, size_t verb);
 bool picker_enter_archive(app_state_t *app, proven_u8str_view_t path);
 bool open_archive_tree(app_state_t *app, proven_u8str_view_t path);
 int picker_index_read(app_state_t *app, const char *path, rubraview_codepage_t codepage,   /* a rubraview_archive_result_t */

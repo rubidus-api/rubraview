@@ -8,7 +8,19 @@
 
 #define CTX_MAX RUBRAVIEW_CONTEXT_MAX_ITEMS
 
-typedef struct ctx_row { proven_u8str_view_t caption, action; int32_t group; } ctx_row_t;
+/* RV-279: `verb` is a registry verb's index (its caption is Windows' own words, not translated here), -1 for a row
+   of the boxes document. */
+typedef struct ctx_row { proven_u8str_view_t caption, action; int32_t group; int32_t verb; } ctx_row_t;
+
+#define CTX_ROWS (CTX_MAX + RUBRAVIEW_SHELLVERBS_MAX)
+#define CTX_VERB_GROUP 0x7000   /* the verbs' own group: a line before them and after */
+
+static bool ctx_is_explorer_row(proven_u8str_view_t action) {
+    return proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu")) || proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu_classic"));
+}
+
+static rubraview_window_t *ctx_window(const app_state_t *app);
+static rubraview_ctxmenu_metrics_t ctx_metrics(const app_state_t *app);
 
 /* 1.21.0 (owner, 2026-10-18: "우클릭 메뉴에서, 툴바 버튼으로 호출 가능한 기능들은 빼 주세요"): is this action
    a tile of the toolbox for what is on screen? Then the right click leaves it out. Open file stays
@@ -25,14 +37,32 @@ static bool ctx_on_toolbox(const app_state_t *app, proven_u8str_view_t action) {
 
 /* The rows on show: the list's, less (on the picture) what the toolbox has a tile for. 1.23.0: the
    menu's sections are gone from it (owner, 2026-10-19: all of them have another way in). */
+/* RV-279: the registry's verbs go before Explorer's two rows (after Rubraview's own, owner 2026-11-14: "추천대로"),
+   as many as the window has room for; those two rows only when there is a file on disk to show them for. */
 static size_t ctx_row_list(const app_state_t *app, ctx_row_t *rows) {
     if (!app->ctx_list) return 0;
     size_t n = 0;
     const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
-    for (int32_t i = 0; i < app->ctx_list->tile_count && n < CTX_MAX; ++i) {
+    bool explorer = explorer_rows_shown(app), verbs_done = false;
+    size_t room = RUBRAVIEW_SHELLVERBS_MAX;
+    if (explorer && app->shell_verb_count > 0) {
+        int32_t w = 0, h = 0;
+        rubraview_pal_window_get_size(ctx_window(app), &w, &h);
+        rubraview_ctxmenu_metrics_t m = ctx_metrics(app);
+        double fits = m.row_height > 0.0 ? ((double)h - 2.0 * m.pad - 8.0 * m.gap) / m.row_height : 0.0;
+        size_t own = (size_t)app->ctx_list->tile_count;
+        room = fits > (double)own ? (size_t)(fits - (double)own) : 0;
+    }
+    for (int32_t i = 0; i < app->ctx_list->tile_count && n < CTX_ROWS; ++i) {
         const rubraview_box_tile_t *item = &doc->context_items[app->ctx_list->first_tile + i];
         if (app->ctx_on_picture && ctx_on_toolbox(app, item->action)) continue;
-        rows[n++] = (ctx_row_t){ item->caption, item->action, item->group };
+        if (ctx_is_explorer_row(item->action)) {
+            if (!explorer) continue;
+            for (size_t v = 0; !verbs_done && v < app->shell_verb_count && v < room && n < CTX_ROWS; ++v)
+                rows[n++] = (ctx_row_t){ proven_u8str_view_from_cstr(app->shell_verbs[v].caption), PROVEN_LIT(""), CTX_VERB_GROUP, (int32_t)v };
+            verbs_done = true;
+        }
+        rows[n++] = (ctx_row_t){ item->caption, item->action, item->group, -1 };
     }
     return n;
 }
@@ -49,12 +79,12 @@ static rubraview_ctxmenu_metrics_t ctx_metrics(const app_state_t *app) {
 
 /* The open list's rows: their groups, and whether each can act now. */
 static size_t ctx_rows(const app_state_t *app, int32_t *groups, bool *enabled) {
-    ctx_row_t rows[CTX_MAX];
+    ctx_row_t rows[CTX_ROWS];
     size_t n = ctx_row_list(app, rows);
     rubraview_action_facts_t facts = action_facts(app);
     for (size_t i = 0; i < n; ++i) {
         groups[i] = rows[i].group;
-        if (enabled) enabled[i] = rubraview_action_state(rows[i].action, &facts).enabled;
+        if (enabled) enabled[i] = rows[i].verb >= 0 || rubraview_action_state(rows[i].action, &facts).enabled;
     }
     return n;
 }
@@ -62,8 +92,8 @@ static size_t ctx_rows(const app_state_t *app, int32_t *groups, bool *enabled) {
 /* The list's one column, turned to stay in the window. */
 typedef struct ctx_layout {
     size_t n;
-    int32_t groups[CTX_MAX];
-    bool enabled[CTX_MAX];
+    int32_t groups[CTX_ROWS];
+    bool enabled[CTX_ROWS];
     rubraview_rect_t a;
     rubraview_ctxmenu_metrics_t m;
 } ctx_layout_t;
@@ -109,6 +139,7 @@ void ctx_open_at(app_state_t *app, double x, double y) {
         app->slidepop_y = y;
         return;
     }
+    if (explorer_shift_click_page(app, x, y)) return;   /* RV-279: Shift, Explorer's classic menu at once */
     const rubraview_toolbox_profile_t *list = rubraview_boxes_context(rubraview_boxes_document(), cstr(toolbox_profile_name(app)));
     if (!list || list->tile_count <= 0) return;
     app->ctx_open = true;
@@ -116,16 +147,30 @@ void ctx_open_at(app_state_t *app, double x, double y) {
     app->ctx_x = x;
     app->ctx_y = y;
     app->ctx_on_picture = true;
+    explorer_targets_page(app);   /* RV-279 */
 }
 
 /* A row chosen, by a click or Enter. Delete asks a second time, as the menu's does. */
 static void ctx_choose(app_state_t *app, int32_t row) {
-    int32_t groups[CTX_MAX];
-    bool enabled[CTX_MAX];
+    int32_t groups[CTX_ROWS];
+    bool enabled[CTX_ROWS];
     size_t n = ctx_rows(app, groups, enabled);
     if (row < 0 || (size_t)row >= n || !enabled[row]) return;
-    ctx_row_t rows[CTX_MAX];
+    ctx_row_t rows[CTX_ROWS];
     (void)ctx_row_list(app, rows);
+    if (rows[row].verb >= 0) {   /* RV-279: a registry verb, on the files the list was opened for */
+        ctx_close(app);
+        explorer_verb_run(app, (size_t)rows[row].verb);
+        return;
+    }
+    if (ctx_is_explorer_row(rows[row].action)) {   /* Explorer's own menu, where the list was */
+        rubraview_window_t *window = ctx_window(app);
+        double x = app->ctx_x, y = app->ctx_y;
+        bool classic = proven_u8str_view_eq(rows[row].action, PROVEN_LIT("explorer_menu_classic"));
+        ctx_close(app);
+        explorer_menu_from_list(app, classic, window, x, y);
+        return;
+    }
     bool clears = proven_u8str_view_eq(rows[row].action, PROVEN_LIT("recent_clear"));
     if ((clears || proven_u8str_view_eq(rows[row].action, PROVEN_LIT("delete_file")) || proven_u8str_view_eq(rows[row].action, PROVEN_LIT("picker_recycle"))) &&
         !rubraview_confirm_press(&app->ctx_confirm, row, rubraview_pal_time_now_seconds())) {
@@ -158,7 +203,7 @@ static void draw_ctxmenu_on_in(app_state_t *app, rubraview_renderer_t *r, double
     rubraview_rect_t f = L.a;
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, 0xF6202020u, 4.0 * dpi);
     rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ f.x, f.y, f.width, f.height }, COLOR_BOX_BORDER, 1.0 * dpi, 4.0 * dpi);
-    ctx_row_t rows[CTX_MAX];
+    ctx_row_t rows[CTX_ROWS];
     (void)ctx_row_list(app, rows);
     int32_t hover = rubraview_ctxmenu_row_at(L.a, &m, groups, n, px, py);
     if (hover < 0) hover = app->ctx_focus;
@@ -178,6 +223,8 @@ static void draw_ctxmenu_on_in(app_state_t *app, rubraview_renderer_t *r, double
         proven_u8str_view_t text;
         if (rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now)) {
             text = proven_u8str_view_eq(item->action, PROVEN_LIT("recent_clear")) ? TU8("Clear?") : TU8("Delete?");
+        } else if (item->verb >= 0) {   /* RV-279: Windows' words as they are; Explorer's own standard words translated */
+            text = app->shell_verbs[item->verb].standard ? rubraview_tr_u8(item->caption) : item->caption;
         } else {
             text = rubraview_tile_caption(rubraview_tr_ctx_u8("menu", item->caption), false, st.mark, st.value, rubraview_mem_mut(scratch, sizeof(scratch)));
         }
@@ -194,6 +241,7 @@ void draw_ctxmenu(app_state_t *app) {
 void list_row_menu(app_state_t *app, size_t row, double x, double y, bool in_files) {
     ctx_close(app);
     slidepop_close(app);
+    if (explorer_shift_click_row(app, row, in_files && app->files_window ? app->files_window : app->window, x, y)) return;   /* RV-279 */
     const rubraview_toolbox_profile_t *list = rubraview_boxes_context(rubraview_boxes_document(), PROVEN_LIT("listrow"));
     if (!list || list->tile_count <= 0) return;
     app->ctx_open = true;
@@ -203,6 +251,7 @@ void list_row_menu(app_state_t *app, size_t row, double x, double y, bool in_fil
     app->ctx_y = y;
     app->list_ctx_row = row;
     app->files_dirty = true;
+    explorer_targets_list_row(app, row);   /* RV-279 */
 }
 
 /* What the field says: the delay, "3.5 s" (RV-267: a press on it asks the number in the input card). */
@@ -366,8 +415,8 @@ bool popups_key(app_state_t *app, rubraview_key_combo_t combo) {
         return false;
     }
     if (!app->ctx_open) return false;
-    int32_t groups[CTX_MAX];
-    bool enabled[CTX_MAX];
+    int32_t groups[CTX_ROWS];
+    bool enabled[CTX_ROWS];
     size_t n = ctx_rows(app, groups, enabled);
     if (key_is(combo, "Escape")) { ctx_close(app); return true; }
     if (key_is(combo, "Down")) { app->ctx_focus = rubraview_ctxmenu_step(enabled, n, app->ctx_focus, +1); return true; }

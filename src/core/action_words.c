@@ -44,6 +44,8 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "copy_to_folder", "Copy the file on screen to the folder set for it (a page inside an archive too)" },
     { "copy_to_other_folder", "Copy the file on screen to a folder typed or browsed; one not there yet is made" },
     { "delete_file", "To the recycle bin; inside an archive it asks: this page, or the whole archive" },
+    { "explorer_menu", "Explorer's menu of the file (Windows 11's, its packages' items too), from a process of its own" },
+    { "explorer_menu_classic", "Explorer's classic menu of the file (Show more options: shell extensions, Send to, Open with)" },
     { "extract_subtitles", "Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed" },
     { "film_adjust", "Adjust the film: light, colour, a brightness curve, blur, sharpening and the upscaler, as it plays (Shift+E)" },
     { "first_page", "First page" },

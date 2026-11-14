@@ -799,6 +799,9 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
             list_delete_row(app, row, owner);
         }
         app->files_dirty = true;
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu")) || proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu_classic"))) {
+        /* RV-279: Explorer's own menu of what is on screen, from the child (a key, the title bar's ☰) */
+        explorer_menu_action(app, proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu_classic")));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("reveal_in_explorer"))) {
         /* Owner, 2026-10-09: the file on screen picked out in Explorer; a
            page inside an archive has no file of its own, so the archive. */

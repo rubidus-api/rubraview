@@ -411,7 +411,22 @@ file's own group: Rename, Copy to folder, Move to folder, Copy to another
 folder..., Move to another folder..., Classify..., Show in Explorer and
 Delete (a page inside an archive: Rename, the copies, Show in Explorer
 and Delete). A row that cannot act now is grey. The arrow keys and
-`Enter` choose, `Esc` or a click elsewhere closes it. The mouse's back and
+`Enter` choose, `Esc` or a click elsewhere closes it.
+
+Under Rubraview's own rows the list has **what Explorer's menu has for the
+file** in the registry — Edit, Print, Set as desktop background, Rotate,
+the items other programs put there — as many as the window has room for,
+in Windows' own words; one runs as Explorer runs it. The last two rows,
+**Explorer menu** and **Classic Explorer menu**, open Windows' own menu
+for the file where you clicked: the classic one is Windows 11's "Show more
+options" (7-Zip, Bandizip, Send to, Open with, Properties...), Explorer
+menu puts the items installed apps add to Windows 11's menu above it.
+They come from a program of their own, so an item of another program's
+that fails cannot take the viewer with it. `Shift` with the right click
+opens the classic menu at once, with the items Explorer shows only with
+`Shift`. In the open-file screen they act on what is picked, on a page
+inside an archive the archive. Settings › General › Explorer's items in
+the right-click list turns them off. The mouse's back and
 forward buttons turn the page, a middle click goes to real size and back,
 the wheel turns the page on a picture that fits the window (away from
 you the one before, towards you the next) and brings up the filmstrip
@@ -2324,6 +2339,8 @@ listed under a later heading only means that while that is on screen.
 | Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |
 | Right click `Move to...`, Right click `Move them to...` | Move what is picked to a folder |
 | Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
+| Right click `Explorer menu` | Explorer's menu of the file (Windows 11's, its packages' items too), from a process of its own |
+| Right click `Classic Explorer menu` | Explorer's classic menu of the file (Show more options: shell extensions, Send to, Open with) |
 | Right click `Make a playlist of them` | Make a playlist of what is picked |
 | Right click `Pick none` | Pick nothing in the open-file screen |
 | Right click `Paste` | The files on the clipboard, from here or Explorer, copied or moved into the folder on screen (Ctrl+V) |

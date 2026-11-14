@@ -664,6 +664,7 @@ void picker_context(app_state_t *app, size_t index, double x, double y) {
     app->picker.focus = index;
     ctx_close(app);
     slidepop_close(app);
+    if (explorer_shift_click_picker(app, index, x, y)) return;   /* RV-279: Shift, Explorer's classic menu at once */
     const rubraview_toolbox_profile_t *list = rubraview_boxes_context(rubraview_boxes_document(), many ? PROVEN_LIT("pickermany") : PROVEN_LIT("pickerone"));
     if (!list || list->tile_count <= 0) return;
     app->ctx_open = true;
@@ -672,6 +673,7 @@ void picker_context(app_state_t *app, size_t index, double x, double y) {
     app->ctx_x = x;
     app->ctx_y = y;
     app->picker_ctx_index = index;
+    explorer_targets_picker(app, index);   /* RV-279: the registry's verbs of what is picked */
 }
 
 /* RV-207: a right click past the tiles, on the folder itself: a new folder in it. */
