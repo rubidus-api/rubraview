@@ -4020,3 +4020,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: a book's click turned pages in its left and right 30 %, the edge column reached 96 px in and acted on the press, the navigator came up by resting over a picture only, and a film's click anywhere paused it; "page" named both a spread and a file.
 - Decision: three places. The middle (a quarter of the width and the height) shows a see-through hint while the pointer is over it, and a click there opens the navigator of what is on screen — a film's or a song's new set: play / pause, a time bar, 5 s, 5 %, the file, the folder or archive; it closes by X, Esc, a click outside it (that click does nothing else) or the pointer away 2 s; for 0.35 s after it opens a press on it runs nothing (a double click's second). The sides are 10 % of the width (80 px at least by DPI); a press there is decided on release: plain, the smallest move (a page turn; 5 s for a film or music); with the column up, or dragged along it (the mouse held, or one finger's pan gesture), the button let go on. Elsewhere a click plays or pauses a film or music and does nothing on a picture or a book. Words: a page turn ("페이지 넘김") is one spread; a file turn ("파일 넘김") is exactly one file — "File", "+1 file", "One file back", "Page back" / "Page on".
 - Consequences: a click in the middle of a film no longer pauses it (it opens the navigator, whose play / pause does), and a double click in the middle no longer centres the picture. A finger's sideways swipe that starts at a side chooses from the column instead of turning the page; a swipe across the middle still turns it.
+
+## D-351: Clicks In A Row At A Side Keep Stepping
+
+- Date: 2026-11-15
+- Status: Accepted (owner 2026-11-15: "추천대로 해 주시고 계속 진행해 주세요", to the question whether clicks in a row at a side should keep going 5 s). Amends D-350.
+- Context: on the VM two clicks at a film's side 0.8 s apart went 5 s once: by the second the column was up and the press fell between two buttons.
+- Decision: a press at the side of the last plain press, within 1 s of its release, is plain again, whatever the column shows; past a second, or at the other side, a press with the column up chooses a button as before.
+- Consequences: to choose a button just after a plain click at that side, wait a second.

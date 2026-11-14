@@ -1065,6 +1065,8 @@ typedef struct app_state {
     double pointer_x, pointer_y;
     bool   pointer_inside;   /* false after the pointer left the window (the edge buttons go with it) */
     rubraview_edge_press_t edge_press;   /* RV-285: a press at a side, decided when let go */
+    int32_t edge_plain_side;  /* RV-285: the side of the last plain press (rubraview_edge_side_t; 0 when zeroed is harmless: */
+    double  edge_plain_at;    /*   edge_plain_at 0 is long past), and when it was let go */
     int32_t edge_side;        /* RV-206: the side the pointer is at (rubraview_edge_side_t), and since when */
     double  edge_since;
 

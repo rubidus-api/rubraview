@@ -90,6 +90,10 @@ const char *rubraview_edgenav_plain_action(rubraview_edge_side_t side, bool medi
     return "";
 }
 
+bool rubraview_edge_press_repeats(rubraview_edge_side_t last_side, double last_at, rubraview_edge_side_t side, double now) {
+    return side != RUBRAVIEW_EDGE_NONE && side == last_side && now >= last_at && now - last_at < RUBRAVIEW_EDGE_REPEAT;
+}
+
 void rubraview_edge_press_begin(rubraview_edge_press_t *press, rubraview_edge_side_t side, bool column, double x, double y) {
     if (!press) return;
     *press = (rubraview_edge_press_t){ .on = side != RUBRAVIEW_EDGE_NONE, .side = side, .column = column, .x0 = x, .y0 = y };

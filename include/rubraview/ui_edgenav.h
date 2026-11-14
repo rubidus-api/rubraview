@@ -84,6 +84,14 @@ typedef struct rubraview_edge_press {
     double x0, y0;
 } rubraview_edge_press_t;
 
+#define RUBRAVIEW_EDGE_REPEAT 1.0   /* RV-285: seconds after a plain press in which the same side's press is plain again */
+
+/**
+ * RV-285 (owner, 2026-11-15: "추천대로"): a press at `side` at `now` repeats the plain press made there at `last_at`
+ * (`last_side`), within RUBRAVIEW_EDGE_REPEAT: it is the smallest move again, though the column has come up meanwhile.
+ */
+bool rubraview_edge_press_repeats(rubraview_edge_side_t last_side, double last_at, rubraview_edge_side_t side, double now);
+
 void rubraview_edge_press_begin(rubraview_edge_press_t *press, rubraview_edge_side_t side, bool column, double x, double y);
 void rubraview_edge_press_move(rubraview_edge_press_t *press, double x, double y, double slop);
 

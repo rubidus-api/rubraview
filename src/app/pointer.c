@@ -98,7 +98,11 @@ bool edge_press_release(app_state_t *app, double x, double y) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->window, &w, &h);
     rubraview_edgenav_t nav = rubraview_edgenav_create(rubraview_pal_window_dpi_scale(app->window));
+    bool plain = !app->edge_press.column && !app->edge_press.dragged;
+    rubraview_edge_side_t side = app->edge_press.side;
     const char *action = rubraview_edge_press_release(&app->edge_press, &nav, x, y, (double)w, (double)h, app->media != NULL);
+    app->edge_plain_side = plain ? (int32_t)side : (int32_t)RUBRAVIEW_EDGE_NONE;   /* RV-285: a plain press may repeat */
+    app->edge_plain_at = rubraview_pal_time_now_seconds();
     if (action && action[0]) {
         handle_action(app, cstr(action));
         note_activity(app);
@@ -329,7 +333,9 @@ bool handle_chrome_click(app_state_t *app, double x, double y) {
        a plain press is the smallest move; with the column up, or dragged along it, the button let go on. */
     rubraview_edge_side_t at_side = edge_nav_side(app, x, y);
     if (at_side != RUBRAVIEW_EDGE_NONE) {
-        rubraview_edge_press_begin(&app->edge_press, at_side, edge_column_shown(app), x, y);
+        bool again = rubraview_edge_press_repeats((rubraview_edge_side_t)app->edge_plain_side, app->edge_plain_at, at_side,
+                                                  rubraview_pal_time_now_seconds());   /* clicks in a row: each the smallest move */
+        rubraview_edge_press_begin(&app->edge_press, at_side, edge_column_shown(app) && !again, x, y);
         return true;
     }
 

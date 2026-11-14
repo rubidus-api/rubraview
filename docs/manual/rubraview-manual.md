@@ -1417,7 +1417,8 @@ three dots, sizes it: drag it sideways for more or fewer buttons a row, and away
 size is kept, and Settings › Display has the same four numbers.
 
 At each side of the window — a tenth of its width — a plain click is the
-smallest move: a page turn back or on, or 5 seconds for a film or a song.
+smallest move: a page turn back or on, or 5 seconds for a film or a song;
+clicks in a row there, each within a second of the last, keep stepping.
 Rest the pointer there for a moment and a tall column of four buttons
 shows: a click then runs the one under it. With a finger (or the button
 held), press at the side and draw along it: the column shows, the button
