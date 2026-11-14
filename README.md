@@ -264,6 +264,7 @@ ships with, so it cannot drift from them.
 | Toolbar `Hide` | Hide the title bar and the Floating Widget until the picture is clicked |
 | Toolbar `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
 | Toolbar `Wheel strip` | Thumbnails while the wheel turns pages |
+| Toolbar `First alone`, Right click `First page alone` | Two pages: the first page alone, as a book's cover |
 | Toolbar `Edit` | Text: open the file in the editor Settings > Text names (Notepad without one) |
 | Toolbar `Reload` | Text: read the file again, at the same place |
 | Toolbar `Delay` | The slide show's delay: a tap lists 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
@@ -300,7 +301,6 @@ ships with, so it cannot drift from them.
 | Right click `Add to favourites` | Make the file on screen a favourite, or no longer one |
 | Right click `One page` | Layout: one page at a time |
 | Right click `Two pages` | Layout: two pages side by side |
-| Right click `First page alone` | Two pages: the first page alone, as a book's cover |
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
 | Right click `Extract subtitles` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |

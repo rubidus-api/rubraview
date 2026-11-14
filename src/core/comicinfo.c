@@ -174,33 +174,19 @@ rubraview_comicinfo_t rubraview_comicinfo_parse(proven_arena_t *arena, proven_u8
     return out;
 }
 
-static bool type_is_cover(proven_u8str_view_t type) {
-    static const char FRONT[] = "FrontCover";
-    static const char INNER[] = "InnerCover";
-    if (type.size == sizeof(FRONT) - 1 && proven_sys_mem_cmp(type.ptr, FRONT, sizeof(FRONT) - 1) == 0) return true;
-    if (type.size == sizeof(INNER) - 1 && proven_sys_mem_cmp(type.ptr, INNER, sizeof(INNER) - 1) == 0) return true;
-    return false;
-}
-
 void rubraview_comicinfo_apply(const rubraview_comicinfo_t *info,
                                rubraview_layout_opts_t *opts,
                                rubraview_page_info_t *pages,
                                size_t page_count) {
     if (!info) return;
 
+    /* RV-283 (owner, 2026-11-14: "2장씩 보기는 첫 페이지부터 2장씩"): a manga read right to left, in two pages; the
+       first page pairs as any other (it stood alone here, the book of RV-224), and a cover the archive tags pairs too
+       (pages and page_count are kept for the tags the reader may come to use). */
     if (opts && info->manga == RUBRAVIEW_MANGA_YES_RTL) {
-        opts->mode = RUBRAVIEW_PAGE_LAYOUT_DUAL;   /* the book: the cover alone (RV-224, D-279) */
-        opts->first_alone = true;
+        opts->mode = RUBRAVIEW_PAGE_LAYOUT_DUAL;
         opts->direction = RUBRAVIEW_READING_RTL;
     }
-
-    if (!pages || page_count == 0 || !info->pages) return;
-
-    for (size_t i = 0; i < info->page_count; ++i) {
-        int32_t index = info->pages[i].image_index;
-        if (index < 0 || (size_t)index >= page_count) continue;
-        if (type_is_cover(info->pages[i].type)) {
-            pages[index].force_standalone = true;
-        }
-    }
+    (void)pages;
+    (void)page_count;
 }

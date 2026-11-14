@@ -260,7 +260,8 @@ is what the installer adds: the run then ends with 0 when all but Windows
 items are `--open`, `--new-window`, `--open-only`, `--add`, `--browse`, `--convert`,
 `--print`, `--extract-here`, `--extract`, `--extract-smart`, `--extract-to`, `--compress-zip` and `--compress`,
 each followed by the files. Compressing is in the menu of every file and every folder;
-extracting on archives.
+extracting on archives. A playlist (`.m3u8`, `.m3u`, `.pls`, `.rvlist`) has an icon of its own, a list, and its menu
+has Open, Open in a new window and Add to the list, which adds the files it holds to the list being read.
 
 ## Reading
 
@@ -271,7 +272,8 @@ Settings › Viewer › Layout shows and keeps the same choice:
 - **Single** — one page at a time, a wide scan whole.
 - **Dual** — two pages side by side; a wide scan stands alone. Settings ›
   Viewer › **Two pages: the first page alone** (off as it comes; also on a
-  book's right click) shows the first page by itself as a book's cover.
+  book's right click and the Toolbar's **First alone** button, shown in two
+  pages) shows the first page by itself as a book's cover.
 - **Webtoon** — every page one under the other at the same width, read as
   one long strip: the wheel, a drag, or `PageDown` / `PageUp` (a window's
   worth) move through it, and zooming widens or narrows the strip.
@@ -297,8 +299,11 @@ by its right-to-left form. There is no separate reading-order switch.
 
 In two pages the page you pick — by opening it, in a list, in the
 open-file screen, on the page bar, or `Home` — is always the first page
-shown, with the next one beside it; the pages before it are paired back
-to the first. A wide scan stands alone without moving the pages you are
+shown, with the next one beside it; the pages before it are paired from
+the first page (1-2, 3-4...), and one left over stands alone just before
+the page you picked. Picking the last page pairs the whole book from the
+first page. A comic's own tags (a cover, a manga) never leave the first
+page alone; only the setting above does. A wide scan stands alone without moving the pages you are
 looking at, and the pages on screen stay put when the window is resized.
 When a book's facing pages come out wrong, **one page over** moves the
 pairing by a page: `Shift+PageDown` (later) and `Shift+PageUp` (earlier),
@@ -2331,6 +2336,7 @@ listed under a later heading only means that while that is on screen.
 | Toolbar `Hide` | Hide the title bar and the Floating Widget until the picture is clicked |
 | Toolbar `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
 | Toolbar `Wheel strip` | Thumbnails while the wheel turns pages |
+| Toolbar `First alone`, Right click `First page alone` | Two pages: the first page alone, as a book's cover |
 | Toolbar `Edit` | Text: open the file in the editor Settings > Text names (Notepad without one) |
 | Toolbar `Reload` | Text: read the file again, at the same place |
 | Toolbar `Delay` | The slide show's delay: a tap lists 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second |
@@ -2367,7 +2373,6 @@ listed under a later heading only means that while that is on screen.
 | Right click `Add to favourites` | Make the file on screen a favourite, or no longer one |
 | Right click `One page` | Layout: one page at a time |
 | Right click `Two pages` | Layout: two pages side by side |
-| Right click `First page alone` | Two pages: the first page alone, as a book's cover |
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
 | Right click `Extract subtitles` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |

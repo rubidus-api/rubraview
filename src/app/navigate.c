@@ -33,10 +33,12 @@ void rebuild_layout(app_state_t *app) {
     int32_t first = spread_first_page(app);
     if (first >= 0) {
         app->layout_opts.anchor = first;
-        /* A page alone with a pair after it was left over when the pages before an anchor were paired back (or
-           stands alone anyway): paired from the pair after it, it stays alone, as on screen. */
+        /* A page alone with a pair after it was left over when the pages before an anchor were paired (or stands
+           alone anyway): paired from the pair after it, it stays alone, as on screen. */
         const rubraview_spread_t *sp = &app->layout.spreads[app->spread_index];
-        if (sp->right_index < 0 && app->spread_index + 1 < app->layout.count) {
+        /* RV-283: not the first page: alone there it is only for the reader's choice or a wide scan, which the new
+           table gives as well (VM: First alone turned off left page 1 alone, paired from page 2) */
+        if (sp->right_index < 0 && sp->left_index > 0 && app->spread_index + 1 < app->layout.count) {
             const rubraview_spread_t *next = &app->layout.spreads[app->spread_index + 1];
             if (next->right_index >= 0) app->layout_opts.anchor = next->left_index < next->right_index ? next->left_index : next->right_index;
         }

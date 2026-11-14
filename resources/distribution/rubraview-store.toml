@@ -347,28 +347,28 @@ target = "file:App"
 extension = ".m3u8"
 prog-id = "Rubraview.Playlist"
 description = "Playlist"
-logo = "menu/types/music.png"
+logo = "menu/types/playlist.png"
 target = "file:App"
 
 [assoc.Playlist_m3u]
 extension = ".m3u"
 prog-id = "Rubraview.Playlist"
 description = "Playlist"
-logo = "menu/types/music.png"
+logo = "menu/types/playlist.png"
 target = "file:App"
 
 [assoc.Playlist_pls]
 extension = ".pls"
 prog-id = "Rubraview.Playlist"
 description = "Playlist"
-logo = "menu/types/music.png"
+logo = "menu/types/playlist.png"
 target = "file:App"
 
 [assoc.Playlist_rvlist]
 extension = ".rvlist"
 prog-id = "Rubraview.Playlist"
 description = "Playlist"
-logo = "menu/types/music.png"
+logo = "menu/types/playlist.png"
 target = "file:App"
 
 # Explorer's right-click menu (RV-113 (3)): the items of MENU_ITEMS in
@@ -435,7 +435,7 @@ on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".mp4", ".mkv", ".webm", ".avi",
     ".mov", ".wmv", ".asf", ".mpg", ".mpeg", ".mp3", ".flac", ".wav", ".ogg",
-    ".opus", ".m4a",
+    ".opus", ".m4a", ".m3u8", ".m3u", ".pls", ".rvlist",
 ]
 text = "Add to the list"
 text-ko = "재생목록에 넣기"

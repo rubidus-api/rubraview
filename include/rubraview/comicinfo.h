@@ -42,11 +42,11 @@ rubraview_comicinfo_t rubraview_comicinfo_parse(proven_arena_t *arena, proven_u8
 
 /**
  * §3.8.5 point 2 and 3: let the archive's own metadata configure the
- * reader. A `<Manga>YesAndRightToLeft</Manga>` switches to Book mode
- * with right-to-left order without the reader pressing `M`, and every
- * page tagged `FrontCover` or `InnerCover` is marked to stand alone so
- * a cover cannot be paired into a spread and push every later pairing
- * out of step.
+ * reader. A `<Manga>YesAndRightToLeft</Manga>` switches to two pages
+ * with right-to-left order without the reader pressing `M`. RV-283 (owner,
+ * 2026-11-14: "2장씩 보기는 첫 페이지부터 2장씩"): the first page pairs as
+ * any other, and pages tagged `FrontCover` or `InnerCover` are no longer
+ * made to stand alone; `pages` is left as it is.
  *
  * Only what the metadata actually states is changed: a document with no
  * `<Manga>` tag leaves the layout mode and direction as they were.

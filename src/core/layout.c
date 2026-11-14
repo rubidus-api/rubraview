@@ -125,42 +125,28 @@ static void push_alone(proven_arena_t *arena, spread_buf_t *out, const rubraview
     }
 }
 
-/* Two pages (RV-224, D-279): what never pairs — a wide scan, a cover the
-   archive tagged, the first page when it stands alone. */
+/* Two pages (RV-224, D-279): what never pairs — a wide scan, the first page when the reader chose it alone
+   (Settings, the book); RV-283: an archive's metadata no longer makes a cover stand alone. */
 static bool pairs_not(const rubraview_page_info_t *pages, size_t i, const rubraview_layout_opts_t *opts) {
     return stands_alone(&pages[i], opts->spread_ar_threshold) || (opts->first_alone && i == 0);
 }
 
-/* Two pages paired from the anchor (RV-224, D-279): forward from it as a
-   reader turns them, and backward from the page before it down to the first
-   page, so the page chosen is always the first one shown. */
+/* Two pages paired from the anchor (RV-224, D-279): forward from it as a reader turns them, so the page chosen is
+   the first one shown. RV-283 (owner, 2026-11-14: "첫 페이지가 무조건 1장씩 보이는게 조금 그렇네요. 2장씩 보기는 첫 페이지부터
+   2장씩 보이는 것으로 해 주세요." "물론 가로로 넓으면 1장씩 보이는 것도 마찬가지로"): the pages before it pair from the
+   first page forward (they were paired back from the anchor, which left the first page alone whenever the count was
+   odd); one left over stands alone just before the anchor. The last page chosen (reached going back from the next
+   book, End) pairs the whole from the first page, so it is not left alone at the end. */
 static void paginate_pairs(proven_arena_t *arena, spread_buf_t *out, const rubraview_page_info_t *pages, size_t page_count, size_t anchor, const rubraview_layout_opts_t *opts) {
-    /* Backward: each run's starting page, last first; a pair's is its lower page. */
-    size_t units = 0;
-    for (size_t j = anchor; j > 0; ) {
-        size_t i = j - 1;
-        bool pair = !pairs_not(pages, i, opts) && i > 0 && !pairs_not(pages, i - 1, opts);
-        units++;
-        j = pair ? i - 1 : i;
-    }
-    if (units > 0) {
-        proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, units, sizeof(size_t));
-        if (!proven_is_ok(res.err)) { anchor = 0; units = 0; }
-        else {
-            size_t *starts = (size_t*)(void*)res.value.ptr;
-            size_t n = 0;
-            for (size_t j = anchor; j > 0; ) {
-                size_t i = j - 1;
-                bool pair = !pairs_not(pages, i, opts) && i > 0 && !pairs_not(pages, i - 1, opts);
-                starts[n++] = pair ? i - 1 : i;
-                j = pair ? i - 1 : i;
-            }
-            for (size_t k = n; k > 0; --k) {
-                size_t i = starts[k - 1];
-                size_t next_start = k > 1 ? starts[k - 2] : anchor;
-                if (next_start - i == 2) push_pair(arena, out, (int32_t)i, (int32_t)(i + 1), opts->direction);
-                else push_alone(arena, out, pages, i, opts);
-            }
+    if (anchor + 1 >= page_count) anchor = 0;
+    for (size_t j = 0; j < anchor; ) {
+        if (pairs_not(pages, j, opts)) { push_alone(arena, out, pages, j, opts); j += 1; continue; }
+        if (j + 1 < anchor && !pairs_not(pages, j + 1, opts)) {
+            push_pair(arena, out, (int32_t)j, (int32_t)(j + 1), opts->direction);
+            j += 2;
+        } else {
+            push_alone(arena, out, pages, j, opts);
+            j += 1;
         }
     }
 

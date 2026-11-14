@@ -11,6 +11,7 @@
 5 ICON "resources/distribution/rubraview-book.ico"
 6 ICON "resources/distribution/rubraview-audio.ico"   /* RV-189: music */
 7 ICON "resources/distribution/rubraview-archive.ico" /* RV-275: a plain archive, a box */
+8 ICON "resources/distribution/rubraview-playlist.ico" /* RV-282: a playlist, a list */
 
 1 VERSIONINFO
 FILEVERSION     RUBRAVIEW_VERSION_MAJOR, RUBRAVIEW_VERSION_MINOR, RUBRAVIEW_VERSION_PATCH, 0

@@ -1715,8 +1715,9 @@ static int icon_for_ext(const WCHAR *ext) {
         { 3, L".txt.text.md.log.nfo.ini.csv.json.xml.srt.ass.smi.vtt." },
         { 4, L".jpg.jpeg.jpe.jfif.png.apng.gif.webp.bmp.dib.tif.tiff.avif.heic.heif.jxl.ico.tga.psd.svg.dds.qoi." },
         { 5, L".cbz.cbr.cb7.cbt.epub.pdf." },
-        { 6, L".mp3.flac.wav.ogg.oga.opus.m4a.aac.wma.ape.wv.mka.aiff.aif.m3u8.m3u.pls.rvlist." },   /* RV-189; RV-254 the playlists */
+        { 6, L".mp3.flac.wav.ogg.oga.opus.m4a.aac.wma.ape.wv.mka.aiff.aif." },   /* RV-189 */
         { 7, L".zip.rar.7z.tar.alz.egg.azo." },   /* RV-275 */
+        { 8, L".m3u8.m3u.pls.rvlist." },   /* RV-282 (owner, 2026-11-14): the playlists, a list (were the music's notes) */
     };
     WCHAR probe[72];
     size_t n = rubraview_wlen(ext);
@@ -1766,7 +1767,7 @@ static bool register_one(const WCHAR *ext, const WCHAR *progid) {
     WCHAR icon[MAX_PATH * 2 + 8];
     rubraview_wcopy_a(icon, exe);
     int id = icon_for_ext(ext);
-    WCHAR which[4] = { L',', L'-', (WCHAR)(L'0' + id), 0 };   /* ",-2" to ",-7", the resource by ID; 1 is the first, ",0" */
+    WCHAR which[4] = { L',', L'-', (WCHAR)(L'0' + id), 0 };   /* ",-2" to ",-8", the resource by ID; 1 is the first, ",0" */
     rubraview_wcat_a(icon, id > 1 && id <= 9 ? which : L",0");
     write_key(g_shell_root, subkey, NULL, icon);
 

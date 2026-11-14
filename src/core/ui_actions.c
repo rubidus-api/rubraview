@@ -177,6 +177,7 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
         { "next_page", 0xEB9D },             /* ▷▷; the 5 s seeks say "-5 s" / "+5 s" in words, not to look the same */
         { "page_over_next", 0xE72A },        /* Forward: two pages paired one page later (RV-224) */
         { "page_over_back", 0xE72B },        /* Back */
+        { "toggle_first_page_alone", 0xE7C3 }, /* Page: two pages, the first one alone (RV-283) */
         { "media_volume_down", 0xE993 },     /* Volume1 */
         { "media_volume_up", 0xE995 },       /* Volume3 */
         { "media_volume", 0xE767 },          /* Volume: its bar (RV-237) */

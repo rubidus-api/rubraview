@@ -1037,9 +1037,19 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
             if (count == 1 && !path_is_listed_kind(paths[0])) open_path_or_tree(app, paths[0]);   /* a book, a folder */
             else open_paths_as_set(app, paths, count, count == 1 ? T("file opened on its own") : T("files opened as one set"));
             break;
-        case RUBRAVIEW_SHELL_VERB_ADD:
-            list_add_paths(app, paths, count, false);
+        case RUBRAVIEW_SHELL_VERB_ADD: {
+            /* RV-282: a playlist adds the files it holds (playlist_add, RV-255), not itself */
+            proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(proven_u8str_view_t));
+            if (!proven_is_ok(res.err)) break;
+            proven_u8str_view_t *plain = (proven_u8str_view_t*)(void*)res.value.ptr;
+            size_t n = 0;
+            for (size_t i = 0; i < count; ++i) {
+                if (path_is_playlist(paths[i])) playlist_add(app, paths[i]);
+                else plain[n++] = paths[i];
+            }
+            if (n > 0) list_add_paths(app, plain, n, false);
             break;
+        }
         case RUBRAVIEW_SHELL_VERB_BROWSE:
             open_path(app, paths[0]);
             if (app->source.archive_path.size > 0 && rubraview_path_same(app->source.archive_path, paths[0])) {

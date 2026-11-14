@@ -83,7 +83,8 @@ void toolbox_refresh(app_state_t *app) {
             if (p == 1 && parts[0] && proven_u8str_view_eq(tile->action, PROVEN_LIT("media_speed_cycle"))) continue;
             if (edit_panel_open(app) && edit_denies(tile->action)) continue;   /* RV-137: not while Edit is open */
             /* RV-224 (owner, 2026-11-06: "2장보기 모드에서 새로 생기면"): one page over in two pages only */
-            if (proven_u8str_view_eq(tile->action, PROVEN_LIT("page_over_next")) && app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_DUAL) continue;
+            if ((proven_u8str_view_eq(tile->action, PROVEN_LIT("page_over_next")) || proven_u8str_view_eq(tile->action, PROVEN_LIT("toggle_first_page_alone"))) &&
+                app->layout_opts.mode != RUBRAVIEW_PAGE_LAYOUT_DUAL) continue;   /* RV-283: the first page alone too */
             if (((int32_t)p != last_part || tile->group != last_group) && groups < RUBRAVIEW_TOOLBOX_MAX_GROUPS) groups++;
             last_part = (int32_t)p;
             last_group = tile->group;
