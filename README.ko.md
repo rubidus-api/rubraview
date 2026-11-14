@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.43.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.43.0/rubraview-v1.43.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.43.0/rubraview-v1.43.0.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.43.0/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.44.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.44.0/rubraview-v1.44.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.44.0/rubraview-v1.44.0.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.44.0/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
