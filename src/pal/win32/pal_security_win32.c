@@ -143,8 +143,21 @@ static void countersign(const CMSG_SIGNER_INFO *si, HCERTSTORE outer, rubraview_
     if (CryptMsgUpdate(token, a->rgValue[0].pbData, a->rgValue[0].cbData, TRUE)) {
         CMSG_SIGNER_INFO *ts = signer_info(token);
         HCERTSTORE store = CertOpenStore(CERT_STORE_PROV_MSG, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, 0, token);
+        /* the time is the token's own (TSTInfo's genTime); a signing time attribute is optional in RFC 3161 */
+        DWORD cn = 0;
+        if (CryptMsgGetParam(token, CMSG_CONTENT_PARAM, 0, NULL, &cn) && cn > 0) {
+            BYTE *content = (BYTE *)rubraview_alloc(cn);
+            CRYPT_TIMESTAMP_INFO *info = NULL;
+            DWORD in = 0;
+            if (content && CryptMsgGetParam(token, CMSG_CONTENT_PARAM, 0, content, &cn) &&
+                CryptDecodeObjectEx(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, TIMESTAMP_INFO, content, cn, CRYPT_DECODE_ALLOC_FLAG, NULL, &info, &in) && info) {
+                s->signed_at = unix_of(info->ftTime);
+                LocalFree(info);
+            }
+            rubraview_free(content);
+        }
         if (ts) {
-            s->signed_at = signing_time(ts);
+            if (!s->signed_at) s->signed_at = signing_time(ts);
             PCCERT_CONTEXT c = store ? signer_cert(store, ts) : NULL;
             cert_name(c, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, s->countersigner, sizeof s->countersigner);
             if (c) CertFreeCertificateContext(c);

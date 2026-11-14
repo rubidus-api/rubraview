@@ -376,7 +376,7 @@ void propsec_draw_signatures(app_state_t *app, double y, double bottom) {
     props_view_t *v = V(app);
     rubraview_renderer_t *r = app->props_renderer;
     double dpi = dpi_of(app), w = width_of(app);
-    double c1 = 24.0 * dpi, c2 = w * 0.55, c3 = w * 0.72;
+    double c1 = 24.0 * dpi, c2 = w * 0.47, c3 = w * 0.72;
     heading(app, y, T("Signature list"));
     y += 24.0 * dpi;
     pw_text_at(r, T("Name of signer:"), (rubraview_pal_rect_t){ c1, y, c2 - c1, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
@@ -509,7 +509,8 @@ static void draw_advanced(app_state_t *app, double y, double bottom) {
     /* the entries, as Advanced lists them */
     heading(app, y, T("Permission entries"));
     y += 22.0 * dpi;
-    for (size_t i = 0; i < v->ace_count && y < bottom - 280.0 * dpi; ++i) {
+    size_t shown = 0;
+    for (size_t i = 0; i < v->ace_count && y < bottom - 210.0 * dpi; ++i, ++shown) {
         const rubraview_props_ace_t *a = &v->aces[i];
         uint32_t m = rubraview_props_map_generic(a->mask);
         const char *access = T("Special");
@@ -520,17 +521,22 @@ static void draw_advanced(app_state_t *app, double y, double bottom) {
         pw_text_at(r, text, (rubraview_pal_rect_t){ 24.0 * dpi, y, w - 42.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_TEXT);
         y += 19.0 * dpi;
     }
+    if (shown < v->ace_count) {   /* a small window: how many did not fit (a taller one shows them) */
+        (void)rubraview_fmt(text, sizeof text, T("... and {} more (make the window taller)"), PROVEN_ARG((uint32_t)(v->ace_count - shown)));
+        pw_text_at(r, text, (rubraview_pal_rect_t){ 24.0 * dpi, y, w - 42.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
+        y += 19.0 * dpi;
+    }
     y = pw_separator(app, y + 2.0 * dpi);
     /* what the user running this may do */
     heading(app, y, T("Your effective access"));
     y += 22.0 * dpi;
-    double cw = (w - 36.0 * dpi) / 2.0;
+    double cw = (w - 36.0 * dpi) / 3.0;
     for (int32_t i = 0; i < RUBRAVIEW_SPECIAL_COUNT; ++i) {
         bool has = v->sec.no_dacl || (v->sec.effective & rubraview_props_special_bit(i)) != 0;
         (void)rubraview_fmt(text, sizeof text, "{} {}", PROVEN_ARG(has ? "\xe2\x9c\x93" : "\xe2\x80\x93"), PROVEN_ARG(rubraview_tr(rubraview_props_special_name(i, folder))));
-        double x = 24.0 * dpi + (double)(i % 2) * cw;
-        pw_text_at(r, text, (rubraview_pal_rect_t){ x, y, cw - 8.0 * dpi, 18.0 * dpi }, 12.0 * dpi, has ? PW_TEXT : PW_DIM);
-        if (i % 2 == 1 || i == RUBRAVIEW_SPECIAL_COUNT - 1) y += 19.0 * dpi;
+        double x = 24.0 * dpi + (double)(i % 3) * cw;
+        pw_text_at(r, text, (rubraview_pal_rect_t){ x, y, cw - 6.0 * dpi, 18.0 * dpi }, 11.0 * dpi, has ? PW_TEXT : PW_DIM);
+        if (i % 3 == 2 || i == RUBRAVIEW_SPECIAL_COUNT - 1) y += 18.0 * dpi;
     }
     y = pw_separator(app, y + 2.0 * dpi);
     /* the audit entries: administrator only, read and written by the elevated child */

@@ -1379,7 +1379,7 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         rubraview_picker_reveal_focus(&app->picker);
         return true;
     }
-    if (proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Enter"))) {
+    if (proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Enter")) && !(combo.modifiers & RUBRAVIEW_MOD_ALT)) {   /* Alt+Enter: Properties (RV-281) */
         if ((combo.modifiers & RUBRAVIEW_MOD_SHIFT) && picker_enter_book(app, app->picker.focus)) return true;
         picker_activate(app, app->picker.focus);
         return true;
