@@ -799,6 +799,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
             list_delete_row(app, row, owner);
         }
         app->files_dirty = true;
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("file_properties"))) {
+        props_action(app);   /* RV-281: Rubraview's own properties window (Alt+Enter, ☰) */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu")) || proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu_classic"))) {
         /* RV-279: Explorer's own menu of what is on screen, from the child (a key, the title bar's ☰) */
         explorer_menu_action(app, proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu_classic")));

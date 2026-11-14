@@ -105,6 +105,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     handled += help_pump(app);
     handled += info_pump(app);
     handled += log_pump(app);   /* RV-256 */
+    handled += props_pump(app);   /* RV-281 */
     handled += extractwin_pump(app);   /* RV-272 */
     handled += clash_pump(app);   /* RV-258 */
     handled += filejob_pump(app);
@@ -280,6 +281,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     draw_help_window(app);
     draw_info_window(app);
     draw_log_window(app);   /* RV-256 */
+    draw_props_window(app);   /* RV-281 */
     draw_extract_window(app);   /* RV-272 */
     draw_clash_window(app);   /* RV-258 */
     /* The strip moves while the track does, so the little window is

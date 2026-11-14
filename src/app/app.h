@@ -453,7 +453,7 @@ typedef struct app_state {
     /* RFC-0006: a window that opens and closes is made, with its renderer, in a block of the
        windows pool, given back when it closes. */
     struct window_block { void *block; proven_arena_t arena; } mini_block, toolbox_block, info_block, help_block, files_block, fontpick_block, subs_block, edit_block,
-                                                               batch_block, names_block, log_block, clash_block, xw_block;
+                                                               batch_block, names_block, log_block, clash_block, xw_block, props_block;
     rubraview_window_t *window;
     rubraview_renderer_t *renderer;
     rubraview_keymap_t keymap;
@@ -800,6 +800,13 @@ typedef struct app_state {
     size_t                     shell_target_count;
     bool                       shell_folder;
     rubraview_shellverb_t     *shell_verbs;      /* RUBRAVIEW_SHELLVERBS_MAX, from the heap the first time */
+    /* RV-281: Rubraview's own properties window (propswin.c; its state is that file's) */
+    bool                       props_open, props_dirty;
+    rubraview_window_t        *props_window;
+    rubraview_renderer_t      *props_renderer;
+    int32_t                    props_frame[4];
+    double                     props_px, props_py;
+    void                      *props;
     size_t                     shell_verb_count;
     chooser_t                  chooser;          /* 1.24.0 */
     rubraview_texture_t       *logo_tex;         /* 1.25.0: the icon on an empty window */
@@ -2278,6 +2285,15 @@ bool explorer_shift_click_page(app_state_t *app, double x, double y);
 bool explorer_shift_click_picker(app_state_t *app, size_t index, double x, double y);
 bool explorer_shift_click_row(app_state_t *app, size_t row, rubraview_window_t *window, double x, double y);
 void explorer_verb_run(app_state_t *app, size_t verb);
+/* RV-281: the properties window (propswin.c); where it was asked from, for its Rename */
+enum { PROPS_FROM_NONE = 0, PROPS_FROM_PAGE, PROPS_FROM_PICKER, PROPS_FROM_LIST };
+void props_show(app_state_t *app, const char *const *paths, size_t count, int32_t origin, size_t origin_index);
+void props_close(app_state_t *app);
+size_t props_pump(app_state_t *app);
+void draw_props_window(app_state_t *app);
+void props_action(app_state_t *app);
+void props_from_list(app_state_t *app, int32_t origin, size_t index);
+void rename_picker_begin(app_state_t *app, size_t at);
 bool picker_enter_archive(app_state_t *app, proven_u8str_view_t path);
 bool open_archive_tree(app_state_t *app, proven_u8str_view_t path);
 int picker_index_read(app_state_t *app, const char *path, rubraview_codepage_t codepage,   /* a rubraview_archive_result_t */

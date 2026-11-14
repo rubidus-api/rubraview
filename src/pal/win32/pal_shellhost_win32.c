@@ -27,6 +27,8 @@
 #include <shobjidl.h>
 #include <objbase.h>
 #include <tlhelp32.h>
+#include <propsys.h>
+#include "rubraview/fileprops.h"
 
 #define WIDE2(x) L##x
 #define WIDE(x) WIDE2(x)
@@ -545,6 +547,259 @@ static int run_verb(const WCHAR *verb, WCHAR **paths, size_t count, int32_t x, i
     return code;
 }
 
+/* ---- RV-281: the properties window's work ---- */
+
+/* An answer for the viewer: written beside the list file, under its own name only when whole. */
+typedef struct answer { char *buf; size_t len, cap; } answer_t;
+
+static void answer_add(answer_t *a, const char *text, size_t n) {
+    if (a->len + n + 1 > a->cap) {
+        size_t cap = (a->cap ? a->cap * 2 : 8192);
+        while (cap < a->len + n + 1) cap *= 2;
+        char *more = (char *)rubraview_realloc(rubraview_mem_mut(a->buf, cap));
+        if (!more) return;
+        a->buf = more;
+        a->cap = cap;
+    }
+    proven_sys_mem_copy(a->buf + a->len, text, n);
+    a->len += n;
+    a->buf[a->len] = '\0';
+}
+
+static void answer_wide(answer_t *a, const WCHAR *text) {   /* escaped as the lines carry it */
+    char u8[2048], esc[4200];
+    if (WideCharToMultiByte(CP_UTF8, 0, text ? text : L"", -1, u8, sizeof u8, NULL, NULL) <= 0) u8[0] = '\0';
+    if (rubraview_props_escape(proven_u8str_view_from_cstr(u8), esc, sizeof esc)) answer_add(a, esc, proven_cstr_len(esc));
+}
+
+static void answer_put(const WCHAR *list_file, const answer_t *a) {
+    WCHAR tmp[MAX_PATH * 2 + 8], out[MAX_PATH * 2 + 8];
+    if (!rubraview_wcopy(tmp, MAX_PATH * 2 + 8, list_file) || !rubraview_wcat(tmp, MAX_PATH * 2 + 8, L".tmp")) return;
+    if (!rubraview_wcopy(out, MAX_PATH * 2 + 8, list_file) || !rubraview_wcat(out, MAX_PATH * 2 + 8, L".out")) return;
+    HANDLE f = CreateFileW(tmp, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, NULL);
+    if (f == INVALID_HANDLE_VALUE) return;
+    DWORD wrote = 0;
+    if (a->len) WriteFile(f, a->buf, (DWORD)a->len, &wrote, NULL);
+    CloseHandle(f);
+    MoveFileExW(tmp, out, MOVEFILE_REPLACE_EXISTING);
+}
+
+/* The keys this file needs by value; written out here so no library of keys is needed. */
+static const PROPERTYKEY KEY_FULL_DETAILS = { { 0xC9944A21, 0xA406, 0x48FE, { 0x82, 0x25, 0xAE, 0xC7, 0xE2, 0x4C, 0x21, 0x1B } }, 2 };
+static const PROPERTYKEY KEY_RATING = { { 0x64440492, 0x4C8B, 0x11D1, { 0x8B, 0x70, 0x08, 0x00, 0x36, 0xB1, 0x1A, 0x03 } }, 9 };
+
+/* The Details tab of the file: the type's FullDetails list, each property's words and value as Explorer shows them. */
+static int props_read(const WCHAR *path, const WCHAR *list_file) {
+    answer_t a = {0};
+    IShellItem2 *item = NULL;
+    IPropertyStore *store = NULL;
+    IPropertyDescriptionList *list = NULL;
+    LPWSTR names = NULL;
+    HRESULT hr = SHCreateItemFromParsingName(path, NULL, &IID_IShellItem2, (void **)&item);
+    hlog("item", hr);
+    if (SUCCEEDED(hr)) hr = item->lpVtbl->GetPropertyStore(item, GPS_DEFAULT, &IID_IPropertyStore, (void **)&store);
+    hlog("store", hr);
+    if (SUCCEEDED(hr)) hr = item->lpVtbl->GetString(item, &KEY_FULL_DETAILS, &names);
+    if (SUCCEEDED(hr)) hr = PSGetPropertyDescriptionListFromString(names, &IID_IPropertyDescriptionList, (void **)&list);
+    hlog("list", hr);
+    UINT count = 0;
+    if (SUCCEEDED(hr)) list->lpVtbl->GetCount(list, &count);
+    for (UINT i = 0; i < count; ++i) {
+        IPropertyDescription *d = NULL;
+        if (FAILED(list->lpVtbl->GetAt(list, i, &IID_IPropertyDescription, (void **)&d)) || !d) continue;
+        PROPERTYKEY key;
+        LPWSTR canon = NULL, label = NULL, shown = NULL;
+        PROPDESC_TYPE_FLAGS tf = 0;
+        d->lpVtbl->GetPropertyKey(d, &key);
+        d->lpVtbl->GetCanonicalName(d, &canon);
+        if (FAILED(d->lpVtbl->GetDisplayName(d, &label))) label = NULL;
+        d->lpVtbl->GetTypeFlags(d, PDTF_MASK_ALL, &tf);
+        if (tf & PDTF_ISGROUP) {
+            answer_add(&a, "H\t", 2);
+            answer_wide(&a, label ? label : canon);
+            answer_add(&a, "\n", 1);
+        } else {
+            PROPVARIANT v;
+            PropVariantInit(&v);
+            bool rating = IsEqualPropertyKey(key, KEY_RATING);
+            if (store && SUCCEEDED(store->lpVtbl->GetValue(store, &key, &v)) && v.vt != VT_EMPTY && !rating)
+                d->lpVtbl->FormatForDisplay(d, &v, PDFF_DEFAULT, &shown);
+            answer_add(&a, "P\t", 2);
+            answer_wide(&a, canon);
+            answer_add(&a, "\t", 1);
+            answer_wide(&a, label ? label : canon);
+            answer_add(&a, "\t", 1);
+            if (!(tf & PDTF_ISINNATE)) answer_add(&a, "e", 1);
+            if (tf & PDTF_MULTIPLEVALUES) answer_add(&a, "m", 1);
+            if (rating) answer_add(&a, "r", 1);
+            answer_add(&a, "\t", 1);
+            if (rating) {
+                char n[16];
+                uint32_t r = v.vt == VT_UI4 ? v.ulVal : v.vt == VT_UI2 ? v.uiVal : 0;
+                int len = rubraview_fmt(n, sizeof n, "{}", PROVEN_ARG(r));
+                if (len > 0) answer_add(&a, n, (size_t)len);
+            } else {
+                answer_wide(&a, shown);
+            }
+            answer_add(&a, "\n", 1);
+            PropVariantClear(&v);
+        }
+        CoTaskMemFree(canon);
+        CoTaskMemFree(label);
+        CoTaskMemFree(shown);
+        d->lpVtbl->Release(d);
+    }
+    if (list) list->lpVtbl->Release(list);
+    CoTaskMemFree(names);
+    if (store) store->lpVtbl->Release(store);
+    if (item) item->lpVtbl->Release(item);
+    hlog("rows", count);
+    if (a.len == 0) answer_add(&a, "", 0);
+    answer_put(list_file, &a);
+    rubraview_free(a.buf);
+    return SUCCEEDED(hr) ? 0 : 10;
+}
+
+static WCHAR *dup_wide(const WCHAR *text, size_t n) {
+    WCHAR *w = (WCHAR *)CoTaskMemAlloc((n + 1) * sizeof(WCHAR));
+    if (!w) return NULL;
+    proven_sys_mem_copy(w, text, n * sizeof(WCHAR));
+    w[n] = 0;
+    return w;
+}
+
+/* A typed value as the property's own: text, several texts split at ';', or empty (taken away). */
+static HRESULT value_of(IPropertyDescription *d, const WCHAR *text, bool multi, PROPVARIANT *v) {
+    PropVariantInit(v);
+    size_t n = rubraview_wlen(text);
+    while (n > 0 && text[n - 1] == L' ') n--;
+    if (n == 0) return S_OK;   /* VT_EMPTY: the property removed */
+    if (multi) {
+        size_t parts = 1;
+        for (size_t i = 0; i < n; ++i) if (text[i] == L';') parts++;
+        LPWSTR *elems = (LPWSTR *)CoTaskMemAlloc(parts * sizeof(LPWSTR));
+        if (!elems) return E_OUTOFMEMORY;
+        size_t k = 0, from = 0;
+        for (size_t i = 0; i <= n; ++i) {
+            if (i < n && text[i] != L';') continue;
+            size_t a = from, b = i;
+            while (a < b && text[a] == L' ') a++;
+            while (b > a && text[b - 1] == L' ') b--;
+            if (b > a) elems[k++] = dup_wide(text + a, b - a);
+            from = i + 1;
+        }
+        v->vt = VT_VECTOR | VT_LPWSTR;
+        v->calpwstr.cElems = (ULONG)k;
+        v->calpwstr.pElems = elems;
+    } else {
+        v->vt = VT_LPWSTR;
+        v->pwszVal = dup_wide(text, n);
+        if (!v->pwszVal) return E_OUTOFMEMORY;
+    }
+    return d->lpVtbl->CoerceToCanonicalValue(d, v);
+}
+
+/* The changes the viewer asked, on every file; one answer line a change. */
+static int props_write(WCHAR **paths, size_t count, const WCHAR *list_file) {
+    WCHAR in[MAX_PATH * 2 + 8];
+    answer_t a = {0};
+    if (!rubraview_wcopy(in, MAX_PATH * 2 + 8, list_file) || !rubraview_wcat(in, MAX_PATH * 2 + 8, L".in")) return 11;
+    char *input = NULL;
+    {
+        HANDLE f = CreateFileW(in, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+        LARGE_INTEGER size = {0};
+        DWORD got = 0;
+        if (f != INVALID_HANDLE_VALUE && GetFileSizeEx(f, &size) && size.QuadPart < 4 * 1024 * 1024 &&
+            (input = (char *)rubraview_alloc((size_t)size.QuadPart + 1)) != NULL && ReadFile(f, input, (DWORD)size.QuadPart, &got, NULL))
+            input[got] = '\0';
+        if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+        DeleteFileW(in);
+    }
+    if (!input) return 11;
+    static rubraview_props_row_t rows[128];
+    size_t rows_n = rubraview_props_changes_read(proven_u8str_view_from_cstr(input), rows, 128);
+    rubraview_free(input);
+    int code = 0;
+    for (size_t f = 0; f < count; ++f) {
+        IPropertyStore *store = NULL;
+        HRESULT hr = SHGetPropertyStoreFromParsingName(paths[f], NULL, GPS_READWRITE, &IID_IPropertyStore, (void **)&store);
+        hlog("store rw", hr);
+        bool any = false;
+        for (size_t r = 0; r < rows_n; ++r) {
+            WCHAR name[96], value[600];
+            MultiByteToWideChar(CP_UTF8, 0, rows[r].name, -1, name, 96);
+            MultiByteToWideChar(CP_UTF8, 0, rows[r].value, -1, value, 600);
+            PROPERTYKEY key;
+            IPropertyDescription *d = NULL;
+            HRESULT one = FAILED(hr) ? hr : PSGetPropertyKeyFromName(name, &key);
+            if (SUCCEEDED(one)) one = PSGetPropertyDescription(&key, &IID_IPropertyDescription, (void **)&d);
+            PROPDESC_TYPE_FLAGS tf = 0;
+            if (SUCCEEDED(one)) d->lpVtbl->GetTypeFlags(d, PDTF_MASK_ALL, &tf);
+            PROPVARIANT v;
+            PropVariantInit(&v);
+            if (SUCCEEDED(one)) one = value_of(d, value, (tf & PDTF_MULTIPLEVALUES) != 0, &v);
+            if (SUCCEEDED(one)) one = store->lpVtbl->SetValue(store, &key, &v);
+            if (SUCCEEDED(one)) any = true;
+            PropVariantClear(&v);
+            if (d) d->lpVtbl->Release(d);
+            char line[200];
+            int n = SUCCEEDED(one) ? rubraview_fmt(line, sizeof line, "ok\t{}\n", PROVEN_ARG(rows[r].name))
+                                   : rubraview_fmt(line, sizeof line, "fail\t{}\t{:x}\n", PROVEN_ARG(rows[r].name), PROVEN_ARG((uint32_t)one));
+            if (n > 0) answer_add(&a, line, (size_t)n < sizeof line ? (size_t)n : sizeof line - 1);
+            if (FAILED(one)) code = 12;
+        }
+        if (store && any) {
+            HRESULT c = store->lpVtbl->Commit(store);
+            hlog("commit", c);
+            if (FAILED(c)) {
+                char line[64];
+                int n = rubraview_fmt(line, sizeof line, "fail\tcommit\t{:x}\n", PROVEN_ARG((uint32_t)c));
+                if (n > 0) answer_add(&a, line, (size_t)n);
+                code = 13;
+            }
+        }
+        if (store) store->lpVtbl->Release(store);
+    }
+    answer_add(&a, "", 0);
+    answer_put(list_file, &a);
+    rubraview_free(a.buf);
+    return code;
+}
+
+/* Windows' own properties of the files, or its Open with box, then stay while it is up. */
+static int show_windows_box(const WCHAR *kind, WCHAR **paths, size_t count, int32_t x, int32_t y) {
+    HWND hwnd = make_window(x, y);
+    hlog("foreground at once", SetForegroundWindow(hwnd));
+    hold_process();
+    int code = 0;
+    if (rubraview_wcmp(kind, L"openwith") == 0) {
+        OPENASINFO oai = { .pcszFile = paths[0], .oaifInFlags = OAIF_ALLOW_REGISTRATION | OAIF_REGISTER_EXT | OAIF_EXEC };
+        HRESULT hr = SHOpenWithDialog(hwnd, &oai);
+        hlog("SHOpenWithDialog", hr);
+        if (FAILED(hr) && hr != HRESULT_FROM_WIN32(ERROR_CANCELLED)) code = 14;
+    } else if (count == 1) {
+        BOOL ok = SHObjectProperties(hwnd, SHOP_FILEPATH, paths[0], NULL);
+        hlog("SHObjectProperties", ok);
+        if (!ok) code = 15;
+    } else {
+        items_t it;
+        IDataObject *data = NULL;
+        if (items_make(&it, paths, count) &&
+            SUCCEEDED(it.parent->lpVtbl->GetUIObjectOf(it.parent, hwnd, it.count, it.child, &IID_IDataObject, NULL, (void **)&data)) && data) {
+            HRESULT hr = SHMultiFileProperties(data, 0);
+            hlog("SHMultiFileProperties", hr);
+            if (FAILED(hr)) code = 15;
+            data->lpVtbl->Release(data);
+        } else {
+            code = 15;
+        }
+        items_free(&it);
+    }
+    linger(hwnd);
+    if (hwnd) DestroyWindow(hwnd);
+    return code;
+}
+
 int rubraview_pal_shellmenu_host_main(const wchar_t *kind, const wchar_t *list_file, const wchar_t *x, const wchar_t *y) {
     hlog_open();
     if (FAILED(OleInitialize(NULL))) { hlog("OleInitialize failed", 0); return 2; }   /* Copy and Cut put the files on the clipboard through OLE */
@@ -555,6 +810,9 @@ int rubraview_pal_shellmenu_host_main(const wchar_t *kind, const wchar_t *list_f
     int code = 1;
     if (count > 0) {
         if (rubraview_wcmp_n(kind, L"verb:", 5, false) == 0) code = run_verb(kind + 5, paths, count, px, py);
+        else if (rubraview_wcmp(kind, L"props-read") == 0) code = props_read(paths[0], list_file);   /* RV-281 */
+        else if (rubraview_wcmp(kind, L"props-write") == 0) code = props_write(paths, count, list_file);
+        else if (rubraview_wcmp(kind, L"properties") == 0 || rubraview_wcmp(kind, L"openwith") == 0) code = show_windows_box(kind, paths, count, px, py);
         else code = show_menu(kind, paths, count, px, py);
     }
     for (size_t i = 0; i < count; ++i) rubraview_free(paths[i]);

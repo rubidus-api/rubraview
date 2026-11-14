@@ -426,7 +426,20 @@ that fails cannot take the viewer with it. `Shift` with the right click
 opens the classic menu at once, with the items Explorer shows only with
 `Shift`. In the open-file screen they act on what is picked, on a page
 inside an archive the archive. Settings › General › Explorer's items in
-the right-click list turns them off. The mouse's back and
+the right-click list turns them off.
+
+**Properties** in the list (or `Alt+Enter`) opens Rubraview's own
+properties window for the file. **General** shows its type, the program
+that opens it (**Change...** picks another), where it is, its size and
+size on disk, a folder's contents, its dates and its attributes:
+read-only, hidden and the advanced ones (ready for archiving, indexed,
+compressed, encrypted); a file downloaded from another computer has
+**Unblock**. **Rename...** gives the name to type, as `Ctrl+M`. **Details**
+lists what Windows keeps about the file (title, rating, tags, authors,
+camera, the picture's and the film's facts); click a value to type
+another, or a star for the rating. **Apply** or **OK** writes what was
+changed; **Windows properties** opens Windows' own window. Picked
+several in the open-file screen, the window sums them. The mouse's back and
 forward buttons turn the page, a middle click goes to real size and back,
 the wheel turns the page on a picture that fits the window (away from
 you the one before, towards you the next) and brings up the filmstrip
@@ -2114,7 +2127,8 @@ listed under a later heading only means that while that is on screen.
 
 | Keys | What it does |
 |---|---|
-| `F`, `Alt+Enter` | Full screen |
+| `F`, `Enter` | Full screen |
+| `Alt+Enter` | Rubraview's own properties window of the file (General, Details; Windows' own a button away) |
 | `T` | Open or close the Toolbar |
 | `Shift+T` | Pin the Toolbar open |
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |
@@ -2171,7 +2185,7 @@ listed under a later heading only means that while that is on screen.
 
 | Keys | What it does |
 |---|---|
-| `PageDown`, `Space`, `Enter`, `.`, `Right` | Next page |
+| `PageDown`, `Space`, `.`, `Right` | Next page |
 | `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | Previous page |
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |

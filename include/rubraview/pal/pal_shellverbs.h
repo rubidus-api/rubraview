@@ -38,6 +38,24 @@ typedef enum rubraview_shellmenu_kind {
 bool rubraview_pal_shellmenu_show(rubraview_shellmenu_kind_t kind, const char *const *paths, size_t count,
                                   void *native_window, double x, double y);
 
+/*
+ * RV-281: work the child does and answers: "props-read" (the Details tab's rows of the first file, as
+ * rubraview_props_rows_read reads them) and "props-write" (`input`: change lines, rubraview_props_change_line, for every
+ * file; the answer one line a change, "ok" or "fail<TAB>name<TAB>hresult"). Started, not waited for; `ticket` asks for
+ * the answer later.
+ */
+bool rubraview_pal_shellhost_ask(const char *kind, const char *const *paths, size_t count, proven_u8str_view_t input,
+                                 uint32_t *ticket);
+
+/** 1 and the answer (from the heap, rubraview_free) when it has come; 0 while it has not. */
+int rubraview_pal_shellhost_answer(uint32_t ticket, char **text, size_t *length);
+
+/** The ticket's files removed (its answer will not be read). */
+void rubraview_pal_shellhost_forget(uint32_t ticket);
+
+/** RV-281: Windows' own window from the child: "properties" (the files' properties), "openwith" (Open with's box). */
+bool rubraview_pal_shellhost_show(const char *kind, const char *const *paths, size_t count, void *native_window);
+
 /** Whether Shift is down with the input being handled now (a right click with it opens the classic menu at once). */
 bool rubraview_pal_shellmenu_shift_held(void);
 

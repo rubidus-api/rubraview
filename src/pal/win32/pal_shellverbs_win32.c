@@ -99,17 +99,39 @@ size_t rubraview_pal_shellverbs_list(const char *path, bool is_folder, bool shif
 
 /* ---- the child ---- */
 
-static bool start_child(const WCHAR *kind, const char *const *paths, size_t count, int32_t x, int32_t y) {
-    WCHAR exe[MAX_PATH * 2], temp[MAX_PATH], list[MAX_PATH * 2];
-    DWORD got = GetModuleFileNameW(NULL, exe, MAX_PATH * 2);
-    if (got == 0 || got >= MAX_PATH * 2) return false;
+/* The list file of a request: the temp folder's rubraview-menu-<pid>-<serial>.txt; its input and answer beside it. */
+static bool list_path(uint32_t serial, const WCHAR *suffix, WCHAR *list, size_t cap) {
+    WCHAR temp[MAX_PATH];
     if (GetTempPathW(MAX_PATH, temp) == 0) return false;
     char name8[96];
-    static LONG serial = 0;
-    if (rubraview_fmt(name8, sizeof name8, "rubraview-menu-{}-{}.txt", PROVEN_ARG((uint32_t)GetCurrentProcessId()),
-                      PROVEN_ARG((int32_t)InterlockedIncrement(&serial))) < 0) return false;
+    if (rubraview_fmt(name8, sizeof name8, "rubraview-menu-{}-{}.txt", PROVEN_ARG((uint32_t)GetCurrentProcessId()), PROVEN_ARG(serial)) < 0) return false;
     WCHAR wname[96];
-    if (!to_wide(name8, wname, 96) || !rubraview_wcopy(list, MAX_PATH * 2, temp) || !rubraview_wcat(list, MAX_PATH * 2, wname)) return false;
+    return to_wide(name8, wname, 96) && rubraview_wcopy(list, cap, temp) && rubraview_wcat(list, cap, wname) &&
+           (!suffix || rubraview_wcat(list, cap, suffix));
+}
+
+static bool write_whole(const WCHAR *path, const void *bytes, size_t n) {
+    HANDLE f = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, NULL);
+    if (f == INVALID_HANDLE_VALUE) return false;
+    DWORD wrote = 0;
+    bool ok = n == 0 || (WriteFile(f, bytes, (DWORD)n, &wrote, NULL) && wrote == (DWORD)n);
+    CloseHandle(f);
+    return ok;
+}
+
+static bool start_child_with(const WCHAR *kind, const char *const *paths, size_t count, int32_t x, int32_t y,
+                             proven_u8str_view_t input, uint32_t *out_serial) {
+    WCHAR exe[MAX_PATH * 2], list[MAX_PATH * 2];
+    DWORD got = GetModuleFileNameW(NULL, exe, MAX_PATH * 2);
+    if (got == 0 || got >= MAX_PATH * 2) return false;
+    static LONG serial = 0;
+    uint32_t mine = (uint32_t)InterlockedIncrement(&serial);
+    if (out_serial) *out_serial = mine;
+    if (!list_path(mine, NULL, list, MAX_PATH * 2)) return false;
+    if (input.size > 0) {
+        WCHAR in[MAX_PATH * 2];
+        if (!list_path(mine, L".in", in, MAX_PATH * 2) || !write_whole(in, input.ptr, input.size)) return false;
+    }
     /* The files, one a line (rubraview_shellreq_split_lines reads it back) */
     HANDLE f = CreateFileW(list, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, NULL);
     if (f == INVALID_HANDLE_VALUE) return false;
@@ -137,6 +159,55 @@ static bool start_child(const WCHAR *kind, const char *const *paths, size_t coun
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);   /* not waited for: the viewer forgets it */
     return true;
+}
+
+static bool start_child(const WCHAR *kind, const char *const *paths, size_t count, int32_t x, int32_t y) {
+    return start_child_with(kind, paths, count, x, y, (proven_u8str_view_t){0}, NULL);
+}
+
+bool rubraview_pal_shellhost_ask(const char *kind, const char *const *paths, size_t count, proven_u8str_view_t input,
+                                 uint32_t *ticket) {
+    WCHAR wkind[64];
+    if (!kind || !paths || count == 0 || !to_wide(kind, wkind, 64)) return false;
+    return start_child_with(wkind, paths, count, 0, 0, input, ticket);
+}
+
+int rubraview_pal_shellhost_answer(uint32_t ticket, char **text, size_t *length) {
+    WCHAR out[MAX_PATH * 2];
+    *text = NULL;
+    *length = 0;
+    if (!list_path(ticket, L".out", out, MAX_PATH * 2)) return 0;
+    HANDLE f = CreateFileW(out, GENERIC_READ, 0, NULL, OPEN_EXISTING, 0, NULL);
+    if (f == INVALID_HANDLE_VALUE) return 0;
+    LARGE_INTEGER size = {0};
+    char *buf = NULL;
+    DWORD got = 0;
+    if (GetFileSizeEx(f, &size) && size.QuadPart >= 0 && size.QuadPart < 16 * 1024 * 1024 &&
+        (buf = (char *)rubraview_alloc((size_t)size.QuadPart + 1)) != NULL &&
+        (size.QuadPart == 0 || ReadFile(f, buf, (DWORD)size.QuadPart, &got, NULL))) {
+        buf[got] = '\0';
+    }
+    CloseHandle(f);
+    DeleteFileW(out);
+    if (!buf) return 0;
+    *text = buf;
+    *length = got;
+    return 1;
+}
+
+void rubraview_pal_shellhost_forget(uint32_t ticket) {
+    WCHAR p[MAX_PATH * 2];
+    if (list_path(ticket, L".out", p, MAX_PATH * 2)) DeleteFileW(p);
+    if (list_path(ticket, L".in", p, MAX_PATH * 2)) DeleteFileW(p);
+}
+
+bool rubraview_pal_shellhost_show(const char *kind, const char *const *paths, size_t count, void *native_window) {
+    WCHAR wkind[64];
+    if (!kind || !paths || count == 0 || !to_wide(kind, wkind, 64)) return false;
+    POINT at = {0};
+    RECT r;
+    if (native_window && GetWindowRect((HWND)native_window, &r)) { at.x = r.left + 40; at.y = r.top + 40; } else GetCursorPos(&at);
+    return start_child(wkind, paths, count, (int32_t)at.x, (int32_t)at.y);
 }
 
 bool rubraview_pal_shellmenu_show(rubraview_shellmenu_kind_t kind, const char *const *paths, size_t count,

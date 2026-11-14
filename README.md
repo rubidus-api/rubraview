@@ -60,7 +60,8 @@ ships with, so it cannot drift from them.
 
 | Keys | What it does |
 |---|---|
-| `F`, `Alt+Enter` | Full screen |
+| `F`, `Enter` | Full screen |
+| `Alt+Enter` | Rubraview's own properties window of the file (General, Details; Windows' own a button away) |
 | `T` | Open or close the Toolbar |
 | `Shift+T` | Pin the Toolbar open |
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |
@@ -117,7 +118,7 @@ ships with, so it cannot drift from them.
 
 | Keys | What it does |
 |---|---|
-| `PageDown`, `Space`, `Enter`, `.`, `Right` | Next page |
+| `PageDown`, `Space`, `.`, `Right` | Next page |
 | `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | Previous page |
 | `Home`, `Ctrl+Home` | First page |
 | `End`, `Ctrl+End` | Last page |

@@ -47,6 +47,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "explorer_menu", "Explorer's menu of the file (Windows 11's, its packages' items too), from a process of its own" },
     { "explorer_menu_classic", "Explorer's classic menu of the file (Show more options: shell extensions, Send to, Open with)" },
     { "extract_subtitles", "Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed" },
+    { "file_properties", "Rubraview's own properties window of the file (General, Details; Windows' own a button away)" },
     { "film_adjust", "Adjust the film: light, colour, a brightness curve, blur, sharpening and the upscaler, as it plays (Shift+E)" },
     { "first_page", "First page" },
     { "fit_cycle", "Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from" },

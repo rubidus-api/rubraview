@@ -12,7 +12,10 @@ const char *rubraview_default_keymap(void) {
     /* Windows, bars and the program's own (§3.7.2). D-13: every binding sits in a section (INI refuses a key
        before the first one) and every value is a quoted string (TOML needs quotes). */
     "[common]\n"
-    "toggle_fullscreen = \"F, Alt+Enter\"\n"
+    /* RV-281 (owner, 2026-11-14: "Alt+Enter가 파일의 속성 보기 ... Alt+Enter 대신에 다른 키가 전체 화면 키가 되었으면 좋겠어요.
+       좀 쉬운 단축키로요"): full screen on F and Enter (Honeyview's key); Alt+Enter, the file's properties, as Explorer's. */
+    "toggle_fullscreen = \"F, Enter\"\n"
+    "file_properties = \"Alt+Enter\"\n"
     "toggle_toolbox = \"T\"\n"
     /* RFC-0002 Q6: pin it open, or give it a window of its own. */
     "toggle_toolbox_pin = \"Shift+T\"\n"
@@ -103,7 +106,7 @@ const char *rubraview_default_keymap(void) {
        and in an animation or a film its frames ([playback]). */
     /* RV-214 (owner, 2026-10-31: "좌우키는 시간 이동이나 다음이전 페이지로 넘기는 기능으로"): Right and Left turn the page
        again; a film's own (seek) are asked first. */
-    "next_page = \"PageDown, Space, Enter, Period, Right\"\n"
+    "next_page = \"PageDown, Space, Period, Right\"\n"   /* RV-281: Enter is full screen */
     "prev_page = \"PageUp, Backspace, Shift+Space, Comma, Left\"\n"
     "first_page = \"Home, Ctrl+Home\"\n"
     "last_page = \"End, Ctrl+End\"\n"
@@ -263,6 +266,7 @@ const char *rubraview_default_keymap_retired(void) {
     "quit = \"Escape\"\n"   /* RV-245: Esc minimises and mutes now; Ctrl+Q quits */
     "minimize_mute = \"Escape\"\n"   /* RV-276: Esc closes, then quits (close_or_quit); Backquote minimises and mutes */
     "toggle_fullscreen = \"F, F11, Alt+Enter\"\n"
+    "toggle_fullscreen = \"F, Alt+Enter\"\n"   /* RV-281: Alt+Enter is the file's properties, Enter full screen */
     "open_settings = \"F10, Ctrl+Comma\"\n"
     "toggle_help = \"F1\"\n"
     "[file]\n"
@@ -286,6 +290,7 @@ const char *rubraview_default_keymap_retired(void) {
     /* RV-231: the help as RV-211 left it, before F1 came back beside ? (a retired binding is matched by action) */
     "toggle_help = \"Shift+Slash\"\n"
     "next_page = \"PageDown, Space, Enter, Period\"\n"
+    "next_page = \"PageDown, Space, Enter, Period, Right\"\n"   /* RV-281: before Enter went to full screen */
     "prev_page = \"PageUp, Backspace, Shift+Space, Comma\"\n"
     "skip_forward = \"Shift+Right, Ctrl+PageDown\"\n"
     "skip_backward = \"Shift+Left, Ctrl+PageUp\"\n"

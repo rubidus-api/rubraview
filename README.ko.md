@@ -59,7 +59,8 @@
 
 | 키 | 하는 일 |
 |---|---|
-| `F`, `Alt+Enter` | 전체 화면 |
+| `F`, `Enter` | 전체 화면 |
+| `Alt+Enter` | 파일의 루브라뷰 속성 창(일반, 자세히; 윈도 속성 창은 버튼으로) |
 | `T` | 툴바 열기/닫기 |
 | `Shift+T` | 툴바 고정 |
 | `Ctrl+T` | 툴바를 따로 창으로/되돌리기 |
@@ -116,7 +117,7 @@
 
 | 키 | 하는 일 |
 |---|---|
-| `PageDown`, `Space`, `Enter`, `.`, `Right` | 다음 장 |
+| `PageDown`, `Space`, `.`, `Right` | 다음 장 |
 | `PageUp`, `Backspace`, `Shift+Space`, `,`, `Left` | 이전 장 |
 | `Home`, `Ctrl+Home` | 첫 장 |
 | `End`, `Ctrl+End` | 마지막 장 |

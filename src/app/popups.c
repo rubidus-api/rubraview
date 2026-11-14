@@ -163,6 +163,14 @@ static void ctx_choose(app_state_t *app, int32_t row) {
         explorer_verb_run(app, (size_t)rows[row].verb);
         return;
     }
+    if (proven_u8str_view_eq(rows[row].action, PROVEN_LIT("file_properties"))) {   /* RV-281: the files the list is about */
+        bool row_of_list = app->ctx_list == rubraview_boxes_context(rubraview_boxes_document(), PROVEN_LIT("listrow"));
+        int32_t origin = row_of_list ? PROPS_FROM_LIST : app->picker_open ? PROPS_FROM_PICKER : PROPS_FROM_PAGE;
+        size_t index = app->picker_open ? app->picker_ctx_index : app->list_ctx_row;
+        ctx_close(app);
+        props_from_list(app, origin, index);
+        return;
+    }
     if (ctx_is_explorer_row(rows[row].action)) {   /* Explorer's own menu, where the list was */
         rubraview_window_t *window = ctx_window(app);
         double x = app->ctx_x, y = app->ctx_y;
