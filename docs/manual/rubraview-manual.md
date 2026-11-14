@@ -1402,7 +1402,8 @@ where it will go — and a checked row takes every other checked row along.
 Under the title, **Add** puts files you pick in the open dialog at the
 end of the list, **Del** takes the checked rows out (the files themselves
 stay on the disk), **Save** writes the list to a file (`.m3u8`, or
-`.rvlist`), **Load** opens such a file, **Edit to all** writes an edited
+`.rvlist`; the box opens in the folder of the file picked in the list,
+else of the one on screen), **Load** opens such a file, **Edit to all** writes an edited
 copy of every picture (see Edit), and **Rel** / **Abs** says how a
 saved list names its files: from the list's own folder, so that the folder
 can be moved or copied whole, or by their whole paths (Settings > Files >

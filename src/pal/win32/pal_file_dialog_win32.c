@@ -24,10 +24,26 @@ static proven_u8str_view_t win32_wstr_to_u8str(proven_arena_t *arena, const WCHA
     };
 }
 
+/* IShellItem's IID, here so the dialog needs no uuid library. */
+static const GUID RV_IID_IShellItem_FD = {0x43826D1E, 0xE718, 0x42EE, {0xBC, 0x55, 0xA1, 0xE2, 0x61, 0xC3, 0x7B, 0xFE}};
+
+/* RV-280: the folder the dialog starts in, over the one Windows remembers; one not there is left to Windows. */
+static void apply_folder(IFileDialog *pfd, const rubraview_file_dialog_opts_t *opts) {
+    if (!opts || !opts->default_dir || !opts->default_dir[0]) return;
+    WCHAR wdir[1024];
+    if (MultiByteToWideChar(CP_UTF8, 0, opts->default_dir, -1, wdir, 1024) <= 0) return;
+    IShellItem *folder = NULL;
+    if (SUCCEEDED(SHCreateItemFromParsingName(wdir, NULL, &RV_IID_IShellItem_FD, (void **)&folder)) && folder) {
+        IFileDialog_SetFolder(pfd, folder);
+        IShellItem_Release(folder);
+    }
+}
+
 /* The title, the file-type list and — for a save — the extension added
    when the reader types a name without one (the first filter's). */
 static void apply_title_and_filters(IFileDialog *pfd, const rubraview_file_dialog_opts_t *opts, bool save) {
     if (!opts) return;
+    apply_folder(pfd, opts);
     if (opts->title) {
         WCHAR wtitle[256];
         if (MultiByteToWideChar(CP_UTF8, 0, opts->title, -1, wtitle, 256) > 0) IFileDialog_SetTitle(pfd, wtitle);

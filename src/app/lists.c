@@ -345,6 +345,33 @@ static const rubraview_file_filter_t LIST_FILTERS[] = {
     { "Playlist (*.m3u8)", "*.m3u8" }, { "Rubraview list (*.rvlist)", "*.rvlist" },
 };
 
+/* RV-280 (owner, 2026-11-14: "재생목록 저장할 때 기본적으로 현재 선택된 파일과 같은 경로에서 시작"): the folder of the
+   row picked in the list, else of the file on screen (in a book of the list, the book's); a page inside an archive,
+   the archive's folder. Empty when there is none (a station, nothing there): Windows' own then. */
+static const char *list_save_dir(app_state_t *app, char *buf, size_t cap) {
+    buf[0] = '\0';
+    proven_u8str_view_t path = PROVEN_LIT("");
+    if (app->book_active && app->book_list) {
+        if (app->book_row < app->book_list_n) path = app->book_list[app->book_row].path;
+    } else {
+        int32_t at = app->files_selected >= 0 ? app->files_selected : current_page_index(app);
+        if (at >= 0 && (size_t)at < page_count(app)) path = app->source.pages[at].path;
+    }
+    if (path.size == 0 || is_station_path(path)) return buf;
+    proven_u8str_view_t d = rubraview_path_dirname(rubraview_pal_fs_absolute(app->arena, path));
+    for (int up = 0; up < 32 && d.size > 0; ++up) {   /* past an archive's inner folders to one on disk */
+        rubraview_fs_entry_t e = {0};
+        if (rubraview_pal_fs_stat(app->arena, d, &e) && e.is_directory) {
+            if (d.size < cap) { proven_sys_mem_copy(buf, d.ptr, d.size); buf[d.size] = '\0'; }
+            return buf;
+        }
+        proven_u8str_view_t parent = rubraview_path_dirname(d);
+        if (parent.size >= d.size) break;
+        d = parent;
+    }
+    return buf;
+}
+
 static void list_save(app_state_t *app) {
     /* RV-276: in a book of the list, the list it came from (its rows, the book's own path among them) */
     bool outer = app->book_active && app->book_list;
@@ -358,8 +385,10 @@ static void list_save(app_state_t *app) {
         for (size_t i = 0; i < count; ++i)
             rows[i] = outer ? app->book_list[i] : (rubraview_fs_entry_t){ .name = app->source.pages[i].name, .path = app->source.pages[i].path };
     }
+    char start_dir[1024];
     rubraview_file_dialog_opts_t opts = {
-        .title = T("Save the list"), .filters = LIST_FILTERS, .filter_count = 2,
+        .title = T("Save the list"), .default_dir = list_save_dir(app, start_dir, sizeof start_dir),
+        .filters = LIST_FILTERS, .filter_count = 2,
         .parent_window_handle = rubraview_pal_window_native_handle(app->window),
     };
     rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_save(app->arena, &opts);
