@@ -200,6 +200,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
             app->titlebar_armed = RUBRAVIEW_TITLEBAR_NONE;   /* RV-257: a new press; titlebar_click arms it again if it is X, _, [] */
+            if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT) app->edge_press.on = false;   /* RV-285: a press whose release was lost */
             if (chooser_press(app, CHOOSE_IN_MAIN, event->mouse.x, event->mouse.y)) break;   /* 1.24.0 */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && progress_card_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-268 */
             if (volpop_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-237 */

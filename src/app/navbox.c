@@ -37,6 +37,7 @@ void navbox_tick(app_state_t *app) {
     bool allowed = navbox_allowed(app, false);
     bool in_middle = allowed && in_middle_at(app, px, py);
     bool in_box = app->navbox_shown && rubraview_rect_contains(app->navbox.box, px, py);
+    if (app->navbox_shown && app->navbox.media != (app->media != NULL)) app->navbox_shown = false;   /* a film after a picture, or back: a click opens the right one */
     if (in_middle || in_box) app->navbox_near_at = now;
     app->navbox_shown = rubraview_navbox_keep(app->navbox_shown, allowed, in_middle || in_box, now - app->navbox_near_at);
     app->navbox_hint = rubraview_navbox_hint(allowed, app->navbox_shown, in_middle,
