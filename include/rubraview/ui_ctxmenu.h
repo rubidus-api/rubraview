@@ -53,32 +53,40 @@ int32_t rubraview_ctxmenu_row_at(rubraview_rect_t frame, const rubraview_ctxmenu
 int32_t rubraview_ctxmenu_step(const bool *enabled, size_t count, int32_t from, int direction);
 
 /*
- * RV-205 (owner, 2026-10-31: "화면 우클릭 컨텍스트 메뉴의 모든 항목들이 타이틀바 좌측의 메뉴에도 ... 2열로 각 항목들
- * 가로로 길쭉한 버튼으로"): the title bar's ☰ as a grid of wide buttons in `columns` columns. Each group
- * starts a line of its own and fills it left to right; a room between two groups. The frame's top
- * left is (x, y); a window too small for it gets the grid's top left.
+ * RV-287 (owner, 2026-11-15: "창 모양과 크기에 맞게 ... 각 항목이 필요한 만큼의 가로폭 ... html의 inline 요소처럼 가로로 길게
+ * 나열 ... 오른쪽 끝에서 워드랩"; it was RV-205's two columns): the title bar's ☰ as buttons each as wide as its
+ * words, laid left to right and wrapped at `max_width`, like inline elements. Two buttons of a group are `gap`
+ * apart, two groups `group_gap`; a group that would break over the line's end starts the next line when it fits
+ * on one; a button wider than the line is cut to it. Every line is `cell_height` high, `gap` below the last.
  */
-typedef struct rubraview_gridmenu_metrics {
-    double  cell_width, cell_height;
-    double  gap;        /* between two groups' lines; also between two columns */
-    double  pad;        /* inside the frame, all round */
-    int32_t columns;
-} rubraview_gridmenu_metrics_t;
+typedef struct rubraview_flowmenu_metrics {
+    double cell_height;
+    double gap;         /* between two buttons of a group, and between two lines */
+    double group_gap;   /* between two groups on one line */
+    double pad;         /* inside the frame, all round */
+} rubraview_flowmenu_metrics_t;
 
-rubraview_rect_t rubraview_gridmenu_frame(double x, double y, const rubraview_gridmenu_metrics_t *metrics,
-                                          const int32_t *groups, size_t count);
-/** Cell `index`'s place inside `frame`. */
-rubraview_rect_t rubraview_gridmenu_cell(rubraview_rect_t frame, const rubraview_gridmenu_metrics_t *metrics,
-                                         const int32_t *groups, size_t index);
-/** The cell under a point, or -1. */
-int32_t rubraview_gridmenu_at(rubraview_rect_t frame, const rubraview_gridmenu_metrics_t *metrics,
-                              const int32_t *groups, size_t count, double x, double y);
 /**
- * Up and Down: the nearest cell that can act in the same column above or below `from` (-1: the first
- * that can act); `from` when there is none that way.
+ * Lays out `count` buttons of `widths` into `out_cells` (may be NULL) from the frame's top left (x, y) and
+ * returns the frame round them: as wide as its widest line, as high as all its lines.
  */
-int32_t rubraview_gridmenu_step_vertical(rubraview_rect_t frame, const rubraview_gridmenu_metrics_t *metrics,
-                                         const int32_t *groups, const bool *enabled, size_t count, int32_t from, int direction);
+rubraview_rect_t rubraview_flowmenu_layout(double x, double y, double max_width, const rubraview_flowmenu_metrics_t *metrics,
+                                           const double *widths, const int32_t *groups, size_t count, rubraview_rect_t *out_cells);
+/** The button under a point, or -1. */
+int32_t rubraview_flowmenu_at(const rubraview_rect_t *cells, size_t count, double x, double y);
+/**
+ * Up and Down: on the nearest line above or below `from` that has a button that can act, the one whose
+ * middle is nearest `from`'s (-1: the first that can act); `from` when there is none that way.
+ */
+int32_t rubraview_flowmenu_step_vertical(const rubraview_rect_t *cells, const bool *enabled, size_t count, int32_t from, int direction);
+/**
+ * A frame higher than the room scrolls by whole lines (`pitch` = cell_height + gap): `scroll` brought into
+ * [0, the last line at the bottom] on a whole line. `content` is the frame's height, `view` the height shown:
+ * pad * 2 + a whole number of pitches.
+ */
+double rubraview_flowmenu_scroll_clamp(double scroll, double content, double view, double pitch);
+/** The scroll that shows a button whose top is `top` below the frame's (unscrolled) top, moving as little as it can. */
+double rubraview_flowmenu_scroll_to(double scroll, double top, double content, double view, double pitch, double pad);
 
 #ifdef __cplusplus
 }

@@ -6,46 +6,58 @@
 
 /* ---- 1.25.0: the title bar's ☰ pull-down (owner, 2026-10-20: "타이틀바 고정(Pin), 정렬align, 새 창 열기,
    파일 열기, 최근 파일, 일괄 처리, 인쇄, 재생목록Playlist, 설정Settings, 도움말Help") ---- */
-static const struct { const char *words, *action; } TMENU[] = {
+static const struct { const char *words, *action; int32_t group; } TMENU[] = {
     /* RV-246 (owner, 2026-11-07: "메인메뉴에서 전체화면 끔이랑 제목표시줄고정 끔은 없애고 대신 맨 마지막에 종료 항목 넣어줘요. 그리고
        각 항목 옆에 작은 글씨로 단축키"): the title bar's pin is its P button; Quit is the last row (tmenu_rows) */
-    { N_("Align the Floating Widget"), "align_widget" },
-    { N_("New window"), "new_window" },
-    { N_("Open file"), "open_picker" },
-    { N_("Recent files..."), "open_recent_list" },
-    { N_("Batch"), "open_batch" },
-    { N_("Print..."), "print" },
-    /* RV-235 (owner, 2026-11-07: "특정 폴더로 복사/이동 항목을 타이틀바 왼쪽 메인메뉴에 항목으로 넣어주세요") */
-    { N_("Copy to folder"), "copy_to_folder" },
-    { N_("Move to folder"), "move_to_folder" },
-    { N_("Copy to another folder..."), "copy_to_other_folder" },
-    { N_("Move to another folder..."), "move_to_other_folder" },
-    { N_("Playlist"), "toggle_playlist" },
-    { N_("Settings"), "open_settings" },
-    { N_("Log"), "open_log" },   /* RV-256 */
-    { N_("Help"), "toggle_help" },
+    { N_("Align the Floating Widget"), "align_widget", 0 },
+    { N_("New window"), "new_window", 0 },
+    { N_("Open file"), "open_picker", 0 },
+    { N_("Recent files..."), "open_recent_list", 0 },
+    { N_("Batch"), "open_batch", 0 },
+    { N_("Print..."), "print", 0 },
+    /* RV-235 (owner, 2026-11-07: "특정 폴더로 복사/이동 항목을 타이틀바 왼쪽 메인메뉴에 항목으로 넣어주세요"); RV-287 (owner,
+       2026-11-15: "폴더로복사 폴더로이동 분류 항목은 하나로 묶여야"): one group with Classify */
+    { N_("Copy to folder"), "copy_to_folder", 1 },
+    { N_("Move to folder"), "move_to_folder", 1 },
+    { N_("Copy to another folder..."), "copy_to_other_folder", 1 },
+    { N_("Move to another folder..."), "move_to_other_folder", 1 },
+    { N_("Classify..."), "toggle_classify", 1 },
+    { N_("Playlist"), "toggle_playlist", 2 },
+    { N_("Settings"), "open_settings", 2 },
+    { N_("Log"), "open_log", 2 },   /* RV-256 */
+    { N_("Help"), "toggle_help", 2 },
 };
 #define TMENU_COUNT ((int32_t)(sizeof(TMENU) / sizeof(TMENU[0])))
+#define TMENU_GROUPS 3
 
-/* RV-205 (owner, 2026-10-31: "화면 우클릭 컨텍스트 메뉴의 모든 항목들이 타이틀바 좌측의 메뉴에도 들어가게 ... 2열로 각 항목들
-   가로로 길쭉한 버튼으로"): its own rows, then the right click's list for what is on screen, all of it (the
-   right click leaves out what the Toolbar has; this does not), less what its own rows already do; in two
-   columns of wide buttons, each group on lines of its own (rubraview_gridmenu_*). */
+/* RV-287 (owner, 2026-11-15: "이 메뉴에서 슬라이드 쇼와 그림 보정은 불필요한 항목이고, 탐색기 메뉴와 구 탐색기 메뉴 항목은
+   파일관리 모드에서 우클릭해서 떠야 할 항목이니 사라지게"): the right click's items the ☰ leaves out. */
+static const char *const TMENU_NOT[] = { "toggle_slideshow", "open_edit", "explorer_menu", "explorer_menu_classic" };
+
+/* RV-205 (owner, 2026-10-31: "화면 우클릭 컨텍스트 메뉴의 모든 항목들이 타이틀바 좌측의 메뉴에도 들어가게"): its own rows, then
+   the right click's list for what is on screen (the right click leaves out what the Toolbar has; this does not),
+   less what its own rows already do and TMENU_NOT; RV-287: buttons as wide as their words, laid like inline
+   elements and wrapped at the window's right, scrolled by whole lines when the window is too low
+   (rubraview_flowmenu_*). */
 #define TMENU_MAX (TMENU_COUNT + RUBRAVIEW_CONTEXT_MAX_ITEMS + 1)
 typedef struct tmenu_row { proven_u8str_view_t words, action; int32_t group; } tmenu_row_t;
+
+static bool tmenu_left_out(proven_u8str_view_t action) {
+    for (int32_t k = 0; k < TMENU_COUNT; ++k) if (proven_u8str_view_eq(action, cstr(TMENU[k].action))) return true;
+    for (size_t k = 0; k < sizeof(TMENU_NOT) / sizeof(TMENU_NOT[0]); ++k) if (proven_u8str_view_eq(action, cstr(TMENU_NOT[k]))) return true;
+    return false;
+}
 
 static size_t tmenu_rows(const app_state_t *app, tmenu_row_t *rows) {
     size_t n = 0;
     for (int32_t i = 0; i < TMENU_COUNT; ++i)
-        rows[n++] = (tmenu_row_t){ rubraview_tr_u8(cstr(TMENU[i].words)), cstr(TMENU[i].action), 0 };
+        rows[n++] = (tmenu_row_t){ rubraview_tr_u8(cstr(TMENU[i].words)), cstr(TMENU[i].action), TMENU[i].group };
     const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
     const rubraview_toolbox_profile_t *list = rubraview_boxes_context(doc, cstr(toolbox_profile_name(app)));
     for (int32_t i = 0; list && i < list->tile_count && n < TMENU_MAX; ++i) {
         const rubraview_box_tile_t *item = &doc->context_items[list->first_tile + i];
-        bool own = false;
-        for (int32_t k = 0; k < TMENU_COUNT && !own; ++k) own = proven_u8str_view_eq(item->action, cstr(TMENU[k].action));
-        if (own) continue;
-        rows[n++] = (tmenu_row_t){ rubraview_tr_ctx_u8("menu", item->caption), item->action, item->group + 1 };
+        if (tmenu_left_out(item->action)) continue;
+        rows[n++] = (tmenu_row_t){ rubraview_tr_ctx_u8("menu", item->caption), item->action, item->group + TMENU_GROUPS };
     }
     if (n < TMENU_MAX) rows[n] = (tmenu_row_t){ TU8("Quit"), PROVEN_LIT("quit"), (n ? rows[n - 1].group : 0) + 1 }, n++;   /* RV-246: last */
     return n;
@@ -66,37 +78,90 @@ typedef struct tmenu_layout {
     tmenu_row_t rows[TMENU_MAX];
     int32_t groups[TMENU_MAX];
     bool enabled[TMENU_MAX];
-    rubraview_gridmenu_metrics_t m;
-    rubraview_rect_t frame;
+    double widths[TMENU_MAX];
+    rubraview_rect_t cells[TMENU_MAX];   /* where drawn, the scroll taken off */
+    rubraview_flowmenu_metrics_t m;
+    rubraview_rect_t frame;              /* what is shown: under the title bar, at most the room below it */
+    double content, pitch, top, size;    /* all the lines' height; a line and its gap; the frame's top; the words' size */
 } tmenu_layout_t;
 
-/* The grid under the title bar at the left, made smaller to stay in the window. */
+static bool tmenu_asks(proven_u8str_view_t action) {
+    return proven_u8str_view_eq(action, PROVEN_LIT("recent_clear")) || proven_u8str_view_eq(action, PROVEN_LIT("delete_file")) ||
+           proven_u8str_view_eq(action, PROVEN_LIT("picker_recycle"));
+}
+
+/* A button's words as drawn: Delete? while it asks again, else the caption with its mark or value. */
+static proven_u8str_view_t tmenu_words(const tmenu_row_t *row, const rubraview_action_facts_t *facts, bool armed, char *scratch, size_t capacity) {
+    if (armed) return proven_u8str_view_eq(row->action, PROVEN_LIT("recent_clear")) ? TU8("Clear?") : TU8("Delete?");
+    rubraview_action_state_t st = rubraview_action_state(row->action, facts);
+    return rubraview_tile_caption(row->words, false, st.mark, st.value, rubraview_mem_mut(scratch, capacity));
+}
+
+static void tmenu_place(app_state_t *app, tmenu_layout_t *L);
+
+/* The buttons under the title bar at the left, each as wide as its words and key, wrapped at the window's right. */
 static void tmenu_layout(app_state_t *app, tmenu_layout_t *L) {
     double dpi = rubraview_pal_window_dpi_scale(app->window), k = place_size(app, PF_MENU);
+    int before = place_font_begin(app, PF_MENU, NULL);   /* measured in the face it is drawn in */
     L->n = tmenu_rows(app, L->rows);
+    L->size = 15.0 * dpi * k;
+    L->m = (rubraview_flowmenu_metrics_t){ .cell_height = 34.0 * dpi * k, .gap = 4.0 * dpi, .group_gap = 18.0 * dpi, .pad = 6.0 * dpi };
     rubraview_action_facts_t facts = action_facts(app);
     for (size_t i = 0; i < L->n; ++i) {
         L->groups[i] = L->rows[i].group;
         L->enabled[i] = rubraview_action_state(L->rows[i].action, &facts).enabled;
+        char scratch[160], keybuf[48];
+        double tw = 0.0, aw = 0.0, kw = 0.0;
+        (void)rubraview_pal_render_measure_text(app->renderer, tmenu_words(&L->rows[i], &facts, false, scratch, sizeof scratch), L->size, &tw);
+        if (tmenu_asks(L->rows[i].action))
+            (void)rubraview_pal_render_measure_text(app->renderer, tmenu_words(&L->rows[i], &facts, true, scratch, sizeof scratch), L->size, &aw);
+        proven_u8str_view_t key = tmenu_key_of(app, L->rows[i].action, keybuf, sizeof keybuf);
+        if (key.size > 0) (void)rubraview_pal_render_measure_text(app->renderer, key, L->size * 0.72, &kw);
+        L->widths[i] = fmax(64.0 * dpi, 12.0 * dpi + fmax(tw, aw) + (kw > 0.0 ? 16.0 * dpi + kw : 0.0) + 14.0 * dpi);
     }
+    place_font_end(app, before);
+    tmenu_place(app, L);
+}
+
+/* Where the buttons of `L`'s widths are, in the window as it is and at the scroll there is. */
+static void tmenu_place(app_state_t *app, tmenu_layout_t *L) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->window, &w, &h);
-    L->m = (rubraview_gridmenu_metrics_t){ .cell_width = 250.0 * dpi * k, .cell_height = 34.0 * dpi * k, .gap = 8.0 * dpi,
-                                           .pad = 6.0 * dpi, .columns = 2 };
-    double top = app->titlebar.height;
-    L->frame = rubraview_gridmenu_frame(0.0, top, &L->m, L->groups, L->n);
-    if (L->frame.width > (double)w && w > 0) {
-        L->m.cell_width = fmax(120.0 * dpi, ((double)w - L->m.pad * 2.0 - L->m.gap) / 2.0);
-        L->frame = rubraview_gridmenu_frame(0.0, top, &L->m, L->groups, L->n);
+    L->pitch = L->m.cell_height + L->m.gap;
+    L->top = app->titlebar.height;
+    rubraview_rect_t all = rubraview_flowmenu_layout(0.0, L->top, w > 0 ? (double)w : 800.0, &L->m, L->widths, L->groups, L->n, NULL);
+    L->content = all.height;
+    double room = (double)h - L->top, view = all.height;
+    if (h > 0 && view > room) {   /* the whole lines that fit, the rest scrolled to */
+        double lines = floor((room - L->m.pad * 2.0) / L->pitch);
+        view = L->m.pad * 2.0 + fmax(1.0, lines) * L->pitch;
     }
-    double room = (double)h - top;
-    if (L->frame.height > room && room > 0.0) {
-        double lines = 0.0, gaps = 0.0;   /* the lines kept, each made lower */
-        for (size_t i = 1; i < L->n; ++i) if (L->groups[i] != L->groups[i - 1]) gaps += 1.0;
-        lines = (L->frame.height - L->m.pad * 2.0 - L->m.gap * gaps) / L->m.cell_height;
-        if (lines > 0.0) L->m.cell_height = fmax(20.0 * dpi, (room - L->m.pad * 2.0 - L->m.gap * gaps) / lines);
-        L->frame = rubraview_gridmenu_frame(0.0, top, &L->m, L->groups, L->n);
-    }
+    app->tmenu_scroll = rubraview_flowmenu_scroll_clamp(app->tmenu_scroll, L->content, view, L->pitch);
+    (void)rubraview_flowmenu_layout(0.0, L->top - app->tmenu_scroll, w > 0 ? (double)w : 800.0, &L->m, L->widths, L->groups, L->n, L->cells);
+    L->frame = (rubraview_rect_t){ all.x, L->top, all.width, view };
+}
+
+/* What a press, a key or the wheel acts on is what was drawn last (its rows, marks and widths, not measured
+   again), placed for the window and the scroll there are now. */
+static tmenu_layout_t g_tmenu_drawn;
+static bool g_tmenu_drawn_ok;
+
+static void tmenu_seen(app_state_t *app, tmenu_layout_t *L) {
+    if (!g_tmenu_drawn_ok) { tmenu_layout(app, L); return; }
+    *L = g_tmenu_drawn;
+    tmenu_place(app, L);
+}
+
+/* A button wholly inside what is shown (the others are scrolled away). */
+static bool tmenu_shown(const tmenu_layout_t *L, size_t i) {
+    const rubraview_rect_t c = L->cells[i];
+    return c.y >= L->frame.y + L->m.pad - 0.5 && c.y + c.height <= L->frame.y + L->frame.height - L->m.pad + 0.5;
+}
+
+static int32_t tmenu_at(const tmenu_layout_t *L, double x, double y) {
+    if (!rubraview_rect_contains(L->frame, x, y)) return -1;
+    int32_t i = rubraview_flowmenu_at(L->cells, L->n, x, y);
+    return i >= 0 && tmenu_shown(L, (size_t)i) ? i : -1;
 }
 
 /* A cell chosen, by a click or Enter. Delete asks a second time, as the right click's does. */
@@ -104,8 +169,7 @@ static bool tmenu_choose(app_state_t *app, const tmenu_layout_t *L, int32_t i) {
     if (i < 0 || (size_t)i >= L->n || !L->enabled[i]) return false;
     proven_u8str_view_t action = L->rows[i].action;
     bool clears = proven_u8str_view_eq(action, PROVEN_LIT("recent_clear"));
-    if ((clears || proven_u8str_view_eq(action, PROVEN_LIT("delete_file")) || proven_u8str_view_eq(action, PROVEN_LIT("picker_recycle"))) &&
-        !rubraview_confirm_press(&app->ctx_confirm, i, rubraview_pal_time_now_seconds())) {
+    if (tmenu_asks(action) && !rubraview_confirm_press(&app->ctx_confirm, i, rubraview_pal_time_now_seconds())) {
         osd_say(app, clears ? TU8("click Clear again to empty the recent list") : TU8("click Delete again to move it to the recycle bin"));
         return true;
     }
@@ -128,29 +192,30 @@ static void draw_tmenu_in(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     static tmenu_layout_t L;
     tmenu_layout(app, &L);
+    g_tmenu_drawn = L;
+    g_tmenu_drawn_ok = true;
     rubraview_pal_rect_t f = { L.frame.x, L.frame.y, L.frame.width, L.frame.height };
     rubraview_pal_render_fill_rect(app->renderer, f, 0xF6202020u, 4.0 * dpi);
     rubraview_pal_render_stroke_rect(app->renderer, f, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
     bool pinned = rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5;
     rubraview_action_facts_t facts = action_facts(app);
     double now = rubraview_pal_time_now_seconds();
-    int32_t hover = rubraview_gridmenu_at(L.frame, &L.m, L.groups, L.n, app->pointer_x, app->pointer_y);
-    double size = fmin(15.0 * dpi * place_size(app, PF_MENU), L.m.cell_height * 0.46);
+    int32_t hover = tmenu_at(&L, app->pointer_x, app->pointer_y);
+    double size = L.size;
     for (size_t i = 0; i < L.n; ++i) {
-        rubraview_rect_t c = rubraview_gridmenu_cell(L.frame, &L.m, L.groups, i);
-        rubraview_pal_rect_t r = { c.x, c.y + 1.0 * dpi, c.width, c.height - 2.0 * dpi };
+        if (!tmenu_shown(&L, i)) continue;
+        rubraview_rect_t c = L.cells[i];
+        rubraview_pal_rect_t r = { c.x, c.y, c.width, c.height };
         bool on = pinned && proven_u8str_view_eq(L.rows[i].action, PROVEN_LIT("toggle_titlebar_pin"));
         rubraview_pal_render_fill_rect(app->renderer, r, on ? TITLEBAR_ON : 0x18FFFFFFu, 3.0 * dpi);   /* a button */
         if (L.enabled[i] && ((int32_t)i == hover || (int32_t)i == app->tmenu_focus))
             rubraview_pal_render_fill_rect(app->renderer, r, 0x40FFFFFFu, 3.0 * dpi);
-        rubraview_action_state_t st = rubraview_action_state(L.rows[i].action, &facts);
         char scratch[160], line[200];
-        proven_u8str_view_t text = rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now)
-            ? (proven_u8str_view_eq(L.rows[i].action, PROVEN_LIT("recent_clear")) ? TU8("Clear?") : TU8("Delete?"))
-            : rubraview_tile_caption(L.rows[i].words, false, st.mark, st.value, rubraview_mem_mut(scratch, sizeof(scratch)));
+        proven_u8str_view_t text = tmenu_words(&L.rows[i], &facts, rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now),
+                                               scratch, sizeof scratch);
         int k = rubraview_fmt(line, sizeof(line), "{}{}", PROVEN_ARG(rubraview_bytes_view((const char *)text.ptr, (int)text.size)), PROVEN_ARG(on ? "  \xE2\x9C\x93" : ""));
         proven_u8str_view_t shown = k > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k < sizeof(line) ? (size_t)k : sizeof(line) - 1 } : text;
-        rubraview_pal_rect_t words = { r.x + 12.0 * dpi, r.y, r.width - 16.0 * dpi, r.height };
+        rubraview_pal_rect_t words = { r.x + 12.0 * dpi, r.y, r.width - 14.0 * dpi, r.height };
         char keybuf[48];
         proven_u8str_view_t key = tmenu_key_of(app, L.rows[i].action, keybuf, sizeof keybuf);
         if (key.size > 0) {   /* RV-246: its key in small print at the right */
@@ -164,6 +229,23 @@ static void draw_tmenu_in(app_state_t *app) {
         if (on) rubraview_pal_render_draw_text(app->renderer, shown, (rubraview_pal_rect_t){ words.x + 0.9, words.y, words.width, words.height },
                                                size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
+    if (L.content > L.frame.height + 0.5) {   /* RV-287: scrolled — where the shown lines are among all */
+        double track = L.frame.height - L.m.pad * 2.0, thumb = fmax(12.0 * dpi, track * L.frame.height / L.content);
+        double at = L.frame.y + L.m.pad + (track - thumb) * (app->tmenu_scroll / fmax(1.0, L.content - L.frame.height + L.m.gap));
+        if (at + thumb > L.frame.y + L.m.pad + track) at = L.frame.y + L.m.pad + track - thumb;
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ L.frame.x + L.frame.width - 4.5 * dpi, at, 3.0 * dpi, thumb },
+                                       0x80F0F0F0u, 1.5 * dpi);
+    }
+}
+
+/* RV-287: the wheel over it scrolls its lines. */
+bool tmenu_wheel(app_state_t *app, double x, double y, double delta) {
+    if (!app->tmenu_open) return false;
+    static tmenu_layout_t L;
+    tmenu_seen(app, &L);
+    if (!rubraview_rect_contains(L.frame, x, y)) return false;
+    app->tmenu_scroll = rubraview_flowmenu_scroll_clamp(app->tmenu_scroll - delta * L.pitch * 2.0, L.content, L.frame.height, L.pitch);
+    return true;
 }
 
 /* A press while it is open: a button does its action; anywhere else closes it (the title bar's ☰ toggles it). */
@@ -171,8 +253,8 @@ bool tmenu_press(app_state_t *app, double x, double y) {
     if (!app->tmenu_open) return false;
     if (rubraview_titlebar_hit(&app->titlebar, x, y, (double)tmenu_win_w(app)) == RUBRAVIEW_TITLEBAR_MENU) return false;
     static tmenu_layout_t L;
-    tmenu_layout(app, &L);
-    int32_t at = rubraview_gridmenu_at(L.frame, &L.m, L.groups, L.n, x, y);
+    tmenu_seen(app, &L);
+    int32_t at = tmenu_at(&L, x, y);
     if (at >= 0) { (void)tmenu_choose(app, &L, at); return true; }
     bool inside = rubraview_rect_contains(L.frame, x, y);
     if (!inside) { app->tmenu_open = false; rubraview_confirm_clear(&app->ctx_confirm); }
@@ -182,13 +264,19 @@ bool tmenu_press(app_state_t *app, double x, double y) {
 bool tmenu_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (!app->tmenu_open) return false;
     static tmenu_layout_t L;
-    tmenu_layout(app, &L);
+    tmenu_seen(app, &L);
     if (app->tmenu_focus >= (int32_t)L.n) app->tmenu_focus = -1;   /* a shorter list since */
     if (key_is(combo, "Escape")) { app->tmenu_open = false; return true; }
-    if (key_is(combo, "Right")) { app->tmenu_focus = rubraview_ctxmenu_step(L.enabled, L.n, app->tmenu_focus, +1); return true; }
-    if (key_is(combo, "Left")) { app->tmenu_focus = rubraview_ctxmenu_step(L.enabled, L.n, app->tmenu_focus, -1); return true; }
-    if (key_is(combo, "Down") || key_is(combo, "Up")) {
-        app->tmenu_focus = rubraview_gridmenu_step_vertical(L.frame, &L.m, L.groups, L.enabled, L.n, app->tmenu_focus, key_is(combo, "Down") ? +1 : -1);
+    bool moved = true;
+    if (key_is(combo, "Right")) app->tmenu_focus = rubraview_ctxmenu_step(L.enabled, L.n, app->tmenu_focus, +1);
+    else if (key_is(combo, "Left")) app->tmenu_focus = rubraview_ctxmenu_step(L.enabled, L.n, app->tmenu_focus, -1);
+    else if (key_is(combo, "Down") || key_is(combo, "Up"))
+        app->tmenu_focus = rubraview_flowmenu_step_vertical(L.cells, L.enabled, L.n, app->tmenu_focus, key_is(combo, "Down") ? +1 : -1);
+    else moved = false;
+    if (moved) {   /* RV-287: the button gone to is scrolled into view */
+        if (app->tmenu_focus >= 0)
+            app->tmenu_scroll = rubraview_flowmenu_scroll_to(app->tmenu_scroll, L.cells[app->tmenu_focus].y - (L.top - app->tmenu_scroll),
+                                                             L.content, L.frame.height, L.pitch, L.m.pad);
         return true;
     }
     if (key_is(combo, "Enter") && app->tmenu_focus >= 0) { (void)tmenu_choose(app, &L, app->tmenu_focus); return true; }

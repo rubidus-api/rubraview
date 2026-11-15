@@ -1272,12 +1272,17 @@ encoding and how far through the file you are.
 ## The title bar and the Floating Widget
 
 The title bar starts with **☰**, a list of what the window does: Align
-the Floating Widget, New window, Open file, Recent files, Batch, Print, the
-copies and moves to a folder, Playlist, Settings and Help, under them
-everything a right click on the picture, the film or the text would offer
-(also what the Toolbar has), and Quit last, as two columns of wide buttons,
-each with its key in small print at its right. The arrow keys move between
-them and `Enter` presses one. `Esc` closes what is open — a list, a panel,
+the Floating Widget, New window, Open file, Recent files, Batch, Print; the
+copies and moves to a folder and Classify; Playlist, Settings and Help;
+after them everything a right click on the picture, the film or the text
+would offer (also what the Toolbar has; not Slide show, Adjust picture or
+the Explorer menus), and Quit last. Each is a button as wide as its words,
+with its key in small print at its right, laid along the line and onto the
+next at the window's right edge, so the list takes the window's shape; a
+group that would break over a line's end starts the next line. When the
+window is too low for them all, the wheel over the list scrolls it a line
+at a time. The arrow keys move between them (Up and Down to the nearest on
+the next line) and `Enter` presses one. `Esc` closes what is open — a list, a panel,
 a box, the Toolbar — and with nothing open turns the sound off and puts the
 window down at once; `Ctrl+Q` quits. After it comes the
 name of the file on screen (the folder's, in the open-file screen), only

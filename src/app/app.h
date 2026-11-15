@@ -814,6 +814,7 @@ typedef struct app_state {
     uint32_t                   logo_back;
     bool                       tmenu_open;       /* 1.25.0: the title bar's ☰ pull-down */
     int32_t                    tmenu_focus;
+    double                     tmenu_scroll;     /* RV-287: how far its lines are scrolled */
     rubraview_confirm_t        ctx_confirm;        /* Delete asks twice, as in the menu */
     bool                       slidepop_open;
     proven_u8str_view_t                    hint;               /* RV-116: what the box part under the pointer does */
@@ -2912,6 +2913,7 @@ bool titlebar_click(app_state_t *app, double x, double y);
 bool titlebar_release(app_state_t *app, double x, double y);   /* RV-257 */
 bool tmenu_key(app_state_t *app, rubraview_key_combo_t combo);
 bool tmenu_press(app_state_t *app, double x, double y);
+bool tmenu_wheel(app_state_t *app, double x, double y, double delta);
 int32_t tmenu_win_w(const app_state_t *app);
 void toggle_slideshow(app_state_t *app);
 proven_u8str_view_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled);

@@ -1728,7 +1728,7 @@ uint64_t scene_signature(const app_state_t *app) {
         SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y);
     }
     SIG(&h, hint_shown(app)); SIG(&h, (uintptr_t)app->hint.ptr);
-    SIG(&h, app->tmenu_open); SIG(&h, app->tmenu_focus);   /* 1.25.0 */
+    SIG(&h, app->tmenu_open); SIG(&h, app->tmenu_focus); SIG(&h, (int64_t)lround(app->tmenu_scroll));   /* 1.25.0 */
     SIG(&h, edge_column_shown((app_state_t *)app)); SIG(&h, app->edge_side);   /* RV-206 */
     if (app->tmenu_open) { SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y); }   /* RV-205: the hovered button */
     SIG(&h, app->chooser.open); SIG(&h, app->chooser.focus); SIG(&h, app->chooser.layout.first);   /* 1.24.0 */

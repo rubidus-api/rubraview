@@ -681,6 +681,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL: {
             if (chooser_wheel(app, CHOOSE_IN_MAIN, event->mouse.wheel_delta)) break;   /* 1.24.0 */
+            if (tmenu_wheel(app, event->mouse.x, event->mouse.y, event->mouse.wheel_delta)) break;   /* RV-287: the ☰'s lines */
             if (app->picker_open) {
                 picker_layout(app);
                 rubraview_picker_scroll_by(&app->picker, -event->mouse.wheel_delta * app->picker.tile_extent *
