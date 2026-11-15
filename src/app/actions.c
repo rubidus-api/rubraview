@@ -1035,6 +1035,12 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("at_end"), (double)mode);
         app->follow_for = -1;   /* decided again, in the new mode */
         osd_say(app, cstr(rubraview_repeat_sentence(mode)));
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_shuffle"))) {
+        /* RV-288 (owner, 2026-11-15: "그림과 동영상 음악 모두"): the shuffle on or off, for pictures as for films and songs */
+        bool on = repeat_mode(app) != RUBRAVIEW_REPEAT_SHUFFLE;
+        rubraview_settings_set(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("at_end"), (double)(on ? RUBRAVIEW_REPEAT_SHUFFLE : RUBRAVIEW_REPEAT_NEXT));
+        app->follow_for = -1;
+        osd_say(app, on ? TU8("shuffle: Next picks at random, Previous goes back the way it came") : TU8("shuffle off: the list's order"));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("list_paste"))) {
         list_paste(app);   /* RV-276 */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_playlist"))) {

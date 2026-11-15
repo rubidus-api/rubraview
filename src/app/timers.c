@@ -11,6 +11,7 @@ void tick_timers(app_state_t *app, double dt) {
         if (side != app->edge_side) { app->edge_side = side; app->edge_since = rubraview_pal_time_now_seconds(); }
     }
     navbox_tick(app);   /* RV-277 */
+    shuffle_note_screen(app);   /* RV-288: the page on screen into the shuffle's history, however it came */
     rubraview_osd_tick(&app->osd, dt);
     hdr_screen_tick(app, dt);   /* RV-153 */
     media_stopped_tick(app);    /* RV-176 */
@@ -149,9 +150,10 @@ void tick_timers(app_state_t *app, double dt) {
         slides_follow_screen(app);
         rubraview_slideshow_event_t event = slide_ready(app) ? rubraview_slideshow_tick(&app->slideshow, app->slides, dt)
                                                              : RUBRAVIEW_SLIDESHOW_NONE;
-        if (event == RUBRAVIEW_SLIDESHOW_ADVANCED) {
+        bool shuffled = repeat_mode(app) == RUBRAVIEW_REPEAT_SHUFFLE && page_count(app) > 1;   /* RV-288: the slides in the shuffle */
+        if (event == RUBRAVIEW_SLIDESHOW_ADVANCED || (shuffled && event == RUBRAVIEW_SLIDESHOW_ENDED)) {
             app->subs_leave_unasked = true;
-            go_to_spread(app, app->slideshow.current_index);
+            if (!shuffled || !shuffle_step(app, +1)) go_to_spread(app, app->slideshow.current_index);
             app->subs_leave_unasked = false;
         } else if (event == RUBRAVIEW_SLIDESHOW_ENDED) {
             app->slideshow_running = false;

@@ -1701,6 +1701,106 @@ rubraview_repeat_mode_t repeat_mode(const app_state_t *app) {
     return mode >= 0 && mode < RUBRAVIEW_REPEAT_MODE_COUNT ? (rubraview_repeat_mode_t)mode : RUBRAVIEW_REPEAT_NEXT;
 }
 
+/* ---- RV-288 (owner, 2026-11-15: "동영상이나 음악, 이미지 파일 등을 목록에서 랜덤하게 볼 때, 뒤로가기 앞으로가기가
+   어느정도까지는 재생순서를 따라갈 수가 있어야"; "그림과 동영상 음악 모두 넣고 기록 길이는 재생목록 길이만큼"): in the
+   shuffle, Back and Forward go over the pages shown in the order shown (a browser's history as long as the list);
+   Forward past its end is a new pick among every page; the end of a film or a song goes Forward too. ---- */
+
+static bool page_any(void *ctx, size_t index) { return index < page_count((const app_state_t *)ctx); }
+
+/* The shuffle's flags and history for the list as it is: a page the viewer took out moves them along; another
+   length is a new list, a new shuffle. */
+static bool shuffle_ready(app_state_t *app) {
+    size_t count = page_count(app);
+    if (count == 0) return false;
+    if (app->shuffle_flags && app->shuffle_flags_count == count && app->shuffle_hist_slots) return true;
+    uint8_t *flags = (uint8_t *)rubraview_alloc_zero(count, 1);
+    int32_t *slots = (int32_t *)rubraview_alloc_zero(count, sizeof *slots);
+    if (!flags || !slots) { rubraview_free(flags); rubraview_free(slots); return false; }
+    int32_t gone = app->shuffle_removed;
+    app->shuffle_removed = -1;
+    bool follows = gone >= 0 && app->shuffle_flags && app->shuffle_hist_slots && app->shuffle_flags_count == count + 1;
+    rubraview_shuffle_history_t hist;
+    rubraview_shuffle_history_reset(&hist, slots, count);
+    if (follows) {
+        for (size_t i = 0, k = 0; i < app->shuffle_flags_count; ++i) if ((int32_t)i != gone) flags[k++] = app->shuffle_flags[i];
+        rubraview_shuffle_history_removed(&app->shuffle_hist, (size_t)gone);
+        rubraview_shuffle_history_copy(&hist, &app->shuffle_hist);
+        rubraview_shuffle_t sh = app->shuffle;
+        sh.played = flags; sh.count = count; sh.played_count = 0;
+        for (size_t i = 0; i < count; ++i) sh.played_count += flags[i] ? 1u : 0u;
+        sh.last = sh.last == gone ? -1 : (sh.last > gone ? sh.last - 1 : sh.last);
+        app->shuffle = sh;
+    } else {
+        double t = rubraview_pal_time_now_seconds();
+        uint64_t seed = 0;
+        proven_sys_mem_copy(&seed, &t, sizeof(seed) < sizeof(t) ? sizeof(seed) : sizeof(t));
+        rubraview_shuffle_reset(&app->shuffle, rubraview_mem_mut(flags, count), seed ^ 0xA5A5A5A5u);
+        app->shuffle_seen = -1;
+    }
+    rubraview_free(app->shuffle_flags);
+    rubraview_free(app->shuffle_hist_slots);
+    app->shuffle_flags = flags;
+    app->shuffle_flags_count = count;
+    app->shuffle_hist_slots = slots;
+    app->shuffle_hist = hist;
+    return true;
+}
+
+/* Each pass while the shuffle is on: the page on screen, however it came, is noted in the history (the one
+   ahead or behind is a step along it; any other cuts what was ahead) and flagged as played with its spread's other. */
+void shuffle_note_screen(app_state_t *app) {
+    if (repeat_mode(app) != RUBRAVIEW_REPEAT_SHUFFLE) { app->shuffle_seen = -1; return; }
+    int32_t page = current_page_index(app);
+    if (page < 0 || !shuffle_ready(app)) return;
+    if (page == app->shuffle_seen && rubraview_shuffle_history_current(&app->shuffle_hist) == page) return;
+    app->shuffle_seen = page;
+    if (page == app->shuffle_picked) rubraview_shuffle_history_push(&app->shuffle_hist, page);   /* a film's or song's new pick */
+    else rubraview_shuffle_history_note(&app->shuffle_hist, page);
+    app->shuffle_picked = -1;
+    rubraview_shuffle_mark(&app->shuffle, (size_t)page);
+    int32_t other = app->layout.spreads[app->spread_index].right_index;
+    if (other >= 0 && (size_t)other < app->shuffle_flags_count && !app->shuffle_flags[other]) {
+        app->shuffle_flags[other] = 1;
+        app->shuffle.played_count++;
+    }
+}
+
+/* Next (+1) and Previous (-1) in the shuffle: along the history, a new pick past its end. False when the shuffle
+   is not what they do here (not on, a strip, one page): they go by the list. */
+bool shuffle_step(app_state_t *app, int direction) {
+    if (repeat_mode(app) != RUBRAVIEW_REPEAT_SHUFFLE || strip_active(app) || page_count(app) < 2) return false;
+    shuffle_note_screen(app);
+    int32_t now = current_page_index(app);
+    int32_t to = direction < 0 ? rubraview_shuffle_history_back(&app->shuffle_hist) : rubraview_shuffle_history_forward(&app->shuffle_hist);
+    if (to < 0 && direction > 0) {
+        to = rubraview_shuffle_pick(&app->shuffle, now, page_any, app);
+        /* a pick on the screen's own spread (its other page) is passed: it is shown already */
+        for (int tries = 0; to >= 0 && spread_index_for_page(app, to) == app->spread_index && tries < 8; ++tries) {
+            if ((size_t)to < app->shuffle_flags_count && !app->shuffle_flags[to]) { app->shuffle_flags[to] = 1; app->shuffle.played_count++; }
+            to = rubraview_shuffle_pick(&app->shuffle, now, page_any, app);
+        }
+    }
+    if (to < 0) {
+        if (direction < 0) osd_say(app, TU8("the first of the shuffle's history"));
+        return true;
+    }
+    bool along = direction < 0 || rubraview_shuffle_history_forward(&app->shuffle_hist) == to;
+    go_to_spread(app, spread_index_for_page(app, to));
+    update_precache(app);
+    /* said to the history as what it is — a step along it, or a new page — never guessed from the page */
+    int32_t shown = current_page_index(app);
+    if (shown == now) return true;   /* it did not go (a subtitle not saved held it) */
+    if (along) rubraview_shuffle_history_step(&app->shuffle_hist, direction);
+    else rubraview_shuffle_history_push(&app->shuffle_hist, shown);
+    if (rubraview_shuffle_history_current(&app->shuffle_hist) != shown) rubraview_shuffle_history_note(&app->shuffle_hist, shown);
+    app->shuffle_seen = shown;
+    rubraview_shuffle_mark(&app->shuffle, (size_t)shown);
+    int32_t other = app->layout.spreads[app->spread_index].right_index;
+    if (other >= 0 && (size_t)other < app->shuffle_flags_count && !app->shuffle_flags[other]) { app->shuffle_flags[other] = 1; app->shuffle.played_count++; }
+    return true;
+}
+
 /* The page to play when this one ends, decided once for it (a shuffle's
    pick must not change between preparing the next track and reaching it). */
 static int32_t media_follow_page(app_state_t *app) {
@@ -1710,19 +1810,17 @@ static int32_t media_follow_page(app_state_t *app) {
     if (app->follow_for == app->media_page && app->follow_mode == (int32_t)mode && app->follow_count == count) {
         return app->follow_page;
     }
-    if (mode == RUBRAVIEW_REPEAT_SHUFFLE) {
-        if (app->shuffle_flags_count != count || !app->shuffle_flags) {   /* a new list: a new shuffle */
-            rubraview_free(app->shuffle_flags);
-            app->shuffle_flags = (uint8_t *)rubraview_alloc(count ? count : 1);
-            app->shuffle_flags_count = app->shuffle_flags ? count : 0;
-            double t = rubraview_pal_time_now_seconds();
-            uint64_t seed = 0;
-            proven_sys_mem_copy(&seed, &t, sizeof(seed) < sizeof(t) ? sizeof(seed) : sizeof(t));
-            rubraview_shuffle_reset(&app->shuffle, rubraview_mem_mut(app->shuffle_flags, app->shuffle_flags_count), seed ^ 0xA5A5A5A5u);
-        }
+    if (mode == RUBRAVIEW_REPEAT_SHUFFLE && shuffle_ready(app)) {
+        shuffle_note_screen(app);
         rubraview_shuffle_mark(&app->shuffle, (size_t)app->media_page);
+        /* RV-288: Forward's page when the history has one past here and it plays; else a pick among those that play */
+        int32_t ahead = rubraview_shuffle_history_current(&app->shuffle_hist) == app->media_page ? rubraview_shuffle_history_forward(&app->shuffle_hist) : -1;
+        bool along = ahead >= 0 && page_plays(app, (size_t)ahead);
+        app->follow_page = along ? ahead : rubraview_shuffle_pick_within(&app->shuffle, app->media_page, page_plays, app);
+        app->shuffle_picked = along ? -1 : app->follow_page;
+    } else {
+        app->follow_page = rubraview_repeat_follow(mode, app->media_page, count, page_plays, app, &app->shuffle);
     }
-    app->follow_page = rubraview_repeat_follow(mode, app->media_page, count, page_plays, app, &app->shuffle);
     app->follow_for = app->media_page;
     app->follow_mode = (int32_t)mode;
     app->follow_count = count;

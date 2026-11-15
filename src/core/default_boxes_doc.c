@@ -384,6 +384,7 @@ static const char *const PARTS[] = {
 "  item open_edit                \"Adjust picture\"\n"
 "  group\n"
 "  item toggle_slideshow         \"Slide show\"\n"
+"  item toggle_shuffle           \"Shuffle\"\n"
 "  item toggle_info              \"Info\"\n"
 "  group\n"
 "  item rename_file              \"Rename\"\n"

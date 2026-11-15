@@ -456,6 +456,7 @@ static void past_the_end(app_state_t *app, bool forward) {
 }
 
 void next_spread(app_state_t *app) {
+    if (shuffle_step(app, +1)) return;   /* RV-288: along the shuffle's history, then a new pick */
     if (strip_active(app)) {
         /* A window's worth, less a little to keep one's place. */
         int32_t win_w = 0, win_h = 0;
@@ -474,6 +475,7 @@ void next_spread(app_state_t *app) {
 }
 
 void prev_spread(app_state_t *app) {
+    if (shuffle_step(app, -1)) return;   /* RV-288: back along the shuffle's history */
     if (strip_active(app)) {
         int32_t win_w = 0, win_h = 0;
         rubraview_pal_window_get_size(app->window, &win_w, &win_h);

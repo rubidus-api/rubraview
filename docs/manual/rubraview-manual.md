@@ -1085,6 +1085,13 @@ While it does:
   random order, each once before any comes again, and never the same one
   twice in a row. Pictures between them are passed over. `Next` is where it
   starts.
+- With **Shuffle** on (a picture's right click has it too), the next page
+  or file — `PgDn`, a side's click, the buttons, the end of a film or a
+  song, the slide show — is picked at random among the pictures, films and
+  songs, and the way taken is remembered: the previous one goes back along
+  it as far as the list is long, and the next one goes forward along it
+  again before picking anew. Opening another file from the list or the
+  open-file screen starts a new way from there.
 - Subtitles come from a file beside the film (`.srt`, `.smi`, `.vtt`,
   `.ass`, a DVD's pictures as `.idx` with its `.sub`, and a Blu-ray's as
   `.sup`) or from inside the film itself. In a SAMI file, `&nbsp;`,
@@ -2414,6 +2421,7 @@ listed under a later heading only means that while that is on screen.
 | Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
 | Right click `Favourites...` | The favourites, files and folders, in a list window: open, reorder, remove |
 | Right click `Add to favourites` | Make the file on screen a favourite, or no longer one |
+| Right click `Shuffle` | Shuffle on or off: Next picks at random among pictures, films and songs, Previous goes back the way it came |
 | Right click `One page` | Layout: one page at a time |
 | Right click `Two pages` | Layout: two pages side by side |
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |

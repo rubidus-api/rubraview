@@ -87,6 +87,9 @@ rubraview_action_state_t rubraview_action_state(proven_u8str_view_t action, cons
     if (proven_u8str_view_eq(action, PROVEN_LIT("page_over_next")) || proven_u8str_view_eq(action, PROVEN_LIT("page_over_back"))) {
         st.enabled = f->has_page && f->layout == RUBRAVIEW_PAGE_LAYOUT_DUAL;
     }
+    if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_shuffle"))) {   /* RV-288 */
+        st.mark = f->repeat_mode == RUBRAVIEW_REPEAT_SHUFFLE ? RUBRAVIEW_MARK_ON : RUBRAVIEW_MARK_OFF;
+    }
     if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_first_page_alone"))) {
         st.enabled = f->layout == RUBRAVIEW_PAGE_LAYOUT_DUAL;
         st.mark = f->first_alone ? RUBRAVIEW_MARK_ON : RUBRAVIEW_MARK_OFF;
@@ -178,6 +181,7 @@ uint32_t rubraview_action_icon(proven_u8str_view_t action, const rubraview_actio
         { "page_over_next", 0xE72A },        /* Forward: two pages paired one page later (RV-224) */
         { "page_over_back", 0xE72B },        /* Back */
         { "toggle_first_page_alone", 0xE7C3 }, /* Page: two pages, the first one alone (RV-283) */
+        { "toggle_shuffle", 0xE8B1 },        /* Shuffle (RV-288) */
         { "media_volume_down", 0xE993 },     /* Volume1 */
         { "media_volume_up", 0xE995 },       /* Volume3 */
         { "media_volume", 0xE767 },          /* Volume: its bar (RV-237) */

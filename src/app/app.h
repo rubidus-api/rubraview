@@ -619,6 +619,11 @@ typedef struct app_state {
     rubraview_shuffle_t    shuffle;
     uint8_t               *shuffle_flags;
     size_t                 shuffle_flags_count;
+    /* RV-288: the pages shown in the shuffle, Back and Forward over them; the page last noted; a page taken out of
+       the list by the viewer (reopen_after_removal), for the flags and the history to follow, else -1 */
+    rubraview_shuffle_history_t shuffle_hist;
+    int32_t               *shuffle_hist_slots;
+    int32_t                shuffle_seen, shuffle_removed, shuffle_picked;   /* picked: the page a film's end picked anew, pushed when reached */
     bool                   media_ended;       /* reached the end; Space plays it again from the start */
     double                 media_progress_pos, media_progress_at;   /* 1.25.2: the last picture's time plus the sound heard, and when it last changed */
     double                 sound_dry_since;   /* when the sound device last ran empty; 0 while it plays */
@@ -2914,6 +2919,8 @@ bool titlebar_release(app_state_t *app, double x, double y);   /* RV-257 */
 bool tmenu_key(app_state_t *app, rubraview_key_combo_t combo);
 bool tmenu_press(app_state_t *app, double x, double y);
 bool tmenu_wheel(app_state_t *app, double x, double y, double delta);
+bool shuffle_step(app_state_t *app, int direction);
+void shuffle_note_screen(app_state_t *app);
 int32_t tmenu_win_w(const app_state_t *app);
 void toggle_slideshow(app_state_t *app);
 proven_u8str_view_t toolbox_caption(const app_state_t *app, const rubraview_box_tile_t *tile_in, bool *out_enabled);

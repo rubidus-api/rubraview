@@ -26,6 +26,8 @@ void reopen_after_removal(app_state_t *app, size_t removed_index) {
     if (dir.size == 0) return;
 
     size_t target = removed_index;
+    bool asc = true;   /* RV-288: the shuffle follows a page taken out (not a list sorted at random: that is a new order) */
+    app->shuffle_removed = folder_sort_mode(app, &asc) == RUBRAVIEW_SORT_RANDOM ? -1 : (int32_t)removed_index;
     open_folder(app, dir);
     if (page_count(app) == 0) return;
     if (target >= page_count(app)) target = page_count(app) - 1;

@@ -78,6 +78,7 @@ bool app_start(app_state_t *app, rubraview_mem_t *mem) {
     app->names_codepage = -1;
     app->eqwin = rubraview_eqwin_create(dpi);
     app->follow_for = -1;
+    app->shuffle_seen = app->shuffle_removed = app->shuffle_picked = -1;   /* RV-288 */
     app->rename_favorite = -1;
     app->fav_press = -1;
     app->toolbox = rubraview_box_create(RUBRAVIEW_BOX_TOOLBOX, (double)win_w - 220.0 * dpi, (double)win_h - 160.0 * dpi, 8);   /* toolbox_refresh sets the real count */

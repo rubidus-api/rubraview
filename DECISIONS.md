@@ -4053,3 +4053,12 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: core `rubraview_flowmenu_*` (host-tested, T450) lays buttons of given widths left to right and wraps at the window's width; groups are kept apart by a wider room on one line rather than each on lines of its own, and a group that would break over a line's end goes whole to the next line when it fits on one (a group longer than a line breaks button by button). A button's width is its words (also its "Delete?" when it asks twice) and its key, measured in the menus' face. A window lower than the lines shows the whole lines that fit and scrolls by whole lines, since the renderer has no clip: a button partly out of view is not drawn. TMENU gains groups and Classify; the right click's Slide show, Adjust picture, Explorer menu and Classic Explorer menu are left out of ☰ only — the right click keeps them, as the owner named only this menu.
 - Alternatives: each group on lines of its own (D-236's rule) — a wide window would again leave most lines short; a clip in the renderer for smooth pixel scrolling — a PAL change for one menu.
 - Consequences: T295 retired (the grid's), T450; VM T451. `rubraview_gridmenu_*` is gone.
+
+## D-355: The Shuffle Remembers Its Way, Pictures Included
+
+- Date: 2026-11-15
+- Status: Accepted (owner 2026-11-15: "랜덤하게 볼 때, 뒤로가기 앞으로가기가 어느정도까지는 재생순서를 따라갈 수가 있어야"; "셔플 작업은 모두 추천대로 하고 그림과 동영상 음악 모두 넣고 기록 길이는 재생목록 길이만큼 늘려도 됩니다").
+- Context: D-121's shuffle picked the next film or song when one ended and remembered only the flags of a round; Previous went to the list's neighbour, and pictures had no shuffle.
+- Decision: a browser's history of the pages shown (core, host-tested), as long as the list; every way of moving in the shuffle goes along it (Next / Previous by any key, button or side, the end of a film or a song, the slide show), Forward past its end picks among all pages; the page on screen is noted once a pass, so a page reached otherwise (the list, the open-file screen) is a jump. The shuffle stays the one setting `audio.at_end`; pictures get a Shuffle toggle in their right click rather than the five-way end button, whose other four modes mean nothing to a picture. A file taken out by the viewer keeps the history (its index removed); a list sorted at random and opened again is a new shuffle.
+- Alternatives: a permutation made at the start of each round (gone with every change of the list, and a round's end is a seam); a history of 256 (the owner chose the list's length).
+- Consequences: T452; VM T453.

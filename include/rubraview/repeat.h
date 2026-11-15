@@ -66,6 +66,45 @@ void rubraview_shuffle_mark(rubraview_shuffle_t *sh, size_t index);
 int32_t rubraview_shuffle_pick(rubraview_shuffle_t *sh, int32_t current, rubraview_repeat_plays_fn plays, void *ctx);
 
 /**
+ * RV-288: a pick among some of the pages (`plays`: the films and songs) inside a round of all of them: as
+ * rubraview_shuffle_pick, but when every one of those has played, any of them but `current` at random and the
+ * round goes on (the pictures' flags are not cleared by the songs' round).
+ */
+int32_t rubraview_shuffle_pick_within(rubraview_shuffle_t *sh, int32_t current, rubraview_repeat_plays_fn plays, void *ctx);
+
+/*
+ * RV-288 (owner, 2026-11-15: "랜덤하게 볼 때, 뒤로가기 앞으로가기가 어느정도까지는 재생순서를 따라갈 수가 있어야"; the
+ * length: "기록 길이는 재생목록 길이만큼"): the pages shown in a shuffle, in the order shown, as a browser's history —
+ * Back goes to the one before, Forward again over the same ones, a page reached any other way cuts what was ahead
+ * and is added. At most `cap` (the list's length) are kept; past that the oldest goes. The caller owns the
+ * `cap` slots.
+ */
+typedef struct rubraview_shuffle_history {
+    int32_t *pages;
+    size_t   cap;
+    size_t   first;   /* the oldest's slot */
+    size_t   len;
+    size_t   at;      /* the page shown, 0..len-1 from the oldest (len 0: none) */
+} rubraview_shuffle_history_t;
+
+void rubraview_shuffle_history_reset(rubraview_shuffle_history_t *h, int32_t *slots, size_t cap);
+/** Page `page` is now shown: the one ahead or behind becomes the place; else what was ahead goes and it is added. */
+void rubraview_shuffle_history_note(rubraview_shuffle_history_t *h, int32_t page);
+/** A new page picked: what was ahead goes and it is added, even when it is the one behind (no step is guessed). */
+void rubraview_shuffle_history_push(rubraview_shuffle_history_t *h, int32_t page);
+/** Back (-1) or Forward (+1) taken: the place moves one, when there is one that way. */
+void rubraview_shuffle_history_step(rubraview_shuffle_history_t *h, int direction);
+/** The page Back goes to, or -1 at the oldest; the page Forward goes to, or -1 at the newest. */
+int32_t rubraview_shuffle_history_back(const rubraview_shuffle_history_t *h);
+int32_t rubraview_shuffle_history_forward(const rubraview_shuffle_history_t *h);
+/** The page shown as the history has it, or -1. */
+int32_t rubraview_shuffle_history_current(const rubraview_shuffle_history_t *h);
+/** Page `index` left the list: its entries go (two of one page side by side are one), those after it move down. */
+void rubraview_shuffle_history_removed(rubraview_shuffle_history_t *h, size_t index);
+/** `src`'s pages and place into `dst` (its slots and cap as reset); when `dst` holds fewer, the oldest stay behind. */
+void rubraview_shuffle_history_copy(rubraview_shuffle_history_t *dst, const rubraview_shuffle_history_t *src);
+
+/**
  * The page to play after `current` ends: -1 to stop (STOP, or NEXT past the
  * last), `current` again for ONE (and for ALL or SHUFFLE when it is the
  * only one that plays), the next playing page for NEXT and ALL (ALL going

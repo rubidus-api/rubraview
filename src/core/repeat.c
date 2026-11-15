@@ -89,6 +89,100 @@ int32_t rubraview_shuffle_pick(rubraview_shuffle_t *sh, int32_t current, rubravi
     return chosen;
 }
 
+/* ---- RV-288: the shuffle's history ---- */
+
+static int32_t *hist_slot(const rubraview_shuffle_history_t *h, size_t i) { return &h->pages[(h->first + i) % h->cap]; }
+
+void rubraview_shuffle_history_reset(rubraview_shuffle_history_t *h, int32_t *slots, size_t cap) {
+    if (!h) return;
+    *h = (rubraview_shuffle_history_t){ .pages = slots, .cap = slots ? cap : 0 };
+}
+
+void rubraview_shuffle_history_note(rubraview_shuffle_history_t *h, int32_t page) {
+    if (!h || h->cap == 0 || page < 0) return;
+    if (h->len) {
+        if (*hist_slot(h, h->at) == page) return;
+        if (h->at + 1 < h->len && *hist_slot(h, h->at + 1) == page) { h->at++; return; }
+        if (h->at > 0 && *hist_slot(h, h->at - 1) == page) { h->at--; return; }
+    }
+    rubraview_shuffle_history_push(h, page);
+}
+
+void rubraview_shuffle_history_step(rubraview_shuffle_history_t *h, int direction) {
+    if (!h || h->len == 0) return;
+    if (direction < 0 && h->at > 0) h->at--;
+    else if (direction > 0 && h->at + 1 < h->len) h->at++;
+}
+
+int32_t rubraview_shuffle_history_current(const rubraview_shuffle_history_t *h) {
+    return h && h->len ? *hist_slot(h, h->at) : -1;
+}
+
+int32_t rubraview_shuffle_history_back(const rubraview_shuffle_history_t *h) {
+    return h && h->len && h->at > 0 ? *hist_slot(h, h->at - 1) : -1;
+}
+
+int32_t rubraview_shuffle_history_forward(const rubraview_shuffle_history_t *h) {
+    return h && h->len && h->at + 1 < h->len ? *hist_slot(h, h->at + 1) : -1;
+}
+
+void rubraview_shuffle_history_push(rubraview_shuffle_history_t *h, int32_t page) {
+    if (!h || h->cap == 0 || page < 0) return;
+    if (h->len) {
+        if (*hist_slot(h, h->at) == page) return;
+        h->len = h->at + 1;   /* what was ahead goes */
+    }
+    if (h->len == h->cap) {   /* full: the oldest goes */
+        h->first = (h->first + 1) % h->cap;
+        h->len--;
+    }
+    *hist_slot(h, h->len) = page;
+    h->at = h->len;
+    h->len++;
+}
+
+void rubraview_shuffle_history_removed(rubraview_shuffle_history_t *h, size_t index) {
+    if (!h || h->len == 0) return;
+    size_t kept = 0, at = 0;
+    bool at_set = false;
+    for (size_t i = 0; i < h->len; ++i) {
+        int32_t p = *hist_slot(h, i);
+        if (p == (int32_t)index) {
+            if (i == h->at && !at_set) { at = kept ? kept - 1 : 0; at_set = true; }   /* the place falls back to the one before */
+            continue;
+        }
+        if (p > (int32_t)index) p--;
+        if (kept > 0 && *hist_slot(h, kept - 1) == p) {   /* the same page twice in a row: once */
+            if (i == h->at && !at_set) { at = kept - 1; at_set = true; }
+            continue;
+        }
+        *hist_slot(h, kept) = p;
+        if (i == h->at && !at_set) { at = kept; at_set = true; }
+        kept++;
+    }
+    h->len = kept;
+    h->at = kept == 0 ? 0 : (at < kept ? at : kept - 1);
+}
+
+void rubraview_shuffle_history_copy(rubraview_shuffle_history_t *dst, const rubraview_shuffle_history_t *src) {
+    if (!dst || dst->cap == 0) return;
+    dst->first = 0; dst->len = 0; dst->at = 0;
+    if (!src || src->len == 0) return;
+    size_t drop = src->len > dst->cap ? src->len - dst->cap : 0;
+    for (size_t i = drop; i < src->len; ++i) dst->pages[dst->len++] = *hist_slot(src, i);
+    dst->at = src->at >= drop ? src->at - drop : 0;
+}
+
+int32_t rubraview_shuffle_pick_within(rubraview_shuffle_t *sh, int32_t current, rubraview_repeat_plays_fn plays, void *ctx) {
+    if (!sh || !plays || sh->count == 0) return -1;
+    bool fresh = candidates(sh, current, true, plays, ctx, 0, NULL) > 0;
+    size_t n = candidates(sh, current, fresh, plays, ctx, 0, NULL);
+    if (n == 0) return current >= 0 && (size_t)current < sh->count && plays(ctx, (size_t)current) ? current : -1;
+    int32_t chosen = -1;
+    (void)candidates(sh, current, fresh, plays, ctx, (size_t)(next_random(sh) % n), &chosen);
+    return chosen;
+}
+
 int32_t rubraview_repeat_follow(rubraview_repeat_mode_t mode, int32_t current, size_t count,
                                 rubraview_repeat_plays_fn plays, void *ctx, rubraview_shuffle_t *sh) {
     if (!plays || current < 0 || (size_t)current >= count) return -1;

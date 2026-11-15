@@ -215,6 +215,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "toggle_osd", "Information bar" },
     { "toggle_pixel_grid", "Pixel grid past 400%" },
     { "toggle_playlist", "The playlist, or this folder's files, floating over the picture" },
+    { "toggle_shuffle", "Shuffle on or off: Next picks at random among pictures, films and songs, Previous goes back the way it came" },
     { "toggle_slideshow", "Start or stop the slide show" },
     { "toggle_spread_detect", "Detect two-page spreads" },
     { "toggle_subtitle_window", "The film's subtitles as a list in a window of their own: a click goes to one, the boxes choose, Earlier and Later move the chosen" },
