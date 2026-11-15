@@ -59,6 +59,7 @@ bool app_start(app_state_t *app, rubraview_mem_t *mem) {
     app->media_preferred = preferred_backend(arena);
     history_load(app);
     app_log_start(app);   /* RV-256: this window's log, its cap from the settings just read */
+    jobnotes_check(app);   /* RV-292: a job left unfinished since the last time */
     app_log(app, "start", cstr(RUBRAVIEW_VERSION_STRING));
     load_keymap(app);   /* after history_load: it settles portable or AppData, and so where keymap.ini is */
     /* history_load read settings.ini from wherever it lives (beside the

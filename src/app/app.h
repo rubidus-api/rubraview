@@ -2741,6 +2741,7 @@ bool filejob_start(app_state_t *app, proven_u8str_view_t dir, const proven_u8str
 bool filejob_start_viewer(app_state_t *app, proven_u8str_view_t dir, proven_u8str_view_t path, bool moving, int32_t page, proven_u8str_view_t temp_dir);   /* RV-259 */
 bool filejob_busy(void);
 const char *lang_file_in_use(void);   /* RV-289 */
+void jobnotes_check(app_state_t *app);   /* RV-292: notes of jobs that did not end as they should, said in the log */
 int jobproc_main(const wchar_t *pipe_name);   /* RV-289: `--file-job <pipe>` */
 size_t time_left_text(char *out, size_t cap, double seconds);   /* "About 3 min 5 s left" (progresscard.c) */
 bool filejob_same_recycles_copy(void);

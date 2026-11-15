@@ -35,6 +35,17 @@ bool rubraview_pal_process_start_apart(proven_u8str_view_t command_line) {
 }
 #endif
 
+bool rubraview_pal_process_started(uint32_t pid, uint64_t *started) {
+    (void)pid;
+    if (started) *started = 0;
+    return false;   /* the job notes are Windows' */
+}
+
+uint32_t rubraview_pal_process_self(uint64_t *started) {
+    if (started) *started = 0;
+    return 0;
+}
+
 bool rubraview_pal_process_read_bytes(uint64_t *bytes) {
     if (bytes) *bytes = 0;
     return false;   /* the viewer's live rows are Windows' */

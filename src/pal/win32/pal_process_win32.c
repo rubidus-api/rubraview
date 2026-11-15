@@ -65,6 +65,28 @@ bool rubraview_pal_process_start_apart(proven_u8str_view_t command_line) {
     return start_process(command_line, CREATE_BREAKAWAY_FROM_JOB) || start_process(command_line, 0);   /* a job that holds on: as it is */
 }
 
+static bool started_of(HANDLE h, uint64_t *started) {
+    FILETIME created, ended, kernel, user;
+    if (!GetProcessTimes(h, &created, &ended, &kernel, &user)) return false;
+    if (started) *started = ((uint64_t)created.dwHighDateTime << 32) | created.dwLowDateTime;
+    return true;
+}
+
+bool rubraview_pal_process_started(uint32_t pid, uint64_t *started) {
+    if (pid == 0) return false;
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!h) return false;
+    DWORD code = 0;
+    bool running = GetExitCodeProcess(h, &code) && code == STILL_ACTIVE && started_of(h, started);
+    CloseHandle(h);
+    return running;
+}
+
+uint32_t rubraview_pal_process_self(uint64_t *started) {
+    if (!started_of(GetCurrentProcess(), started) && started) *started = 0;
+    return (uint32_t)GetCurrentProcessId();
+}
+
 uint64_t rubraview_mhost_children_read_bytes(void);   /* pal_media_host.c */
 
 bool rubraview_pal_process_read_bytes(uint64_t *bytes) {

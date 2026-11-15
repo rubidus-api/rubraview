@@ -50,6 +50,14 @@ bool rubraview_pal_process_start(proven_u8str_view_t command_line);
 bool rubraview_pal_process_start_apart(proven_u8str_view_t command_line);
 
 /**
+ * RV-292: whether process `pid` is running, and when it started (`*started`, Windows' 100 ns count since 1601;
+ * a pid used again by another process has another start). False: not running, or not to be asked.
+ */
+bool rubraview_pal_process_started(uint32_t pid, uint64_t *started);
+/** This process's id, and its start time into `*started`. */
+uint32_t rubraview_pal_process_self(uint64_t *started);
+
+/**
  * RV-215 (D-248): bytes this program has read since it started, its FFmpeg
  * children's included (those ended counted as they were at the end), from
  * any file or drive, the system's cache included. False when it cannot be had.

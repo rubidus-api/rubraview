@@ -91,6 +91,7 @@ typedef struct rubraview_jobwire_start {
     bool     same_recycles_copy;
     proven_u8str_view_t lang_file;  /* the language pack the viewer reads ("" English), for the job's windows */
     proven_u8str_view_t ui_font;    /* Settings › General › the windows' face, as the setting holds it */
+    proven_u8str_view_t journal_dir;/* RV-292: where the job leaves its note ("" none) */
     uint32_t count;                 /* the sources that follow */
 } rubraview_jobwire_start_t;
 

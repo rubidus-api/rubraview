@@ -11,6 +11,7 @@
 #include "clashui.h"
 #include "rubraview/fileop.h"
 #include "rubraview/jobwire.h"
+#include "rubraview/jobnote.h"
 #include "rubraview/memory.h"
 
 enum { JP_ANSWERS = 1024 };
@@ -352,6 +353,38 @@ static void pw_summary(jp_win_t *w) {
     w->dirty = true;
 }
 
+/* ---- RV-292: the note left while the job runs (owner: "프로세스 시작할 때 어떤 로그를 남기고 끝날 때 그걸 지우도록") ---- */
+
+static rubraview_jobnote_t g_note;
+static char g_note_path[2048];
+
+static void note_write(void) {
+    if (!g_note_path[0]) return;
+    char text[4096];
+    size_t n = rubraview_jobnote_format(&g_note, text, sizeof text);
+    if (n) (void)rubraview_pal_fs_write_file(cstr(g_note_path), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n });
+}
+
+static void note_begin(proven_u8str_view_t dir, bool moving, proven_u8str_view_t where, proven_u8str_view_t first, uint64_t count) {
+    if (dir.size == 0 || !rubraview_pal_fs_make_dirs(dir)) return;   /* no note can be left: the job runs without one */
+    g_note = (rubraview_jobnote_t){ .when = (int64_t)time(NULL), .count = count };
+    g_note.pid = rubraview_pal_process_self(&g_note.started);
+    (void)rubraview_fmt(g_note.kind, sizeof g_note.kind, "{}", PROVEN_ARG(moving ? "move" : "copy"));
+    (void)rubraview_fmt(g_note.where, sizeof g_note.where, "{}", PROVEN_ARG(where));
+    (void)rubraview_fmt(g_note.first, sizeof g_note.first, "{}", PROVEN_ARG(first));
+    char name[64];
+    if (!rubraview_jobnote_name(&g_note, name, sizeof name)) return;
+    int k = rubraview_fmt(g_note_path, sizeof g_note_path, "{}\\{}", PROVEN_ARG(dir), PROVEN_ARG(name));
+    if (k <= 0 || (size_t)k >= sizeof g_note_path) { g_note_path[0] = '\0'; return; }
+    note_write();
+}
+
+/* It ended as it should: the note goes. */
+static void note_end(void) {
+    if (g_note_path[0]) (void)rubraview_pal_fs_delete(cstr(g_note_path));
+    g_note_path[0] = '\0';
+}
+
 /* ---- the process ---- */
 
 static bool start_job(proven_arena_t *arena, rubraview_jobwire_msg_t *m, clashui_t *ui, rubraview_lang_t *lang, char **temp_dir, jp_win_t *pw) {
@@ -375,13 +408,16 @@ static bool start_job(proven_arena_t *arena, rubraview_jobwire_msg_t *m, clashui
     rubraview_fileop_init(&J.op, st.moving ? RUBRAVIEW_FILEOP_MOVE : RUBRAVIEW_FILEOP_COPY, rubraview_pal_fileop_fs(), d);
     J.op.fs.ctx = (void *)&J.copied;   /* RV-269: the copy says how far it is in the file in hand */
     rubraview_free(d);
+    proven_u8str_view_t first = {0};
     for (uint32_t i = 0; i < st.count; ++i) {
         proven_u8str_view_t s = rubraview_jobwire_get_str(m);
+        if (i == 0) first = s;
         char *c = rubraview_strndup_view(s);
         if (c && s.size) (void)rubraview_fileop_add(&J.op, c);
         rubraview_free(c);
     }
     if (m->bad) return false;
+    note_begin(st.journal_dir, st.moving, st.dir, first, st.count);
     J.wake = CreateEventW(NULL, FALSE, FALSE, NULL);
     J.worker = J.wake ? CreateThread(NULL, 0, worker, NULL, 0, NULL) : NULL;
     return J.worker != NULL;
@@ -411,6 +447,7 @@ int jobproc_main(const wchar_t *pipe_name) {
     double began = rubraview_pal_time_now_seconds(), last_progress = 0.0;
     uint32_t seen_version = 0;
     rubraview_jobwire_progress_t sent = { .total = UINT64_MAX }, shown = {0};
+    double noted = 0.0;
     int code = 0;
 
     for (;;) {
@@ -476,10 +513,16 @@ int jobproc_main(const wchar_t *pipe_name) {
             pw.dirty = true;
             shown = now;
         }
+        if (t - noted > 3.0 && !finished) {   /* RV-292: how far, now and then */
+            g_note.done = now.done + now.skipped + now.failed;
+            note_write();
+            noted = t;
+        }
         if (finished && !ended) {
             ended = true;
             WaitForSingleObject(J.worker, 5000);
             send_items_and_end(J.stop != 0);
+            note_end();   /* RV-292: it ended as it should (finished or stopped) */
             if (temp_dir) (void)rubraview_pal_fs_delete_tree(cstr(temp_dir));   /* a page out of an archive, written for the job */
             pw_summary(&pw);
             clashui_close(&ui);

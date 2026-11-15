@@ -12,6 +12,7 @@
 #include "clashui.h"
 #include "rubraview/fileop.h"
 #include "rubraview/jobwire.h"
+#include "rubraview/jobnote.h"
 #include <sddl.h>
 
 #define FJ_ARCADD 0xFFFFFFFFu   /* RV-260: a row of a writing into an archive (arcadd.c), answered on this thread */
@@ -97,12 +98,69 @@ static HANDLE make_pipe(wchar_t *name, size_t cap) {
     return h;
 }
 
+/* ---- RV-292: the notes the jobs leave while they run ---- */
+
+static char g_notes_dir[2048];
+static double g_notes_at;
+
+static proven_u8str_view_t jobnotes_dir(app_state_t *app) {
+    proven_u8str_view_t dir = rubraview_path_dirname(app->settings_path);
+    int k = dir.size ? rubraview_fmt(g_notes_dir, sizeof g_notes_dir, "{}\\jobs", PROVEN_ARG(dir)) : -1;
+    return k > 0 && (size_t)k < sizeof g_notes_dir ? cstr(g_notes_dir) : PROVEN_LIT("");
+}
+
+static const char *kind_words(const char *kind) {
+    if (rubraview_cstr_cmp(kind, "move") == 0) return T("a move");
+    if (rubraview_cstr_cmp(kind, "extract") == 0) return T("an extraction");
+    if (rubraview_cstr_cmp(kind, "archive") == 0) return T("a writing into an archive");
+    return T("a copy");
+}
+
+/* The notes whose process is no longer running: said in the log, then removed; the OSD says how many. */
+void jobnotes_check(app_state_t *app) {
+    g_notes_at = rubraview_pal_time_now_seconds();
+    proven_u8str_view_t dir = jobnotes_dir(app);
+    if (dir.size == 0 || !rubraview_pal_fs_exists(dir)) return;
+    rubraview_scratch_t sc;
+    proven_arena_t *sa = scratch_begin(app, &sc, 1u << 20);
+    rubraview_fs_listing_t list = rubraview_pal_fs_list_dir(sa, dir);
+    size_t said = 0;
+    for (size_t i = 0; i < list.count; ++i) {
+        const rubraview_fs_entry_t *e = &list.entries[i];
+        proven_u8str_view_t ext = rubraview_path_ext(e->name);
+        if (e->is_directory || !proven_u8str_view_eq(ext, PROVEN_LIT(".job"))) continue;
+        proven_u8str_view_t text = rubraview_pal_fs_read_file(sa, e->path, 64u << 10);
+        rubraview_jobnote_t note;
+        if (!rubraview_jobnote_parse(text, &note)) continue;
+        uint64_t started = 0;
+        bool running = rubraview_pal_process_started(note.pid, &started);
+        if (!rubraview_jobnote_stale(&note, running, started)) continue;
+        char when[64], line[2600];
+        info_local_time(when, sizeof when, note.when);
+        int n = rubraview_fmt(line, sizeof line, T("{} did not end as it should (its process is gone): {} of {} done, into {}, the first {}, started {}"),
+                              PROVEN_ARG(kind_words(note.kind)), PROVEN_ARG(note.done), PROVEN_ARG(note.count), PROVEN_ARG(note.where),
+                              PROVEN_ARG(note.first), PROVEN_ARG(when));
+        if (n > 0) app_log(app, "job", (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof line ? (size_t)n : sizeof line - 1 });
+        if (rubraview_cstr_cmp(note.kind, "copy") == 0 || rubraview_cstr_cmp(note.kind, "move") == 0)   /* not removed for it: another job there may be writing its own */
+            app_log(app, "job", TU8("a file named .rubraview-tmp-... in that folder is the one it was writing when it stopped: it can be deleted"));
+        (void)rubraview_pal_fs_delete(e->path);
+        said++;
+    }
+    scratch_end(app, &sc);
+    if (said) {
+        char words[200];
+        int n = rubraview_fmt(words, sizeof words, T("{} file jobs did not end as they should: see the log (Ctrl+Shift+L)"), PROVEN_ARG(said));
+        if (n > 0) osd_say(app, cstr(words));
+    }
+}
+
 static void put_start(fj_job_t *job, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, app_state_t *app) {
     rubraview_jobwire_start_t st = {
         .moving = job->moving, .dir = dir, .basket = job->basket, .from_cut = job->from_cut, .viewer_page = job->viewer_page,
         .viewer_path = cstr(job->viewer_path ? job->viewer_path : ""), .temp_dir = cstr(job->temp_dir ? job->temp_dir : ""),
         .same_recycles_copy = g_same_recycles_copy, .lang_file = cstr(lang_file_in_use()),
         .ui_font = rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("ui_font")),
+        .journal_dir = jobnotes_dir(app),
     };
     rubraview_jobwire_put_start(&job->out, &st, sources, n);
 }
@@ -391,6 +449,7 @@ static bool viewer_rows(app_state_t *app) {
 /* Once a pass of the main loop: each job's pipe read and written, finished jobs brought home, the progress card. */
 size_t filejob_pump(app_state_t *app) {
     size_t handled = viewer_rows(app) ? 1 : 0;
+    if (rubraview_pal_time_now_seconds() - g_notes_at > 60.0) jobnotes_check(app);   /* RV-292: once a minute */
     if (g_njobs == 0) return handled;
     for (size_t j = 0; j < g_njobs;) {
         fj_job_t *job = g_jobs[j];
@@ -402,6 +461,7 @@ size_t filejob_pump(app_state_t *app) {
             if (job->connected) {
                 osd_say(app, TU8("the copy's process ended without its report: see the folders (Ctrl+Z cannot take it back)"));
                 app_log(app, "file", PROVEN_LIT("a file job's process ended before it said how it went"));
+                jobnotes_check(app);   /* RV-292: what its note says */
                 if (app->picker_open) picker_navigate(app, app->picker_dir);   /* what did arrive, listed */
             } else {
                 osd_say(app, TU8("the copy could not be started"));
