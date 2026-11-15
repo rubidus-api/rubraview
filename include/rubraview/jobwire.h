@@ -26,11 +26,13 @@ typedef enum rubraview_jobwire_type {
     RUBRAVIEW_JOBWIRE_STOP = 2,       /* stop after the file in hand */
     RUBRAVIEW_JOBWIRE_SHOW_CLASHES = 3,
     RUBRAVIEW_JOBWIRE_ROWS = 4,       /* an extraction's or an archive's clashes: a u32 count, then rows */
+    RUBRAVIEW_JOBWIRE_ARCHIVE = 5,    /* RV-292: an extraction or a compression: rubraview_jobwire_archive_t */
     /* the job to the viewer */
     RUBRAVIEW_JOBWIRE_PROGRESS = 16,
     RUBRAVIEW_JOBWIRE_ITEMS = 17,     /* a u32 count, then items */
     RUBRAVIEW_JOBWIRE_END = 18,
     RUBRAVIEW_JOBWIRE_ANSWER = 19,    /* the answer to a row of ROWS */
+    RUBRAVIEW_JOBWIRE_ARCHIVE_DONE = 20,   /* RV-292: how an extraction or a compression went: rubraview_jobwire_archive_done_t */
 } rubraview_jobwire_type_t;
 
 /* ---- writing ---- */
@@ -151,6 +153,55 @@ typedef struct rubraview_jobwire_answer {
 
 void rubraview_jobwire_put_answer(rubraview_jobwire_out_t *out, const rubraview_jobwire_answer_t *a);
 void rubraview_jobwire_get_answer(rubraview_jobwire_msg_t *msg, rubraview_jobwire_answer_t *a);
+
+/* ---- RV-292: an extraction or a compression in a job's process ---- */
+
+enum { RUBRAVIEW_JOBWIRE_EXTRACT = 1, RUBRAVIEW_JOBWIRE_COMPRESS = 2,
+       RUBRAVIEW_JOBWIRE_ADD = 3   /* files into an archive: `dest` the archive, `output` the new one written beside it, the names
+                                      (path, name in the archive) in pairs, `only` the entries they replace, `format` the target,
+                                      `mode` 1 to make it a ZIP or 7z of its own name; the answer's `made` the archive, `set_name`
+                                      the old one kept (name.rvold), `result` an arcedit result */ };
+
+typedef struct rubraview_jobwire_archive {
+    uint8_t  kind;                     /* RUBRAVIEW_JOBWIRE_EXTRACT or _COMPRESS */
+    bool     quiet;                    /* no window of its own (Explorer's extraction window shows it) */
+    proven_u8str_view_t journal_dir, lang_file, ui_font;
+    uint32_t count;                    /* the archives (extract) or the sources (compress) that follow, as strings */
+    /* extract */
+    proven_u8str_view_t dest;          /* "" beside each */
+    uint8_t  mode;                     /* rubraview_extract_mode_t */
+    uint32_t only_count;               /* the entries picked, u64 each after the names; 0 all */
+    proven_u8str_view_t inner;
+    uint32_t rules_count;              /* a rule a picked entry (u8 each after them), or 0 */
+    int32_t  codepage;
+    /* compress */
+    proven_u8str_view_t output;
+    uint8_t  format, method;
+    int32_t  level;
+    bool     solid_off, names_hidden;
+    uint64_t volume_bytes;
+    /* both */
+    proven_u8str_view_t password;      /* "" none; never written anywhere else */
+} rubraview_jobwire_archive_t;
+
+/** ARCHIVE with its names, then its picked entries and their rules. */
+void rubraview_jobwire_put_archive(rubraview_jobwire_out_t *out, const rubraview_jobwire_archive_t *a, const proven_u8str_view_t *names,
+                                   const size_t *only, const uint8_t *rules);
+/** ARCHIVE's head; then `count` strings, `only_count` u64 and `rules_count` u8 read by the caller. */
+void rubraview_jobwire_get_archive(rubraview_jobwire_msg_t *msg, rubraview_jobwire_archive_t *a);
+
+typedef struct rubraview_jobwire_archive_done {
+    uint8_t  result;                   /* rubraview_archive_result_t */
+    uint32_t written, skipped, failed, at;   /* at: the archive it stopped at */
+    proven_u8str_view_t root, why;
+    proven_u8str_view_t made, set_name;      /* compress: the archive made; a split set's name */
+    uint32_t files, folders;
+    bool     older_parts;
+    uint32_t parked;                   /* names taken: (u32 archive, root, u64 entry, u64 size, i64 mtime, path) each after */
+} rubraview_jobwire_archive_done_t;
+
+void rubraview_jobwire_begin_archive_done(rubraview_jobwire_out_t *out, const rubraview_jobwire_archive_done_t *d);
+void rubraview_jobwire_get_archive_done(rubraview_jobwire_msg_t *msg, rubraview_jobwire_archive_done_t *d);
 
 #ifdef __cplusplus
 }

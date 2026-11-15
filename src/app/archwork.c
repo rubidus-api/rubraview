@@ -40,10 +40,10 @@ typedef struct archwork {
     rubraview_compress_job_t pk;
     char output[RUBRAVIEW_ARCHIVE_PATH];
     char dir[RUBRAVIEW_ARCHIVE_PATH];         /* the files' folder: the archive offered there, a name alone put there */
-    /* the thread */
-    HANDLE thread;
-    volatile LONG done;
-    rubraview_window_t *wake;
+    /* RV-292 (owner, 2026-11-15: C — the whole work apart): the job's process doing it, and how far it said it is */
+    int32_t job;
+    rubraview_jobwire_progress_t prog;
+    bool stopping;
 } archwork_t;
 
 static char *dup_view(proven_u8str_view_t v) {
@@ -69,70 +69,39 @@ static void work_free(archwork_t *w) {
     rubraview_free(w);
 }
 
-static DWORD WINAPI work_main(void *arg) {
-    archwork_t *w = arg;
-    if (w->compress) {
-        rubraview_compress_run(&w->pk);
-    } else {
-        for (; w->at < w->count; ++w->at) {
-            char dest[RUBRAVIEW_ARCHIVE_PATH];
-            if (w->dest[0]) rubraview_fmt(dest, sizeof dest, "{}", PROVEN_ARG(w->dest));
-            else {   /* beside the archive */
-                rubraview_fmt(dest, sizeof dest, "{}", PROVEN_ARG(w->archives[w->at]));
-                char *cut = rubraview_cstr_rchr(dest, '\\'), *cut2 = rubraview_cstr_rchr(dest, '/');
-                if (cut2 > cut) cut = cut2;
-                if (cut) *cut = '\0'; else rubraview_fmt(dest, sizeof dest, ".");
-            }
-            rubraview_extract_job_t *ex = &w->ex;
-            bool stop = atomic_load(&ex->cancel);
-            proven_sys_mem_set(ex, 0, sizeof *ex);
-            atomic_store(&ex->cancel, stop);
-            ex->archive = w->archives[w->at];
-            ex->dest = dest;
-            ex->mode = w->mode;
-            ex->exists = RUBRAVIEW_EXISTS_PARK;   /* RV-258: a name taken is asked, not numbered unasked */
-            ex->rules = w->rules;
-            ex->password = w->password[0] ? w->password : NULL;
-            ex->only = w->only;
-            ex->only_count = w->only_count;
-            ex->inner = w->only ? w->inner : NULL;
-            rubraview_extract_run(ex);
-            for (size_t k = 0; k < ex->parked_count; ++k) {   /* kept for the main thread, which asks */
-                if (w->parked_n == w->parked_cap) {
-                    size_t cap = w->parked_cap ? w->parked_cap * 2 : 16;
-                    xpark_t *grown = rubraview_alloc(cap * sizeof *grown);
-                    if (!grown) { rubraview_free(ex->parked[k].path); continue; }
-                    if (w->parked) proven_sys_mem_copy(grown, w->parked, w->parked_n * sizeof *grown);
-                    rubraview_free(w->parked);
-                    w->parked = grown;
-                    w->parked_cap = cap;
-                }
-                xpark_t *x = &w->parked[w->parked_n++];
-                x->archive = w->at;
-                rubraview_fmt(x->root, sizeof x->root, "{}", PROVEN_ARG(ex->root));
-                x->p = ex->parked[k];
-            }
-            rubraview_free(ex->parked);
-            ex->parked = NULL;
-            ex->parked_count = 0;
-            w->written += ex->written; w->skipped += ex->skipped; w->failed += ex->failed;
-            if (ex->root[0]) rubraview_fmt(w->last_root, sizeof w->last_root, "{}", PROVEN_ARG(ex->root));
-            if (ex->result == RUBRAVIEW_ARCHIVE_CANCELLED || ex->result == RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED ||
-                ex->result == RUBRAVIEW_ARCHIVE_PASSWORD_WRONG) break;   /* stopped here: asked, or let go */
-        }
-    }
-    InterlockedExchange(&w->done, 1);
-    if (w->wake) rubraview_pal_window_wake(w->wake);
-    return 0;
-}
-
+/* RV-292: the work goes to a job's process of its own (jobproc.c runs rubraview_extract_run / rubraview_compress_run
+   there, archive by archive as this file did on its thread); what to do is all in the message. */
 static bool work_start(app_state_t *app, archwork_t *w) {
     /* A password typed for work kept waiting while other work started (Explorer's menu does that): one at a time. */
     if (app->archwork) { osd_say(app, TU8("an archive is already being worked on (Esc stops it)")); work_free(w); return false; }
-    w->wake = app->window;
-    w->done = 0;
-    w->thread = CreateThread(NULL, 0, work_main, w, 0, NULL);
-    if (!w->thread) { osd_say(app, TU8("the work could not be started")); work_free(w); return false; }
+    rubraview_jobwire_archive_t a = { .kind = w->compress ? RUBRAVIEW_JOBWIRE_COMPRESS : RUBRAVIEW_JOBWIRE_EXTRACT, .quiet = w->windowed,
+                                      .password = proven_u8str_view_from_cstr(w->password) };
+    size_t n = w->compress ? w->source_count : w->count;
+    proven_u8str_view_t *names = (proven_u8str_view_t *)rubraview_alloc_zero(n ? n : 1, sizeof *names);
+    if (!names) { work_free(w); return false; }
+    for (size_t i = 0; i < n; ++i) names[i] = proven_u8str_view_from_cstr(w->compress ? w->sources[i] : w->archives[i]);
+    a.count = (uint32_t)n;
+    if (w->compress) {
+        a.output = proven_u8str_view_from_cstr(w->output);
+        a.format = (uint8_t)w->pk.format;
+        a.method = (uint8_t)w->pk.method;
+        a.level = w->pk.level;
+        a.solid_off = w->pk.solid_off;
+        a.names_hidden = w->pk.names_hidden;
+        a.volume_bytes = w->pk.volume_bytes;
+    } else {
+        a.dest = proven_u8str_view_from_cstr(w->dest);
+        a.mode = (uint8_t)w->mode;
+        a.only_count = (uint32_t)w->only_count;
+        a.inner = w->only ? proven_u8str_view_from_cstr(w->inner) : PROVEN_LIT("");
+        a.rules_count = w->rules ? (uint32_t)w->only_count : 0;
+        a.codepage = (int32_t)app->archive_codepage;
+    }
+    w->job = filejob_archive_start(app, &a, names, w->only, w->rules);
+    rubraview_free(names);
+    if (w->job < 0) { work_free(w); return false; }
+    w->prog = (rubraview_jobwire_progress_t){0};
+    w->stopping = false;
     app->archwork = w;
     return true;
 }
@@ -143,7 +112,8 @@ bool archwork_busy(const app_state_t *app) { return app->archwork != NULL; }
 bool archwork_stop(app_state_t *app) {
     archwork_t *w = app->archwork;
     if (!w) return false;
-    atomic_store(w->compress ? &w->pk.cancel : &w->ex.cancel, true);
+    filejob_archive_stop(w->job);   /* RV-292: its process stops */
+    w->stopping = true;
     osd_say(app, TU8("stopping..."));
     return true;
 }
@@ -664,20 +634,21 @@ void archwork_pack_cancelled(app_state_t *app) {
 static void say_progress(app_state_t *app, archwork_t *w) {
     progress_view_t v = { .source = PROGRESS_ARCHWORK, .bytes = true, .can_stop = true, .windowed = w->windowed };
     if (w->compress) {
-        int phase = atomic_load(&w->pk.phase);
-        v.done = atomic_load(&w->pk.done);
-        v.total = atomic_load(&w->pk.total);
-        v.stopping = atomic_load(&w->pk.cancel);
-        if (phase == 1) { v.files_at = atomic_load(&w->pk.files_done); v.files_total = atomic_load(&w->pk.files_total); }
+        int phase = (int)w->prog.skipped;   /* RV-292: the job sends the compression's phase there */
+        v.done = w->prog.bytes_done;
+        v.total = w->prog.bytes_total;
+        v.stopping = w->stopping;
+        if (phase == 1) { v.files_at = (uint32_t)w->prog.done; v.files_total = (uint32_t)w->prog.total; }
         proven_u8str_view_t name = rubraview_path_basename(proven_u8str_view_from_cstr(w->output));
         rubraview_fmt(v.title, sizeof v.title, phase == 0 ? T("Listing the files for {}") : phase == 2 ? T("Checking {}") : T("Compressing into {}"),
                       PROVEN_ARG(rubraview_bytes_view((const char *)name.ptr, (int)name.size)));
     } else {
-        v.done = atomic_load(&w->ex.done);
-        v.total = atomic_load(&w->ex.total);
-        v.stopping = atomic_load(&w->ex.cancel);
-        v.files_at = atomic_load(&w->ex.files_at);
-        v.files_total = atomic_load(&w->ex.files_total);
+        v.done = w->prog.bytes_done;
+        v.total = w->prog.bytes_total;
+        v.stopping = w->stopping;
+        v.files_at = (uint32_t)w->prog.done;
+        v.files_total = (uint32_t)w->prog.total;
+        w->at = (size_t)w->prog.failed;   /* RV-292: the archive it is on */
         size_t at = w->at < w->count ? w->at : w->count - 1;
         proven_u8str_view_t name = rubraview_path_basename(proven_u8str_view_from_cstr(w->archives[at]));
         if (w->count > 1) rubraview_fmt(v.title, sizeof v.title, T("Extracting {} ({} of {})"), PROVEN_ARG(rubraview_bytes_view((const char *)name.ptr, (int)name.size)),
@@ -688,6 +659,52 @@ static void say_progress(app_state_t *app, archwork_t *w) {
     progress_show(app, &v);
 }
 
+/* RV-292: the job's answer where the work's thread left it: the result and counts, the folder, the reason, the names
+   parked (each archive's index, its folder, the entry, its size and time, the path taken), and for a compression what
+   was made. */
+static void archwork_take_done(archwork_t *w, const uint8_t *fields, size_t len) {
+    rubraview_jobwire_msg_t m = { .type = RUBRAVIEW_JOBWIRE_ARCHIVE_DONE, .p = fields, .left = len };
+    rubraview_jobwire_archive_done_t d;
+    rubraview_jobwire_get_archive_done(&m, &d);
+    if (m.bad) d = (rubraview_jobwire_archive_done_t){ .result = RUBRAVIEW_ARCHIVE_CANNOT_READ };
+    if (w->compress) {
+        w->pk.result = (rubraview_archive_result_t)d.result;
+        rubraview_fmt(w->pk.written, sizeof w->pk.written, "{}", PROVEN_ARG(d.made));
+        rubraview_fmt(w->pk.set_name, sizeof w->pk.set_name, "{}", PROVEN_ARG(d.set_name));
+        rubraview_fmt(w->pk.why, sizeof w->pk.why, "{}", PROVEN_ARG(d.why));
+        w->pk.files = d.files;
+        w->pk.folders = d.folders;
+        w->pk.older_parts = d.older_parts;
+        return;
+    }
+    w->ex.result = (rubraview_archive_result_t)d.result;
+    w->written += d.written; w->skipped += d.skipped; w->failed += d.failed;
+    w->at = d.at;
+    rubraview_fmt(w->ex.why, sizeof w->ex.why, "{}", PROVEN_ARG(d.why));
+    if (d.root.size) rubraview_fmt(w->last_root, sizeof w->last_root, "{}", PROVEN_ARG(d.root));
+    for (uint32_t k = 0; k < d.parked && !m.bad; ++k) {
+        uint32_t arc = rubraview_jobwire_get_u32(&m);
+        proven_u8str_view_t root = rubraview_jobwire_get_str(&m);
+        uint64_t entry = rubraview_jobwire_get_u64(&m), size = rubraview_jobwire_get_u64(&m);
+        int64_t mtime = rubraview_jobwire_get_i64(&m);
+        proven_u8str_view_t path = rubraview_jobwire_get_str(&m);
+        if (m.bad) break;
+        if (w->parked_n == w->parked_cap) {
+            size_t cap = w->parked_cap ? w->parked_cap * 2 : 16;
+            xpark_t *grown = rubraview_alloc(cap * sizeof *grown);
+            if (!grown) break;
+            if (w->parked) proven_sys_mem_copy(grown, w->parked, w->parked_n * sizeof *grown);
+            rubraview_free(w->parked);
+            w->parked = grown;
+            w->parked_cap = cap;
+        }
+        xpark_t *x = &w->parked[w->parked_n++];
+        *x = (xpark_t){ .archive = arc < w->count ? arc : 0 };
+        rubraview_fmt(x->root, sizeof x->root, "{}", PROVEN_ARG(root));
+        x->p = (rubraview_extract_parked_t){ .index = (size_t)entry, .size = size, .mtime = mtime, .path = rubraview_strndup_view(path) };
+    }
+}
+
 static size_t xrows_take(app_state_t *app, archwork_t *w);   /* RV-258, below */
 static void xrows_carry_out(app_state_t *app);
 
@@ -695,14 +712,30 @@ void archwork_poll(app_state_t *app, bool quitting) {
     archwork_t *w = app->archwork;
     if (!w && !quitting) xrows_carry_out(app);   /* RV-258: what was answered about names taken */
     if (!w) return;
-    if (quitting) atomic_store(w->compress ? &w->pk.cancel : &w->ex.cancel, true);
-    if (!quitting && !InterlockedCompareExchange(&w->done, 0, 0)) { say_progress(app, w); return; }
-    WaitForSingleObject(w->thread, INFINITE);
-    CloseHandle(w->thread);
-    w->thread = NULL;
+    if (quitting) {   /* RV-292: the viewer goes; the work goes on in its own process */
+        filejob_archive_forget(w->job);
+        app->archwork = NULL;
+        work_free(w);
+        return;
+    }
+    const uint8_t *fields = NULL;
+    size_t flen = 0;
+    int state = filejob_archive_state(w->job, &w->prog, &fields, &flen);
+    if (state == 0) { say_progress(app, w); return; }
     app->archwork = NULL;
     progress_end(app, PROGRESS_ARCHWORK);   /* RV-268 */
-    if (quitting) { work_free(w); return; }
+    if (state < 0) {   /* its process went before it said how it went */
+        filejob_archive_forget(w->job);
+        osd_say(app, TU8("the work's process ended without its report: see the folders"));
+        app_log(app, "archive", PROVEN_LIT("an extraction's or a compression's process ended before it said how it went"));
+        jobnotes_check(app);
+        if (w->windowed) extractwin_finished(app, false, false, TU8("the work's process ended without its report"), PROVEN_LIT(""));
+        if (app->picker_open) picker_navigate(app, app->picker_dir);
+        work_free(w);
+        return;
+    }
+    archwork_take_done(w, fields, flen);   /* its answer into the fields this file read when the work was its thread's */
+    filejob_archive_forget(w->job);
     char line[512];
     if (w->compress) {
         rubraview_archive_result_t r = w->pk.result;

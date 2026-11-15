@@ -5,7 +5,7 @@
 
    Files and folders pasted or dropped while the open-file screen shows a folder inside an archive go into that folder:
    every name checked first against the archive; what clashes with nothing is written at once (one writing of the
-   archive, rubraview_arcedit_add_files, on a thread); the names already there wait in the clashes window, and their
+   archive, rubraview_arcedit_add_files, in a job's process since RV-292); the names already there wait in the clashes window, and their
    answers are written in a second writing. Each writing puts the new archive in the old one's place and keeps the old
    one as name.rvold for Ctrl+Z (D-89), and the screen lists the folder again. */
 #include "app.h"
@@ -39,11 +39,13 @@ typedef struct arcadd {
     size_t   ntops;
     char   **names_taken;  /* the archive's file names, for a free "(2)" */
     size_t   ntaken;
-    /* the writing under way */
-    HANDLE   thread;
-    volatile LONG done;
+    /* the writing under way: in a job's process (RV-292 X2) */
+    int32_t  job;
+    bool     running;
     int      result;
-    rubraview_arcedit_job_t job;
+    bool     book;            /* the archive was open as a book: closed for the writing, opened again after */
+    size_t   book_page;
+    char     opened[RUBRAVIEW_ARCHIVE_PATH];
     bool     same_recycles_copy;
     size_t   added, replaced, same, failed, rounds;
 } arcadd_t;
@@ -73,7 +75,6 @@ static void aa_free(arcadd_t *a) {
     rubraview_free(a->items);
     rubraview_free(a->tops);
     rubraview_free(a->names_taken);
-    rubraview_arcedit_job_free(&a->job);
     rubraview_free(a);
 }
 
@@ -141,13 +142,22 @@ static bool keep_beside(arcadd_t *a, size_t i) {
     return false;
 }
 
-/* The writing's thread: same-only answers decided by unpacking, then one writing of every queued item. */
-static DWORD WINAPI aa_main(void *arg) {
-    arcadd_t *a = (arcadd_t *)arg;
+static void aa_round_ended(app_state_t *app);
+
+/* RV-292 X2 (owner, 2026-11-15: C — the whole work apart): a round of writing. Here the same-only answers are decided
+   (by unpacking) and the names kept beside one another made free; the writing itself, and the new archive taking the
+   old one's place (the old one kept as name.rvold in the same step), are a job's process's, so the viewer gone does not
+   leave the archive half done. An archive open as a book is closed first and opened again after. */
+static void aa_start_round(app_state_t *app) {
+    arcadd_t *a = g_aa;
+    bool any = false;
+    for (size_t i = 0; i < a->count; ++i) if (a->items[i].state == AA_PENDING) { a->items[i].state = AA_QUEUED; any = true; }
+    if (!any) return;
+    a->rounds++;
     size_t n = 0, ngone = 0;
-    rubraview_arcedit_add_t *adds = (rubraview_arcedit_add_t *)rubraview_alloc_zero(a->count + 1, sizeof *adds);
+    proven_u8str_view_t *pairs = (proven_u8str_view_t *)rubraview_alloc_zero(2 * a->count + 2, sizeof *pairs);
     size_t *gone = (size_t *)rubraview_alloc_zero(a->count + 1, sizeof *gone);
-    if (!adds || !gone) { a->result = RUBRAVIEW_ARCEDIT_NO_MEMORY; goto end; }
+    if (!pairs || !gone) { rubraview_free(pairs); rubraview_free(gone); a->result = RUBRAVIEW_ARCEDIT_NO_MEMORY; aa_round_ended(app); return; }
     for (size_t i = 0; i < a->count; ++i) {
         aa_item_t *it = &a->items[i];
         if (it->state != AA_QUEUED) continue;
@@ -157,83 +167,58 @@ static DWORD WINAPI aa_main(void *arg) {
             if (!keep_beside(a, i)) { it->state = AA_FAILED; continue; }
         }
         if (it->answer == RUBRAVIEW_FILEOP_ANSWER_OVERWRITE && it->existing != RUBRAVIEW_ARCHIVE_NO_ITEM) gone[ngone++] = it->existing;
-        adds[n++] = (rubraview_arcedit_add_t){ .path = it->path, .name = it->name };
+        pairs[2 * n] = cstr(it->path);
+        pairs[2 * n + 1] = cstr(it->name);
+        n++;
     }
-    if (n == 0) { a->result = RUBRAVIEW_ARCEDIT_OK; a->out[0] = '\0'; goto end; }
-    a->job = (rubraview_arcedit_job_t){ .archive_path = a->archive, .codepage = a->codepage, .entries = ngone ? gone : NULL,
-                                        .entry_count = ngone, .target = a->target, .out_path = a->out, .level = 6 };
-    a->result = (int)rubraview_arcedit_add_files(&a->job, adds, n);
-end:
-    rubraview_free(adds);
-    rubraview_free(gone);
-    InterlockedExchange(&a->done, 1);
-    return 0;
-}
-
-static void aa_start_round(app_state_t *app) {
-    arcadd_t *a = g_aa;
-    bool any = false;
-    for (size_t i = 0; i < a->count; ++i) if (a->items[i].state == AA_PENDING) { a->items[i].state = AA_QUEUED; any = true; }
-    if (!any) return;
+    if (n == 0) { rubraview_free(pairs); rubraview_free(gone); a->result = RUBRAVIEW_ARCEDIT_OK; aa_round_ended(app); return; }
     rubraview_fmt(a->out, sizeof a->out, "{}.rvnew", PROVEN_ARG(cstr(a->archive)));
-    a->done = 0;
-    a->rounds++;
-    a->thread = CreateThread(NULL, 0, aa_main, a, 0, NULL);
-    if (!a->thread) {
-        for (size_t i = 0; i < a->count; ++i) if (a->items[i].state == AA_QUEUED) a->items[i].state = AA_FAILED;
-        osd_say(app, TU8("the archive could not be written"));
-        return;
+    proven_u8str_view_t archive = cstr(a->archive);
+    a->book = app->source.archive_path.size > 0 &&
+              (rubraview_path_same(app->source.archive_path, archive) || rubraview_path_same(rubraview_page_source_first_volume(&app->source), archive));
+    if (a->book) {   /* its file must be let go to be replaced */
+        a->book_page = current_page_index(app) >= 0 ? (size_t)current_page_index(app) : 0;
+        rubraview_fmt(a->opened, sizeof a->opened, "{}", PROVEN_ARG(app->source.archive_path));
+        history_remember(app); unload_all_pages(app); source_close(app);
     }
+    rubraview_jobwire_archive_t job = { .kind = RUBRAVIEW_JOBWIRE_ADD, .count = (uint32_t)(2 * n), .dest = archive, .output = cstr(a->out),
+                                        .format = (uint8_t)a->target, .mode = a->convert ? 1 : 0, .only_count = (uint32_t)ngone,
+                                        .codepage = (int32_t)a->codepage, .password = PROVEN_LIT("") };
+    a->job = filejob_archive_start(app, &job, pairs, ngone ? gone : NULL, NULL);
+    rubraview_free(pairs);
+    rubraview_free(gone);
+    if (a->job < 0) { a->result = RUBRAVIEW_ARCEDIT_UNWRITABLE; aa_round_ended(app); return; }
+    a->running = true;
     osd_say(app, TU8("putting them into the archive..."));
 }
 
-/* The writing done: the new archive in the old one's place (the old one kept for Ctrl+Z), the screen listed again. */
+/* The writing done (the job swapped the archive): the undo kept, the book opened again, the screen listed again. */
+static void aa_take(app_state_t *app, const uint8_t *fields, size_t len) {
+    arcadd_t *a = g_aa;
+    rubraview_jobwire_msg_t m = { .type = RUBRAVIEW_JOBWIRE_ARCHIVE_DONE, .p = fields, .left = len };
+    rubraview_jobwire_archive_done_t d;
+    rubraview_jobwire_get_archive_done(&m, &d);
+    a->result = m.bad ? RUBRAVIEW_ARCEDIT_UNWRITABLE : (int)d.result;
+    if (a->result == RUBRAVIEW_ARCEDIT_OK && d.made.size) {
+        if (a->convert) {   /* the new ZIP or 7z under its own name: the old one's undo means nothing now */
+            rubraview_fmt(a->archive, sizeof a->archive, "{}", PROVEN_ARG(d.made));
+            a->convert = false;
+            a->target = RUBRAVIEW_ARCEDIT_SAME;
+            arc_undo_drop(app);
+        } else if (d.set_name.size) {
+            rubraview_fmt(app->arc_undo_backup, sizeof app->arc_undo_backup, "{}", PROVEN_ARG(d.set_name));
+            rubraview_fmt(app->arc_undo_path, sizeof app->arc_undo_path, "{}", PROVEN_ARG(cstr(a->archive)));
+        }
+    }
+}
+
 static void aa_round_ended(app_state_t *app) {
     arcadd_t *a = g_aa;
-    WaitForSingleObject(a->thread, INFINITE);
-    CloseHandle(a->thread);
-    a->thread = NULL;
     bool ok = a->result == RUBRAVIEW_ARCEDIT_OK;
-    if (ok && a->out[0]) {
-        proven_u8str_view_t archive = cstr(a->archive);
-        bool book = app->source.archive_path.size > 0 &&
-                    (rubraview_path_same(app->source.archive_path, archive) || rubraview_path_same(rubraview_page_source_first_volume(&app->source), archive));
-        size_t page = book && current_page_index(app) >= 0 ? (size_t)current_page_index(app) : 0;
-        proven_u8str_view_t opened = book ? app_keep(app, app->source.archive_path) : PROVEN_LIT("");
-        if (book) { history_remember(app); unload_all_pages(app); source_close(app); }
-        proven_u8str_view_t final = archive;
-        if (a->convert) {   /* the new ZIP or 7z beside it under its own name; the old one's files to the Recycle Bin */
-            char name[1024];
-            size_t k = rubraview_arcedit_converted_name(rubraview_path_basename(archive), a->target, name, sizeof name);
-            char want[RUBRAVIEW_ARCHIVE_PATH], free_name[RUBRAVIEW_ARCHIVE_PATH];
-            proven_u8str_view_t dir = rubraview_path_dirname(archive);
-            int w = k ? rubraview_fmt(want, sizeof want, "{}/{}", PROVEN_ARG(dir), PROVEN_ARG(rubraview_bytes_view(name, (int)k))) : -1;
-            ok = w > 0 && rubraview_archive_free_name(cstr(want), rubraview_pal_fs_exists, free_name, sizeof free_name) &&
-                 rubraview_pal_fs_move(cstr(a->out), cstr(free_name));
-            if (ok) {
-                for (size_t v = 0; v < a->job.volume_count; ++v) (void)rubraview_pal_fs_recycle(cstr(a->job.volumes[v]));
-                rubraview_fmt(a->archive, sizeof a->archive, "{}", PROVEN_ARG(cstr(free_name)));
-                a->convert = false;   /* a second round writes the new one as it is */
-                a->target = RUBRAVIEW_ARCEDIT_SAME;
-                final = app_keep(app, cstr(a->archive));
-                arc_undo_drop(app);
-            }
-        } else {
-            char backup[sizeof app->arc_undo_backup];
-            bool kept = rubraview_fmt(backup, sizeof backup, "{}.rvold", PROVEN_ARG(archive)) < (int)sizeof backup &&
-                        rubraview_pal_fs_replace(archive, cstr(backup));
-            ok = kept && rubraview_pal_fs_replace(cstr(a->out), archive);
-            if (!ok && kept) (void)rubraview_pal_fs_replace(cstr(backup), archive);
-            if (ok) {
-                rubraview_fmt(app->arc_undo_backup, sizeof app->arc_undo_backup, "{}", PROVEN_ARG(backup));
-                rubraview_fmt(app->arc_undo_path, sizeof app->arc_undo_path, "{}", PROVEN_ARG(archive));
-            }
-        }
-        if (!ok) (void)rubraview_pal_fs_delete(cstr(a->out));
-        if (book) arc_reopen_at(app, ok ? final : opened, page);
-        if (app->picker_open && picker_enter_archive(app, final) && !a->convert)
-            picker_navigate(app, app_keep(app, cstr(a->picker_dir)));   /* the folder inside it, listed again */
-    }
+    proven_u8str_view_t final = app_keep(app, cstr(a->archive));
+    if (a->book) { arc_reopen_at(app, ok ? final : app_keep(app, cstr(a->opened)), a->book_page); a->book = false; }
+    if (ok && app->picker_open && picker_enter_archive(app, final))
+        picker_navigate(app, app_keep(app, cstr(a->picker_dir)));   /* the folder inside it, listed again */
     for (size_t i = 0; i < a->count; ++i) {
         aa_item_t *it = &a->items[i];
         if (it->state == AA_QUEUED) {
@@ -380,8 +365,15 @@ void arcadd_answer_all(app_state_t *app, rubraview_fileop_answer_t answer) {
 /* Once a pass: a writing that ended handled; the answered ones written next; the end when nothing is left. */
 void arcadd_poll(app_state_t *app) {
     if (!g_aa || g_aa_asking_format) return;
-    if (g_aa->thread) {
-        if (!InterlockedCompareExchange(&g_aa->done, 0, 0)) return;
+    if (g_aa->running) {
+        const uint8_t *fields = NULL;
+        size_t len = 0;
+        int state = filejob_archive_state(g_aa->job, NULL, &fields, &len);
+        if (state == 0) return;
+        if (state > 0) aa_take(app, fields, len);
+        else { g_aa->result = RUBRAVIEW_ARCEDIT_UNWRITABLE; jobnotes_check(app); }   /* its process went before it said */
+        filejob_archive_forget(g_aa->job);
+        g_aa->running = false;
         aa_round_ended(app);
     }
     bool pending = false, parked = false;
@@ -395,12 +387,7 @@ void arcadd_poll(app_state_t *app) {
 
 void arcadd_quit(void) {
     if (!g_aa) return;
-    if (g_aa->thread) {
-        atomic_store(&g_aa->job.cancel, true);
-        WaitForSingleObject(g_aa->thread, 10000);
-        CloseHandle(g_aa->thread);
-        (void)rubraview_pal_fs_delete(cstr(g_aa->out));
-    }
+    if (g_aa->running) filejob_archive_forget(g_aa->job);   /* RV-292: the writing goes on in its process */
     aa_free(g_aa);
     g_aa = NULL;
 }

@@ -720,6 +720,15 @@ bool rubraview_pal_fs_replace(proven_u8str_view_t from, proven_u8str_view_t to) 
     return MoveFileExW(wfrom, wto, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 }
 
+bool rubraview_pal_fs_replace_keeping(proven_u8str_view_t target, proven_u8str_view_t replacement, proven_u8str_view_t backup) {
+    WCHAR wt[MAX_PATH * 2], wr[MAX_PATH * 2], wb[MAX_PATH * 2];
+    if (!utf8_to_wide_buf(target, wt, sizeof(wt) / sizeof(wt[0])) || !utf8_to_wide_buf(replacement, wr, sizeof(wr) / sizeof(wr[0])) ||
+        !utf8_to_wide_buf(backup, wb, sizeof(wb) / sizeof(wb[0]))) return false;
+    if (GetFileAttributesW(wt) == INVALID_FILE_ATTRIBUTES) return MoveFileExW(wr, wt, MOVEFILE_WRITE_THROUGH) != 0;
+    (void)DeleteFileW(wb);   /* an older backup gives way (ReplaceFileW will not overwrite one that is read-only) */
+    return ReplaceFileW(wt, wr, wb, REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS, NULL, NULL) != 0;
+}
+
 bool rubraview_pal_fs_free_bytes(proven_u8str_view_t dir, uint64_t *out_bytes) {
     WCHAR wide[MAX_PATH * 2];
     if (!out_bytes || !utf8_to_wide_buf(dir, wide, sizeof(wide) / sizeof(wide[0]))) return false;

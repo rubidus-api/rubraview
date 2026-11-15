@@ -12,6 +12,8 @@
 #include "rubraview/fileop.h"
 #include "rubraview/jobwire.h"
 #include "rubraview/jobnote.h"
+#include "rubraview/archive_job.h"
+#include "rubraview/arcedit.h"
 #include "rubraview/memory.h"
 
 enum { JP_ANSWERS = 1024 };
@@ -385,6 +387,255 @@ static void note_end(void) {
     g_note_path[0] = '\0';
 }
 
+/* ---- RV-292 (owner, 2026-11-15: C — "새 압축 파일 만들기도 그렇게"): an extraction or a compression in this process.
+   archwork.c asks everything first (the folder, the password, the Compress box) and sends what to do; the work runs
+   here on a thread as it ran there, archive by archive; how it went goes back as ARCHIVE_DONE, the names an
+   extraction found taken with it, for the viewer to ask. */
+
+typedef struct jp_park { uint32_t archive; char root[RUBRAVIEW_ARCHIVE_PATH]; rubraview_extract_parked_t p; } jp_park_t;
+
+static struct {
+    bool on, quiet;
+    uint8_t kind;
+    char **names;
+    size_t n, at;
+    char *dest, *inner, *password, *output;
+    uint8_t mode;
+    size_t *only, only_count;
+    uint8_t *rules;
+    int32_t codepage;
+    rubraview_extract_job_t ex;
+    rubraview_compress_job_t pk;
+    HANDLE thread;
+    volatile LONG done, stop;
+    uint32_t written, skipped, failed;
+    char last_root[RUBRAVIEW_ARCHIVE_PATH];
+    jp_park_t *parked;
+    size_t pn, pcap;
+    /* RV-292 X2: files into an archive */
+    rubraview_arcedit_job_t aj;
+    int add_result;
+    char made[RUBRAVIEW_ARCHIVE_PATH], backup[RUBRAVIEW_ARCHIVE_PATH];
+} A;
+
+/* The new archive written beside the old one, then in its place — the old one kept as name.rvold in the same step
+   (ReplaceFileW), or for a conversion the new one under its own free name and the old set to the Recycle Bin. */
+static void archive_add(void) {
+    size_t n = A.n / 2;
+    rubraview_arcedit_add_t *adds = (rubraview_arcedit_add_t *)rubraview_alloc_zero(n ? n : 1, sizeof *adds);
+    if (!adds) { A.add_result = RUBRAVIEW_ARCEDIT_NO_MEMORY; return; }
+    for (size_t i = 0; i < n; ++i) adds[i] = (rubraview_arcedit_add_t){ .path = A.names[2 * i], .name = A.names[2 * i + 1] };
+    A.aj = (rubraview_arcedit_job_t){ .archive_path = A.dest, .codepage = (rubraview_codepage_t)A.codepage, .entries = A.only_count ? A.only : NULL,
+                                      .entry_count = A.only_count, .target = (rubraview_arcedit_target_t)A.pk.format, .out_path = A.output, .level = 6 };
+    A.add_result = (int)rubraview_arcedit_add_files(&A.aj, adds, n);
+    rubraview_free(adds);
+    if (A.add_result != RUBRAVIEW_ARCEDIT_OK) { (void)rubraview_pal_fs_delete(cstr(A.output)); return; }
+    proven_u8str_view_t archive = cstr(A.dest);
+    bool ok;
+    if (A.mode == 1) {   /* made a ZIP or a 7z of its own name */
+        char name[1024], want[RUBRAVIEW_ARCHIVE_PATH];
+        size_t k = rubraview_arcedit_converted_name(rubraview_path_basename(archive), (rubraview_arcedit_target_t)A.pk.format, name, sizeof name);
+        int w = k ? rubraview_fmt(want, sizeof want, "{}/{}", PROVEN_ARG(rubraview_path_dirname(archive)), PROVEN_ARG(rubraview_bytes_view(name, (int)k))) : -1;
+        ok = w > 0 && rubraview_archive_free_name(cstr(want), rubraview_pal_fs_exists, A.made, sizeof A.made) &&
+             rubraview_pal_fs_move(cstr(A.output), cstr(A.made));
+        if (ok) for (size_t v = 0; v < A.aj.volume_count; ++v) (void)rubraview_pal_fs_recycle(cstr(A.aj.volumes[v]));
+    } else {
+        ok = rubraview_fmt(A.backup, sizeof A.backup, "{}.rvold", PROVEN_ARG(archive)) < (int)sizeof A.backup &&
+             rubraview_pal_fs_replace_keeping(archive, cstr(A.output), cstr(A.backup));
+        if (ok) rubraview_fmt(A.made, sizeof A.made, "{}", PROVEN_ARG(archive));
+        else A.backup[0] = '\0';
+    }
+    if (!ok) { (void)rubraview_pal_fs_delete(cstr(A.output)); A.add_result = RUBRAVIEW_ARCEDIT_UNWRITABLE; }
+}
+
+static DWORD WINAPI archive_worker(void *arg) {
+    (void)arg;
+    if (A.kind == RUBRAVIEW_JOBWIRE_ADD) {
+        archive_add();
+    } else if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS) {
+        rubraview_compress_run(&A.pk);
+    } else {
+        for (; A.at < A.n; ++A.at) {
+            char dest[RUBRAVIEW_ARCHIVE_PATH];
+            if (A.dest && A.dest[0]) rubraview_fmt(dest, sizeof dest, "{}", PROVEN_ARG(A.dest));
+            else {   /* beside the archive */
+                rubraview_fmt(dest, sizeof dest, "{}", PROVEN_ARG(A.names[A.at]));
+                char *cut = rubraview_cstr_rchr(dest, '\\'), *cut2 = rubraview_cstr_rchr(dest, '/');
+                if (cut2 > cut) cut = cut2;
+                if (cut) *cut = '\0'; else rubraview_fmt(dest, sizeof dest, ".");
+            }
+            rubraview_extract_job_t *ex = &A.ex;
+            bool stop = atomic_load(&ex->cancel) || A.stop;
+            proven_sys_mem_set(ex, 0, sizeof *ex);
+            atomic_store(&ex->cancel, stop);
+            ex->archive = A.names[A.at];
+            ex->dest = dest;
+            ex->mode = (rubraview_extract_mode_t)A.mode;
+            ex->exists = RUBRAVIEW_EXISTS_PARK;   /* RV-258: a name taken is asked by the viewer, not numbered unasked */
+            ex->rules = A.rules;
+            ex->password = A.password && A.password[0] ? A.password : NULL;
+            ex->only = A.only;
+            ex->only_count = A.only_count;
+            ex->inner = A.only ? A.inner : NULL;
+            ex->codepage = (rubraview_codepage_t)A.codepage;
+            rubraview_extract_run(ex);
+            for (size_t k = 0; k < ex->parked_count; ++k) {
+                if (A.pn == A.pcap) {
+                    size_t cap = A.pcap ? A.pcap * 2 : 16;
+                    jp_park_t *grown = (jp_park_t *)rubraview_realloc((proven_mem_mut_t){ .ptr = (proven_byte_t *)A.parked, .size = cap * sizeof *grown });
+                    if (!grown) { rubraview_free(ex->parked[k].path); continue; }
+                    A.parked = grown;
+                    A.pcap = cap;
+                }
+                jp_park_t *x = &A.parked[A.pn++];
+                x->archive = (uint32_t)A.at;
+                rubraview_fmt(x->root, sizeof x->root, "{}", PROVEN_ARG(ex->root));
+                x->p = ex->parked[k];
+            }
+            rubraview_free(ex->parked);
+            ex->parked = NULL;
+            ex->parked_count = 0;
+            A.written += ex->written; A.skipped += ex->skipped; A.failed += ex->failed;
+            if (ex->root[0]) rubraview_fmt(A.last_root, sizeof A.last_root, "{}", PROVEN_ARG(ex->root));
+            if (ex->result == RUBRAVIEW_ARCHIVE_CANCELLED || ex->result == RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED ||
+                ex->result == RUBRAVIEW_ARCHIVE_PASSWORD_WRONG) break;   /* stopped here: the viewer asks, or lets go */
+        }
+    }
+    InterlockedExchange(&A.done, 1);
+    return 0;
+}
+
+static char *dup_of(proven_u8str_view_t v) { return rubraview_strndup_view(v); }
+
+static bool start_archive(proven_arena_t *arena, rubraview_jobwire_msg_t *m, clashui_t *ui, rubraview_lang_t *lang, jp_win_t *pw) {
+    rubraview_jobwire_archive_t a;
+    rubraview_jobwire_get_archive(m, &a);
+    if (m->bad || a.count == 0 || (a.kind != RUBRAVIEW_JOBWIRE_EXTRACT && a.kind != RUBRAVIEW_JOBWIRE_COMPRESS && a.kind != RUBRAVIEW_JOBWIRE_ADD)) return false;
+    if (a.lang_file.size > 0) {
+        proven_u8str_view_t text = rubraview_pal_fs_read_file(arena, a.lang_file, RUBRAVIEW_LANG_MAX_FILE);
+        rubraview_lang_stats_t stats;
+        if (text.size > 0 && rubraview_lang_load(lang, text, &stats)) rubraview_lang_use(lang);
+    }
+    char *face = dup_of(a.ui_font);
+    ui->ui_font = face ? proven_u8str_view_from_cstr(face) : PROVEN_LIT("");
+    A.on = true;
+    A.kind = a.kind;
+    A.quiet = a.quiet;
+    A.n = a.count;
+    A.names = (char **)rubraview_alloc_zero(a.count, sizeof *A.names);
+    if (!A.names) return false;
+    A.dest = dup_of(a.dest); A.inner = dup_of(a.inner); A.password = dup_of(a.password); A.output = dup_of(a.output);
+    A.mode = a.mode;
+    A.codepage = a.codepage;
+    for (uint32_t i = 0; i < a.count; ++i) A.names[i] = dup_of(rubraview_jobwire_get_str(m));
+    if (a.only_count) {
+        A.only = (size_t *)rubraview_alloc_zero(a.only_count, sizeof *A.only);
+        if (!A.only) return false;
+        for (uint32_t i = 0; i < a.only_count; ++i) A.only[i] = (size_t)rubraview_jobwire_get_u64(m);
+        A.only_count = a.only_count;
+    }
+    if (a.rules_count) {
+        A.rules = (uint8_t *)rubraview_alloc_zero(a.rules_count, 1);
+        if (!A.rules) return false;
+        for (uint32_t i = 0; i < a.rules_count; ++i) A.rules[i] = rubraview_jobwire_get_u8(m);
+    }
+    if (m->bad) return false;
+    if (A.kind == RUBRAVIEW_JOBWIRE_ADD) A.pk.format = (rubraview_pack_format_t)a.format;   /* the arcedit target, kept here */
+    if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS) {
+        A.pk = (rubraview_compress_job_t){ .sources = (const char *const *)A.names, .source_count = A.n, .output = A.output,
+                                           .format = (rubraview_pack_format_t)a.format, .level = a.level, .method = (rubraview_pack_method_t)a.method,
+                                           .solid_off = a.solid_off, .volume_bytes = a.volume_bytes, .names_hidden = a.names_hidden,
+                                           .password = A.password && A.password[0] ? A.password : NULL };
+    }
+    note_begin(a.journal_dir, false, A.kind == RUBRAVIEW_JOBWIRE_COMPRESS ? a.output : a.dest, proven_u8str_view_from_cstr(A.names[0]),
+               A.kind == RUBRAVIEW_JOBWIRE_ADD ? A.n / 2 : A.n);
+    if (g_note_path[0]) {   /* what it is, in the note */
+        (void)rubraview_fmt(g_note.kind, sizeof g_note.kind, "{}",
+                            PROVEN_ARG(A.kind == RUBRAVIEW_JOBWIRE_COMPRESS ? "compress" : A.kind == RUBRAVIEW_JOBWIRE_ADD ? "archive" : "extract"));
+        note_write();
+    }
+    proven_u8str_view_t first = rubraview_path_basename(proven_u8str_view_from_cstr(A.kind == RUBRAVIEW_JOBWIRE_COMPRESS ? A.output
+                                                                                    : A.kind == RUBRAVIEW_JOBWIRE_ADD ? A.dest : A.names[0]));
+    (void)rubraview_fmt(pw->head, sizeof pw->head, A.kind == RUBRAVIEW_JOBWIRE_COMPRESS ? T("Compressing into {}")
+                                                   : A.kind == RUBRAVIEW_JOBWIRE_ADD ? T("Putting files into {}") : T("Extracting {}"), PROVEN_ARG(first));
+    A.thread = CreateThread(NULL, 0, archive_worker, NULL, 0, NULL);
+    return A.thread != NULL;
+}
+
+/* How far: the bytes, the files, and in `skipped` the compression's phase, in `failed` the archive it is on. */
+static rubraview_jobwire_progress_t archive_progress(void) {
+    if (A.kind == RUBRAVIEW_JOBWIRE_ADD)
+        return (rubraview_jobwire_progress_t){ .bytes_done = (uint64_t)atomic_load(&A.aj.done), .bytes_total = (uint64_t)atomic_load(&A.aj.total), .total = A.n / 2 };
+    if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS)
+        return (rubraview_jobwire_progress_t){ .bytes_done = atomic_load(&A.pk.done), .bytes_total = atomic_load(&A.pk.total),
+                                               .done = atomic_load(&A.pk.files_done), .total = atomic_load(&A.pk.files_total),
+                                               .skipped = (uint64_t)atomic_load(&A.pk.phase) };
+    return (rubraview_jobwire_progress_t){ .bytes_done = atomic_load(&A.ex.done), .bytes_total = atomic_load(&A.ex.total),
+                                           .done = atomic_load(&A.ex.files_at), .total = atomic_load(&A.ex.files_total), .failed = A.at };
+}
+
+static void archive_send_done(void) {
+    rubraview_jobwire_archive_done_t d = { .written = A.written, .skipped = A.skipped, .failed = A.failed, .at = (uint32_t)A.at,
+                                           .root = cstr(A.last_root), .parked = (uint32_t)A.pn };
+    if (A.kind == RUBRAVIEW_JOBWIRE_ADD) {
+        d.result = (uint8_t)A.add_result;
+        d.made = cstr(A.made);
+        d.set_name = cstr(A.backup);
+        d.root = PROVEN_LIT("");
+        d.why = PROVEN_LIT("");
+        d.parked = 0;
+    } else if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS) {
+        d.result = (uint8_t)A.pk.result;
+        d.why = cstr(A.pk.why);
+        d.made = cstr(A.pk.written);
+        d.set_name = cstr(A.pk.set_name);
+        d.files = A.pk.files;
+        d.folders = A.pk.folders;
+        d.older_parts = A.pk.older_parts;
+        d.root = PROVEN_LIT("");
+        d.parked = 0;
+    } else {
+        d.result = (uint8_t)A.ex.result;
+        d.why = cstr(A.ex.why);
+    }
+    if (P.broken) return;
+    AcquireSRWLockExclusive(&P.lock);
+    rubraview_jobwire_begin_archive_done(&P.out, &d);
+    for (size_t k = 0; k < d.parked; ++k) {
+        rubraview_jobwire_put_u32(&P.out, A.parked[k].archive);
+        rubraview_jobwire_put_str(&P.out, cstr(A.parked[k].root));
+        rubraview_jobwire_put_u64(&P.out, A.parked[k].p.index);
+        rubraview_jobwire_put_u64(&P.out, A.parked[k].p.size);
+        rubraview_jobwire_put_i64(&P.out, A.parked[k].p.mtime);
+        rubraview_jobwire_put_str(&P.out, cstr(A.parked[k].p.path));
+    }
+    (void)rubraview_jobwire_finish(&P.out);
+    ReleaseSRWLockExclusive(&P.lock);
+    SetEvent(P.wake);
+}
+
+static void archive_summary(jp_win_t *pw) {
+    if (A.kind == RUBRAVIEW_JOBWIRE_ADD) {
+        if (A.add_result == RUBRAVIEW_ARCEDIT_OK)
+            (void)rubraview_fmt(pw->summary, sizeof pw->summary, T("{} files put into {}"), PROVEN_ARG(A.n / 2), PROVEN_ARG(rubraview_path_basename(cstr(A.made))));
+        else
+            (void)rubraview_fmt(pw->summary, sizeof pw->summary, T("not put into the archive: {}"), PROVEN_ARG(rubraview_arcedit_result_text((rubraview_arcedit_result_t)A.add_result)));
+        pw->dirty = true;
+        return;
+    }
+    rubraview_archive_result_t r = A.kind == RUBRAVIEW_JOBWIRE_COMPRESS ? A.pk.result : A.ex.result;
+    const char *why = A.kind == RUBRAVIEW_JOBWIRE_COMPRESS ? A.pk.why : A.ex.why;
+    if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS && r == RUBRAVIEW_ARCHIVE_DONE)
+        (void)rubraview_fmt(pw->summary, sizeof pw->summary, T("compressed: {} ({} files, {} folders)"),
+                            PROVEN_ARG(rubraview_path_basename(cstr(A.pk.written))), PROVEN_ARG(A.pk.files), PROVEN_ARG(A.pk.folders));
+    else if (A.kind == RUBRAVIEW_JOBWIRE_EXTRACT && (r == RUBRAVIEW_ARCHIVE_DONE || r == RUBRAVIEW_ARCHIVE_PARTLY || r == RUBRAVIEW_ARCHIVE_NOTHING))
+        (void)rubraview_fmt(pw->summary, sizeof pw->summary, T("extracted {} files into {}"), PROVEN_ARG(A.written),
+                            PROVEN_ARG(rubraview_path_basename(cstr(A.last_root))));
+    else
+        (void)rubraview_fmt(pw->summary, sizeof pw->summary, "{}{}{}", PROVEN_ARG(rubraview_archive_result_text(r)), PROVEN_ARG(why[0] ? "  -  " : ""), PROVEN_ARG(why));
+    pw->dirty = true;
+}
+
 /* ---- the process ---- */
 
 static bool start_job(proven_arena_t *arena, rubraview_jobwire_msg_t *m, clashui_t *ui, rubraview_lang_t *lang, char **temp_dir, jp_win_t *pw) {
@@ -462,9 +713,17 @@ int jobproc_main(const wchar_t *pipe_name) {
                     started = start_job(arena, &m, &ui, &lang, &temp_dir, &pw);
                     if (!started) { code = 3; goto out; }
                     (void)pw_show(&pw, arena, ui.ui_font, rubraview_pal_time_now_seconds());
+                } else if (m.type == RUBRAVIEW_JOBWIRE_ARCHIVE && !started) {   /* RV-292 */
+                    started = start_archive(arena, &m, &ui, &lang, &pw);
+                    if (!started) { code = 3; goto out; }
+                    if (!A.quiet) (void)pw_show(&pw, arena, ui.ui_font, rubraview_pal_time_now_seconds());
                 } else if (m.type == RUBRAVIEW_JOBWIRE_STOP) {
                     InterlockedExchange(&J.stop, 1);
-                    SetEvent(J.wake);
+                    if (J.wake) SetEvent(J.wake);
+                    InterlockedExchange(&A.stop, 1);   /* RV-292 */
+                    atomic_store(&A.ex.cancel, true);
+                    atomic_store(&A.pk.cancel, true);
+                    atomic_store(&A.aj.cancel, true);
                 } else if (m.type == RUBRAVIEW_JOBWIRE_SHOW_CLASHES) {
                     if (ui.nrows) (void)clashui_show(&ui, arena);
                 }
@@ -478,6 +737,35 @@ int jobproc_main(const wchar_t *pipe_name) {
         if (!started) {
             if (P.broken || rubraview_pal_time_now_seconds() - began > 15.0) { code = 4; goto out; }
             Sleep(20);
+            continue;
+        }
+        if (A.on) {   /* RV-292: an extraction or a compression */
+            double t = rubraview_pal_time_now_seconds();
+            bool fin = InterlockedCompareExchange(&A.done, 0, 0) != 0;
+            rubraview_jobwire_progress_t now = archive_progress();
+            if (t - last_progress > 0.25 || fin) {
+                send_with(put_progress, &now);
+                last_progress = t;
+                rubraview_progress_sample(&pw.rate, now.bytes_done, t);
+                shown = now;
+                shown.done = now.done; shown.total = now.total; shown.skipped = 0; shown.failed = 0;
+                pw.dirty = true;
+            }
+            if (t - noted > 3.0 && !fin && g_note_path[0]) { g_note.done = now.done; note_write(); noted = t; }
+            if (fin && !ended) {
+                ended = true;
+                WaitForSingleObject(A.thread, 5000);
+                archive_send_done();
+                note_end();
+                archive_summary(&pw);
+            }
+            if (pw_pump(&pw)) {
+                if (!ended) { InterlockedExchange(&A.stop, 1); atomic_store(&A.ex.cancel, true); atomic_store(&A.pk.cancel, true); }
+                pw_close(&pw);
+            }
+            pw_draw(&pw, &shown, ended, A.stop != 0, t);
+            if (ended && !pw.open) break;
+            (void)MsgWaitForMultipleObjects(0, NULL, FALSE, 40, QS_ALLINPUT);
             continue;
         }
         /* the worker's rows and counts */
@@ -542,6 +830,8 @@ int jobproc_main(const wchar_t *pipe_name) {
 out:
     clashui_close(&ui);
     pw_close(&pw);
+    if (A.thread) { InterlockedExchange(&A.stop, 1); atomic_store(&A.ex.cancel, true); atomic_store(&A.pk.cancel, true);
+                    WaitForSingleObject(A.thread, 10000); CloseHandle(A.thread); }
     InterlockedExchange(&J.quit, 1);
     if (J.wake) SetEvent(J.wake);
     if (J.worker) { WaitForSingleObject(J.worker, 5000); CloseHandle(J.worker); }

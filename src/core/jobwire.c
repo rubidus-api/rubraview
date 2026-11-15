@@ -255,3 +255,94 @@ void rubraview_jobwire_get_answer(rubraview_jobwire_msg_t *msg, rubraview_jobwir
     a->all = rubraview_jobwire_get_u8(msg) != 0;
     a->answer = rubraview_jobwire_get_u8(msg);
 }
+
+/* ---- RV-292: an extraction or a compression ---- */
+
+void rubraview_jobwire_put_archive(rubraview_jobwire_out_t *out, const rubraview_jobwire_archive_t *a, const proven_u8str_view_t *names,
+                                   const size_t *only, const uint8_t *rules) {
+    if (!out || !a) return;
+    rubraview_jobwire_begin(out, RUBRAVIEW_JOBWIRE_ARCHIVE);
+    rubraview_jobwire_put_u8(out, a->kind);
+    rubraview_jobwire_put_u8(out, a->quiet);
+    rubraview_jobwire_put_str(out, a->journal_dir);
+    rubraview_jobwire_put_str(out, a->lang_file);
+    rubraview_jobwire_put_str(out, a->ui_font);
+    rubraview_jobwire_put_u32(out, a->count);
+    rubraview_jobwire_put_str(out, a->dest);
+    rubraview_jobwire_put_u8(out, a->mode);
+    rubraview_jobwire_put_u32(out, a->only_count);
+    rubraview_jobwire_put_str(out, a->inner);
+    rubraview_jobwire_put_u32(out, a->rules_count);
+    rubraview_jobwire_put_i32(out, a->codepage);
+    rubraview_jobwire_put_str(out, a->output);
+    rubraview_jobwire_put_u8(out, a->format);
+    rubraview_jobwire_put_u8(out, a->method);
+    rubraview_jobwire_put_i32(out, a->level);
+    rubraview_jobwire_put_u8(out, a->solid_off);
+    rubraview_jobwire_put_u8(out, a->names_hidden);
+    rubraview_jobwire_put_u64(out, a->volume_bytes);
+    rubraview_jobwire_put_str(out, a->password);
+    for (uint32_t i = 0; names && i < a->count; ++i) rubraview_jobwire_put_str(out, names[i]);
+    for (uint32_t i = 0; only && i < a->only_count; ++i) rubraview_jobwire_put_u64(out, only[i]);
+    for (uint32_t i = 0; rules && i < a->rules_count; ++i) rubraview_jobwire_put_u8(out, rules[i]);
+    (void)rubraview_jobwire_finish(out);
+}
+
+void rubraview_jobwire_get_archive(rubraview_jobwire_msg_t *msg, rubraview_jobwire_archive_t *a) {
+    if (!a) return;
+    a->kind = rubraview_jobwire_get_u8(msg);
+    a->quiet = rubraview_jobwire_get_u8(msg) != 0;
+    a->journal_dir = rubraview_jobwire_get_str(msg);
+    a->lang_file = rubraview_jobwire_get_str(msg);
+    a->ui_font = rubraview_jobwire_get_str(msg);
+    a->count = rubraview_jobwire_get_u32(msg);
+    a->dest = rubraview_jobwire_get_str(msg);
+    a->mode = rubraview_jobwire_get_u8(msg);
+    a->only_count = rubraview_jobwire_get_u32(msg);
+    a->inner = rubraview_jobwire_get_str(msg);
+    a->rules_count = rubraview_jobwire_get_u32(msg);
+    a->codepage = rubraview_jobwire_get_i32(msg);
+    a->output = rubraview_jobwire_get_str(msg);
+    a->format = rubraview_jobwire_get_u8(msg);
+    a->method = rubraview_jobwire_get_u8(msg);
+    a->level = rubraview_jobwire_get_i32(msg);
+    a->solid_off = rubraview_jobwire_get_u8(msg) != 0;
+    a->names_hidden = rubraview_jobwire_get_u8(msg) != 0;
+    a->volume_bytes = rubraview_jobwire_get_u64(msg);
+    a->password = rubraview_jobwire_get_str(msg);
+}
+
+void rubraview_jobwire_begin_archive_done(rubraview_jobwire_out_t *out, const rubraview_jobwire_archive_done_t *d) {
+    if (!out || !d) return;
+    rubraview_jobwire_begin(out, RUBRAVIEW_JOBWIRE_ARCHIVE_DONE);
+    rubraview_jobwire_put_u8(out, d->result);
+    rubraview_jobwire_put_u32(out, d->written);
+    rubraview_jobwire_put_u32(out, d->skipped);
+    rubraview_jobwire_put_u32(out, d->failed);
+    rubraview_jobwire_put_u32(out, d->at);
+    rubraview_jobwire_put_str(out, d->root);
+    rubraview_jobwire_put_str(out, d->why);
+    rubraview_jobwire_put_str(out, d->made);
+    rubraview_jobwire_put_str(out, d->set_name);
+    rubraview_jobwire_put_u32(out, d->files);
+    rubraview_jobwire_put_u32(out, d->folders);
+    rubraview_jobwire_put_u8(out, d->older_parts);
+    rubraview_jobwire_put_u32(out, d->parked);
+}
+
+void rubraview_jobwire_get_archive_done(rubraview_jobwire_msg_t *msg, rubraview_jobwire_archive_done_t *d) {
+    if (!d) return;
+    d->result = rubraview_jobwire_get_u8(msg);
+    d->written = rubraview_jobwire_get_u32(msg);
+    d->skipped = rubraview_jobwire_get_u32(msg);
+    d->failed = rubraview_jobwire_get_u32(msg);
+    d->at = rubraview_jobwire_get_u32(msg);
+    d->root = rubraview_jobwire_get_str(msg);
+    d->why = rubraview_jobwire_get_str(msg);
+    d->made = rubraview_jobwire_get_str(msg);
+    d->set_name = rubraview_jobwire_get_str(msg);
+    d->files = rubraview_jobwire_get_u32(msg);
+    d->folders = rubraview_jobwire_get_u32(msg);
+    d->older_parts = rubraview_jobwire_get_u8(msg) != 0;
+    d->parked = rubraview_jobwire_get_u32(msg);
+}

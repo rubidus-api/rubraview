@@ -88,6 +88,7 @@
 #include "rubraview/ui_card.h"
 #include "rubraview/progress.h"
 #include "rubraview/editctl.h"
+#include "rubraview/jobwire.h"
 #include "rubraview/pal/pal_render.h"
 typedef struct editbox_clicks { double at, x, y; int count; } editbox_clicks_t;   /* RV-293 */
 typedef struct editbox_view {   /* RV-293 E2: a field as drawn: its box, the size of its words, how far scrolled, from where */
@@ -2763,7 +2764,11 @@ bool filejob_start(app_state_t *app, proven_u8str_view_t dir, const proven_u8str
 bool filejob_start_viewer(app_state_t *app, proven_u8str_view_t dir, proven_u8str_view_t path, bool moving, int32_t page, proven_u8str_view_t temp_dir);   /* RV-259 */
 bool filejob_busy(void);
 const char *lang_file_in_use(void);   /* RV-289 */
-void jobnotes_check(app_state_t *app);   /* RV-292: notes of jobs that did not end as they should, said in the log */
+void jobnotes_check(app_state_t *app);
+int32_t filejob_archive_start(app_state_t *app, const rubraview_jobwire_archive_t *a, const proven_u8str_view_t *names, const size_t *only, const uint8_t *rules);
+int filejob_archive_state(int32_t id, rubraview_jobwire_progress_t *p, const uint8_t **fields, size_t *len);
+void filejob_archive_stop(int32_t id);
+void filejob_archive_forget(int32_t id);   /* RV-292: notes of jobs that did not end as they should, said in the log */
 int jobproc_main(const wchar_t *pipe_name);   /* RV-289: `--file-job <pipe>` */
 size_t time_left_text(char *out, size_t cap, double seconds);   /* "About 3 min 5 s left" (progresscard.c) */
 bool filejob_same_recycles_copy(void);

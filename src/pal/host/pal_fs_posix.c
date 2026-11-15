@@ -347,6 +347,12 @@ bool rubraview_pal_fs_delete_tree(proven_u8str_view_t path) {
     char z[4096];
     return z_of(path, z, sizeof z) && tree_gone(z);
 }
+bool rubraview_pal_fs_replace_keeping(proven_u8str_view_t target, proven_u8str_view_t replacement, proven_u8str_view_t backup) {
+    /* RV-292: on POSIX two renames (no single call keeps a backup); the host build only tests with it */
+    if (rubraview_pal_fs_exists(target) && !rubraview_pal_fs_replace(target, backup)) return false;
+    return rubraview_pal_fs_replace(replacement, target);
+}
+
 bool rubraview_pal_fs_replace(proven_u8str_view_t from, proven_u8str_view_t to) {
     char a[4096], b[4096];
     return z_of(from, a, sizeof a) && z_of(to, b, sizeof b) && rename(a, b) == 0;

@@ -38,10 +38,16 @@ typedef struct fj_job {
     fj_item_t *items;
     size_t   nitems, cap;
     rubraview_jobwire_end_t end;
+    /* RV-292: an extraction's or a compression's job: its answer kept for archwork, not ended here */
+    bool     archive;
+    int32_t  id;
+    uint8_t *done_fields;
+    size_t   done_len;
 } fj_job_t;
 
 static fj_job_t *g_jobs[FJ_JOBS];
 static size_t    g_njobs;
+static int32_t   g_next_id;
 static unsigned  g_serial;
 static bool      g_same_recycles_copy;   /* the copy's same file: the last the reader chose */
 
@@ -69,6 +75,7 @@ static void job_free(fj_job_t *job) {
     items_free(job);
     rubraview_free(job->viewer_path);
     rubraview_free(job->temp_dir);
+    rubraview_free(job->done_fields);
     rubraview_free(job);
 }
 
@@ -113,6 +120,7 @@ static const char *kind_words(const char *kind) {
     if (rubraview_cstr_cmp(kind, "move") == 0) return T("a move");
     if (rubraview_cstr_cmp(kind, "extract") == 0) return T("an extraction");
     if (rubraview_cstr_cmp(kind, "archive") == 0) return T("a writing into an archive");
+    if (rubraview_cstr_cmp(kind, "compress") == 0) return T("a compression");
     return T("a copy");
 }
 
@@ -165,22 +173,13 @@ static void put_start(fj_job_t *job, proven_u8str_view_t dir, const proven_u8str
     rubraview_jobwire_put_start(&job->out, &st, sources, n);
 }
 
-static bool start_job(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving, int basket,
-                      bool from_cut, int32_t page, proven_u8str_view_t viewer_path, proven_u8str_view_t temp_dir) {
-    if (n == 0 || dir.size == 0) return false;
-    if (g_njobs >= FJ_JOBS) { osd_say(app, TU8("too many copies at once: wait for one to end")); return false; }
-    fj_job_t *job = (fj_job_t *)rubraview_alloc_zero(1, sizeof *job);
-    if (!job) return false;
-    job->moving = moving;
-    job->basket = basket;
-    job->from_cut = from_cut;
-    job->viewer_page = page;
-    job->viewer_path = viewer_path.size ? rubraview_strndup_view(viewer_path) : NULL;
-    job->temp_dir = temp_dir.size ? rubraview_strndup_view(temp_dir) : NULL;
+/* The job's pipe made, its first message written by `put` (START, or ARCHIVE), and the process started. False (the
+   job freed, the OSD told) when it could not be. */
+static bool spawn_with(app_state_t *app, fj_job_t *job, void (*put)(fj_job_t *, app_state_t *, const void *), const void *what) {
     wchar_t name[160];
     job->pipe = make_pipe(name, sizeof name / sizeof name[0]);
     if (job->pipe == INVALID_HANDLE_VALUE) { job->pipe = NULL; job_free(job); osd_say(app, TU8("the copy could not be started")); return false; }
-    put_start(job, dir, sources, n, app);
+    put(job, app, what);
     if (job->out.failed || job->out.len == 0) { job_free(job); osd_say(app, TU8("the copy could not be started")); return false; }
     /* the same program, a job of its own: "<exe>" --file-job <pipe> */
     char line[4096], pipe8[400];
@@ -193,7 +192,35 @@ static bool start_job(app_state_t *app, proven_u8str_view_t dir, const proven_u8
         osd_say(app, TU8("the copy could not be started"));
         return false;
     }
+    return true;
+}
+
+typedef struct { proven_u8str_view_t dir; const proven_u8str_view_t *sources; size_t n; } start_what_t;
+static void put_start_of(fj_job_t *job, app_state_t *app, const void *what) {
+    const start_what_t *w = (const start_what_t *)what;
+    put_start(job, w->dir, w->sources, w->n, app);
+}
+
+static bool spawn_job(app_state_t *app, fj_job_t *job, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n) {
+    start_what_t w = { dir, sources, n };
+    return spawn_with(app, job, put_start_of, &w);
+}
+
+static bool start_job(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving, int basket,
+                      bool from_cut, int32_t page, proven_u8str_view_t viewer_path, proven_u8str_view_t temp_dir) {
+    if (n == 0 || dir.size == 0) return false;
+    if (g_njobs >= FJ_JOBS) { osd_say(app, TU8("too many copies at once: wait for one to end")); return false; }
+    fj_job_t *job = (fj_job_t *)rubraview_alloc_zero(1, sizeof *job);
+    if (!job) return false;
+    job->moving = moving;
+    job->basket = basket;
+    job->from_cut = from_cut;
+    job->viewer_page = page;
+    job->viewer_path = viewer_path.size ? rubraview_strndup_view(viewer_path) : NULL;
+    job->temp_dir = temp_dir.size ? rubraview_strndup_view(temp_dir) : NULL;
+    if (!spawn_job(app, job, dir, sources, n)) return false;
     job->started = rubraview_pal_time_now_seconds();
+    job->id = ++g_next_id;
     g_jobs[g_njobs++] = job;
     char said[200];
     int w = rubraview_fmt(said, sizeof said, moving ? T("moving {} into {}") : T("copying {} into {}"), PROVEN_ARG(n), PROVEN_ARG(rubraview_path_basename(dir)));
@@ -301,6 +328,11 @@ static void job_take(app_state_t *app, fj_job_t *job, rubraview_jobwire_msg_t *m
                                                      .why = w.why.size ? rubraview_strndup_view(w.why) : NULL, .did = w.did, .state = w.state,
                                                      .overwrote = w.overwrote, .parent = w.parent };
         }
+    } else if (m->type == RUBRAVIEW_JOBWIRE_ARCHIVE_DONE && job->archive) {   /* RV-292: kept whole for archwork */
+        rubraview_free(job->done_fields);
+        job->done_fields = (uint8_t *)rubraview_alloc(m->left ? m->left : 1);
+        if (job->done_fields) { proven_sys_mem_copy(job->done_fields, m->p, m->left); job->done_len = m->left; }
+        job->ended = true;
     } else if (m->type == RUBRAVIEW_JOBWIRE_END) {
         rubraview_jobwire_end_t e;
         rubraview_jobwire_get_end(m, &e);
@@ -454,6 +486,7 @@ size_t filejob_pump(app_state_t *app) {
     for (size_t j = 0; j < g_njobs;) {
         fj_job_t *job = g_jobs[j];
         job_io(app, job);
+        if (job->archive) { ++j; continue; }   /* RV-292: archwork reads it and lets it go */
         if (job->ended) {
             job_ended(app, job);
             handled++;
@@ -497,4 +530,60 @@ void filejob_shutdown(app_state_t *app) {
     clashui_rows_free(g_ui.rows, g_ui.nrows);
     g_ui.rows = NULL;
     g_ui.nrows = 0;
+}
+
+/* ---- RV-292: an extraction or a compression in a job's process (archwork.c asks and answers; the work is there) ---- */
+
+typedef struct { const rubraview_jobwire_archive_t *a; const proven_u8str_view_t *names; const size_t *only; const uint8_t *rules; } archive_what_t;
+static void put_archive_of(fj_job_t *job, app_state_t *app, const void *what) {
+    const archive_what_t *w = (const archive_what_t *)what;
+    rubraview_jobwire_archive_t a = *w->a;
+    a.journal_dir = jobnotes_dir(app);
+    a.lang_file = cstr(lang_file_in_use());
+    a.ui_font = rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("ui_font"));
+    rubraview_jobwire_put_archive(&job->out, &a, w->names, w->only, w->rules);
+}
+
+int32_t filejob_archive_start(app_state_t *app, const rubraview_jobwire_archive_t *a, const proven_u8str_view_t *names, const size_t *only, const uint8_t *rules) {
+    if (g_njobs >= FJ_JOBS) { osd_say(app, TU8("too many copies at once: wait for one to end")); return -1; }
+    fj_job_t *job = (fj_job_t *)rubraview_alloc_zero(1, sizeof *job);
+    if (!job) return -1;
+    job->archive = true;
+    archive_what_t w = { a, names, only, rules };
+    if (!spawn_with(app, job, put_archive_of, &w)) return -1;
+    job->started = rubraview_pal_time_now_seconds();
+    job->id = ++g_next_id;
+    g_jobs[g_njobs++] = job;
+    return job->id;
+}
+
+static fj_job_t *by_id(int32_t id) {
+    for (size_t j = 0; j < g_njobs; ++j) if (g_jobs[j]->id == id) return g_jobs[j];
+    return NULL;
+}
+
+/* 0 working (its progress in `*p`), 1 done (its answer's fields in `*fields`), -1 its process went, or none. */
+int filejob_archive_state(int32_t id, rubraview_jobwire_progress_t *p, const uint8_t **fields, size_t *len) {
+    fj_job_t *job = by_id(id);
+    if (!job) return -1;
+    if (p) *p = job->progress;
+    if (job->ended && job->done_fields) { if (fields) *fields = job->done_fields; if (len) *len = job->done_len; return 1; }
+    return job->broken ? -1 : 0;
+}
+
+void filejob_archive_stop(int32_t id) {
+    fj_job_t *job = by_id(id);
+    if (!job || job->ended || job->broken) return;
+    rubraview_jobwire_begin(&job->out, RUBRAVIEW_JOBWIRE_STOP);
+    (void)rubraview_jobwire_finish(&job->out);
+}
+
+/* Let go: the job, if still at work, goes on in its process on its own (the viewer quitting does not stop it). */
+void filejob_archive_forget(int32_t id) {
+    for (size_t j = 0; j < g_njobs; ++j) {
+        if (g_jobs[j]->id != id) continue;
+        job_free(g_jobs[j]);
+        g_jobs[j] = g_jobs[--g_njobs];
+        return;
+    }
 }

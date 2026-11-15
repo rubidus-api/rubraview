@@ -232,6 +232,12 @@ bool rubraview_pal_fs_move(proven_u8str_view_t from, proven_u8str_view_t to);
  */
 bool rubraview_pal_fs_replace(proven_u8str_view_t from, proven_u8str_view_t to);
 
+/**
+ * RV-292: `replacement` takes `target`'s name and `target` is kept as `backup`, in one call (ReplaceFileW), so the
+ * name is never without a file; with no `target` there, a plain rename. Both on one volume.
+ */
+bool rubraview_pal_fs_replace_keeping(proven_u8str_view_t target, proven_u8str_view_t replacement, proven_u8str_view_t backup);
+
 /** The bytes free for this user on the volume holding `dir`. */
 bool rubraview_pal_fs_free_bytes(proven_u8str_view_t dir, uint64_t *out_bytes);
 
