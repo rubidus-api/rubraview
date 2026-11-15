@@ -1554,8 +1554,12 @@ others are kept as `name (2)`). A folder already there is merged, its files
 asked about the same way. Close the window without answering and the names
 left are skipped (both files stay as they are) while the rest goes on.
 `Ctrl+Z` takes the whole copy or move back. Each copy or move runs in a
-process of its own: closing or losing the viewer does not stop it, and a
-copy that fails does not take the viewer with it.
+process of its own, with a window of its own, **Rubraview - copying** (or
+moving): the files and bytes done, the time left, and how many names wait.
+Closing it (or **Stop**, or `Esc`) stops the copy after the file in hand;
+when the copy is over it stays to say what was done until you close it.
+Closing or losing the viewer does not stop a copy, and a copy that fails
+does not take the viewer with it.
 A move to another drive is copied, compared and only then its source goes
 to the Recycle Bin. Extracting an archive checks its names the same way: what
 is not there yet is written at once, and each name already there waits in

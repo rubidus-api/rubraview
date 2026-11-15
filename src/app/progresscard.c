@@ -44,7 +44,7 @@ bool progress_card_press(app_state_t *app, double x, double y) {
     return on;
 }
 
-static size_t time_left_text(char *out, size_t cap, double seconds) {
+size_t time_left_text(char *out, size_t cap, double seconds) {
     if (seconds < 0.0) return (size_t)rubraview_fmt(out, cap, "{}", PROVEN_ARG(T("Working out the time left...")));
     int h = 0, m = 0, s = 0;
     rubraview_progress_split(seconds, &h, &m, &s);

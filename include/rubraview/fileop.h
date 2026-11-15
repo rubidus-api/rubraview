@@ -160,6 +160,8 @@ bool rubraview_fileop_suffix_name(const char *path, bool is_dir, unsigned n, cha
 
 /* Nothing pending and nothing parked. */
 bool rubraview_fileop_finished(const rubraview_fileop_t *op);
+/** RV-289: stopped between items — every item not yet done (waiting, asked, not prepared) skipped with "stopped". */
+void rubraview_fileop_stop(rubraview_fileop_t *op);
 
 #ifdef __cplusplus
 }

@@ -93,7 +93,7 @@ enum { CARD_RENAME, CARD_ARCHIVE_PAGE, CARD_PICKER_NAME, CARD_EXTENSIONS, CARD_T
        CARD_FIND, CARD_LIST_FILTER, CARD_ADDRESS, CARD_COPIES, CARD_VALUE, CARD_FAVORITE, CARD_SIZE, CARD_PROGRESS, CARD_VOLUME, CARD_DELAY, CARD_REPEAT, CARD_KINDS };
 enum { NUMBER_VOLUME = 1, NUMBER_DELAY };   /* RV-267 */
 /* RV-268: who fills the progress card */
-enum { PROGRESS_NONE = 0, PROGRESS_ARCHWORK, PROGRESS_ARCEDIT, PROGRESS_FILEJOB };
+enum { PROGRESS_NONE = 0, PROGRESS_ARCHWORK, PROGRESS_ARCEDIT };   /* RV-289: a copy's progress is in its own process's window */
 typedef struct progress_view {
     int32_t source;              /* PROGRESS_* */
     char title[600];
@@ -2742,6 +2742,7 @@ bool filejob_start_viewer(app_state_t *app, proven_u8str_view_t dir, proven_u8st
 bool filejob_busy(void);
 const char *lang_file_in_use(void);   /* RV-289 */
 int jobproc_main(const wchar_t *pipe_name);   /* RV-289: `--file-job <pipe>` */
+size_t time_left_text(char *out, size_t cap, double seconds);   /* "About 3 min 5 s left" (progresscard.c) */
 bool filejob_same_recycles_copy(void);
 /* RV-260 (D-312): files into the archive the open-file screen shows */
 typedef struct arcadd_row { size_t index; const char *source, *archive, *name; uint64_t ssize, tsize; int64_t smtime, tmtime; } arcadd_row_t;

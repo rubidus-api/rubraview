@@ -177,7 +177,7 @@ static DWORD WINAPI worker(void *arg) {
         ReleaseSRWLockExclusive(&J.lock);
         if (done) break;
         bool more;
-        if (stop) more = false;
+        if (stop) { rubraview_fileop_stop(&J.op); more = false; }   /* between items: nothing left half-written */
         else if (!J.prepared) { (void)rubraview_fileop_prepare(&J.op); J.prepared = true; more = true; }
         else more = rubraview_fileop_step(&J.op, 1);   /* one item, so answers and Stop are taken between */
         AcquireSRWLockExclusive(&J.lock);
@@ -212,9 +212,149 @@ static void ui_recycle(void *ctx, bool on) {
     ReleaseSRWLockExclusive(&J.lock);
 }
 
+/* ---- the progress window (RV-289.3, phase C; owner: "그 창을 꺼야 안겹치는 파일들 복사도 끝나고") ----
+   What the viewer's card showed, in a window of the job's own: what it does, a bar, the files and bytes, the time
+   left, the names waiting. Closed (X, Esc, Stop) while it works: the job stops after the file in hand and the window
+   goes. When the job has ended it stays with the summary until closed. */
+
+#define PW_BACK 0xFF1B1E23u
+#define PW_TEXT 0xFFE6E6E6u
+#define PW_DIM  0xFF9AA2ACu
+#define PW_ON   0xFF3E8BF0u
+
+typedef struct jp_win {
+    rubraview_window_t   *window;
+    rubraview_renderer_t *renderer;
+    bool   open, dirty, moving;
+    double px, py;
+    rubraview_pal_rect_t button;
+    char   head[300], summary[300];
+    rubraview_progress_t rate;
+} jp_win_t;
+
+static bool pw_show(jp_win_t *w, proven_arena_t *arena, proven_u8str_view_t ui_font, double now) {
+    rubraview_window_config_t config = { .title = w->moving ? T("Rubraview - moving") : T("Rubraview - copying"), .width = 600, .height = 230 };
+    w->window = rubraview_pal_window_create(arena, &config);
+    if (!w->window) return false;
+    int32_t ww = 0, hh = 0;
+    rubraview_pal_window_get_size(w->window, &ww, &hh);
+    w->renderer = rubraview_pal_render_create(arena, rubraview_pal_window_native_handle(w->window), ww, hh);
+    if (!w->renderer) { rubraview_pal_window_destroy(w->window); w->window = NULL; return false; }
+    rubraview_font_spec_t face = rubraview_font_spec_parse(ui_font);
+    rubraview_pal_render_set_ui_font(w->renderer, face.family, face.weight, face.italic);
+    rubraview_progress_begin(&w->rate, now);
+    w->open = w->dirty = true;
+    return true;
+}
+
+static void pw_close(jp_win_t *w) {
+    if (!w->open) return;
+    if (w->renderer) rubraview_pal_render_destroy(w->renderer);
+    if (w->window) rubraview_pal_window_destroy(w->window);
+    w->renderer = NULL;
+    w->window = NULL;
+    w->open = false;
+}
+
+static void pw_line(rubraview_renderer_t *r, const char *text, int n, rubraview_pal_rect_t at, double size, uint32_t argb) {
+    if (n > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = (size_t)n }, at, size, argb, RUBRAVIEW_TEXT_LEFT);
+}
+
+static void pw_draw(jp_win_t *w, const rubraview_jobwire_progress_t *p, bool ended, bool stopping, double now) {
+    if (!w->open || !w->dirty) return;
+    w->dirty = false;
+    rubraview_renderer_t *r = w->renderer;
+    int32_t ww = 0, hh = 0;
+    rubraview_pal_window_get_size(w->window, &ww, &hh);
+    double dpi = rubraview_pal_window_dpi_scale(w->window), pad = 18.0 * dpi, width = (double)ww - 2.0 * pad;
+    rubraview_pal_render_begin(r, PW_BACK);
+    double y = pad * 0.7;
+    pw_line(r, w->head, (int)proven_cstr_len(w->head), (rubraview_pal_rect_t){ pad, y, width, 26.0 * dpi }, 15.0 * dpi, PW_TEXT);
+    y += 34.0 * dpi;
+    bool bytes = p->bytes_total > 0;
+    uint64_t done = bytes ? p->bytes_done : p->done + p->skipped + p->failed, total = bytes ? p->bytes_total : p->total;
+    if (ended) { done = total; }
+    double f = total ? (double)done / (double)total : 0.0;
+    if (f > 1.0) f = 1.0;
+    rubraview_pal_rect_t bar = { pad, y, width, 14.0 * dpi };
+    rubraview_pal_render_fill_rect(r, bar, 0xFF141414u, bar.height * 0.5);
+    if (f > 0.0) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ bar.x, bar.y, fmax(bar.height, bar.width * f), bar.height }, PW_ON, bar.height * 0.5);
+    y += 24.0 * dpi;
+    char line[400], a[32], b[32];
+    int n;
+    if (ended) {
+        n = (int)proven_cstr_len(w->summary);
+        pw_line(r, w->summary, n, (rubraview_pal_rect_t){ pad, y, width, 22.0 * dpi }, 13.0 * dpi, PW_TEXT);
+    } else {
+        (void)rubraview_picker_size_text(a, sizeof a, p->bytes_done);
+        (void)rubraview_picker_size_text(b, sizeof b, p->bytes_total);
+        n = rubraview_fmt(line, sizeof line, T("{} of {} files, {} of {} ({}%)"), PROVEN_ARG(p->done + p->skipped + p->failed), PROVEN_ARG(p->total),
+                          PROVEN_ARG(a), PROVEN_ARG(b), PROVEN_ARG(rubraview_progress_percent(done, total)));
+        pw_line(r, line, n, (rubraview_pal_rect_t){ pad, y, width, 22.0 * dpi }, 13.0 * dpi, PW_TEXT);
+        y += 24.0 * dpi;
+        if (stopping) n = rubraview_fmt(line, sizeof line, "{}", PROVEN_ARG(T("stopping after the file in hand...")));
+        else n = (int)time_left_text(line, sizeof line, rubraview_progress_left(&w->rate, done, total, now));
+        pw_line(r, line, n, (rubraview_pal_rect_t){ pad, y, width, 22.0 * dpi }, 13.0 * dpi, PW_DIM);
+        if (p->clashes > 0) {
+            y += 24.0 * dpi;
+            n = rubraview_fmt(line, sizeof line, T("{} names already there wait in the other window"), PROVEN_ARG(p->clashes));
+            pw_line(r, line, n, (rubraview_pal_rect_t){ pad, y, width, 22.0 * dpi }, 13.0 * dpi, PW_DIM);
+        }
+    }
+    const char *word = ended ? T("Close") : T("Stop");
+    double tw = 0.0;
+    (void)rubraview_pal_render_measure_text(r, cstr(word), 13.0 * dpi, &tw);
+    w->button = (rubraview_pal_rect_t){ (double)ww - pad - tw - 40.0 * dpi, (double)hh - pad - 36.0 * dpi, tw + 40.0 * dpi, 36.0 * dpi };
+    bool over = pal_rect_has(w->button, w->px, w->py);
+    if (!stopping || ended) {
+        rubraview_pal_render_fill_rect(r, w->button, over ? 0x50FFFFFFu : 0xFF2A2F36u, 4.0 * dpi);
+        rubraview_pal_render_stroke_rect(r, w->button, 0xFF4A525Cu, 1.0, 4.0 * dpi);
+        rubraview_pal_render_draw_text(r, cstr(word), w->button, 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+    if (!rubraview_pal_render_end(r)) w->dirty = true;
+}
+
+/* Its messages: true when it was closed (X, Esc, its button). */
+static bool pw_pump(jp_win_t *w) {
+    bool closed = false;
+    rubraview_window_event_t event;
+    while (w->open && rubraview_pal_window_poll_event(w->window, &event)) {
+        switch (event.kind) {
+            case RUBRAVIEW_WINDOW_EVENT_CLOSE: closed = true; break;
+            case RUBRAVIEW_WINDOW_EVENT_RESIZE: rubraview_pal_render_resize(w->renderer, event.resize.width, event.resize.height); w->dirty = true; break;
+            case RUBRAVIEW_WINDOW_EVENT_PAINT: w->dirty = true; break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: w->px = event.mouse.x; w->py = event.mouse.y; w->dirty = true; break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && pal_rect_has(w->button, event.mouse.x, event.mouse.y)) closed = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
+                if (key_is(event.key.combo, "Escape") || key_is(event.key.combo, "Enter")) closed = true;
+                break;
+            default: break;
+        }
+    }
+    return closed;
+}
+
+/* The words the viewer says at the end, said here too (its items counted as job_ended counts them). */
+static void pw_summary(jp_win_t *w) {
+    size_t done = 0, replaced = 0, same = 0;
+    for (size_t i = 0; i < J.op.count; ++i) {
+        const rubraview_fileop_item_t *it = &J.op.items[i];
+        if (it->did == RUBRAVIEW_FILEOP_DID_COPY || it->did == RUBRAVIEW_FILEOP_DID_MOVE) done++;
+        else if (it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE) same++;
+        if (it->overwrote) replaced++;
+    }
+    (void)rubraview_fmt(w->summary, sizeof w->summary,
+                        w->moving ? T("{} moved, {} replaced, {} the same, {} left, {} could not be  (Ctrl+Z takes it back)")
+                                  : T("{} copied, {} replaced, {} the same, {} left, {} could not be  (Ctrl+Z takes it back)"),
+                        PROVEN_ARG(done), PROVEN_ARG(replaced), PROVEN_ARG(same), PROVEN_ARG(J.op.skipped), PROVEN_ARG(J.op.failed));
+    w->dirty = true;
+}
+
 /* ---- the process ---- */
 
-static bool start_job(proven_arena_t *arena, rubraview_jobwire_msg_t *m, clashui_t *ui, rubraview_lang_t *lang, char **temp_dir) {
+static bool start_job(proven_arena_t *arena, rubraview_jobwire_msg_t *m, clashui_t *ui, rubraview_lang_t *lang, char **temp_dir, jp_win_t *pw) {
     rubraview_jobwire_start_t st;
     rubraview_jobwire_get_start(m, &st);
     if (m->bad || st.dir.size == 0 || st.count == 0) return false;
@@ -223,7 +363,11 @@ static bool start_job(proven_arena_t *arena, rubraview_jobwire_msg_t *m, clashui
         rubraview_lang_stats_t stats;
         if (text.size > 0 && rubraview_lang_load(lang, text, &stats)) rubraview_lang_use(lang);
     }
-    ui->ui_font = proven_u8str_view_from_cstr(rubraview_strndup_view(st.ui_font));
+    char *face = rubraview_strndup_view(st.ui_font);
+    ui->ui_font = face ? proven_u8str_view_from_cstr(face) : PROVEN_LIT("");
+    pw->moving = st.moving;
+    (void)rubraview_fmt(pw->head, sizeof pw->head, st.moving ? T("moving {} into {}") : T("copying {} into {}"),
+                        PROVEN_ARG(st.count), PROVEN_ARG(rubraview_path_basename(st.dir)));
     ui->same_recycles_copy = J.recycles = st.same_recycles_copy;
     *temp_dir = st.temp_dir.size ? rubraview_strndup_view(st.temp_dir) : NULL;
     char *d = rubraview_strndup_view(st.dir);
@@ -260,12 +404,13 @@ int jobproc_main(const wchar_t *pipe_name) {
     P.thread = P.wake ? CreateThread(NULL, 0, writer, NULL, 0, NULL) : NULL;
 
     clashui_t ui = { .answer = ui_answer, .answer_all = ui_answer_all, .closed = ui_closed, .recycle_set = ui_recycle };
+    static jp_win_t pw;
     static rubraview_lang_t lang;
     char *temp_dir = NULL;
     bool started = false, ended = false;
     double began = rubraview_pal_time_now_seconds(), last_progress = 0.0;
     uint32_t seen_version = 0;
-    rubraview_jobwire_progress_t sent = { .total = UINT64_MAX };
+    rubraview_jobwire_progress_t sent = { .total = UINT64_MAX }, shown = {0};
     int code = 0;
 
     for (;;) {
@@ -277,8 +422,9 @@ int jobproc_main(const wchar_t *pipe_name) {
             while ((got = rubraview_jobwire_take(P.in + at, P.in_len - at, &m, &used)) == 1) {
                 at += used;
                 if (m.type == RUBRAVIEW_JOBWIRE_START && !started) {
-                    started = start_job(arena, &m, &ui, &lang, &temp_dir);
+                    started = start_job(arena, &m, &ui, &lang, &temp_dir, &pw);
                     if (!started) { code = 3; goto out; }
+                    (void)pw_show(&pw, arena, ui.ui_font, rubraview_pal_time_now_seconds());
                 } else if (m.type == RUBRAVIEW_JOBWIRE_STOP) {
                     InterlockedExchange(&J.stop, 1);
                     SetEvent(J.wake);
@@ -326,21 +472,32 @@ int jobproc_main(const wchar_t *pipe_name) {
             send_with(put_progress, &now);
             sent = now;
             last_progress = t;
+            rubraview_progress_sample(&pw.rate, now.bytes_total ? now.bytes_done : now.done, t);
+            pw.dirty = true;
+            shown = now;
         }
         if (finished && !ended) {
             ended = true;
             WaitForSingleObject(J.worker, 5000);
             send_items_and_end(J.stop != 0);
             if (temp_dir) (void)rubraview_pal_fs_delete_tree(cstr(temp_dir));   /* a page out of an archive, written for the job */
+            pw_summary(&pw);
+            clashui_close(&ui);
         }
         (void)clashui_pump(&ui);
         clashui_draw(&ui);
-        if (ended && !ui.open) break;
+        if (pw_pump(&pw)) {   /* closed: while it works, the job stops after the file in hand */
+            if (!ended) { InterlockedExchange(&J.stop, 1); SetEvent(J.wake); }
+            pw_close(&pw);
+        }
+        pw_draw(&pw, &shown, ended, J.stop != 0, t);
+        if (ended && !ui.open && !pw.open) break;
         (void)MsgWaitForMultipleObjects(0, NULL, FALSE, 40, QS_ALLINPUT);
     }
 
 out:
     clashui_close(&ui);
+    pw_close(&pw);
     InterlockedExchange(&J.quit, 1);
     if (J.wake) SetEvent(J.wake);
     if (J.worker) { WaitForSingleObject(J.worker, 5000); CloseHandle(J.worker); }

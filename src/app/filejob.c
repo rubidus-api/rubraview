@@ -391,7 +391,6 @@ static bool viewer_rows(app_state_t *app) {
 size_t filejob_pump(app_state_t *app) {
     size_t handled = viewer_rows(app) ? 1 : 0;
     if (g_njobs == 0) return handled;
-    rubraview_jobwire_progress_t sum = {0};
     for (size_t j = 0; j < g_njobs;) {
         fj_job_t *job = g_jobs[j];
         job_io(app, job);
@@ -409,24 +408,13 @@ size_t filejob_pump(app_state_t *app) {
             }
             handled++;
         } else {
-            sum.total += job->progress.total; sum.done += job->progress.done;
-            sum.bytes_total += job->progress.bytes_total; sum.bytes_done += job->progress.bytes_done;
-            sum.clashes += job->progress.clashes;
             ++j;
             continue;
         }
         job_free(job);
         g_jobs[j] = g_jobs[--g_njobs];
     }
-    if (g_njobs > 0 && sum.total > 0) {   /* RV-268: the progress card (phase C moves it into the job's window) */
-        progress_view_t v = { .source = PROGRESS_FILEJOB, .files_at = (uint32_t)sum.done, .files_total = (uint32_t)sum.total,
-                              .bytes = sum.bytes_total > 0, .done = sum.bytes_done, .total = sum.bytes_total };
-        rubraview_fmt(v.title, sizeof v.title, "{}", PROVEN_ARG(T("Copying and moving files")));
-        if (sum.clashes) rubraview_fmt(v.note, sizeof v.note, T("{} names waiting for an answer (Ctrl+Shift+K)"), PROVEN_ARG(sum.clashes));
-        progress_show(app, &v);
-    } else {
-        progress_end(app, PROGRESS_FILEJOB);
-    }
+    /* RV-289.3: how far each job is shows in its own window, not on a card here */
     return handled;
 }
 

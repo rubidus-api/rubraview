@@ -372,6 +372,18 @@ size_t rubraview_fileop_answer_all(rubraview_fileop_t *op, rubraview_fileop_answ
     return n;
 }
 
+void rubraview_fileop_stop(rubraview_fileop_t *op) {
+    if (!op) return;
+    for (size_t i = 0; i < op->count; ++i) {
+        rubraview_fileop_item_t *it = &op->items[i];
+        if (it->prepared && it->state != RUBRAVIEW_FILEOP_PENDING && it->state != RUBRAVIEW_FILEOP_PARKED) continue;
+        it->prepared = true;
+        it->state = RUBRAVIEW_FILEOP_SKIPPED;
+        it->why = "stopped";
+    }
+    recount(op);
+}
+
 bool rubraview_fileop_finished(const rubraview_fileop_t *op) {
     for (size_t i = 0; op && i < op->count; ++i)
         if (op->items[i].state == RUBRAVIEW_FILEOP_PENDING || op->items[i].state == RUBRAVIEW_FILEOP_PARKED || !op->items[i].prepared) return false;
