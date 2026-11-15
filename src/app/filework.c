@@ -259,6 +259,8 @@ void triage_undo(app_state_t *app) {
 /* The box closes: the window goes back to keys only (K5). */
 void rename_end(app_state_t *app) {
     card_close_keep(app);   /* RV-265: its place kept for the next of its kind */
+    app->rename_inplace = false;   /* RV-293 */
+    app->rename_inplace_rect = (rubraview_pal_rect_t){0};
     app->rename_active = false;
     app->rename_btn_n = 0;
     app->rename_is_archive = false;
@@ -498,6 +500,8 @@ void rename_begin(app_state_t *app) {
     rubraview_textedit_set(&app->rename_ec.te, name);
     app->rename_active = true;
     app->rename_is_archive = in_archive;
+    app->rename_inplace = app->frameless && !app->chrome_hidden && !in_archive;   /* RV-293 E3: in the title bar, where the name is shown */
+    app->rename_inplace_rect = (rubraview_pal_rect_t){0};
     app->rename_composing_length = 0;
     if (!in_archive && path.size < sizeof(app->card_for)) {   /* RV-265: the file it is for, whatever the window shows next */
         if (path.ptr != (const proven_byte_t *)app->card_for) proven_sys_mem_copy(app->card_for, path.ptr, path.size);
@@ -611,6 +615,8 @@ void rename_picker_begin(app_state_t *app, size_t at) {
     app->rename_active = true;
     app->rename_is_picker = true;
     app->rename_picker_at = at;
+    app->rename_inplace = true;   /* RV-293 E3 (owner: "그 자리에서 바로 고칠 수 있게"): on the tile */
+    app->rename_inplace_rect = (rubraview_pal_rect_t){0};
     app->rename_composing_length = 0;
     rubraview_pal_window_text_input(app->window, true);
 }

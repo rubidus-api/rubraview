@@ -222,9 +222,10 @@ static void edit_begin(app_state_t *app, int32_t row) {
     if (row < 0 || (size_t)row >= v->row_count || !(v->rows[row].flags & RUBRAVIEW_PROPS_ROW_EDITABLE)) return;
     if (v->rows[row].flags & RUBRAVIEW_PROPS_ROW_RATING) return;   /* the stars are clicked */
     v->editing = row;
-    v->edit = rubraview_textedit_make(v->edit_buf, sizeof v->edit_buf);
-    rubraview_textedit_set(&v->edit, proven_u8str_view_from_cstr(v->rows[row].value));
-    rubraview_textedit_select_all(&v->edit);
+    editbox_begin(&v->ec, v->edit_buf, sizeof v->edit_buf, false);
+    v->view.scroll = 0.0;
+    rubraview_textedit_set(&v->ec.te, proven_u8str_view_from_cstr(v->rows[row].value));
+    rubraview_textedit_select_all(&v->ec.te);
     v->composing[0] = '\0';
     rubraview_pal_window_text_input(app->props_window, true);
     app->props_dirty = true;
@@ -235,7 +236,8 @@ void pw_name_begin(app_state_t *app, int32_t name_for) {
     if (v->editing >= 0) edit_end(app, true);
     v->editing = EDIT_NAME;
     v->name_for = name_for;
-    v->edit = rubraview_textedit_make(v->edit_buf, sizeof v->edit_buf);
+    editbox_begin(&v->ec, v->edit_buf, sizeof v->edit_buf, false);
+    v->view.scroll = 0.0;
     v->composing[0] = '\0';
     rubraview_pal_window_text_input(app->props_window, true);
     app->props_dirty = true;
@@ -245,7 +247,7 @@ static void edit_end(app_state_t *app, bool keep) {
     props_view_t *v = V(app);
     if (v->editing == EDIT_NAME) {   /* the Security tab's name field: what was typed goes to propsec.c */
         char typed[512];
-        proven_u8str_view_t t = rubraview_textedit_text(&v->edit);
+        proven_u8str_view_t t = rubraview_textedit_text(&v->ec.te);
         size_t n = t.size < sizeof typed - 1 ? t.size : sizeof typed - 1;
         proven_sys_mem_copy(typed, t.ptr, n);
         typed[n] = '\0';
@@ -259,7 +261,7 @@ static void edit_end(app_state_t *app, bool keep) {
     }
     if (v->editing < 0) return;
     rubraview_props_row_t *r = &v->rows[v->editing];
-    proven_u8str_view_t t = rubraview_textedit_text(&v->edit);
+    proven_u8str_view_t t = rubraview_textedit_text(&v->ec.te);
     if (keep && !proven_u8str_view_eq(t, proven_u8str_view_from_cstr(r->value))) {
         size_t n = t.size < sizeof r->value - 1 ? t.size : sizeof r->value - 1;
         proven_sys_mem_copy(r->value, t.ptr, n);
@@ -275,23 +277,9 @@ static void edit_end(app_state_t *app, bool keep) {
 static bool edit_key(app_state_t *app, rubraview_key_combo_t k) {
     props_view_t *v = V(app);
     if (v->editing == -1) return false;
-    bool ctrl = (k.modifiers & RUBRAVIEW_MOD_CTRL) != 0, shift = (k.modifiers & RUBRAVIEW_MOD_SHIFT) != 0;
     if (key_is(k, "Enter")) edit_end(app, true);
     else if (key_is(k, "Escape")) edit_end(app, false);
-    else if (key_is(k, "Backspace")) rubraview_textedit_backspace(&v->edit);
-    else if (key_is(k, "Delete")) rubraview_textedit_delete(&v->edit);
-    else if (key_is(k, "Left")) rubraview_textedit_move(&v->edit, RUBRAVIEW_TEXTEDIT_LEFT, shift);
-    else if (key_is(k, "Right")) rubraview_textedit_move(&v->edit, RUBRAVIEW_TEXTEDIT_RIGHT, shift);
-    else if (key_is(k, "Home")) rubraview_textedit_move(&v->edit, RUBRAVIEW_TEXTEDIT_HOME, shift);
-    else if (key_is(k, "End")) rubraview_textedit_move(&v->edit, RUBRAVIEW_TEXTEDIT_END, shift);
-    else if (ctrl && key_is(k, "A")) rubraview_textedit_select_all(&v->edit);
-    else if (ctrl && key_is(k, "V")) {
-        char pasted[512];
-        size_t n = rubraview_pal_clipboard_get_text(app->props_window, pasted, sizeof pasted);
-        if (n > 0) rubraview_textedit_insert(&v->edit, rubraview_bytes_view(pasted, n));
-    } else if (ctrl && key_is(k, "C") && rubraview_textedit_has_selection(&v->edit)) {
-        (void)rubraview_pal_clipboard_set_text(app->props_window, rubraview_textedit_selection(&v->edit));
-    } else return true;   /* other keys go to the text, as TEXT events */
+    else if (!editbox_key(app->props_window, &v->ec, k, false)) return true;   /* RV-293: every editing key; others are the text's, as TEXT events */
     app->props_dirty = true;
     return true;
 }
@@ -462,12 +450,9 @@ static void draw_details(app_state_t *app, double y, double bottom) {
         if ((int32_t)at == v->editing) {
             rubraview_pal_render_fill_rect(r, val, 0xFF101215u, 2.0 * dpi);
             rubraview_pal_render_stroke_rect(r, val, PW_ACCENT, 1.0, 2.0 * dpi);
-            char shown[600];
-            proven_u8str_view_t t = rubraview_textedit_text(&v->edit);
-            size_t caret = v->edit.caret;
-            (void)rubraview_fmt(shown, sizeof shown, "{}{}|{}", PROVEN_ARG(rubraview_bytes_view(t.ptr, caret)), PROVEN_ARG(v->composing),
-                                PROVEN_ARG(rubraview_bytes_view(t.ptr + caret, t.size - caret)));
-            pw_text_at(r, shown, (rubraview_pal_rect_t){ val.x + 4.0 * dpi, val.y, val.width - 8.0 * dpi, val.height }, 13.0 * dpi, PW_TEXT);
+            v->view.box = val;   /* RV-293: the shared field */
+            v->view.size = 13.0 * dpi;
+            editbox_draw(r, &v->ec, &v->view, proven_u8str_view_from_cstr(v->composing), true, PW_TEXT, dpi);
         } else if (row->flags & RUBRAVIEW_PROPS_ROW_RATING) {
             int32_t stars = rubraview_props_rating_stars((int32_t)rubraview_parse_long(row->value, NULL, 10));
             for (int s = 0; s < 5; ++s) {
@@ -570,6 +555,11 @@ static void props_button(app_state_t *app, int which) {
 
 static void props_press(app_state_t *app, double x, double y) {
     props_view_t *v = V(app);
+    if (v->editing != -1 && editbox_pointer_down(app->props_renderer, &v->ec, &v->view, x, y, false)) {   /* RV-293 */
+        v->composing[0] = '\0';
+        app->props_dirty = true;
+        return;
+    }
     for (int32_t t = 0; t < RUBRAVIEW_PROPS_TAB_COUNT; ++t)
         if (v->tab_rect[t].width > 0 && pal_rect_has(v->tab_rect[t], x, y)) {
             if (v->editing >= 0) edit_end(app, true);
@@ -645,7 +635,11 @@ size_t props_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
                 app->props_px = event.mouse.x;
                 app->props_py = event.mouse.y;
+                if (v->editing != -1) (void)editbox_pointer_move(app->props_renderer, &v->ec, &v->view, event.mouse.x);   /* RV-293 */
                 app->props_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                v->view.dragging = false;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
                 if (v->tab == RUBRAVIEW_PROPS_DETAILS) { v->scroll += event.mouse.wheel_delta > 0 ? -3 : 3; app->props_dirty = true; }
@@ -656,7 +650,7 @@ size_t props_pump(app_state_t *app) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_TEXT:
                 if (v->editing != -1) {
-                    rubraview_textedit_insert(&v->edit, rubraview_bytes_view(event.text.utf8, event.text.length));
+                    editbox_text(&v->ec, rubraview_bytes_view(event.text.utf8, event.text.length), true);
                     v->composing[0] = '\0';
                     app->props_dirty = true;
                 }

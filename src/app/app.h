@@ -88,7 +88,14 @@
 #include "rubraview/ui_card.h"
 #include "rubraview/progress.h"
 #include "rubraview/editctl.h"
+#include "rubraview/pal/pal_render.h"
 typedef struct editbox_clicks { double at, x, y; int count; } editbox_clicks_t;   /* RV-293 */
+typedef struct editbox_view {   /* RV-293 E2: a field as drawn: its box, the size of its words, how far scrolled, from where */
+    rubraview_pal_rect_t box;
+    double size, scroll, x0;
+    bool   secret, dragging;
+    editbox_clicks_t clicks;
+} editbox_view_t;
 
 /* RV-265: the kinds of question the input card asks, each with its place kept, and the windows it is drawn in. */
 enum { CARD_RENAME, CARD_ARCHIVE_PAGE, CARD_PICKER_NAME, CARD_EXTENSIONS, CARD_TARGET, CARD_EXTRACT, CARD_PASSWORD,
@@ -891,7 +898,8 @@ typedef struct app_state {
     int32_t                    subs_edit_row;      /* the row whose text is being typed; -1 */
     bool                       subs_edit_time;     /* RV-115: its times are typed, not its words */
     double                     subs_utf8_armed;    /* RV-115: UTF-8 offered for a save its code page cannot hold */
-    rubraview_textedit_t       subs_edit;
+    rubraview_editctl_t        subs_ec;      /* RV-293: the text being typed (its lines kept), its undo */
+    editbox_view_t             subs_view;
     char                       subs_edit_buffer[1024];
     char                       subs_edit_composing[64];   /* the IME's unfinished part */
     size_t                     subs_edit_composing_len;
@@ -1341,7 +1349,9 @@ typedef struct app_state {
     double                 settings_px, settings_py;   /* 1.25.0: the pointer over the settings window */
     rubraview_pal_rect_t   spath_btn[3];      /* 1.24.0: OK, Cancel, Browse... under it, as last drawn */
     int32_t                spath_btn_n;
-    rubraview_textedit_t   spath_edit;
+    rubraview_editctl_t    spath_ec;      /* RV-293: the settings window's typing box, its undo */
+    editbox_clicks_t       spath_clicks;
+    bool                   spath_dragging;
     char                   spath_buffer[1024];
     char                   spath_composing[64];
     size_t                 spath_composing_length;
@@ -1352,6 +1362,8 @@ typedef struct app_state {
     rubraview_pal_rect_t   rename_field;  /* where its text is drawn, and from where (for the pointer) */
     double                 rename_field_x0, rename_field_size;
     bool                   rename_dragging;
+    bool                   rename_inplace;      /* RV-293 E3: typed where the name is shown (a tile, the title bar), no card */
+    rubraview_pal_rect_t   rename_inplace_rect; /* there, as last drawn */
     editbox_clicks_t       rename_clicks;
     /* RV-065: the adjust panel's live preview — a reduced copy of the page
        run through the same commit code as Save a copy — and its histogram. */
@@ -2916,7 +2928,6 @@ void text_tops(text_page_t *t);
 bool text_wheel(app_state_t *app, double notches, uint32_t mods);
 bool text_with_bytes(app_state_t *app, int32_t index, rubraview_textenc_t want, bool by_hand);
 bool text_wraps(app_state_t *app);
-void textbox_insert(rubraview_textedit_t *te, proven_u8str_view_t text);
 /* RV-293: the one edit control's keys, typing and pointer (editbox.c) */
 enum { EDITBOX_UNDO = 1, EDITBOX_CUT, EDITBOX_COPY, EDITBOX_PASTE, EDITBOX_DELETE, EDITBOX_ALL };
 void editbox_text(rubraview_editctl_t *ec, proven_u8str_view_t text, bool typed);
@@ -2925,7 +2936,11 @@ size_t editbox_shown_at(rubraview_renderer_t *r, proven_u8str_view_t shown, doub
 int editbox_clicks(editbox_clicks_t *c, double x, double y, double now);
 void editbox_press(rubraview_editctl_t *ec, size_t at, int clicks, bool shift);
 void editbox_menu_do(rubraview_window_t *window, rubraview_editctl_t *ec, int what, bool secret);
-bool textbox_key(rubraview_window_t *window, rubraview_textedit_t *te, rubraview_key_combo_t combo);
+void editbox_draw(rubraview_renderer_t *r, const rubraview_editctl_t *ec, editbox_view_t *v, proven_u8str_view_t comp, bool focused, uint32_t text_argb, double dpi);
+size_t editbox_hit(rubraview_renderer_t *r, const rubraview_editctl_t *ec, const editbox_view_t *v, double x);
+bool editbox_pointer_down(rubraview_renderer_t *r, rubraview_editctl_t *ec, editbox_view_t *v, double x, double y, bool shift);
+bool editbox_pointer_move(rubraview_renderer_t *r, rubraview_editctl_t *ec, editbox_view_t *v, double x);
+void editbox_begin(rubraview_editctl_t *ec, char *buf, size_t cap, bool lines);
 void thumbs_wake(void *context);
 void tick_timers(app_state_t *app, double dt);
 void tiles_reset(app_state_t *app);

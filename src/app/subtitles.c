@@ -857,7 +857,15 @@ static void subs_edit_end(app_state_t *app, bool keep) {
     app->subs_dirty = true;
     if (!keep || subs_kind(app) != SUBS_TEXT || row >= app->subs_count) return;
     size_t cue = app->subs_rows[row];
-    proven_u8str_view_t typed = rubraview_textedit_text(&app->subs_edit);
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->subs_ec.te);
+    char back[sizeof app->subs_edit_buffer * 2];
+    if (!times) {   /* RV-293: a break typed is the cue's `\N` again */
+        size_t n = 0;
+        for (size_t i = 0; i < typed.size && n + 2 < sizeof back; ++i) {
+            if (typed.ptr[i] == '\n') { back[n++] = '\\'; back[n++] = 'N'; } else back[n++] = (char)typed.ptr[i];
+        }
+        typed = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)back, .size = n };
+    }
     if (times) {
         /* RV-115: `0:01:02.50 --> 0:01:04.00`, as the row showed them */
         size_t arrow = SIZE_MAX;
@@ -904,9 +912,17 @@ static void subs_edit_begin_as(app_state_t *app, size_t row, bool times) {
         return;
     }
     subs_focus_amount(app, false);
-    app->subs_edit = rubraview_textedit_make(app->subs_edit_buffer, sizeof(app->subs_edit_buffer));
-    rubraview_textedit_set(&app->subs_edit, typed);
-    rubraview_textedit_move(&app->subs_edit, RUBRAVIEW_TEXTEDIT_END, false);
+    /* RV-293 (owner: several lines in the subtitles editor): the cue's `\N` shown as the break it is */
+    char lines[sizeof app->subs_edit_buffer];
+    size_t ln = 0;
+    for (size_t i = 0; i < typed.size && ln + 1 < sizeof lines; ++i) {
+        if (!times && typed.ptr[i] == '\\' && i + 1 < typed.size && (typed.ptr[i + 1] == 'N' || typed.ptr[i + 1] == 'n')) { lines[ln++] = '\n'; i++; }
+        else lines[ln++] = (char)typed.ptr[i];
+    }
+    editbox_begin(&app->subs_ec, app->subs_edit_buffer, sizeof(app->subs_edit_buffer), !times);
+    rubraview_editctl_set(&app->subs_ec, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)lines, .size = ln });
+    rubraview_editctl_move(&app->subs_ec, RUBRAVIEW_EDITCTL_FINISH, false);
+    app->subs_view.scroll = 0.0;
     app->subs_edit_row = (int32_t)row;
     app->subs_edit_time = times;
     app->subs_edit_composing_len = 0;
@@ -1209,25 +1225,11 @@ void draw_subs_window(app_state_t *app) {
             rubraview_pal_rect_t field = { text.x - pad * 0.5, row.y + 2.0, text.width + pad * 0.5, row.height - 4.0 };
             rubraview_pal_render_fill_rect(r, field, 0xFF101010u, 2.0);
             rubraview_pal_render_stroke_rect(r, field, COLOR_TILE_CURRENT, 1.0, 2.0);
-            const rubraview_textedit_t *te = &app->subs_edit;
-            size_t caret = te->caret <= te->len ? te->caret : te->len, comp = app->subs_edit_composing_len;
-            /* Begin far enough on that the caret is in the field. */
-            size_t room = font > 0.0 ? (size_t)(text.width / (font * 0.56)) : 0, from = caret, used = comp + 2;
-            while (from > 0) {
-                size_t prev = from - 1;
-                while (prev > 0 && ((unsigned char)te->buf[prev] & 0xC0) == 0x80) prev--;
-                size_t wide = (unsigned char)te->buf[prev] >= 0xE0 ? 2 : 1;
-                if (used + wide > room) break;
-                used += wide;
-                from = prev;
-            }
-            size_t n = 0;
-            proven_sys_mem_copy(line + n, te->buf + from, caret - from); n += caret - from;
-            proven_sys_mem_copy(line + n, app->subs_edit_composing, comp); n += comp;
-            line[n++] = '|';
-            proven_sys_mem_copy(line + n, te->buf + caret, te->len - caret); n += te->len - caret;
-            rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)line, n }, text.width, font), text, font,
-                                           COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+            app->subs_view.box = field;   /* RV-293: the shared field: selection, the syllable, caret, scroll, breaks as ↵ */
+            app->subs_view.size = font;
+            editbox_draw(r, &app->subs_ec, &app->subs_view,
+                         (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->subs_edit_composing, .size = app->subs_edit_composing_len }, true,
+                         COLOR_TEXT, rubraview_pal_window_dpi_scale(app->subs_window));
         } else
         if (text.width > 0.0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), said, text.width, font), text, font,
                                                              kind == SUBS_TEXT ? COLOR_TEXT : 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
@@ -1240,6 +1242,11 @@ static void subs_press(app_state_t *app, double x, double y, uint32_t modifiers)
     int kind = subs_kind(app);
     size_t count = app->subs_count, index = 0;
     bool on_amount = kind == SUBS_TEXT && subs_in(subs_part_rect(app, SUBS_PART_AMOUNT), x, y);
+    if (app->subs_edit_row >= 0 && editbox_pointer_down(app->subs_renderer, &app->subs_ec, &app->subs_view, x, y, (modifiers & RUBRAVIEW_MOD_SHIFT) != 0)) {
+        app->subs_edit_composing_len = 0;   /* RV-293: a press in the text being typed places the caret there */
+        app->subs_dirty = true;
+        return;
+    }
     subs_edit_end(app, true);                    /* a press anywhere keeps what was typed */
     subs_focus_amount(app, on_amount);
     if (on_amount) return;
@@ -1316,6 +1323,7 @@ size_t subs_pump(app_state_t *app) {
                 int32_t was = app->subs_hover;
                 app->subs_px = event.mouse.x;
                 app->subs_py = event.mouse.y;
+                if (app->subs_edit_row >= 0 && editbox_pointer_move(app->subs_renderer, &app->subs_ec, &app->subs_view, event.mouse.x)) { app->subs_dirty = true; break; }   /* RV-293 */
                 if (scrollbar_motion(app, app->subs_window, event.mouse.x, event.mouse.y)) { app->subs_dirty = true; break; }   /* RV-170 */
                 if (scrollbar_hover(app, RVSB_SUBS, event.mouse.x, event.mouse.y)) app->subs_dirty = true;
                 app->subs_hover = rubraview_listwin_hit(&app->subs_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
@@ -1334,6 +1342,7 @@ size_t subs_pump(app_state_t *app) {
                 if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT) subs_press(app, event.mouse.x, event.mouse.y, event.mouse.modifiers);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                app->subs_view.dragging = false;   /* RV-293 */
                 if (scrollbar_release(app, app->subs_window)) app->subs_dirty = true;   /* RV-170 */
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
@@ -1352,7 +1361,7 @@ size_t subs_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_TEXT:
                 if (app->subs_edit_row >= 0) {
                     app->subs_edit_composing_len = 0;
-                    (void)rubraview_textedit_insert(&app->subs_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event.text.utf8, .size = event.text.length });
+                    editbox_text(&app->subs_ec, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event.text.utf8, .size = event.text.length }, true);
                     app->subs_dirty = true;
                     break;
                 }
@@ -1378,15 +1387,11 @@ size_t subs_pump(app_state_t *app) {
                 }
                 if (app->subs_edit_row >= 0) {
                     /* the text being typed has the keys */
-                    bool extend = (combo.modifiers & RUBRAVIEW_MOD_SHIFT) != 0;
-                    if (key_is(combo, "Enter")) subs_edit_end(app, true);
+                    bool shift = (combo.modifiers & RUBRAVIEW_MOD_SHIFT) != 0;
+                    if (key_is(combo, "Enter") && shift && app->subs_ec.lines) editbox_text(&app->subs_ec, PROVEN_LIT("\n"), false);   /* RV-293: a break */
+                    else if (key_is(combo, "Enter")) subs_edit_end(app, true);
                     else if (key_is(combo, "Escape")) subs_edit_end(app, false);
-                    else if (key_is(combo, "Backspace")) rubraview_textedit_backspace(&app->subs_edit);
-                    else if (key_is(combo, "Delete")) rubraview_textedit_delete(&app->subs_edit);
-                    else if (key_is(combo, "Left")) rubraview_textedit_move(&app->subs_edit, RUBRAVIEW_TEXTEDIT_LEFT, extend);
-                    else if (key_is(combo, "Right")) rubraview_textedit_move(&app->subs_edit, RUBRAVIEW_TEXTEDIT_RIGHT, extend);
-                    else if (key_is(combo, "Home")) rubraview_textedit_move(&app->subs_edit, RUBRAVIEW_TEXTEDIT_HOME, extend);
-                    else if (key_is(combo, "End")) rubraview_textedit_move(&app->subs_edit, RUBRAVIEW_TEXTEDIT_END, extend);
+                    else (void)editbox_key(app->subs_window, &app->subs_ec, combo, false);   /* RV-293: every editing key */
                     app->subs_dirty = true;
                     break;
                 }

@@ -1424,53 +1424,6 @@ void rename_field_begin(app_state_t *app) {
     app->rename_dragging = false;
 }
 
-/* Text for a box: whole UTF-8 characters, no control characters. */
-void textbox_insert(rubraview_textedit_t *te, proven_u8str_view_t text) {
-    if (text.size == 0) return;
-    char clean[1024];
-    size_t length = 0;
-    (void)rubraview_rename_append(clean, sizeof(clean), &length, text);
-    (void)rubraview_textedit_insert(te, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)clean, .size = length });
-}
-
-/* The editing keys of a text box (the rename box, the picker's path, the
-   settings window's folders). The characters themselves come as text;
-   these move, select, delete and use the clipboard of `window`. */
-bool textbox_key(rubraview_window_t *window, rubraview_textedit_t *te, rubraview_key_combo_t combo) {
-    bool shift = (combo.modifiers & RUBRAVIEW_MOD_SHIFT) != 0;
-    bool ctrl = (combo.modifiers & RUBRAVIEW_MOD_CTRL) != 0;
-    if (key_is(combo, "Backspace")) {
-        /* A whole character, not one byte: half a Hangul syllable would
-           leave the name unwritable. (Inside a syllable the IME takes
-           Backspace itself and it never comes here.) */
-        rubraview_textedit_backspace(te);
-    } else if (key_is(combo, "Delete")) {
-        rubraview_textedit_delete(te);
-    } else if (key_is(combo, "Left")) {
-        rubraview_textedit_move(te, RUBRAVIEW_TEXTEDIT_LEFT, shift);
-    } else if (key_is(combo, "Right")) {
-        rubraview_textedit_move(te, RUBRAVIEW_TEXTEDIT_RIGHT, shift);
-    } else if (key_is(combo, "Home")) {
-        rubraview_textedit_move(te, RUBRAVIEW_TEXTEDIT_HOME, shift);
-    } else if (key_is(combo, "End")) {
-        rubraview_textedit_move(te, RUBRAVIEW_TEXTEDIT_END, shift);
-    } else if (ctrl && key_is(combo, "A")) {
-        rubraview_textedit_select_all(te);
-    } else if (ctrl && (key_is(combo, "C") || key_is(combo, "X"))) {
-        proven_u8str_view_t chosen = rubraview_textedit_selection(te);
-        if (chosen.size > 0 && rubraview_pal_clipboard_set_text(window, chosen) && key_is(combo, "X")) {
-            rubraview_textedit_backspace(te);   /* removes the selection */
-        }
-    } else if (ctrl && key_is(combo, "V")) {
-        char pasted[1024];
-        size_t n = rubraview_pal_clipboard_get_text(window, pasted, sizeof(pasted));
-        textbox_insert(te, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)pasted, .size = n });
-    } else {
-        return false;
-    }
-    return true;
-}
-
 static bool rename_edit_key(app_state_t *app, rubraview_key_combo_t combo) {
     return editbox_key(app->window, &app->rename_ec, combo, app->rename_is_password);   /* RV-293 */
 }

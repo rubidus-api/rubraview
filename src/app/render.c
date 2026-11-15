@@ -841,6 +841,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         char fit[512], cellbuf[48];
         double name_x = cols.name_x + check_room + side + 8.0 * dpi;
         rubraview_pal_rect_t name = { name_x, y, cols.x[0] + cols.w[0] - name_x - 8.0 * dpi, cell };
+        if (app->rename_active && app->rename_inplace && app->rename_is_picker && index == app->rename_picker_at) app->rename_inplace_rect = name;   /* RV-293 E3 */
         rubraview_pal_render_draw_text(app->renderer, files_fit_text(fit, sizeof(fit), entry->name, name.width, font), name,
                                        font, entry->is_directory ? 0xFFB8D8FFu : COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         bool up = entry->is_directory && proven_u8str_view_eq(entry->name, PROVEN_LIT(".."));
@@ -901,6 +902,8 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         rubraview_texture_t *thumb = (app->picker_thumbs && index < app->picker_thumb_count)
                                          ? app->picker_thumbs[index].texture : NULL;
         rubraview_pal_rect_t caption = { tile.x, tile.y + tile.height * 0.62, tile.width, tile.height * 0.38 };
+        if (app->rename_active && app->rename_inplace && app->rename_is_picker && index == app->rename_picker_at)   /* RV-293 E3: the name's place */
+            app->rename_inplace_rect = (rubraview_pal_rect_t){ tile.x + 2.0, caption.y + caption.height * 0.2, tile.width - 4.0, fmax(caption.height * 0.6, 24.0 * dpi) };
         rubraview_pal_rect_t kind = { tile.x, tile.y + tile.height * 0.2, tile.width, tile.height * 0.3 };
 
         if (thumb) {

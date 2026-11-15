@@ -1261,7 +1261,8 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
     {
         /* RV-238: a card — title, the line saying what the keys do, the field, the buttons — over a dimmed window;
            the open-file screen's typed path and filter stay in its path bar, Compress keeps its own window */
-        bool card = !(app->rename_is_path || app->rename_is_filter || app->rename_is_pack);
+        bool inplace = app->rename_inplace && app->rename_inplace_rect.width > 0.0;   /* RV-293 E3: where the name is shown */
+        bool card = !(app->rename_is_path || app->rename_is_filter || app->rename_is_pack || inplace);
         bool live = app->rename_is_find || app->rename_is_listfilter;   /* what it filters stays in sight, undimmed */
         rubraview_pal_rect_t card_rect = {0};
         bool focused = true;
@@ -1341,6 +1342,7 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
                                            0xFF101010u, 0.0);   /* the chips under it do not show through */
             box = (rubraview_pal_rect_t){ 4.0 * dpi, picker_top(app) + 4.0 * dpi, win_w - 8.0 * dpi, (PICKER_CRUMB_HEIGHT - 8.0) * dpi };
         }
+        if (inplace) box = app->rename_inplace_rect;
         if (card) {   /* RV-238: a field that looks like one: dark, lit at its edge */
             rubraview_pal_render_fill_rect(app->renderer, box, 0xFF141414u, 5.0 * dpi);
             rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_TILE_CURRENT, 1.5 * dpi, 5.0 * dpi);
@@ -1383,13 +1385,13 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
             sel_a = 3 * at_a;
             sel_b = 3 * at_b;
         }
-        double size = 18.0 * dpi, pad = 14.0 * dpi;
+        double size = inplace ? fmin(18.0 * dpi, box.height * 0.62) : 18.0 * dpi, pad = inplace ? 6.0 * dpi : 14.0 * dpi;
         double full = 0.0, to_caret = 0.0;
         (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = total }, size, &full);
         (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = caret + comp }, size, &to_caret);
         /* Centred while it fits; longer, it scrolls so the caret stays in the box. */
         double inner = box.width - 2.0 * pad;
-        double x0 = full <= inner && !app->rename_is_path && !card ? box.x + (box.width - full) * 0.5 : box.x + pad;   /* RV-238: a card's from the left */
+        double x0 = full <= inner && !app->rename_is_path && !card && !(inplace && !app->rename_is_picker) ? box.x + (box.width - full) * 0.5 : box.x + pad;   /* RV-238: a card's from the left */
         if (full > inner && to_caret > inner) x0 = box.x + pad + inner - to_caret;
         if (host == CARD_HOST_MAIN) { app->rename_field = box; app->rename_field_x0 = x0; app->rename_field_size = size; }   /* RV-293: for the pointer */
         if (has_selection) {
@@ -1428,6 +1430,7 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
             if (app->rename_is_target || app->rename_is_extract) { words[n] = T("Browse..."); kinds[n++] = RENAME_BTN_BROWSE; }
             words[n] = T("Cancel"); kinds[n++] = RENAME_BTN_CANCEL;
         }
+        if (inplace) n = 0;   /* RV-293 E3: Enter keeps it, Esc leaves it, as in Explorer */
         double bw = (card ? 104.0 : 120.0) * dpi, bh = (card ? 38.0 : 48.0) * dpi, gap = 10.0 * dpi;   /* 1.25.0: roomier; RV-238: a card's */
         for (int32_t i = 0; i < n; ++i) {   /* RV-182: one width for all, the longest word's with room, never less */
             double tw = 0.0;

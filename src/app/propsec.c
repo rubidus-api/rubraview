@@ -479,10 +479,9 @@ static void name_field(app_state_t *app, double y, const char *label) {
     rubraview_pal_rect_t box = { 140.0 * dpi, y - 2.0 * dpi, w - 158.0 * dpi, 24.0 * dpi };
     rubraview_pal_render_fill_rect(r, box, 0xFF15181Cu, 3.0 * dpi);
     rubraview_pal_render_stroke_rect(r, box, PW_ACCENT, 1.0, 3.0 * dpi);
-    char shown[600];
-    proven_u8str_view_t t = rubraview_textedit_text(&v->edit);
-    (void)rubraview_fmt(shown, sizeof shown, "{}{}|", PROVEN_ARG(t), PROVEN_ARG(v->composing));
-    pw_text_at(r, shown, (rubraview_pal_rect_t){ box.x + 6.0 * dpi, box.y + 2.0 * dpi, box.width - 12.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_TEXT);
+    v->view.box = box;   /* RV-293: the shared field */
+    v->view.size = 13.0 * dpi;
+    editbox_draw(r, &v->ec, &v->view, proven_u8str_view_from_cstr(v->composing), true, PW_TEXT, dpi);
     pw_text_at(r, T("a user or group (Guests, a PC's name\\user); Enter adds, Esc stops"),
                (rubraview_pal_rect_t){ 140.0 * dpi, y + 24.0 * dpi, w - 158.0 * dpi, 18.0 * dpi }, 11.0 * dpi, PW_DIM);
 }

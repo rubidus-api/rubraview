@@ -311,6 +311,10 @@ void draw_titlebar(app_state_t *app, double win_w) {
     if (name.size > 0 && rubraview_pal_render_measure_text(app->renderer, name, font, &name_w)) app->titlebar.name_width = name_w + 20.0 * dpi;
     else app->titlebar.name_width = 0.0;
     rubraview_rect_t nr = rubraview_titlebar_button_rect(&app->titlebar, RUBRAVIEW_TITLEBAR_NAME, win_w);
+    if (app->rename_active && app->rename_inplace && !app->rename_is_picker) {   /* RV-293 E3: the name typed where it is shown */
+        double room = fmax(nr.width, fmin(560.0 * dpi, win_w - nr.x - 280.0 * dpi));
+        app->rename_inplace_rect = (rubraview_pal_rect_t){ nr.x + 4.0 * dpi, nr.y + 3.0 * dpi, room, nr.height - 6.0 * dpi };
+    }
     if (nr.width > 48.0 * dpi) {   /* RV-229: narrower, its letters stood one under another */
         char fit[1024];
         /* measured to fit: whole (the estimate files_fit_text makes would cut it); cut only when the row is short */

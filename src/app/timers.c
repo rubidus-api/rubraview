@@ -27,7 +27,8 @@ void tick_timers(app_state_t *app, double dt) {
         app->titlebar.idle_seconds = 0.0;
     }
     if (app->frameless && !app->chrome_hidden &&
-        (app->picker_open || app->tmenu_open || rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5)) {
+        (app->picker_open || app->tmenu_open || (app->rename_active && app->rename_inplace && !app->rename_is_picker) ||   /* RV-293 E3: the name typed there */
+         rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) > 0.5)) {
         app->titlebar.shown = true;   /* 1.20.0: pinned; 1.24.0: and always over the open-file screen */
         app->titlebar.idle_seconds = 0.0;
     }

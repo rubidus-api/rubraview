@@ -103,7 +103,7 @@ ships with, so it cannot drift from them.
 | `Delete` | To the recycle bin; inside an archive it asks: this page, or the whole archive |
 | `Shift+Delete` | Delete for good (asks first) |
 | `Ctrl+Z` | Undo a move, copy or rename |
-| `Ctrl+M` | Rename, keeping the extension; a page inside an archive too |
+| `Ctrl+M`, `F2` | Rename, keeping the extension; a page inside an archive too |
 | `Ctrl+Enter` | An Explorer window with this file picked out (the archive, for a page inside one) |
 | `Ctrl+P` | Print the picture on screen: a panel for the turn, size, scale, place, margin and pictures a sheet, then the system's dialog |
 | `Ctrl+Shift+C` | Copy the file on screen to the folder set for it (a page inside an archive too) |

@@ -1446,8 +1446,8 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                     app->spath_list_index = row - 1;   /* the folder in place, or past the end: a new one */
                     proven_u8str_view_t dirs[256];
                     size_t have = rubraview_folder_list_split(folder_list_text(app, folders), dirs, 256);
-                    rubraview_textedit_set(&app->spath_edit, (size_t)(row - 1) < have ? dirs[row - 1] : PROVEN_LIT(""));
-                    rubraview_textedit_select_all(&app->spath_edit);
+                    rubraview_textedit_set(&app->spath_ec.te, (size_t)(row - 1) < have ? dirs[row - 1] : PROVEN_LIT(""));
+                    rubraview_textedit_select_all(&app->spath_ec.te);
                     /* Typed in the box that is always there, the list's last row, never over another row. */
                     rubraview_settings_view_focus_table_row(&app->settings_view, cstr(FOLDER_LISTS[folders].table), (int32_t)n + 1);
                     if ((size_t)row <= n) settings_say(app, T("change the folder in the box; Enter keeps it, Esc leaves it, Ctrl+O browses"));
@@ -1670,10 +1670,10 @@ static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) 
    넣어서 복사해갈 수도 있게") ---- */
 
 void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def) {
-    app->spath_edit = rubraview_textedit_make(app->spath_buffer, sizeof(app->spath_buffer));
+    editbox_begin(&app->spath_ec, app->spath_buffer, sizeof(app->spath_buffer), false);
     proven_u8str_view_t now = rubraview_settings_get_text(&app->settings, def->section, def->key);
-    rubraview_textedit_set(&app->spath_edit, now.size < sizeof(app->spath_buffer) ? now : PROVEN_LIT(""));
-    rubraview_textedit_select_all(&app->spath_edit);
+    rubraview_textedit_set(&app->spath_ec.te, now.size < sizeof(app->spath_buffer) ? now : PROVEN_LIT(""));
+    rubraview_textedit_select_all(&app->spath_ec.te);
     app->spath_section = def->section;
     app->spath_key = def->key;
     app->spath_list_index = -1;
@@ -1690,9 +1690,9 @@ void settings_number_begin(app_state_t *app) {
     char now[32];
     double v = rubraview_settings_get(&app->settings, def->section, def->key);
     int n = def->type == RUBRAVIEW_SETTING_FLOAT ? rubraview_fmt(now, sizeof(now), "{:.2}", PROVEN_ARG((double)v)) : rubraview_fmt(now, sizeof(now), "{:.0}", PROVEN_ARG((double)v));
-    app->spath_edit = rubraview_textedit_make(app->spath_buffer, sizeof(app->spath_buffer));
-    rubraview_textedit_set(&app->spath_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
-    rubraview_textedit_select_all(&app->spath_edit);
+    editbox_begin(&app->spath_ec, app->spath_buffer, sizeof(app->spath_buffer), false);
+    rubraview_textedit_set(&app->spath_ec.te, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
+    rubraview_textedit_select_all(&app->spath_ec.te);
     app->spath_section = def->section;
     app->spath_key = def->key;
     app->spath_list_index = -1;
@@ -1716,7 +1716,7 @@ static void settings_path_end(app_state_t *app) {
 }
 
 static void settings_path_commit(app_state_t *app) {
-    proven_u8str_view_t text = rubraview_textedit_text(&app->spath_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->spath_ec.te);
     if (app->spath_number) {   /* 1.24.0 */
         char buf[48];
         size_t n = text.size < sizeof(buf) - 1 ? text.size : sizeof(buf) - 1;
@@ -1802,7 +1802,7 @@ static void settings_path_browse(app_state_t *app) {
     };
     rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
     if (picked.accepted && picked.count > 0 && picked.paths[0].size < sizeof(app->spath_buffer)) {
-        rubraview_textedit_set(&app->spath_edit, picked.paths[0]);   /* in the box, for Enter to keep */
+        rubraview_textedit_set(&app->spath_ec.te, picked.paths[0]);   /* in the box, for Enter to keep */
     }
 }
 
@@ -1811,7 +1811,7 @@ static bool settings_path_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (!app->spath_active) return false;
     bool ctrl = (combo.modifiers & RUBRAVIEW_MOD_CTRL) != 0;
     if (key_is(combo, "Enter")) {
-        textbox_insert(&app->spath_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length });
+        editbox_text(&app->spath_ec, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length }, true);
         app->spath_composing_length = 0;
         settings_path_commit(app);
     } else if (key_is(combo, "Escape")) {
@@ -1820,7 +1820,7 @@ static bool settings_path_key(app_state_t *app, rubraview_key_combo_t combo) {
     } else if (ctrl && key_is(combo, "O")) {
         settings_path_browse(app);
     } else {
-        (void)textbox_key(app->settings_window, &app->spath_edit, combo);
+        (void)editbox_key(app->settings_window, &app->spath_ec, combo, false);   /* RV-293 */
     }
     app->settings_dirty = true;
     return true;   /* nothing else happens while typing */
@@ -1847,22 +1847,36 @@ static bool settings_path_box(const app_state_t *app, int32_t list, int32_t *row
 /* The first character shown: a long path shows its end, where the caret usually is. */
 static size_t settings_path_first(const app_state_t *app, int32_t cols) {
     size_t caret_chars = 0;
-    for (size_t i = 0; i < app->spath_edit.caret && i < app->spath_edit.len; ++i) {
-        if (((unsigned char)app->spath_edit.buf[i] & 0xC0) != 0x80) caret_chars++;
+    for (size_t i = 0; i < app->spath_ec.te.caret && i < app->spath_ec.te.len; ++i) {
+        if (((unsigned char)app->spath_ec.te.buf[i] & 0xC0) != 0x80) caret_chars++;
     }
     return caret_chars + 2 > (size_t)cols ? caret_chars + 2 - (size_t)cols : 0;
 }
 
 /* A click in the box puts the caret at that character. */
-static void settings_path_click(app_state_t *app, int32_t col, int32_t cols) {
+static size_t settings_path_at(const app_state_t *app, int32_t col, int32_t cols) {
     size_t want = settings_path_first(app, cols) + (size_t)(col < 0 ? 0 : col), seen = 0, at = 0;
-    const char *t = app->spath_edit.buf;
-    while (at < app->spath_edit.len && seen < want) {
+    const char *t = app->spath_ec.te.buf;
+    while (at < app->spath_ec.te.len && seen < want) {
         at++;
-        while (at < app->spath_edit.len && ((unsigned char)t[at] & 0xC0) == 0x80) at++;
+        while (at < app->spath_ec.te.len && ((unsigned char)t[at] & 0xC0) == 0x80) at++;
         seen++;
     }
-    app->spath_edit.caret = app->spath_edit.anchor = at;
+    return at;
+}
+
+/* RV-293: a click puts the caret, a double click a word, a triple click all; Shift+click and a drag select. */
+static void settings_path_click(app_state_t *app, int32_t col, int32_t cols, double x, double y, bool shift) {
+    int clicks = editbox_clicks(&app->spath_clicks, x, y, rubraview_pal_time_now_seconds());
+    editbox_press(&app->spath_ec, settings_path_at(app, col, cols), clicks, shift);
+    app->spath_dragging = clicks == 1;
+    app->settings_dirty = true;
+}
+
+static void settings_path_drag(app_state_t *app, double x) {
+    int32_t brow = 0, bcol = 0, bcols = 0;
+    if (!app->spath_dragging || !settings_path_box(app, app->spath_list_index >= 0 ? app->spath_list : -1, &brow, &bcol, &bcols)) return;
+    rubraview_editctl_place(&app->spath_ec, settings_path_at(app, (int32_t)(x / app->settings_cell_w) - bcol, bcols), true);
     app->settings_dirty = true;
 }
 
@@ -1906,12 +1920,12 @@ static void settings_path_draw(app_state_t *app) {
     rubraview_pal_rect_t box = { cw * col0, y - pad, cw * cols, ch + 2.0 * pad };
     rubraview_pal_render_fill_rect(r, box, 0xFF101010u, 3.0);
     rubraview_pal_render_stroke_rect(r, box, 0xFF5B9BD5u, 1.0, 3.0);
-    proven_u8str_view_t text = rubraview_textedit_text(&app->spath_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->spath_ec.te);
     size_t caret_chars = 0, sel_a = 0, sel_b = 0, a = 0, b = 0;
-    rubraview_textedit_selection_range(&app->spath_edit, &a, &b);
+    rubraview_textedit_selection_range(&app->spath_ec.te, &a, &b);
     for (size_t i = 0; i < text.size; ++i) {
         if (((unsigned char)text.ptr[i] & 0xC0) == 0x80) continue;
-        if (i < app->spath_edit.caret) caret_chars++;
+        if (i < app->spath_ec.te.caret) caret_chars++;
         if (i < a) sel_a++;
         if (i < b) sel_b++;
     }
@@ -2016,7 +2030,7 @@ size_t settings_pump(app_state_t *app) {
                 if (app->spath_active) {   /* 1.24.0: the box's own buttons */
                     int32_t hit = -1;
                     for (int32_t i = 0; i < app->spath_btn_n; ++i) if (pal_rect_has(app->spath_btn[i], event.mouse.x, event.mouse.y)) hit = i;
-                    if (hit == 0) { textbox_insert(&app->spath_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length });
+                    if (hit == 0) { editbox_text(&app->spath_ec, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length }, true);
                                     app->spath_composing_length = 0; settings_path_commit(app); app->settings_dirty = true; break; }
                     if (hit == 1) { settings_path_end(app); app->settings_dirty = true; break; }
                     if (hit == 2) { settings_path_browse(app); app->settings_dirty = true; break; }
@@ -2027,7 +2041,7 @@ size_t settings_pump(app_state_t *app) {
                     int32_t mc = (int32_t)(event.mouse.x / app->settings_cell_w), mr = (int32_t)(event.mouse.y / app->settings_cell_h);
                     if (settings_path_box(app, app->spath_list_index >= 0 ? app->spath_list : -1, &brow, &bcol, &bcols) &&
                         mr == brow && mc >= bcol && mc < bcol + bcols) {
-                        settings_path_click(app, mc - bcol, bcols);
+                        settings_path_click(app, mc - bcol, bcols, event.mouse.x, event.mouse.y, (event.mouse.modifiers & RUBRAVIEW_MOD_SHIFT) != 0);
                         break;
                     }
                     settings_path_end(app);
@@ -2085,6 +2099,7 @@ size_t settings_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
                 app->settings_px = event.mouse.x;
                 app->settings_py = event.mouse.y;
+                if (app->spath_active && app->spath_dragging) { settings_path_drag(app, event.mouse.x); break; }   /* RV-293 */
                 {   /* RV-252: the circle under the pointer lights */
                     int32_t dot = keys_dot_under(app, event.mouse.x, event.mouse.y);
                     if (dot != g_keys_dot_hover) { g_keys_dot_hover = dot; app->settings_dirty = true; }
@@ -2139,6 +2154,7 @@ size_t settings_pump(app_state_t *app) {
                 }
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                app->spath_dragging = false;   /* RV-293 */
                 if (scrollbar_release(app, app->settings_window)) { app->settings_dirty = true; break; }   /* RV-170 */
                 if (app->settings_selecting) {
                     app->settings_selecting = false;
@@ -2156,7 +2172,7 @@ size_t settings_pump(app_state_t *app) {
                 if (app->spath_active) {
                     proven_u8str_view_t typed = { .ptr = (const proven_byte_t *)event.text.utf8, .size = event.text.length };
                     if (event.kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
-                        textbox_insert(&app->spath_edit, typed);
+                        editbox_text(&app->spath_ec, typed, true);
                         app->spath_composing_length = 0;
                     } else {
                         size_t n = typed.size < sizeof(app->spath_composing) ? typed.size : sizeof(app->spath_composing) - 1;

@@ -45,7 +45,8 @@ typedef struct props_view {
     int32_t                      scroll;
     int32_t                      editing;       /* the row being typed in, -1 */
     char                         edit_buf[512];
-    rubraview_textedit_t         edit;
+    rubraview_editctl_t          ec;            /* RV-293: the field being typed in, its undo */
+    editbox_view_t               view;
     char                         composing[64];
     /* where things are drawn, for the pointer */
     rubraview_pal_rect_t         tab_rect[RUBRAVIEW_PROPS_TAB_COUNT];

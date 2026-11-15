@@ -78,7 +78,7 @@ const char *rubraview_default_keymap(void) {
     "delete_file = \"Delete\"\n"
     "purge_file = \"Shift+Delete\"\n"
     "undo = \"Ctrl+Z\"\n"
-    "rename_file = \"Ctrl+M\"\n"   /* RV-211: was F2 */
+    "rename_file = \"Ctrl+M, F2\"\n"   /* RV-211: was F2; RV-293 (owner, 2026-11-15): F2 again, renaming where the name is */
     /* Owner, 2026-10-09: an Explorer window with the file on screen picked
        out — the archive itself for a page inside one. */
     "reveal_in_explorer = \"Ctrl+Enter\"\n"
