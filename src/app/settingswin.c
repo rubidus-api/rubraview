@@ -742,6 +742,8 @@ void settings_close(app_state_t *app) {
    missing or cannot be read leaves the viewer in English and says so. */
 static rubraview_lang_t g_lang;
 static char g_lang_code[24];   /* what is in use: "" for English */
+static char g_lang_file[1024]; /* RV-289: its file, for a file job's windows ("" English) */
+const char *lang_file_in_use(void) { return g_lang_file; }
 const char *const LANG_PACKS[] = { "ko", "ja", "zh-Hans", "zh-Hant", "fa" };
 
 /* Where Import puts what cannot go beside the program (the Store's package
@@ -765,6 +767,7 @@ static void lang_apply(app_state_t *app) {
     rubraview_lang_use(NULL);
     rubraview_lang_free(&g_lang);
     g_lang_code[0] = '\0';
+    g_lang_file[0] = '\0';
     if (want) {
         char name[48];
         rubraview_fmt(name, sizeof(name), "lang/{}.txt", PROVEN_ARG(want));
@@ -778,6 +781,7 @@ static void lang_apply(app_state_t *app) {
             proven_u8str_view_t text = rubraview_pal_fs_read_file(sa, path, RUBRAVIEW_LANG_MAX_FILE);
             rubraview_lang_stats_t stats;
             if (text.size > 0) loaded = rubraview_lang_load(&g_lang, text, &stats);
+            if (loaded) rubraview_fmt(g_lang_file, sizeof g_lang_file, "{}", PROVEN_ARG(path));
             scratch_end(app, &sc);
         }
         if (loaded) {

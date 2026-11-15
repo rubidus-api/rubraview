@@ -44,6 +44,12 @@ bool rubraview_pal_process_start_console(proven_u8str_view_t command_line);
 bool rubraview_pal_process_start(proven_u8str_view_t command_line);
 
 /**
+ * RV-289: as rubraview_pal_process_start, and out of any job object this program was started in (when that job
+ * lets it go), so a file job is not ended with whatever ends the viewer's job.
+ */
+bool rubraview_pal_process_start_apart(proven_u8str_view_t command_line);
+
+/**
  * RV-215 (D-248): bytes this program has read since it started, its FFmpeg
  * children's included (those ended counted as they were at the end), from
  * any file or drive, the system's cache included. False when it cannot be had.

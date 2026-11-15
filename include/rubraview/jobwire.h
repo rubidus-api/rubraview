@@ -89,6 +89,8 @@ typedef struct rubraview_jobwire_start {
     proven_u8str_view_t viewer_path;
     proven_u8str_view_t temp_dir;   /* removed by the job at its end ("" none) */
     bool     same_recycles_copy;
+    proven_u8str_view_t lang_file;  /* the language pack the viewer reads ("" English), for the job's windows */
+    proven_u8str_view_t ui_font;    /* Settings › General › the windows' face, as the setting holds it */
     uint32_t count;                 /* the sources that follow */
 } rubraview_jobwire_start_t;
 

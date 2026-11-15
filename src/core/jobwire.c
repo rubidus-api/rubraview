@@ -131,6 +131,8 @@ void rubraview_jobwire_put_start(rubraview_jobwire_out_t *out, const rubraview_j
     rubraview_jobwire_put_str(out, s->viewer_path);
     rubraview_jobwire_put_str(out, s->temp_dir);
     rubraview_jobwire_put_u8(out, s->same_recycles_copy);
+    rubraview_jobwire_put_str(out, s->lang_file);
+    rubraview_jobwire_put_str(out, s->ui_font);
     rubraview_jobwire_put_u32(out, (uint32_t)count);
     for (size_t i = 0; i < count; ++i) rubraview_jobwire_put_str(out, sources[i]);
     (void)rubraview_jobwire_finish(out);
@@ -146,6 +148,8 @@ void rubraview_jobwire_get_start(rubraview_jobwire_msg_t *msg, rubraview_jobwire
     s->viewer_path = rubraview_jobwire_get_str(msg);
     s->temp_dir = rubraview_jobwire_get_str(msg);
     s->same_recycles_copy = rubraview_jobwire_get_u8(msg) != 0;
+    s->lang_file = rubraview_jobwire_get_str(msg);
+    s->ui_font = rubraview_jobwire_get_str(msg);
     s->count = rubraview_jobwire_get_u32(msg);
 }
 

@@ -28,6 +28,11 @@ bool rubraview_pal_process_start(proven_u8str_view_t command_line) {
     (void)command_line;
     return false;
 }
+
+bool rubraview_pal_process_start_apart(proven_u8str_view_t command_line) {
+    (void)command_line;
+    return false;
+}
 #endif
 
 bool rubraview_pal_process_read_bytes(uint64_t *bytes) {

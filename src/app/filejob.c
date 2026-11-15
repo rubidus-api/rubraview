@@ -1,249 +1,172 @@
 /* RV-258 (owner, 2026-11-08: "압축파일 내에서 오건 어디서 오건 파일 관리자에서 동일한 이름의 파일이 있고 그걸 덮어씌우려 할 때,
-   그 파일은 일단 킵해놓고 일괄적으로 묻게 해 줘요 ... 안겹치는 파일들을 복사 또는 이동하면서, 모달레스로 겹치는 파일 어떻게 할지
-   작업 큐에 쌓아가면서 사용자에게 묻고 처리하게 해요. 윈도 파일 탐색기처럼 두개 비교하면서 체크박스로 체크할 수도 있고, 일괄적으로
-   덮어씌울수도 있고, 둘다 보존하게 ... 할 수도 있고, 동일한 파일만 골라서 ..."; asked: a copy's same file left or recycled as
-   chosen, a folder there merged, _2 everywhere, the window closed keeps its questions; D-310): copies and moves of the
-   file manager as jobs of rubraview_fileop, stepped on one worker thread, one job after another; the clashes they
-   park are asked in a modeless window of their own, and each answer goes back to its job.
+   그 파일은 일단 킵해놓고 일괄적으로 묻게 해 줘요 ..."; D-310): copies and moves of the file manager as jobs of
+   rubraview_fileop, the clashes they park asked together.
 
-   The operations are the worker's alone. The main thread sees a copy of the parked rows and the counts, and hands
-   over new jobs and answers, all under one lock. A finished job comes back to the main thread for its undo, its
-   words and what it changes on screen. */
+   RV-289 (owner, 2026-11-15: "이것들은 어떤 독립된 프로세스로 따로 처리하는 것이 바람직하지 않을까요? 메인 창이 죽거나 해도
+   그대로 이어서 진행되고, 반대로 이 프로세스가 죽어도 메인 창이 죽지 않게요"; "작업마다 프로세스"): each job now runs in a
+   process of its own (jobproc.c), started here with a pipe of its own; this side only sends the job, shows how far
+   it is, and when it ends takes its items for the undo, the basket, the clipboard and the screen, as before. A job
+   whose process goes away without its end is said and forgotten. The viewer keeps the clashes window (clashui) for
+   an extraction's and an archive's questions, which run here still. */
 #include "app.h"
+#include "clashui.h"
 #include "rubraview/fileop.h"
+#include "rubraview/jobwire.h"
+#include <sddl.h>
 
-enum { FJ_JOBS = 16, FJ_ANSWERS = 1024 };
 #define FJ_ARCADD 0xFFFFFFFFu   /* RV-260: a row of a writing into an archive (arcadd.c), answered on this thread */
 #define FJ_EXTRACT 0xFFFFFFFEu  /* RV-258: a row of an extraction (archwork.c), answered on this thread */
+enum { FJ_JOBS = 16 };
+
+typedef struct fj_item { char *source, *target, *why; uint8_t did, state; bool overwrote; int32_t parent; } fj_item_t;
 
 typedef struct fj_job {
-    rubraview_fileop_t op;
-    uint32_t id;
-    int      basket;    /* the basket it empties as it moves (0..4), or -1 */
-    bool     from_cut;  /* a paste of a cut: the clipboard cleared after */
-    int32_t  viewer_page;   /* RV-259: the viewer's own Copy / Move to folder of the page on screen, or -1 */
-    char    *viewer_path;   /* that page's file, to know it is still the one on screen */
-    char    *temp_dir;      /* a page out of an archive, written there first: removed after */
-    bool     prepared, finished, said_parked;
-    _Atomic uint64_t copied;   /* RV-269: the bytes of the file being copied so far (the fs copy's ctx) */
+    HANDLE   pipe;
+    bool     connected, broken, ended;
+    double   started;
+    rubraview_jobwire_out_t out;   /* waiting to be written */
+    uint8_t *in;
+    size_t   in_len, in_cap;
+    bool     moving;
+    int      basket;          /* the basket it empties as it moves (0..4), or -1 */
+    bool     from_cut;        /* a paste of a cut: the clipboard cleared after */
+    int32_t  viewer_page;     /* RV-259: the viewer's own Copy / Move to folder of the page on screen, or -1 */
+    char    *viewer_path;
+    char    *temp_dir;        /* removed by the job; by us only when the job never started */
+    rubraview_jobwire_progress_t progress;
+    fj_item_t *items;
+    size_t   nitems, cap;
+    rubraview_jobwire_end_t end;
 } fj_job_t;
 
-typedef struct fj_row {
-    uint32_t job;
-    size_t   index;
-    char    *source, *target;
-    uint64_t ssize, tsize;
-    int64_t  smtime, tmtime;
-    bool     kind_differs, keep_coming, keep_there;
-} fj_row_t;
+static fj_job_t *g_jobs[FJ_JOBS];
+static size_t    g_njobs;
+static unsigned  g_serial;
+static bool      g_same_recycles_copy;   /* the copy's same file: the last the reader chose */
 
-typedef struct fj_answer { uint32_t job; size_t index; bool all; rubraview_fileop_answer_t answer; } fj_answer_t;
+static clashui_t g_ui;   /* an extraction's and an archive's questions */
+static uint32_t  m_aa_version, m_xx_version;
 
-static struct {
-    SRWLOCK lock;
-    HANDLE  thread, wake;
-    volatile LONG quit;
-    fj_job_t *jobs[FJ_JOBS];
-    size_t   njobs;
-    uint32_t next_id;
-    fj_answer_t answers[FJ_ANSWERS];
-    size_t   nanswers;
-    bool     same_recycles_copy;
-    /* what the worker shows the main thread */
-    fj_row_t *rows;
-    size_t   nrows;
-    uint32_t version;
-    size_t   total, done, failed, skipped;
-    uint64_t bytes_total, bytes_done;   /* RV-269 */
-} g = { .lock = SRWLOCK_INIT };
-
-/* the main thread's copy, drawn in the window */
-static fj_row_t *m_rows;
-static size_t    m_nrows;
-static uint32_t  m_version;
-static int32_t   m_scroll;
-
-static void rows_free(fj_row_t *rows, size_t n) {
-    for (size_t i = 0; i < n; ++i) { rubraview_free(rows[i].source); rubraview_free(rows[i].target); }
-    rubraview_free(rows);
-}
-
-/* RV-269: every job's bytes, ended and in all (under the lock) */
-static void publish_bytes(void) {
-    uint64_t bd = 0, bt = 0;
-    for (size_t j = 0; j < g.njobs; ++j) {
-        uint64_t d = 0, t = 0;
-        rubraview_fileop_bytes(&g.jobs[j]->op, &d, &t);
-        bd += d; bt += t;
-    }
-    g.bytes_done = bd;
-    g.bytes_total = bt;
-}
-
-/* Under the lock: the counts, and — when the parked ones changed — the parked items of every job as rows. */
-static size_t g_parked_sig = (size_t)-1;
-static void publish(void) {
-    size_t n = 0, sig = 0;
-    for (size_t j = 0; j < g.njobs; ++j) { n += g.jobs[j]->op.parked; sig = sig * 31u + g.jobs[j]->op.parked * 7u + g.jobs[j]->id; }
-    if (sig == g_parked_sig && n == g.nrows) {   /* only the counts moved */
-        size_t total = 0, done = 0, failed = 0, skipped = 0;
-        for (size_t j = 0; j < g.njobs; ++j) { total += g.jobs[j]->op.count; done += g.jobs[j]->op.done; failed += g.jobs[j]->op.failed; skipped += g.jobs[j]->op.skipped; }
-        g.total = total; g.done = done; g.failed = failed; g.skipped = skipped;
-        publish_bytes();
-        return;
-    }
-    g_parked_sig = sig;
-    fj_row_t *rows = n ? (fj_row_t *)rubraview_alloc_zero(n, sizeof *rows) : NULL;
-    size_t k = 0, total = 0, done = 0, failed = 0, skipped = 0;
-    const rubraview_fileop_fs_t *fs = rubraview_pal_fileop_fs();
-    for (size_t j = 0; j < g.njobs; ++j) {
-        rubraview_fileop_t *op = &g.jobs[j]->op;
-        total += op->count; done += op->done; failed += op->failed; skipped += op->skipped;
-        for (size_t i = 0; rows && i < op->count && k < n; ++i) {
-            const rubraview_fileop_item_t *it = &op->items[i];
-            if (it->state != RUBRAVIEW_FILEOP_PARKED) continue;
-            rubraview_fileop_stat_t s = { 0 }, t = { 0 };
-            (void)fs->stat(NULL, it->source, &s);
-            (void)fs->stat(NULL, it->target, &t);
-            rows[k++] = (fj_row_t){ .job = g.jobs[j]->id, .index = i, .source = rubraview_strdup(it->source), .target = rubraview_strdup(it->target),
-                                    .ssize = s.size, .tsize = t.size, .smtime = s.mtime, .tmtime = t.mtime, .kind_differs = it->kind_differs,
-                                    .keep_coming = true, .keep_there = true };
-        }
-    }
-    rows_free(g.rows, g.nrows);
-    g.rows = rows;
-    g.nrows = k;
-    g.total = total; g.done = done; g.failed = failed; g.skipped = skipped;
-    publish_bytes();
-    g.version++;
-}
-
-static DWORD WINAPI worker(void *arg) {
-    (void)arg;
-    while (!InterlockedCompareExchange(&g.quit, 0, 0)) {
-        fj_answer_t answers[FJ_ANSWERS];
-        size_t nanswers = 0;
-        fj_job_t *job = NULL;
-        bool recycles = false;
-        AcquireSRWLockExclusive(&g.lock);
-        nanswers = g.nanswers;
-        proven_sys_mem_copy(answers, g.answers, nanswers * sizeof *answers);
-        g.nanswers = 0;
-        recycles = g.same_recycles_copy;
-        /* answers go to their jobs (the operations are this thread's; the lock keeps the list still) */
-        for (size_t a = 0; a < nanswers; ++a)
-            for (size_t j = 0; j < g.njobs; ++j) {
-                if (g.jobs[j]->id != answers[a].job && !answers[a].all) continue;
-                g.jobs[j]->op.same_recycles_copy = recycles;
-                if (answers[a].all) (void)rubraview_fileop_answer_all(&g.jobs[j]->op, answers[a].answer);
-                else (void)rubraview_fileop_answer(&g.jobs[j]->op, answers[a].index, answers[a].answer);
-            }
-        for (size_t j = 0; j < g.njobs && !job; ++j)
-            if (!g.jobs[j]->finished && (!g.jobs[j]->prepared || !rubraview_fileop_finished(&g.jobs[j]->op))) job = g.jobs[j];
-        if (nanswers) { g_parked_sig = (size_t)-1; publish(); }
-        ReleaseSRWLockExclusive(&g.lock);
-        if (!job) { WaitForSingleObject(g.wake, 250); continue; }
-        bool more;
-        if (!job->prepared) { (void)rubraview_fileop_prepare(&job->op); job->prepared = true; more = true; }
-        else more = rubraview_fileop_step(&job->op, 1);   /* one item, so answers and Esc are taken between */
-        AcquireSRWLockExclusive(&g.lock);
-        if (rubraview_fileop_finished(&job->op)) job->finished = true;
-        publish();
-        ReleaseSRWLockExclusive(&g.lock);
-        if (!more && !job->finished) WaitForSingleObject(g.wake, 250);   /* only answers can move it on */
-    }
-    return 0;
-}
-
-static bool ensure_worker(void) {
-    if (g.thread) return true;
-    g.wake = CreateEventW(NULL, FALSE, FALSE, NULL);
-    if (!g.wake) return false;
-    g.thread = CreateThread(NULL, 0, worker, NULL, 0, NULL);
-    return g.thread != NULL;
-}
-
-bool filejob_same_recycles_copy(void) {
-    AcquireSRWLockShared(&g.lock);
-    bool v = g.same_recycles_copy;
-    ReleaseSRWLockShared(&g.lock);
-    return v;
-}
+bool filejob_same_recycles_copy(void) { return g_same_recycles_copy; }
 
 bool filejob_busy(void) {
-    AcquireSRWLockShared(&g.lock);
-    bool busy = g.njobs > 0;
-    ReleaseSRWLockShared(&g.lock);
-    return busy;
+    for (size_t j = 0; j < g_njobs; ++j) if (!g_jobs[j]->ended) return true;
+    return false;
+}
+
+static void items_free(fj_job_t *job) {
+    for (size_t i = 0; i < job->nitems; ++i) { rubraview_free(job->items[i].source); rubraview_free(job->items[i].target); rubraview_free(job->items[i].why); }
+    rubraview_free(job->items);
+    job->items = NULL;
+    job->nitems = job->cap = 0;
+}
+
+static void job_free(fj_job_t *job) {
+    if (job->pipe && job->pipe != INVALID_HANDLE_VALUE) CloseHandle(job->pipe);
+    rubraview_jobwire_out_free(&job->out);
+    rubraview_free(job->in);
+    items_free(job);
+    rubraview_free(job->viewer_path);
+    rubraview_free(job->temp_dir);
+    rubraview_free(job);
+}
+
+/* ---- starting a job's process ---- */
+
+/* A pipe only this user may open, one end, not across the network, that never makes us wait. */
+static HANDLE make_pipe(wchar_t *name, size_t cap) {
+    SECURITY_ATTRIBUTES sa = { .nLength = sizeof sa };
+    PSECURITY_DESCRIPTOR sd = NULL;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(L"D:P(A;;GA;;;OW)(A;;GA;;;SY)", SDDL_REVISION_1, &sd, NULL)) return INVALID_HANDLE_VALUE;
+    sa.lpSecurityDescriptor = sd;
+    DWORD session = 0;
+    (void)ProcessIdToSessionId(GetCurrentProcessId(), &session);
+    HANDLE h = INVALID_HANDLE_VALUE;
+    for (int tries = 0; tries < 4 && h == INVALID_HANDLE_VALUE; ++tries) {
+        LARGE_INTEGER q;
+        QueryPerformanceCounter(&q);
+        unsigned noise = (unsigned)(q.QuadPart ^ (q.QuadPart >> 32) ^ (GetTickCount64() * 2654435761u) ^ ((uintptr_t)&q >> 4));
+        char n8[160];
+        int k = rubraview_fmt(n8, sizeof n8, "\\\\.\\pipe\\rubraview-job-{}-{}-{}-{:08x}", PROVEN_ARG((uint32_t)session),
+                              PROVEN_ARG((uint32_t)GetCurrentProcessId()), PROVEN_ARG(++g_serial), PROVEN_ARG(noise));
+        if (k <= 0 || (size_t)k >= sizeof n8 || MultiByteToWideChar(CP_UTF8, 0, n8, -1, name, (int)cap) <= 0) continue;
+        h = CreateNamedPipeW(name, PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
+                             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS, 1, 1u << 16, 1u << 16, 0, &sa);
+    }
+    LocalFree(sd);
+    return h;
+}
+
+static void put_start(fj_job_t *job, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, app_state_t *app) {
+    rubraview_jobwire_start_t st = {
+        .moving = job->moving, .dir = dir, .basket = job->basket, .from_cut = job->from_cut, .viewer_page = job->viewer_page,
+        .viewer_path = cstr(job->viewer_path ? job->viewer_path : ""), .temp_dir = cstr(job->temp_dir ? job->temp_dir : ""),
+        .same_recycles_copy = g_same_recycles_copy, .lang_file = cstr(lang_file_in_use()),
+        .ui_font = rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("ui_font")),
+    };
+    rubraview_jobwire_put_start(&job->out, &st, sources, n);
+}
+
+static bool start_job(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving, int basket,
+                      bool from_cut, int32_t page, proven_u8str_view_t viewer_path, proven_u8str_view_t temp_dir) {
+    if (n == 0 || dir.size == 0) return false;
+    if (g_njobs >= FJ_JOBS) { osd_say(app, TU8("too many copies at once: wait for one to end")); return false; }
+    fj_job_t *job = (fj_job_t *)rubraview_alloc_zero(1, sizeof *job);
+    if (!job) return false;
+    job->moving = moving;
+    job->basket = basket;
+    job->from_cut = from_cut;
+    job->viewer_page = page;
+    job->viewer_path = viewer_path.size ? rubraview_strndup_view(viewer_path) : NULL;
+    job->temp_dir = temp_dir.size ? rubraview_strndup_view(temp_dir) : NULL;
+    wchar_t name[160];
+    job->pipe = make_pipe(name, sizeof name / sizeof name[0]);
+    if (job->pipe == INVALID_HANDLE_VALUE) { job->pipe = NULL; job_free(job); osd_say(app, TU8("the copy could not be started")); return false; }
+    put_start(job, dir, sources, n, app);
+    if (job->out.failed || job->out.len == 0) { job_free(job); osd_say(app, TU8("the copy could not be started")); return false; }
+    /* the same program, a job of its own: "<exe>" --file-job <pipe> */
+    char line[4096], pipe8[400];
+    int pl = WideCharToMultiByte(CP_UTF8, 0, name, -1, pipe8, (int)sizeof pipe8, NULL, NULL);
+    proven_u8str_view_t exe = rubraview_pal_process_executable(app->arena);
+    int k = pl > 0 ? rubraview_fmt(line, sizeof line, "\"{}\" --file-job {}", PROVEN_ARG(exe), PROVEN_ARG(pipe8)) : -1;
+    if (k <= 0 || (size_t)k >= sizeof line || exe.size == 0 ||
+        !rubraview_pal_process_start_apart((proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k })) {
+        job_free(job);
+        osd_say(app, TU8("the copy could not be started"));
+        return false;
+    }
+    job->started = rubraview_pal_time_now_seconds();
+    g_jobs[g_njobs++] = job;
+    char said[200];
+    int w = rubraview_fmt(said, sizeof said, moving ? T("moving {} into {}") : T("copying {} into {}"), PROVEN_ARG(n), PROVEN_ARG(rubraview_path_basename(dir)));
+    if (w > 0) osd_say(app, cstr(said));
+    return true;
 }
 
 /* RV-258: a copy or a move of `sources` into `dir`, every name checked before anything is done; the clashes asked in
-   the clashes window. `basket` (0..4, or -1) and `from_cut` say what is tidied when it ends. */
-static fj_job_t *g_last_started;   /* the job filejob_start just queued, for filejob_start_viewer (main thread) */
-
+   the job's window. `basket` (0..4, or -1) and `from_cut` say what is tidied when it ends. */
 bool filejob_start(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving, int basket, bool from_cut) {
-    g_last_started = NULL;
-    if (n == 0 || dir.size == 0) return false;
-    if (!ensure_worker()) { osd_say(app, TU8("the copy could not be started")); return false; }
-    fj_job_t *job = (fj_job_t *)rubraview_alloc_zero(1, sizeof *job);
-    char *d = rubraview_strndup_view(dir);
-    if (!job || !d) { rubraview_free(job); rubraview_free(d); return false; }
-    rubraview_fileop_init(&job->op, moving ? RUBRAVIEW_FILEOP_MOVE : RUBRAVIEW_FILEOP_COPY, rubraview_pal_fileop_fs(), d);
-    job->op.fs.ctx = (void *)&job->copied;   /* RV-269: the copy says how far it is in the file in hand */
-    rubraview_free(d);
-    for (size_t i = 0; i < n; ++i) {
-        char *s = rubraview_strndup_view(sources[i]);
-        if (s) (void)rubraview_fileop_add(&job->op, s);
-        rubraview_free(s);
-    }
-    job->basket = basket;
-    job->from_cut = from_cut;
-    job->viewer_page = -1;
-    AcquireSRWLockExclusive(&g.lock);
-    bool room = g.njobs < FJ_JOBS;
-    if (room) { job->id = ++g.next_id; g.jobs[g.njobs++] = job; g_last_started = job; }
-    ReleaseSRWLockExclusive(&g.lock);
-    if (!room) { rubraview_fileop_free(&job->op); rubraview_free(job); osd_say(app, TU8("too many copies at once: wait for one to end")); return false; }
-    SetEvent(g.wake);
-    char line[200];
-    int w = rubraview_fmt(line, sizeof line, moving ? T("moving {} into {}") : T("copying {} into {}"), PROVEN_ARG(n), PROVEN_ARG(rubraview_path_basename(dir)));
-    if (w > 0) { osd_say(app, cstr(line)); }
-    return true;
+    return start_job(app, dir, sources, n, moving, basket, from_cut, -1, PROVEN_LIT(""), PROVEN_LIT(""));
 }
 
-static void answer(uint32_t job, size_t index, bool all, rubraview_fileop_answer_t a) {
-    AcquireSRWLockExclusive(&g.lock);
-    if (g.nanswers < FJ_ANSWERS) g.answers[g.nanswers++] = (fj_answer_t){ .job = job, .index = index, .all = all, .answer = a };
-    ReleaseSRWLockExclusive(&g.lock);
-    SetEvent(g.wake);
-}
-
-/* RV-259 (owner, 2026-11-08: "화면의 그림 하나를 \"폴더로 복사/이동\"하는 뷰어 자체 기능은 ... <- 이것도 묻고 처리하게 해 주세요"): the file on screen to a folder through the same check — a
-   name there is asked about; a page inside an archive is written to a folder of its own in %TEMP% first and copied
-   from there. When it ends, a move takes the page out of the list as before. */
+/* RV-259: the file on screen to a folder through the same check; a page inside an archive was written to a folder
+   of its own in %TEMP% first (the job removes it). When it ends, a move takes the page out of the list as before. */
 bool filejob_start_viewer(app_state_t *app, proven_u8str_view_t dir, proven_u8str_view_t path, bool moving, int32_t page, proven_u8str_view_t temp_dir) {
-    char *vp = rubraview_strndup_view(path), *td = temp_dir.size ? rubraview_strndup_view(temp_dir) : NULL;
-    if (!filejob_start(app, dir, &path, 1, moving, -1, false) || !g_last_started) { rubraview_free(vp); rubraview_free(td); return false; }
-    AcquireSRWLockExclusive(&g.lock);   /* a finished job is only ended by filejob_pump, on this thread: it is set in time */
-    g_last_started->viewer_page = page;
-    g_last_started->viewer_path = vp;
-    g_last_started->temp_dir = td;
-    ReleaseSRWLockExclusive(&g.lock);
-    return true;
+    return start_job(app, dir, &path, 1, moving, -1, false, page, path, temp_dir);
 }
 
-/* A finished job, on the main thread: the undo, the basket, the clipboard, the words. */
+/* ---- a finished job, on the main thread: the undo, the basket, the clipboard, the words ---- */
+
 static void job_ended(app_state_t *app, fj_job_t *job) {
-    rubraview_fileop_t *op = &job->op;
     uint32_t batch = ++app->undo_batch;
     size_t done = 0, replaced = 0, same = 0;
     bool *moved = NULL;
     size_t top = 0;
-    for (size_t i = 0; i < op->count; ++i) if (op->items[i].parent < 0) top++;
+    for (size_t i = 0; i < job->nitems; ++i) if (job->items[i].parent < 0) top++;
     if (job->basket >= 0 && top) moved = (bool *)rubraview_alloc_zero(top, sizeof *moved);
     size_t t = 0;
-    for (size_t i = 0; i < op->count; ++i) {
-        const rubraview_fileop_item_t *it = &op->items[i];
+    for (size_t i = 0; i < job->nitems; ++i) {
+        const fj_item_t *it = &job->items[i];
         bool is_top = it->parent < 0;
         if (it->did == RUBRAVIEW_FILEOP_DID_COPY || it->did == RUBRAVIEW_FILEOP_DID_MOVE || it->did == RUBRAVIEW_FILEOP_DID_MAKE_DIR) {
             rubraview_undo_push(&app->undo, (rubraview_file_action_t){
@@ -255,7 +178,8 @@ static void job_ended(app_state_t *app, fj_job_t *job) {
             same++;
         }
         if (it->overwrote) replaced++;
-        if (it->state == RUBRAVIEW_FILEOP_FAILED || (it->why && it->did == RUBRAVIEW_FILEOP_DID_COPY && op->kind == RUBRAVIEW_FILEOP_MOVE)) {
+        bool why = it->why && it->why[0];
+        if (it->state == RUBRAVIEW_FILEOP_FAILED || (why && it->did == RUBRAVIEW_FILEOP_DID_COPY && job->moving)) {
             char line[700];
             int w = rubraview_fmt(line, sizeof line, "{}: {}", PROVEN_ARG(cstr(it->source)), PROVEN_ARG(it->why ? it->why : ""));
             if (w > 0) app_log(app, "file", (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)w });
@@ -266,19 +190,20 @@ static void job_ended(app_state_t *app, fj_job_t *job) {
             t++;
         }
     }
-    bool moving = op->kind == RUBRAVIEW_FILEOP_MOVE;
+    bool moving = job->moving;
     if (moved && moving) rubraview_basket_keep_unmoved(&app->baskets, job->basket, moved);
     rubraview_free(moved);
-    if (job->from_cut && moving && done > 0) { dragout_clip_pasted(app); if (op->failed == 0) rubraview_pal_clipboard_clear(app->window); }
+    if (job->from_cut && moving && done > 0) { dragout_clip_pasted(app); if (job->end.failed == 0) rubraview_pal_clipboard_clear(app->window); }
     char line[260];
     int w = rubraview_fmt(line, sizeof line, moving ? T("{} moved, {} replaced, {} the same, {} left, {} could not be  (Ctrl+Z takes it back)")
                                                    : T("{} copied, {} replaced, {} the same, {} left, {} could not be  (Ctrl+Z takes it back)"),
-                          PROVEN_ARG(done), PROVEN_ARG(replaced), PROVEN_ARG(same), PROVEN_ARG(op->skipped), PROVEN_ARG(op->failed));
+                          PROVEN_ARG(done), PROVEN_ARG(replaced), PROVEN_ARG(same), PROVEN_ARG(job->end.skipped), PROVEN_ARG(job->end.failed));
     if (w > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)w });
+    if (job->end.stopped) app_log(app, "file", PROVEN_LIT("the copy or move was stopped; what was not reached is where it was"));
     if (replaced > 0) app_log(app, "file", PROVEN_LIT("replaced files are in the Recycle Bin; Ctrl+Z takes the new ones away, not the old ones back"));
     if (app->picker_open) picker_navigate(app, app->picker_dir);   /* what arrived, listed */
-    if (job->viewer_page >= 0 && op->count > 0) {   /* RV-259: the viewer's own; its name there said, a move leaves the list */
-        const rubraview_fileop_item_t *it = &op->items[0];
+    if (job->viewer_page >= 0 && job->nitems > 0) {   /* RV-259: the viewer's own; its name there said, a move leaves the list */
+        const fj_item_t *it = &job->items[0];
         if (it->state == RUBRAVIEW_FILEOP_DONE || it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE) {
             char said[sizeof app->notice];
             proven_u8str_view_t put = rubraview_path_basename(cstr(it->target));
@@ -291,293 +216,236 @@ static void job_ended(app_state_t *app, fj_job_t *job) {
             rubraview_path_same(app->source.pages[job->viewer_page].path, cstr(job->viewer_path)))
             reopen_after_removal(app, (size_t)job->viewer_page);
     }
-    if (job->temp_dir) (void)rubraview_pal_fs_delete_tree(cstr(job->temp_dir));
-    rubraview_free(job->viewer_path);
-    rubraview_free(job->temp_dir);
 }
 
-/* ---- the clashes window ---- */
+/* ---- the pipe, without waiting ---- */
+
+static void job_take(app_state_t *app, fj_job_t *job, rubraview_jobwire_msg_t *m) {
+    (void)app;
+    if (m->type == RUBRAVIEW_JOBWIRE_PROGRESS) {
+        rubraview_jobwire_progress_t p;
+        rubraview_jobwire_get_progress(m, &p);
+        if (rubraview_jobwire_done(m)) job->progress = p;
+    } else if (m->type == RUBRAVIEW_JOBWIRE_ITEMS) {
+        uint32_t n = rubraview_jobwire_get_u32(m);
+        for (uint32_t i = 0; i < n && !m->bad; ++i) {
+            rubraview_jobwire_item_t w;
+            rubraview_jobwire_get_item(m, &w);
+            if (m->bad) break;
+            if (job->nitems == job->cap) {
+                size_t cap = job->cap ? job->cap * 2 : 64;
+                fj_item_t *more = (fj_item_t *)rubraview_realloc((proven_mem_mut_t){ .ptr = (proven_byte_t *)job->items, .size = cap * sizeof *more });
+                if (!more) break;
+                job->items = more;
+                job->cap = cap;
+            }
+            job->items[job->nitems++] = (fj_item_t){ .source = rubraview_strndup_view(w.source), .target = rubraview_strndup_view(w.target),
+                                                     .why = w.why.size ? rubraview_strndup_view(w.why) : NULL, .did = w.did, .state = w.state,
+                                                     .overwrote = w.overwrote, .parent = w.parent };
+        }
+    } else if (m->type == RUBRAVIEW_JOBWIRE_END) {
+        rubraview_jobwire_end_t e;
+        rubraview_jobwire_get_end(m, &e);
+        if (rubraview_jobwire_done(m)) { job->end = e; job->ended = true; }
+    }
+}
+
+static void job_io(app_state_t *app, fj_job_t *job) {
+    if (job->broken || job->ended) return;
+    if (!job->connected) {
+        if (ConnectNamedPipe(job->pipe, NULL) || GetLastError() == ERROR_PIPE_CONNECTED) job->connected = true;
+        else if (GetLastError() == ERROR_NO_DATA) { job->broken = true; return; }   /* came and went */
+        else {
+            if (rubraview_pal_time_now_seconds() - job->started > 20.0) job->broken = true;   /* it never came */
+            return;
+        }
+    }
+    while (job->out.len > 0) {   /* what is waiting, as much as the pipe takes now */
+        DWORD wrote = 0;
+        if (!WriteFile(job->pipe, job->out.data, (DWORD)(job->out.len > (1u << 16) ? (1u << 16) : job->out.len), &wrote, NULL)) {
+            if (GetLastError() != ERROR_PIPE_LISTENING) job->broken = true;   /* ERROR_NO_DATA here: the other end is closing */
+            break;
+        }
+        if (wrote == 0) break;   /* the pipe is full: the rest next pass */
+        rubraview_jobwire_out_drop(&job->out, wrote);
+    }
+    for (;;) {
+        DWORD avail = 0;
+        if (!PeekNamedPipe(job->pipe, NULL, 0, NULL, &avail, NULL)) { job->broken = true; break; }
+        if (avail == 0) break;
+        if (job->in_len + avail > job->in_cap) {
+            size_t cap = job->in_cap ? job->in_cap : 4096;
+            while (cap < job->in_len + avail) cap *= 2;
+            uint8_t *more = (uint8_t *)rubraview_realloc((proven_mem_mut_t){ .ptr = (proven_byte_t *)job->in, .size = cap });
+            if (!more) break;
+            job->in = more; job->in_cap = cap;
+        }
+        DWORD got = 0;
+        if (!ReadFile(job->pipe, job->in + job->in_len, avail, &got, NULL)) { if (GetLastError() != ERROR_NO_DATA) job->broken = true; break; }
+        job->in_len += got;
+        size_t at = 0, used = 0;
+        rubraview_jobwire_msg_t m;
+        int r;
+        while ((r = rubraview_jobwire_take(job->in + at, job->in_len - at, &m, &used)) == 1) { at += used; job_take(app, job, &m); }
+        if (r < 0) { job->broken = true; break; }
+        if (at) { proven_sys_mem_move(job->in, job->in + at, job->in_len - at); job->in_len -= at; }
+        if (job->ended) break;
+    }
+}
+
+/* ---- the viewer's clashes window: an extraction's and an archive's questions ---- */
+
+static void vui_answer(void *ctx, const clashui_row_t *row, rubraview_fileop_answer_t a) {
+    app_state_t *app = (app_state_t *)ctx;
+    if (row->owner == FJ_ARCADD) arcadd_answer(app, row->index, a);
+    else if (row->owner == FJ_EXTRACT) archwork_clash_answer(app, row->index, a);
+}
+static void vui_answer_all(void *ctx, rubraview_fileop_answer_t a) {
+    app_state_t *app = (app_state_t *)ctx;
+    arcadd_answer_all(app, a);
+    archwork_clash_answer_all(app, a);
+    app_log(app, "clash", PROVEN_LIT("an answer for all"));
+}
+static void vui_recycle(void *ctx, bool on) { (void)ctx; g_same_recycles_copy = on; }
+
+static void vui_ready(app_state_t *app) {
+    g_ui.ctx = app;
+    g_ui.answer = vui_answer;
+    g_ui.answer_all = vui_answer_all;
+    g_ui.recycle_set = vui_recycle;
+    g_ui.same_recycles_copy = g_same_recycles_copy;
+    g_ui.ui_font = rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("ui_font"));
+}
 
 void clashwin_close(app_state_t *app) {
-    if (!app->clash_open) return;
-    rubraview_pal_window_get_frame(app->clash_window, &app->clash_frame[0], &app->clash_frame[1], &app->clash_frame[2], &app->clash_frame[3]);
-    if (app->clash_renderer) rubraview_pal_render_destroy(app->clash_renderer);
-    if (app->clash_window) rubraview_pal_window_destroy(app->clash_window);
-    window_block_give(app, &app->clash_block);
-    app->clash_renderer = NULL;
-    app->clash_window = NULL;
-    app->clash_open = false;   /* the questions stay: the owner's answer */
+    if (!g_ui.open) return;
+    clashui_close(&g_ui);
+    window_block_give(app, &app->clash_block);   /* the questions stay */
 }
 
 void clashwin_show(app_state_t *app) {
-    if (app->clash_open) return;
-    if (m_nrows == 0) { osd_say(app, TU8("no name clash is waiting")); return; }
-    rubraview_window_config_t config = { .title = T("Rubraview - names already there"), .width = 980, .height = 620, .owner = app->window };
-    app->clash_window = rubraview_pal_window_create(window_block_take(app, &app->clash_block), &config);
-    if (!app->clash_window) return;
-    if (app->clash_frame[2] > 0 && app->clash_frame[3] > 0)
-        rubraview_pal_window_set_frame(app->clash_window, app->clash_frame[0], app->clash_frame[1], app->clash_frame[2], app->clash_frame[3]);
-    int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->clash_window, &w, &h);
-    app->clash_renderer = rubraview_pal_render_create(window_block_arena(app, &app->clash_block), rubraview_pal_window_native_handle(app->clash_window), w, h);
-    ui_font_apply_all(app);
-    if (!app->clash_renderer) { rubraview_pal_window_destroy(app->clash_window); window_block_give(app, &app->clash_block); app->clash_window = NULL; return; }
-    app->clash_open = true;
-    app->clash_dirty = true;
-    m_scroll = 0;
-}
-
-void clashwin_toggle(app_state_t *app) { if (app->clash_open) clashwin_close(app); else clashwin_show(app); }
-
-#define CW_BACK   0xFF1B1E23u
-#define CW_TEXT   0xFFE6E6E6u
-#define CW_DIM    0xFF9AA2ACu
-#define CW_LINE   0xFF30353Cu
-#define CW_ON     0xFF3E8BF0u
-
-enum { CW_BTN_APPLY = 0, CW_BTN_OVERWRITE, CW_BTN_BOTH, CW_BTN_SKIP, CW_BTN_SAME, CW_BTN_RECYCLE, CW_BTNS };
-static rubraview_pal_rect_t cw_btn[CW_BTNS];
-static rubraview_pal_rect_t cw_box[256][2];
-static size_t cw_box_row[256];
-static size_t cw_nbox;
-
-static void size_text(char *buf, size_t cap, uint64_t bytes) { (void)rubraview_picker_size_text(buf, cap, bytes); }
-
-static void when_text(char *buf, size_t cap, int64_t t) {
-    if (t <= 0) { buf[0] = '\0'; return; }
-    info_local_time(buf, cap, t);
-}
-
-void draw_clash_window(app_state_t *app) {
-    if (!app->clash_open || !app->clash_dirty) return;
-    app->clash_dirty = false;
-    rubraview_renderer_t *r = app->clash_renderer;
-    int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->clash_window, &w, &h);
-    double dpi = rubraview_pal_window_dpi_scale(app->clash_window), pad = 12.0 * dpi, row_h = 54.0 * dpi, box = 20.0 * dpi;
-    rubraview_pal_render_begin(r, CW_BACK);
-    char head[200];
-    int n = rubraview_fmt(head, sizeof head, T("{} names already there — the other files go on being copied or moved meanwhile"), PROVEN_ARG(m_nrows));
-    if (n > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)head, .size = (size_t)n },
-                                              (rubraview_pal_rect_t){ pad, pad * 0.5, (double)w - 2 * pad, 26.0 * dpi }, 15.0 * dpi, CW_TEXT, RUBRAVIEW_TEXT_LEFT);
-    double col0 = pad + 10.0 * dpi, col1 = pad + 64.0 * dpi, text_x = pad + 104.0 * dpi, top = 38.0 * dpi;
-    rubraview_pal_render_draw_text(r, TU8("coming"), (rubraview_pal_rect_t){ col0 + box * 0.5 - 26.0 * dpi, top, 52.0 * dpi, 18.0 * dpi }, 11.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_CENTER);
-    rubraview_pal_render_draw_text(r, TU8("there"), (rubraview_pal_rect_t){ col1 + box * 0.5 - 26.0 * dpi, top, 52.0 * dpi, 18.0 * dpi }, 11.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_CENTER);
-    double y = top + 22.0 * dpi, foot = (double)h - 96.0 * dpi;
-    int32_t rows = (int32_t)((foot - y) / row_h);
-    if (rows < 1) rows = 1;
-    if (m_scroll > (int32_t)m_nrows - rows) m_scroll = (int32_t)m_nrows - rows;
-    if (m_scroll < 0) m_scroll = 0;
-    cw_nbox = 0;
-    for (int32_t k = 0; k < rows && (size_t)(m_scroll + k) < m_nrows; ++k) {
-        fj_row_t *row = &m_rows[m_scroll + k];
-        double ry = y + (double)k * row_h;
-        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ pad * 0.5, ry + row_h - 1.0, (double)w - pad, 1.0 }, CW_LINE, 0.0);
-        for (int c = 0; c < 2; ++c) {
-            rubraview_pal_rect_t b = { c == 0 ? col0 : col1, ry + (row_h - box) * 0.5, box, box };
-            bool on = c == 0 ? row->keep_coming : row->keep_there;
-            rubraview_pal_render_fill_rect(r, b, on ? CW_ON : 0xFF2A2F36u, 3.0 * dpi);
-            rubraview_pal_render_stroke_rect(r, b, 0xFF6A7685u, 1.0, 3.0 * dpi);
-            if (on) rubraview_pal_render_draw_text(r, TU8("\xE2\x9C\x93"), b, 14.0 * dpi, 0xFFFFFFFFu, RUBRAVIEW_TEXT_CENTER);
-            if (cw_nbox < 256) { cw_box[cw_nbox][c] = b; }
+    if (g_ui.open) return;
+    if (g_ui.nrows == 0) {   /* RV-289: a job's questions are in its own window */
+        for (size_t j = g_njobs; j-- > 0;) {
+            fj_job_t *job = g_jobs[j];
+            if (job->ended || job->broken || job->progress.clashes == 0) continue;
+            rubraview_jobwire_begin(&job->out, RUBRAVIEW_JOBWIRE_SHOW_CLASHES);
+            (void)rubraview_jobwire_finish(&job->out);
+            return;
         }
-        if (cw_nbox < 256) cw_box_row[cw_nbox++] = (size_t)(m_scroll + k);
-        proven_u8str_view_t name = rubraview_path_basename(cstr(row->target));
-        rubraview_pal_render_draw_text(r, name, (rubraview_pal_rect_t){ text_x, ry + 4.0 * dpi, (double)w - text_x - pad, 22.0 * dpi }, 14.0 * dpi, CW_TEXT, RUBRAVIEW_TEXT_LEFT);
-        char ss[32], ts[32], sw[64], tw[64], line[1400];
-        size_text(ss, sizeof ss, row->ssize); size_text(ts, sizeof ts, row->tsize);
-        when_text(sw, sizeof sw, row->smtime); when_text(tw, sizeof tw, row->tmtime);
-        int m = rubraview_fmt(line, sizeof line, T("coming: {}  {}  {}      there: {}  {}{}"), PROVEN_ARG(ss), PROVEN_ARG(sw),
-                              PROVEN_ARG(rubraview_path_dirname(cstr(row->source))), PROVEN_ARG(ts), PROVEN_ARG(tw),
-                              PROVEN_ARG(row->kind_differs ? T("   (a file and a folder: skip or keep both)") : ""));
-        if (m > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)m < sizeof line ? (size_t)m : sizeof line - 1 },
-                                                  (rubraview_pal_rect_t){ text_x, ry + 26.0 * dpi, (double)w - text_x - pad, 20.0 * dpi }, 12.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_LEFT);
+        osd_say(app, TU8("no name clash is waiting"));
+        return;
     }
-    /* the foot: what the boxes mean, the answers for all, the copy's same file */
-    rubraview_pal_render_draw_text(r, TU8("Both ticked: both kept (the one coming as \"name (2)\"). Only the one coming: it replaces the one there (that one to the Recycle Bin). Otherwise: left as it is."),
-                                   (rubraview_pal_rect_t){ pad, foot + 4.0 * dpi, (double)w - 2 * pad, 20.0 * dpi }, 12.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_LEFT);
-    const char *words[CW_BTNS] = { T("Apply the ticks"), T("Overwrite all"), T("Keep both, all"), T("Skip all"), T("Only the same ones"),
-                                   g.same_recycles_copy ? T("A copy's same file: its source to the Recycle Bin") : T("A copy's same file: its source left") };
-    double bx = pad, by = (double)h - 50.0 * dpi, bh = 36.0 * dpi;
-    for (int i = 0; i < CW_BTNS; ++i) {
-        double tw = 0.0;
-        (void)rubraview_pal_render_measure_text(r, cstr(words[i]), 13.0 * dpi, &tw);
-        rubraview_pal_rect_t b = { bx, by, tw + 22.0 * dpi, bh };
-        if (bx + b.width > (double)w - pad && i > 0) { b.x = bx = pad; b.y = by -= bh + 6.0 * dpi; }
-        cw_btn[i] = b;
-        bool over = pal_rect_has(b, app->clash_px, app->clash_py);
-        rubraview_pal_render_fill_rect(r, b, i == 0 ? (over ? 0xFF4F9CF7u : CW_ON) : over ? 0x50FFFFFFu : 0xFF2A2F36u, 4.0 * dpi);
-        rubraview_pal_render_stroke_rect(r, b, 0xFF4A525Cu, 1.0, 4.0 * dpi);
-        rubraview_pal_render_draw_text(r, cstr(words[i]), b, 13.0 * dpi, CW_TEXT, RUBRAVIEW_TEXT_CENTER);
-        bx += b.width + 8.0 * dpi;
-    }
-    if (!rubraview_pal_render_end(r)) app->clash_dirty = true;
+    vui_ready(app);
+    if (!clashui_show(&g_ui, window_block_take(app, &app->clash_block))) window_block_give(app, &app->clash_block);
 }
 
-static void cw_press(app_state_t *app, double x, double y) {
-    for (size_t k = 0; k < cw_nbox; ++k)
-        for (int c = 0; c < 2; ++c)
-            if (pal_rect_has(cw_box[k][c], x, y) && cw_box_row[k] < m_nrows) {
-                fj_row_t *row = &m_rows[cw_box_row[k]];
-                if (c == 0) row->keep_coming = !row->keep_coming; else row->keep_there = !row->keep_there;
-                app->clash_dirty = true;
-                return;
-            }
-    int hit = -1;
-    for (int i = 0; i < CW_BTNS; ++i) if (pal_rect_has(cw_btn[i], x, y)) hit = i;
-    switch (hit) {
-        case CW_BTN_APPLY:
-            for (size_t i = 0; i < m_nrows; ++i) {
-                rubraview_fileop_answer_t a = rubraview_fileop_answer_of_checks(m_rows[i].keep_coming, m_rows[i].keep_there);
-                if (m_rows[i].kind_differs && a == RUBRAVIEW_FILEOP_ANSWER_OVERWRITE) a = RUBRAVIEW_FILEOP_ANSWER_SKIP;   /* never a file over a folder */
-                if (m_rows[i].job == FJ_ARCADD) arcadd_answer(app, m_rows[i].index, a);
-                else if (m_rows[i].job == FJ_EXTRACT) archwork_clash_answer(app, m_rows[i].index, a);
-                else answer(m_rows[i].job, m_rows[i].index, false, a);
-            }
-            app_log(app, "clash", PROVEN_LIT("the ticks applied"));
-            break;
-        case CW_BTN_OVERWRITE: answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_OVERWRITE); arcadd_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_OVERWRITE); archwork_clash_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_OVERWRITE); app_log(app, "clash", PROVEN_LIT("overwrite all")); break;
-        case CW_BTN_BOTH:      answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_KEEP_BOTH); arcadd_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_KEEP_BOTH); archwork_clash_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_KEEP_BOTH); app_log(app, "clash", PROVEN_LIT("keep both, all")); break;
-        case CW_BTN_SKIP:      answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_SKIP); arcadd_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_SKIP); archwork_clash_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_SKIP); app_log(app, "clash", PROVEN_LIT("skip all")); break;
-        case CW_BTN_SAME:      answer(0, 0, true, RUBRAVIEW_FILEOP_ANSWER_SAME_ONLY); arcadd_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_SAME_ONLY); archwork_clash_answer_all(app, RUBRAVIEW_FILEOP_ANSWER_SAME_ONLY); app_log(app, "clash", PROVEN_LIT("only the same ones")); break;
-        case CW_BTN_RECYCLE:
-            AcquireSRWLockExclusive(&g.lock);
-            g.same_recycles_copy = !g.same_recycles_copy;
-            ReleaseSRWLockExclusive(&g.lock);
-            break;
-        default: return;
-    }
-    app->clash_dirty = true;
-}
+void clashwin_toggle(app_state_t *app) { if (g_ui.open) clashwin_close(app); else clashwin_show(app); }
+
+void draw_clash_window(app_state_t *app) { (void)app; clashui_draw(&g_ui); }
 
 size_t clash_pump(app_state_t *app) {
-    size_t handled = 0;
-    rubraview_window_event_t event;
-    while (app->clash_open && rubraview_pal_window_poll_event(app->clash_window, &event)) {
-        handled++;
-        switch (event.kind) {
-            case RUBRAVIEW_WINDOW_EVENT_CLOSE: clashwin_close(app); return handled;
-            case RUBRAVIEW_WINDOW_EVENT_RESIZE:
-                rubraview_pal_render_resize(app->clash_renderer, event.resize.width, event.resize.height);
-                app->clash_dirty = true;
-                break;
-            case RUBRAVIEW_WINDOW_EVENT_PAINT: app->clash_dirty = true; break;
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL: m_scroll += event.mouse.wheel_delta > 0 ? -2 : 2; app->clash_dirty = true; break;
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: app->clash_px = event.mouse.x; app->clash_py = event.mouse.y; app->clash_dirty = true; break;
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
-                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT) cw_press(app, event.mouse.x, event.mouse.y);
-                break;
-            case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
-                if (key_is(event.key.combo, "Escape")) { clashwin_close(app); return handled; }
-                if (key_is(event.key.combo, "Enter")) cw_press(app, cw_btn[CW_BTN_APPLY].x + 1.0, cw_btn[CW_BTN_APPLY].y + 1.0);
-                if (key_is(event.key.combo, "PageDown")) { m_scroll += 5; app->clash_dirty = true; }
-                if (key_is(event.key.combo, "PageUp")) { m_scroll -= 5; app->clash_dirty = true; }
-                break;
-            default: break;
-        }
-    }
-    return handled;
+    bool was = g_ui.open;
+    size_t n = clashui_pump(&g_ui);
+    if (was && !g_ui.open) window_block_give(app, &app->clash_block);
+    return n;
 }
 
-/* Once a pass of the main loop: the worker's rows taken over (the ticks kept), new clashes shown, finished jobs
-   brought home, a line now and then while it works. */
-static uint32_t m_aa_version, m_xx_version;
+/* The viewer's own questions (an extraction's, an archive's) taken over when they changed. */
+static bool viewer_rows(app_state_t *app) {
+    if (arcadd_version() == m_aa_version && archwork_clash_version() == m_xx_version) return false;
+    size_t na = arcadd_rows(NULL, 0), nx = archwork_clash_rows(NULL, 0);
+    clashui_row_t *rows = na + nx ? (clashui_row_t *)rubraview_alloc_zero(na + nx, sizeof *rows) : NULL;
+    size_t k = 0;
+    if (rows && nx) {   /* RV-258: the names an extraction found taken */
+        xclash_row_t *xr = (xclash_row_t *)rubraview_alloc_zero(nx, sizeof *xr);
+        size_t got = xr ? archwork_clash_rows(xr, nx) : 0;
+        for (size_t i = 0; i < got; ++i)
+            rows[k++] = (clashui_row_t){ .owner = FJ_EXTRACT, .index = xr[i].index, .source = rubraview_strdup(xr[i].coming), .target = rubraview_strdup(xr[i].there),
+                                         .ssize = xr[i].csize, .tsize = xr[i].tsize, .smtime = xr[i].cmtime, .tmtime = xr[i].tmtime,
+                                         .keep_coming = true, .keep_there = true };
+        rubraview_free(xr);
+    }
+    m_xx_version = archwork_clash_version();
+    if (rows && na) {   /* RV-260: the names already in an archive being written into */
+        arcadd_row_t *ar = (arcadd_row_t *)rubraview_alloc_zero(na, sizeof *ar);
+        size_t got = ar ? arcadd_rows(ar, na) : 0;
+        for (size_t i = 0; i < got; ++i) {
+            char there[RUBRAVIEW_ARCHIVE_PATH * 2];
+            (void)rubraview_fmt(there, sizeof there, "{}/{}", PROVEN_ARG(cstr(ar[i].archive)), PROVEN_ARG(cstr(ar[i].name)));
+            rows[k++] = (clashui_row_t){ .owner = FJ_ARCADD, .index = ar[i].index, .source = rubraview_strdup(ar[i].source), .target = rubraview_strdup(there),
+                                         .ssize = ar[i].ssize, .tsize = ar[i].tsize, .smtime = ar[i].smtime, .tmtime = ar[i].tmtime,
+                                         .keep_coming = true, .keep_there = true };
+        }
+        rubraview_free(ar);
+    }
+    m_aa_version = arcadd_version();
+    bool grew = k > g_ui.nrows;
+    clashui_set_rows(&g_ui, rows, k);
+    if (grew && !g_ui.open) clashwin_show(app);   /* new questions: the window comes */
+    if (k == 0 && g_ui.open) clashwin_close(app);
+    return true;
+}
 
+/* Once a pass of the main loop: each job's pipe read and written, finished jobs brought home, the progress card. */
 size_t filejob_pump(app_state_t *app) {
-    if (!g.thread && arcadd_version() == m_aa_version && archwork_clash_version() == m_xx_version) return 0;
-    fj_job_t *ended[FJ_JOBS];
-    size_t nended = 0;
-    bool changed = false, grew = false;
-    size_t total = 0, done = 0;
-    AcquireSRWLockExclusive(&g.lock);
-    if (g.version != m_version || arcadd_version() != m_aa_version || archwork_clash_version() != m_xx_version) {
-        size_t na = arcadd_rows(NULL, 0), nx = archwork_clash_rows(NULL, 0);
-        fj_row_t *rows = g.nrows + na + nx ? (fj_row_t *)rubraview_alloc_zero(g.nrows + na + nx, sizeof *rows) : NULL;
-        size_t k = 0;
-        if (rows && nx) {   /* RV-258: the names an extraction found taken */
-            xclash_row_t *xr = (xclash_row_t *)rubraview_alloc_zero(nx, sizeof *xr);
-            size_t got = xr ? archwork_clash_rows(xr, nx) : 0;
-            for (size_t i = 0; i < got; ++i) {
-                rows[k] = (fj_row_t){ .job = FJ_EXTRACT, .index = xr[i].index, .source = rubraview_strdup(xr[i].coming), .target = rubraview_strdup(xr[i].there),
-                                      .ssize = xr[i].csize, .tsize = xr[i].tsize, .smtime = xr[i].cmtime, .tmtime = xr[i].tmtime,
-                                      .keep_coming = true, .keep_there = true };
-                for (size_t o = 0; o < m_nrows; ++o)
-                    if (m_rows[o].job == FJ_EXTRACT && m_rows[o].index == rows[k].index) { rows[k].keep_coming = m_rows[o].keep_coming; rows[k].keep_there = m_rows[o].keep_there; }
-                k++;
+    size_t handled = viewer_rows(app) ? 1 : 0;
+    if (g_njobs == 0) return handled;
+    rubraview_jobwire_progress_t sum = {0};
+    for (size_t j = 0; j < g_njobs;) {
+        fj_job_t *job = g_jobs[j];
+        job_io(app, job);
+        if (job->ended) {
+            job_ended(app, job);
+            handled++;
+        } else if (job->broken) {
+            if (job->connected) {
+                osd_say(app, TU8("the copy's process ended without its report: see the folders (Ctrl+Z cannot take it back)"));
+                app_log(app, "file", PROVEN_LIT("a file job's process ended before it said how it went"));
+                if (app->picker_open) picker_navigate(app, app->picker_dir);   /* what did arrive, listed */
+            } else {
+                osd_say(app, TU8("the copy could not be started"));
+                if (job->temp_dir) (void)rubraview_pal_fs_delete_tree(cstr(job->temp_dir));   /* it never took it over */
             }
-            rubraview_free(xr);
+            handled++;
+        } else {
+            sum.total += job->progress.total; sum.done += job->progress.done;
+            sum.bytes_total += job->progress.bytes_total; sum.bytes_done += job->progress.bytes_done;
+            sum.clashes += job->progress.clashes;
+            ++j;
+            continue;
         }
-        m_xx_version = archwork_clash_version();
-        if (rows && na) {   /* RV-260: the names already in an archive being written into */
-            arcadd_row_t *ar = (arcadd_row_t *)rubraview_alloc_zero(na, sizeof *ar);
-            size_t got = ar ? arcadd_rows(ar, na) : 0;
-            for (size_t i = 0; i < got; ++i) {
-                char there[RUBRAVIEW_ARCHIVE_PATH * 2];
-                (void)rubraview_fmt(there, sizeof there, "{}/{}", PROVEN_ARG(cstr(ar[i].archive)), PROVEN_ARG(cstr(ar[i].name)));
-                rows[k] = (fj_row_t){ .job = FJ_ARCADD, .index = ar[i].index, .source = rubraview_strdup(ar[i].source), .target = rubraview_strdup(there),
-                                      .ssize = ar[i].ssize, .tsize = ar[i].tsize, .smtime = ar[i].smtime, .tmtime = ar[i].tmtime,
-                                      .keep_coming = true, .keep_there = true };
-                for (size_t o = 0; o < m_nrows; ++o)
-                    if (m_rows[o].job == FJ_ARCADD && m_rows[o].index == rows[k].index) { rows[k].keep_coming = m_rows[o].keep_coming; rows[k].keep_there = m_rows[o].keep_there; }
-                k++;
-            }
-            rubraview_free(ar);
-        }
-        m_aa_version = arcadd_version();
-        for (size_t i = 0; rows && i < g.nrows; ++i) {
-            rows[k] = g.rows[i];
-            rows[k].source = rubraview_strdup(g.rows[i].source);
-            rows[k].target = rubraview_strdup(g.rows[i].target);
-            for (size_t o = 0; o < m_nrows; ++o)   /* the ticks the reader set are kept */
-                if (m_rows[o].job == rows[k].job && m_rows[o].index == rows[k].index) { rows[k].keep_coming = m_rows[o].keep_coming; rows[k].keep_there = m_rows[o].keep_there; }
-            k++;
-        }
-        grew = k > m_nrows;
-        rows_free(m_rows, m_nrows);
-        m_rows = rows;
-        m_nrows = k;
-        m_version = g.version;
-        changed = true;
+        job_free(job);
+        g_jobs[j] = g_jobs[--g_njobs];
     }
-    total = g.total; done = g.done;
-    uint64_t bytes_total = g.bytes_total, bytes_done = g.bytes_done;
-    for (size_t j = 0; j < g.njobs; ++j) bytes_done += atomic_load(&g.jobs[j]->copied);   /* RV-269: the file in hand too */
-    for (size_t j = 0; j < g.njobs;) {
-        if (g.jobs[j]->finished) { ended[nended++] = g.jobs[j]; g.jobs[j] = g.jobs[--g.njobs]; }
-        else ++j;
-    }
-    ReleaseSRWLockExclusive(&g.lock);
-    for (size_t e = 0; e < nended; ++e) { job_ended(app, ended[e]); rubraview_fileop_free(&ended[e]->op); rubraview_free(ended[e]); }
-    if (changed) {
-        app->clash_dirty = true;
-        if (grew && !app->clash_open) clashwin_show(app);   /* new questions: the window comes */
-        if (m_nrows == 0 && app->clash_open) clashwin_close(app);
-    }
-    if (filejob_busy() && total > 0) {   /* RV-268: the progress card (it was a line at the top) */
-        progress_view_t v = { .source = PROGRESS_FILEJOB, .files_at = (uint32_t)done, .files_total = (uint32_t)total,
-                              .bytes = bytes_total > 0, .done = bytes_done, .total = bytes_total };   /* RV-269: by bytes too */
+    if (g_njobs > 0 && sum.total > 0) {   /* RV-268: the progress card (phase C moves it into the job's window) */
+        progress_view_t v = { .source = PROGRESS_FILEJOB, .files_at = (uint32_t)sum.done, .files_total = (uint32_t)sum.total,
+                              .bytes = sum.bytes_total > 0, .done = sum.bytes_done, .total = sum.bytes_total };
         rubraview_fmt(v.title, sizeof v.title, "{}", PROVEN_ARG(T("Copying and moving files")));
-        if (m_nrows) rubraview_fmt(v.note, sizeof v.note, T("{} names waiting for an answer (Ctrl+Shift+K)"), PROVEN_ARG(m_nrows));
+        if (sum.clashes) rubraview_fmt(v.note, sizeof v.note, T("{} names waiting for an answer (Ctrl+Shift+K)"), PROVEN_ARG(sum.clashes));
         progress_show(app, &v);
     } else {
         progress_end(app, PROGRESS_FILEJOB);
     }
-    return nended + (changed ? 1 : 0);
+    return handled;
 }
 
-/* At the end of the program: the worker stopped after its item; what waited is left as it is (said in the log). */
+/* At the end of the viewer: the jobs go on in their own processes; only our ends of their pipes are let go. */
 void filejob_shutdown(app_state_t *app) {
     clashwin_close(app);
     archwork_clash_shutdown();   /* RV-258: an extraction's questions left unasked */
-    if (!g.thread) return;
-    InterlockedExchange(&g.quit, 1);
-    SetEvent(g.wake);
-    WaitForSingleObject(g.thread, 10000);
-    CloseHandle(g.thread);
-    CloseHandle(g.wake);
-    g.thread = NULL;
-    for (size_t j = 0; j < g.njobs; ++j) { rubraview_fileop_free(&g.jobs[j]->op); rubraview_free(g.jobs[j]); }
-    g.njobs = 0;
-    rows_free(g.rows, g.nrows); g.rows = NULL; g.nrows = 0;
-    rows_free(m_rows, m_nrows); m_rows = NULL; m_nrows = 0;
+    double until = rubraview_pal_time_now_seconds() + 3.0;   /* a job just started: its START handed over first */
+    for (bool waiting = true; waiting && rubraview_pal_time_now_seconds() < until;) {
+        waiting = false;
+        for (size_t j = 0; j < g_njobs; ++j) {
+            fj_job_t *job = g_jobs[j];
+            if (job->out.len && !job->broken && !job->ended) { job_io(app, job); waiting = waiting || job->out.len > 0; }
+        }
+        if (waiting) Sleep(20);
+    }
+    for (size_t j = 0; j < g_njobs; ++j) job_free(g_jobs[j]);
+    g_njobs = 0;
+    clashui_rows_free(g_ui.rows, g_ui.nrows);
+    g_ui.rows = NULL;
+    g_ui.nrows = 0;
 }

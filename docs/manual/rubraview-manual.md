@@ -1551,8 +1551,11 @@ otherwise it is left. **Apply the ticks** (`Enter`), or answer all at once:
 (the same size and bytes: the one there is kept — a move's source goes to
 the Recycle Bin, a copy's is left or recycled as the last button says;
 others are kept as `name (2)`). A folder already there is merged, its files
-asked about the same way. Close the window and the questions wait;
-`Ctrl+Shift+K` opens it again. `Ctrl+Z` takes the whole copy or move back.
+asked about the same way. Close the window without answering and the names
+left are skipped (both files stay as they are) while the rest goes on.
+`Ctrl+Z` takes the whole copy or move back. Each copy or move runs in a
+process of its own: closing or losing the viewer does not stop it, and a
+copy that fails does not take the viewer with it.
 A move to another drive is copied, compared and only then its source goes
 to the Recycle Bin. Extracting an archive checks its names the same way: what
 is not there yet is written at once, and each name already there waits in

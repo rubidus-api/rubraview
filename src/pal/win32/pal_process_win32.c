@@ -61,6 +61,10 @@ bool rubraview_pal_process_start(proven_u8str_view_t command_line) {
     return start_process(command_line, 0);
 }
 
+bool rubraview_pal_process_start_apart(proven_u8str_view_t command_line) {
+    return start_process(command_line, CREATE_BREAKAWAY_FROM_JOB) || start_process(command_line, 0);   /* a job that holds on: as it is */
+}
+
 uint64_t rubraview_mhost_children_read_bytes(void);   /* pal_media_host.c */
 
 bool rubraview_pal_process_read_bytes(uint64_t *bytes) {

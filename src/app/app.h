@@ -1553,12 +1553,6 @@ typedef struct app_state {
     rubraview_pal_rect_t   log_btn[3];
     rubraview_grid_selection_t log_sel;             /* RV-264: what is marked, as in the information window */
     bool                   log_selecting;
-    /* RV-258 (D-310): the window asking about names already there */
-    bool                   clash_open, clash_dirty;
-    rubraview_window_t    *clash_window;
-    rubraview_renderer_t  *clash_renderer;
-    int32_t                clash_frame[4];
-    double                 clash_px, clash_py;
     bool                   list_del_ask;            /* RV-256: a file of the list to the Recycle Bin? asked on a card */
     size_t                 list_del_row;
     char                   list_del_path[1024];
@@ -2746,6 +2740,8 @@ void log_sb_to(app_state_t *app, size_t first);
 bool filejob_start(app_state_t *app, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, bool moving, int basket, bool from_cut);   /* RV-258 */
 bool filejob_start_viewer(app_state_t *app, proven_u8str_view_t dir, proven_u8str_view_t path, bool moving, int32_t page, proven_u8str_view_t temp_dir);   /* RV-259 */
 bool filejob_busy(void);
+const char *lang_file_in_use(void);   /* RV-289 */
+int jobproc_main(const wchar_t *pipe_name);   /* RV-289: `--file-job <pipe>` */
 bool filejob_same_recycles_copy(void);
 /* RV-260 (D-312): files into the archive the open-file screen shows */
 typedef struct arcadd_row { size_t index; const char *source, *archive, *name; uint64_t ssize, tsize; int64_t smtime, tmtime; } arcadd_row_t;

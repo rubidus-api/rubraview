@@ -284,6 +284,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             LocalFree(wargv);
             return code;
         }
+        if (wargv && argc == 3 && rubraview_wcmp(wargv[1], L"--file-job") == 0) {   /* RV-289: a copy or a move in a process of its own */
+            int code = jobproc_main(wargv[2]);
+            LocalFree(wargv);
+            return code;
+        }
         if (wargv) LocalFree(wargv);
     }
     rubraview_edit_set_plugin_runner(plugin_runner, NULL);
