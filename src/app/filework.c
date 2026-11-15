@@ -282,7 +282,7 @@ void rename_end(app_state_t *app) {
     if (app->rename_is_password) {                       /* nothing of it stays behind */
         secure_wipe(rubraview_mem_mut(app->rename_buffer, sizeof(app->rename_buffer)));
         secure_wipe(rubraview_mem_mut(app->rename_composing, sizeof(app->rename_composing)));
-        app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+        rename_field_begin(app);
         app->rename_is_password = false;
     }
     app->rename_favorite = -1;
@@ -345,9 +345,9 @@ void rename_text(app_state_t *app, const rubraview_window_event_t *event) {
 void picker_path_begin(app_state_t *app) {
     if (!app->picker_open || app->rename_active) return;
     proven_u8str_view_t here = rubraview_picker_is_places(app->picker_dir) ? PROVEN_LIT("") : app->picker_dir;
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, here.size < sizeof(app->rename_buffer) ? here : PROVEN_LIT(""));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, here.size < sizeof(app->rename_buffer) ? here : PROVEN_LIT(""));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_is_path = true;
     app->rename_composing_length = 0;
@@ -359,7 +359,7 @@ void picker_path_begin(app_state_t *app) {
 static void picker_path_commit(app_state_t *app) {
     rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     app->rename_composing_length = 0;
-    proven_u8str_view_t path = rubraview_picker_typed_path(app->arena, rubraview_textedit_text(&app->rename_edit), app->picker_dir);
+    proven_u8str_view_t path = rubraview_picker_typed_path(app->arena, rubraview_textedit_text(&app->rename_ec.te), app->picker_dir);
     if (path.size == 0) { rename_end(app); return; }
     rubraview_fs_entry_t found;
     if (!rubraview_pal_fs_stat(app->arena, path, &found)) {
@@ -394,9 +394,9 @@ void target_begin(app_state_t *app, bool moving, bool from_picker) {
     if (app->rename_active) rename_end(app);
     proven_u8str_view_t last = rubraview_settings_get_text(&app->settings, PROVEN_LIT("curation"), PROVEN_LIT("other_dir"));
     if (last.size == 0) last = moving ? app->curation.move_dir : app->curation.copy_dir;
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, last.size < sizeof(app->rename_buffer) ? last : PROVEN_LIT(""));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, last.size < sizeof(app->rename_buffer) ? last : PROVEN_LIT(""));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_is_target = true;
     app->target_moving = moving;
@@ -414,7 +414,7 @@ void target_browse(app_state_t *app) {
     };
     rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
     if (picked.accepted && picked.count > 0 && picked.paths[0].size < sizeof(app->rename_buffer)) {
-        rubraview_textedit_set(&app->rename_edit, picked.paths[0]);   /* in the box, for Enter */
+        rubraview_textedit_set(&app->rename_ec.te, picked.paths[0]);   /* in the box, for Enter */
         app->target_offered_len = 0;
     }
 }
@@ -424,7 +424,7 @@ void target_browse(app_state_t *app) {
 void target_commit(app_state_t *app) {
     rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     app->rename_composing_length = 0;
-    proven_u8str_view_t typed = rubraview_target_folder_trim(rubraview_textedit_text(&app->rename_edit));
+    proven_u8str_view_t typed = rubraview_target_folder_trim(rubraview_textedit_text(&app->rename_ec.te));
     proven_u8str_view_t base = app->target_from_picker ? app->picker_dir : rubraview_path_dirname(current_file_path(app));
     proven_u8str_view_t path = typed.size ? rubraview_picker_typed_path(app->arena, typed, base) : typed;
     rubraview_fs_entry_t found;
@@ -494,8 +494,8 @@ void rename_begin(app_state_t *app) {
         rename_end(app);
     }
 
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, name);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, name);
     app->rename_active = true;
     app->rename_is_archive = in_archive;
     app->rename_composing_length = 0;
@@ -516,7 +516,7 @@ static bool ext_same(const char *a, proven_u8str_view_t b) {
 
 static void ext_store(app_state_t *app) {
     if (app->ext_at < 0 || app->ext_at >= app->ext_n) return;
-    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_ec.te);
     rubraview_fmt(app->ext_to[app->ext_at], sizeof(app->ext_to[0]), "{}", PROVEN_ARG(rubraview_bytes_view(typed.ptr, (int)typed.size)));
 }
 
@@ -524,8 +524,8 @@ void ext_switch(app_state_t *app, int32_t row) {
     if (row < 0 || row >= app->ext_n) return;
     ext_store(app);
     app->ext_at = row;
-    rubraview_textedit_set(&app->rename_edit, cstr(app->ext_to[row]));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rubraview_textedit_set(&app->rename_ec.te, cstr(app->ext_to[row]));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_composing_length = 0;
 }
 
@@ -544,9 +544,9 @@ void rename_extension_begin(app_state_t *app) {
     }
     if (app->ext_n == 0) { osd_say(app, TU8("pick some files with an extension first")); return; }
     app->ext_at = 0;
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, cstr(app->ext_to[0]));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, cstr(app->ext_to[0]));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_is_extension = true;
     app->rename_composing_length = 0;
@@ -606,8 +606,8 @@ void rename_picker_begin(app_state_t *app, size_t at) {
     }
     proven_u8str_view_t name = app->picker_listing.entries[at].name;
     if (name.size == 0 || name.size >= sizeof(app->rename_buffer)) return;
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, name);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, name);
     app->rename_active = true;
     app->rename_is_picker = true;
     app->rename_picker_at = at;
@@ -621,7 +621,7 @@ void rename_picker_commit(app_state_t *app) {
     rename_end(app);
     if (at >= app->picker_listing.count) return;
     const rubraview_fs_entry_t *entry = &app->picker_listing.entries[at];
-    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_ec.te);
     if (typed.size == entry->name.size && proven_sys_mem_cmp(typed.ptr, entry->name.ptr, typed.size) == 0) return;   /* nothing changed */
     rubraview_rename_err_t err = rubraview_rename_validate(typed);
     if (err != RUBRAVIEW_RENAME_OK) { osd_say(app, rubraview_rename_error_text(err)); return; }
@@ -669,7 +669,7 @@ void rename_commit(app_state_t *app) {
 
     if (in_archive) {
         /* D-88: the same rules for the name; the archive is written again with it. */
-        proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_edit);
+        proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_ec.te);
         rubraview_rename_err_t bad = rubraview_rename_validate(typed);
         char name[512];
         if (bad != RUBRAVIEW_RENAME_OK) { osd_say(app, rubraview_rename_error_text(bad)); return; }
@@ -687,7 +687,7 @@ void rename_commit(app_state_t *app) {
     if (path.size == 0) return;
     bool elsewhere = !proven_u8str_view_eq(path, on_screen);   /* the page turned under the card */
 
-    proven_u8str_view_t new_name = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t new_name = rubraview_textedit_text(&app->rename_ec.te);
 
     rubraview_rename_err_t err = rubraview_rename_validate(new_name);
     if (err != RUBRAVIEW_RENAME_OK) {
@@ -944,8 +944,8 @@ static void list_add_station(app_state_t *app, proven_u8str_view_t address, prov
 
 void address_begin(app_state_t *app) {
     if (app->rename_active) rename_end(app);
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, PROVEN_LIT("http://"));
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, PROVEN_LIT("http://"));
     app->rename_active = true;
     app->rename_is_address = true;
     app->rename_composing_length = 0;
@@ -954,7 +954,7 @@ void address_begin(app_state_t *app) {
 }
 
 void address_typed(app_state_t *app) {
-    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_ec.te);
     proven_u8str_view_t address = {0}, title = {0};
     bool ok = rubraview_stream_split_typed(text, &address, &title);
     char a[RUBRAVIEW_STREAM_URL_MAX], t[512];

@@ -196,9 +196,9 @@ static void extract_start(app_state_t *app, archwork_t *w, int mode, bool choose
         g_dest_wait = w;
         proven_u8str_view_t beside = rubraview_path_dirname(proven_u8str_view_from_cstr(w->archives[0]));
         if (app->rename_active) rename_end(app);
-        app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-        rubraview_textedit_set(&app->rename_edit, beside.size < sizeof(app->rename_buffer) ? beside : PROVEN_LIT(""));
-        rubraview_textedit_select_all(&app->rename_edit);
+        rename_field_begin(app);
+        rubraview_textedit_set(&app->rename_ec.te, beside.size < sizeof(app->rename_buffer) ? beside : PROVEN_LIT(""));
+        rubraview_textedit_select_all(&app->rename_ec.te);
         app->rename_active = true;
         app->rename_is_extract = true;
         app->rename_composing_length = 0;
@@ -211,7 +211,7 @@ static void extract_start(app_state_t *app, archwork_t *w, int mode, bool choose
 void archwork_extract_dest_typed(app_state_t *app) {
     archwork_t *w = g_dest_wait;
     if (!w) { rename_end(app); return; }
-    proven_u8str_view_t typed = rubraview_target_folder_trim(rubraview_textedit_text(&app->rename_edit));
+    proven_u8str_view_t typed = rubraview_target_folder_trim(rubraview_textedit_text(&app->rename_ec.te));
     proven_u8str_view_t base = rubraview_path_dirname(proven_u8str_view_from_cstr(w->archives[0]));
     proven_u8str_view_t path = typed.size ? rubraview_picker_typed_path(app->arena, typed, base) : base;
     rubraview_fs_entry_t found;
@@ -234,7 +234,7 @@ void archwork_extract_dest_browse(app_state_t *app) {
                                           .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
     rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
     if (picked.accepted && picked.count > 0 && picked.paths[0].size < sizeof(app->rename_buffer))
-        rubraview_textedit_set(&app->rename_edit, picked.paths[0]);   /* in the box, for Enter */
+        rubraview_textedit_set(&app->rename_ec.te, picked.paths[0]);   /* in the box, for Enter */
 }
 
 static void extract_go(app_state_t *app, archwork_t *w) {
@@ -443,9 +443,9 @@ static void compress_go(app_state_t *app, archwork_t *w, bool ask) {
     if (g_packing) work_free(g_packing);
     g_packing = w;
     if (app->rename_active) rename_end(app);
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, proven_u8str_view_from_cstr(offer));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, proven_u8str_view_from_cstr(offer));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_is_pack = true;
     app->pack_focus = 0;   /* D-261: the name first; the password fields empty */
@@ -464,7 +464,7 @@ static bool ends_with_ci(const char *s, const char *tail) {
 /* D-260: the Compress window's format is the name's ending; a chip changes the ending. D-261: the name is in the box
    while it is typed, in pack_name while a password is. */
 static proven_u8str_view_t pack_name_text(const app_state_t *app) {
-    return app->pack_focus == 0 ? rubraview_textedit_text(&app->rename_edit)
+    return app->pack_focus == 0 ? rubraview_textedit_text(&app->rename_ec.te)
                                 : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len };
 }
 
@@ -484,7 +484,7 @@ void archwork_pack_set_format(app_state_t *app, bool sevenz) {
     if (n >= 4 && rubraview_cstr_cmp_ci(s + n - 4, ".zip") == 0) n -= 4;
     else if (n >= 3 && rubraview_cstr_cmp_ci(s + n - 3, ".7z") == 0) n -= 3;
     rubraview_fmt(s + n, sizeof s - n, sevenz ? ".7z" : ".zip");
-    if (app->pack_focus == 0) rubraview_textedit_set(&app->rename_edit, proven_u8str_view_from_cstr(s));
+    if (app->pack_focus == 0) rubraview_textedit_set(&app->rename_ec.te, proven_u8str_view_from_cstr(s));
     else { app->pack_name_len = proven_cstr_len(s); proven_sys_mem_copy(app->pack_name, s, app->pack_name_len); }
     /* a codec the other format does not take goes back to the format's first */
     if (!rubraview_pack_method_fits(sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP, (rubraview_pack_method_t)app->pack_method))
@@ -495,7 +495,7 @@ void archwork_pack_set_format(app_state_t *app, bool sevenz) {
 static void pack_field_keep(app_state_t *app) {
     rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     app->rename_composing_length = 0;
-    proven_u8str_view_t t = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t t = rubraview_textedit_text(&app->rename_ec.te);
     if (app->pack_focus == 0) {
         app->pack_name_len = t.size < sizeof app->pack_name ? t.size : sizeof app->pack_name - 1;
         proven_sys_mem_copy(app->pack_name, t.ptr, app->pack_name_len);
@@ -515,12 +515,12 @@ void archwork_pack_focus(app_state_t *app, int32_t to) {
     pack_field_keep(app);
     secure_wipe(rubraview_mem_mut(app->rename_buffer, sizeof app->rename_buffer));
     secure_wipe(rubraview_mem_mut(app->rename_composing, sizeof app->rename_composing));
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof app->rename_buffer);
+    rename_field_begin(app);
     proven_u8str_view_t v = to == 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len }
                           : to == 3 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_split, .size = app->pack_split_len }
                                     : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_pw[to - 1], .size = app->pack_pw_len[to - 1] };
-    rubraview_textedit_set(&app->rename_edit, v);
-    if (to == 3) rubraview_textedit_select_all(&app->rename_edit);   /* RV-248: a new size types over the old */
+    rubraview_textedit_set(&app->rename_ec.te, v);
+    if (to == 3) rubraview_textedit_select_all(&app->rename_ec.te);   /* RV-248: a new size types over the old */
     app->pack_focus = to;
     app->rename_is_password = to == 1 || to == 2;   /* dots, never copied out, wiped when it ends */
     rubraview_pal_window_text_ime(app->window, to == 0);   /* D-262: a new archive's password in plain letters */
@@ -736,7 +736,7 @@ void archwork_poll(app_state_t *app, bool quitting) {
             return;
         }
         if (app->rename_active) rename_end(app);
-        app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+        rename_field_begin(app);
         app->rename_active = true;
         app->rename_is_password = true;
         app->password_for_extract = true;

@@ -419,9 +419,9 @@ void batch_type_begin(app_state_t *app, int32_t id) {
     size_t cap = 0;
     const char *now = batch_field(app, id, &cap);
     if (app->rename_active) rename_end(app);
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, cstr(now));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, cstr(now));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_composing_length = 0;
     app->batch_typing = id;
@@ -454,7 +454,7 @@ void batch_typed(app_state_t *app) {
 
 static void batch_typed_in(app_state_t *app) {
     if (app->rename_is_value) { edit_value_typed(app); return; }   /* RV-200: a slider's value, on this panel */
-    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_ec.te);
     int32_t id = app->batch_typing;
     size_t cap = 0;
     char *dst = batch_field(app, id, &cap);

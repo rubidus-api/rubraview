@@ -20,6 +20,7 @@ typedef struct rubraview_textedit {
     size_t len;
     size_t caret;
     size_t anchor;
+    bool   keep_lines;   /* RV-293: a field of several lines keeps '\n' (a CR dropped, a tab a space) */
 } rubraview_textedit_t;
 
 rubraview_textedit_t rubraview_textedit_make(char *buf, size_t cap);

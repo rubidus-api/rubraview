@@ -1414,11 +1414,14 @@ bool key_is(rubraview_key_combo_t combo, const char *name) {
    anything that is not UTF-8 are left out (rubraview_rename_append's rule),
    then it goes in at the caret in place of the selection. */
 void rename_insert(app_state_t *app, proven_u8str_view_t text) {
-    if (text.size == 0) return;
-    char clean[sizeof(app->rename_buffer)];
-    size_t length = 0;
-    (void)rubraview_rename_append(clean, sizeof(clean), &length, text);
-    (void)rubraview_textedit_insert(&app->rename_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)clean, .size = length });
+    editbox_text(&app->rename_ec, text, true);   /* RV-293: a run of typing is one undo step */
+}
+
+/* RV-293: the field begun anew on rename_buffer (what an earlier field could undo goes with it). */
+void rename_field_begin(app_state_t *app) {
+    rubraview_editctl_free(&app->rename_ec);
+    rubraview_editctl_init(&app->rename_ec, app->rename_buffer, sizeof(app->rename_buffer), false);
+    app->rename_dragging = false;
 }
 
 /* Text for a box: whole UTF-8 characters, no control characters. */
@@ -1469,7 +1472,7 @@ bool textbox_key(rubraview_window_t *window, rubraview_textedit_t *te, rubraview
 }
 
 static bool rename_edit_key(app_state_t *app, rubraview_key_combo_t combo) {
-    return textbox_key(app->window, &app->rename_edit, combo);
+    return editbox_key(app->window, &app->rename_ec, combo, app->rename_is_password);   /* RV-293 */
 }
 
 /* Everything §3.18 puts in front of the reader answers the next key
@@ -1531,6 +1534,42 @@ static void rename_cancel(app_state_t *app) {
     rename_end(app);
     if (filter) picker_filter_set(app, PROVEN_LIT(""));   /* 1.22.0: Esc lets every name show again */
     if (listfilter) list_filter_set(app, PROVEN_LIT(""));
+}
+
+/* ---- RV-293: the pointer in the field (the main window's; the card's other windows in E2) ---- */
+
+/* The byte of the text under x: what is drawn is the text (or a dot a character for a hidden password). */
+static size_t rename_field_index(app_state_t *app, double x) {
+    const rubraview_textedit_t *te = &app->rename_ec.te;
+    if (app->rename_is_password && !app->password_shown) {
+        char dots[3 * sizeof(app->rename_buffer)];
+        size_t n = 0, chars = 0;
+        for (size_t i = 0; i < te->len; ++i) if (((unsigned char)te->buf[i] & 0xC0) != 0x80) { proven_sys_mem_copy(dots + n, "\xE2\x97\x8F", 3); n += 3; chars++; }
+        size_t at = editbox_shown_at(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)dots, .size = n }, app->rename_field_size, app->rename_field_x0, x) / 3;
+        size_t b = 0;   /* the at-th character's first byte */
+        for (size_t c = 0; c < at && b < te->len; ++c) { b++; while (b < te->len && ((unsigned char)te->buf[b] & 0xC0) == 0x80) b++; }
+        return b;
+    }
+    return editbox_shown_at(app->renderer, rubraview_textedit_text(te), app->rename_field_size, app->rename_field_x0, x);
+}
+
+/* A press on the field: the caret, a word, the line, Shift's selection; a right press its list. */
+bool rename_field_press(app_state_t *app, double x, double y, int button, uint32_t modifiers) {
+    if (!app->rename_active || !rename_has_keys(app) || app->rename_field.width <= 0.0 || !pal_rect_has(app->rename_field, x, y)) return false;
+    app->rename_composing_length = 0;
+    if (button == RUBRAVIEW_MOUSE_RIGHT) { chooser_open_editmenu(app, x, y); return true; }
+    if (button != RUBRAVIEW_MOUSE_LEFT) return false;
+    int clicks = editbox_clicks(&app->rename_clicks, x, y, rubraview_pal_time_now_seconds());
+    editbox_press(&app->rename_ec, rename_field_index(app, x), clicks, (modifiers & RUBRAVIEW_MOD_SHIFT) != 0);
+    app->rename_dragging = clicks == 1;
+    return true;
+}
+
+bool rename_field_drag(app_state_t *app, double x, double y) {
+    (void)y;
+    if (!app->rename_dragging || !app->rename_active) { app->rename_dragging = false; return false; }
+    rubraview_editctl_place(&app->rename_ec, rename_field_index(app, x), true);
+    return true;
 }
 
 /* 1.24.0 (owner, 2026-10-19: "단축키만 있는게 아니라 버튼으로도 각 기능이나 입력, 취소가 버튼으로"): the box's buttons and,

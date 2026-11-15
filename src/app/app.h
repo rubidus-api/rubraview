@@ -87,6 +87,8 @@
 #include "rubraview/ui_eqwin.h"
 #include "rubraview/ui_card.h"
 #include "rubraview/progress.h"
+#include "rubraview/editctl.h"
+typedef struct editbox_clicks { double at, x, y; int count; } editbox_clicks_t;   /* RV-293 */
 
 /* RV-265: the kinds of question the input card asks, each with its place kept, and the windows it is drawn in. */
 enum { CARD_RENAME, CARD_ARCHIVE_PAGE, CARD_PICKER_NAME, CARD_EXTENSIONS, CARD_TARGET, CARD_EXTRACT, CARD_PASSWORD,
@@ -418,7 +420,7 @@ typedef struct apply_all_job {
 
 /* 1.24.0 (owner, 2026-10-19): the list a one-of-many choice opens, in the window where it was pressed. */
 enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_ORDER, CHOOSE_LISTEXT, CHOOSE_LISTSORT, CHOOSE_SHAPE,
-       CHOOSE_PICKEXT /* RV-204 */, CHOOSE_BASKET /* RV-227 */, CHOOSE_BASKET_FILES /* D-286 */, CHOOSE_DROP /* RV-286 */ };
+       CHOOSE_PICKEXT /* RV-204 */, CHOOSE_BASKET /* RV-227 */, CHOOSE_BASKET_FILES /* D-286 */, CHOOSE_DROP /* RV-286 */, CHOOSE_EDITMENU /* RV-293 */ };
 enum { SHAPE_FOR_PICKER = 1, SHAPE_FOR_LIST };   /* RV-192 */
 /* RV-202: what a reading of sizes and lengths is for: the shape's choice, the list sorted by length, the open-file
    screen sorted by length or by resolution */
@@ -1346,7 +1348,11 @@ typedef struct app_state {
     proven_u8str_view_t                spath_section, spath_key;
     int32_t                spath_list_index;   /* a folder of a list (`recent.skip_dirs`) being typed, or -1 */
     int32_t                spath_list;         /* which of FOLDER_LISTS that list is */
-    rubraview_textedit_t   rename_edit;   /* the text in rename_buffer, its caret and selection */
+    rubraview_editctl_t    rename_ec;     /* RV-293: the text in rename_buffer, its caret and selection, its undo */
+    rubraview_pal_rect_t   rename_field;  /* where its text is drawn, and from where (for the pointer) */
+    double                 rename_field_x0, rename_field_size;
+    bool                   rename_dragging;
+    editbox_clicks_t       rename_clicks;
     /* RV-065: the adjust panel's live preview — a reduced copy of the page
        run through the same commit code as Save a copy — and its histogram. */
     void                  *edit_small_mem, *edit_work_mem;
@@ -2636,6 +2642,10 @@ void rename_end(app_state_t *app);
 void rename_extension_apply(app_state_t *app);
 void rename_extension_begin(app_state_t *app);
 void rename_insert(app_state_t *app, proven_u8str_view_t text);
+void rename_field_begin(app_state_t *app);   /* RV-293 */
+bool rename_field_press(app_state_t *app, double x, double y, int button, uint32_t modifiers);
+bool rename_field_drag(app_state_t *app, double x, double y);
+void chooser_open_editmenu(app_state_t *app, double x, double y);
 void rename_picker_begin(app_state_t *app, size_t at);
 void rename_picker_commit(app_state_t *app);
 void rename_text(app_state_t *app, const rubraview_window_event_t *event);
@@ -2907,6 +2917,14 @@ bool text_wheel(app_state_t *app, double notches, uint32_t mods);
 bool text_with_bytes(app_state_t *app, int32_t index, rubraview_textenc_t want, bool by_hand);
 bool text_wraps(app_state_t *app);
 void textbox_insert(rubraview_textedit_t *te, proven_u8str_view_t text);
+/* RV-293: the one edit control's keys, typing and pointer (editbox.c) */
+enum { EDITBOX_UNDO = 1, EDITBOX_CUT, EDITBOX_COPY, EDITBOX_PASTE, EDITBOX_DELETE, EDITBOX_ALL };
+void editbox_text(rubraview_editctl_t *ec, proven_u8str_view_t text, bool typed);
+bool editbox_key(rubraview_window_t *window, rubraview_editctl_t *ec, rubraview_key_combo_t combo, bool secret);
+size_t editbox_shown_at(rubraview_renderer_t *r, proven_u8str_view_t shown, double size, double x0, double x);
+int editbox_clicks(editbox_clicks_t *c, double x, double y, double now);
+void editbox_press(rubraview_editctl_t *ec, size_t at, int clicks, bool shift);
+void editbox_menu_do(rubraview_window_t *window, rubraview_editctl_t *ec, int what, bool secret);
 bool textbox_key(rubraview_window_t *window, rubraview_textedit_t *te, rubraview_key_combo_t combo);
 void thumbs_wake(void *context);
 void tick_timers(app_state_t *app, double dt);

@@ -1767,6 +1767,14 @@ uint64_t scene_signature(const app_state_t *app) {
     double now = rubraview_pal_time_now_seconds();
     bool typing = app->ab_edit_open || app->rename_active;
     if (typing) SIG(&h, fmod(now, 1.0) < 0.5);   /* a caret blinks */
+    if (app->rename_active) {   /* RV-293: the field's text, caret, selection and the IME's syllable (an edit was drawn only when
+                                   something else redrew: a Shift selection looked like nothing happened) */
+        const rubraview_textedit_t *te = &app->rename_ec.te;
+        uint64_t text = 1469598103934665603ull;
+        for (size_t i = 0; i < te->len; ++i) text = (text ^ (uint8_t)te->buf[i]) * 1099511628211ull;
+        SIG(&h, (int64_t)text); SIG(&h, (int64_t)te->caret); SIG(&h, (int64_t)te->anchor);
+        SIG(&h, (int64_t)app->rename_composing_length); SIG(&h, app->password_shown);
+    }
     if (app->card.open) {   /* RV-265: the card moved, sized, its focus */
         SIG(&h, (int64_t)app->card.rect.x); SIG(&h, (int64_t)app->card.rect.y);
         SIG(&h, (int64_t)app->card.rect.width); SIG(&h, (int64_t)app->card.rect.height); SIG(&h, app->card.focused);

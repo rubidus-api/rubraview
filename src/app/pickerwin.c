@@ -176,9 +176,9 @@ size_t favorite_drop_index(const app_state_t *app, double x, double dpi, double 
 void favorite_rename_begin(app_state_t *app, size_t index) {
     if (index >= app->favorites.count || app->rename_active) return;
     proven_u8str_view_t now = rubraview_favorites_title(&app->favorites, index);
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, now.size < sizeof(app->rename_buffer) ? now : PROVEN_LIT(""));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, now.size < sizeof(app->rename_buffer) ? now : PROVEN_LIT(""));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_favorite = (int32_t)index;
     app->rename_composing_length = 0;
@@ -191,7 +191,7 @@ void rename_end(app_state_t *app);
 void favorite_rename_commit(app_state_t *app) {
     rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     size_t index = (size_t)app->rename_favorite;
-    proven_u8str_view_t name = app_keep(app, rubraview_textedit_text(&app->rename_edit));
+    proven_u8str_view_t name = app_keep(app, rubraview_textedit_text(&app->rename_ec.te));
     rename_end(app);
     if (rubraview_favorites_rename(&app->favorites, index, name)) {
         favorites_save(app);
@@ -444,9 +444,9 @@ void picker_filter_set(app_state_t *app, proven_u8str_view_t text) {
 void picker_filter_begin(app_state_t *app) {
     if (!app->picker_open || app->picker_in_book) return;
     if (app->rename_active) rename_end(app);
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, cstr(app->picker_filter));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, cstr(app->picker_filter));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_is_filter = true;
     app->rename_composing_length = 0;
@@ -456,7 +456,7 @@ void picker_filter_begin(app_state_t *app) {
 /* Each pass while the filter is typed: the rows follow what is in the box. */
 void picker_filter_follow(app_state_t *app) {
     if (!app->picker_open || !app->rename_active || !app->rename_is_filter) return;
-    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_ec.te);
     if (!proven_u8str_view_eq(typed, cstr(app->picker_filter))) picker_filter_set(app, typed);
 }
 

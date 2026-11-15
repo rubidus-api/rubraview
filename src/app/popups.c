@@ -278,9 +278,9 @@ void number_card_begin(app_state_t *app, int32_t target) {
                                     : rubraview_fmt(now, sizeof now, "{:.1}", PROVEN_ARG((double)app->slideshow.interval_seconds));
     if (target == NUMBER_VOLUME) volpop_close(app); else slidepop_close(app);
     if (app->rename_active) rename_end(app);
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_is_number = true;
     app->number_target = target;
@@ -291,7 +291,7 @@ void number_card_begin(app_state_t *app, int32_t target) {
 void number_typed(app_state_t *app) {
     rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     app->rename_composing_length = 0;
-    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_ec.te);
     double v = 0.0;
     if (app->number_target == NUMBER_VOLUME) {
         if (!rubraview_volpop_parse(typed, &v)) { osd_say(app, TU8("the volume is a percent, 0 to 100")); return; }   /* the card stays, to put it right */
@@ -1305,7 +1305,7 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
                     bool on = k == app->ext_at;
                     rubraview_pal_render_fill_rect(app->renderer, r, on ? COLOR_TILE_CURRENT : pal_rect_has(r, app->pointer_x, app->pointer_y) ? 0x40FFFFFFu : COLOR_TILE_FILL, 4.0 * dpi);
                     char line[128];
-                    proven_u8str_view_t to = on ? rubraview_textedit_text(&app->rename_edit) : cstr(app->ext_to[k]);
+                    proven_u8str_view_t to = on ? rubraview_textedit_text(&app->rename_ec.te) : cstr(app->ext_to[k]);
                     int n = rubraview_fmt(line, sizeof(line), "{}   \xE2\x86\x92   {}", PROVEN_ARG(app->ext_from[k]), PROVEN_ARG(rubraview_bytes_view(to.ptr, (int)(to.size < 64 ? to.size : 64))));
                     if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
                                                               (rubraview_pal_rect_t){ r.x + 14.0 * dpi, r.y, r.width - 28.0 * dpi, r.height },
@@ -1353,7 +1353,7 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
            that blinks (owner, 2026-09-23: the box did not look like it was
            taking text). Widths come from the face the text is drawn in, so
            caret and shading sit under the right characters, Hangul too. */
-        const rubraview_textedit_t *te = &app->rename_edit;
+        const rubraview_textedit_t *te = &app->rename_ec.te;
         char shown[3 * (sizeof(app->rename_buffer) + sizeof(app->rename_composing))];
         size_t caret = te->caret, len = te->len, comp = app->rename_composing_length;
         proven_sys_mem_copy(shown, app->rename_buffer, caret);
@@ -1391,6 +1391,7 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
         double inner = box.width - 2.0 * pad;
         double x0 = full <= inner && !app->rename_is_path && !card ? box.x + (box.width - full) * 0.5 : box.x + pad;   /* RV-238: a card's from the left */
         if (full > inner && to_caret > inner) x0 = box.x + pad + inner - to_caret;
+        if (host == CARD_HOST_MAIN) { app->rename_field = box; app->rename_field_x0 = x0; app->rename_field_size = size; }   /* RV-293: for the pointer */
         if (has_selection) {
             size_t a = sel_a, b = sel_b;
             /* the composing text sits at the caret, which is one end of the selection */

@@ -47,6 +47,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             break;
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+            if (rename_field_drag(app, event->mouse.x, event->mouse.y)) { app->pointer_x = event->mouse.x; app->pointer_y = event->mouse.y; break; }   /* RV-293 */
             if (volpop_motion(app, event->mouse.x, event->mouse.y)) break;   /* RV-237: the volume's bar dragged */
             if (edge_press_motion(app, event->mouse.x, event->mouse.y)) break;   /* RV-285: a side held, along its column */
             if (card_motion(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y)) {   /* RV-265: the card moved or sized */
@@ -202,6 +203,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             app->titlebar_armed = RUBRAVIEW_TITLEBAR_NONE;   /* RV-257: a new press; titlebar_click arms it again if it is X, _, [] */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT) app->edge_press.on = false;   /* RV-285: a press whose release was lost */
             if (chooser_press(app, CHOOSE_IN_MAIN, event->mouse.x, event->mouse.y)) break;   /* 1.24.0 */
+            if (rename_field_press(app, event->mouse.x, event->mouse.y, event->mouse.button, event->mouse.modifiers)) break;   /* RV-293 */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && progress_card_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-268 */
             if (volpop_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-237 */
             if (tmenu_press(app, event->mouse.x, event->mouse.y)) break;   /* 1.25.0: the ☰ pull-down */
@@ -558,6 +560,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
         }
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+            app->rename_dragging = false;   /* RV-293 */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && titlebar_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-257 */
             if (volpop_release(app)) break;   /* RV-237 */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && edge_press_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-285 */

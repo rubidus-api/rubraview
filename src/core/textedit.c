@@ -83,10 +83,23 @@ size_t rubraview_textedit_insert(rubraview_textedit_t *te, proven_u8str_view_t t
         while (n > 0 && is_continuation(text.ptr[n])) n--;
     }
     if (n == 0) return 0;
-    proven_sys_mem_move(te->buf + te->caret + n, te->buf + te->caret, te->len - te->caret);
-    for (size_t i = 0; i < n; ++i) {
-        char c = text.ptr[i];
-        te->buf[te->caret + i] = (c == '\n' || c == '\r' || c == '\t') ? ' ' : c;
+    if (te->keep_lines) {   /* RV-293: CRs dropped (a pasted CRLF is one break), the rest as typed */
+        size_t m = 0;
+        for (size_t i = 0; i < n; ++i) if (text.ptr[i] != '\r') m++;
+        proven_sys_mem_move(te->buf + te->caret + m, te->buf + te->caret, te->len - te->caret);
+        size_t k = 0;
+        for (size_t i = 0; i < n; ++i) {
+            char c = (char)text.ptr[i];
+            if (c == '\r') continue;
+            te->buf[te->caret + k++] = c == '\t' ? ' ' : c;
+        }
+        n = m;
+    } else {
+        proven_sys_mem_move(te->buf + te->caret + n, te->buf + te->caret, te->len - te->caret);
+        for (size_t i = 0; i < n; ++i) {
+            char c = text.ptr[i];
+            te->buf[te->caret + i] = (c == '\n' || c == '\r' || c == '\t') ? ' ' : c;
+        }
     }
     te->len += n;
     te->caret += n;

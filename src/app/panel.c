@@ -490,9 +490,9 @@ static bool edit_type_value_at(app_state_t *app, rubraview_panel_t *panel, int32
     char now[32];
     const rubraview_panel_row_t *row = &panel->rows[index];
     int n = rubraview_fmt(now, sizeof(now), row->step >= 1.0 ? "{:.0}" : "{:.2}", PROVEN_ARG((double)row->value));
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_is_value = true;
     app->rename_composing_length = 0;
@@ -509,7 +509,7 @@ bool panel_type_value_at(app_state_t *app, double px, double py) {
 }
 
 void edit_value_typed(app_state_t *app) {
-    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_ec.te);
     char buf[48];
     size_t n = text.size < sizeof(buf) - 1 ? text.size : sizeof(buf) - 1;
     proven_sys_mem_copy(buf, text.ptr, n);

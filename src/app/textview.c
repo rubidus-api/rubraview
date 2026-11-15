@@ -285,7 +285,7 @@ static void text_set(app_state_t *app, const char *key, double value, const char
 void text_find_step(app_state_t *app, bool forward) {
     text_page_t *t = app->text;
     if (!t) return;
-    proven_u8str_view_t needle = app->rename_active && app->rename_is_find ? rubraview_textedit_text(&app->rename_edit)
+    proven_u8str_view_t needle = app->rename_active && app->rename_is_find ? rubraview_textedit_text(&app->rename_ec.te)
                                                                 : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)t->find, .size = t->find_len };
     if (needle.size == 0) { osd_say(app, TU8("type what to find (Ctrl+F)")); return; }
     if ((const char *)needle.ptr != t->find && needle.size < sizeof(t->find)) { proven_sys_mem_copy(t->find, needle.ptr, needle.size); t->find_len = needle.size; }
@@ -399,9 +399,9 @@ bool text_action(app_state_t *app, proven_u8str_view_t action) {
         osd_say(app, wrap ? TU8("word wrap: to the window") : TU8("word wrap off: long lines run on (Shift+wheel)"));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("text_find"))) {
         if (app->rename_active) rename_end(app);
-        app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-        rubraview_textedit_set(&app->rename_edit, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)t->find, .size = t->find_len });
-        rubraview_textedit_select_all(&app->rename_edit);
+        rename_field_begin(app);
+        rubraview_textedit_set(&app->rename_ec.te, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)t->find, .size = t->find_len });
+        rubraview_textedit_select_all(&app->rename_ec.te);
         app->rename_active = true;
         app->rename_is_find = true;
         app->rename_composing_length = 0;

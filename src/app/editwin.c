@@ -292,10 +292,10 @@ void apply_all_begin(app_state_t *app) {
     if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) { osd_say(app, TU8("the pictures of a folder or a list, not of an archive")); return; }
     if (app->apply_job) { osd_say(app, TU8("still applying the last one")); return; }
     if (app->rename_active) rename_end(app);
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rename_field_begin(app);
     proven_u8str_view_t last = rubraview_settings_get_text(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("copy_name"));
-    rubraview_textedit_set(&app->rename_edit, last.size > 0 ? last : PROVEN_LIT("*_edit"));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rubraview_textedit_set(&app->rename_ec.te, last.size > 0 ? last : PROVEN_LIT("*_edit"));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_is_apply = true;
     app->rename_composing_length = 0;
@@ -399,7 +399,7 @@ static bool edit_is_copy_name(proven_u8str_view_t path, proven_u8str_view_t patt
 }
 
 void apply_all_typed(app_state_t *app) {
-    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_ec.te);
     char pattern[160];
     size_t n = text.size < sizeof(pattern) - 1 ? text.size : sizeof(pattern) - 1;
     proven_sys_mem_copy(pattern, text.ptr, n);
@@ -1514,9 +1514,9 @@ bool gmic_row_changed(app_state_t *app, int32_t id, double v) {
 static void gmic_type_begin(app_state_t *app, int32_t param) {
     if (app->rename_active) rename_end(app);
     const char *now = param >= 0 ? app->gmic_texts[param] : app->gmic_last_typed;
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, cstr(now));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, cstr(now));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_is_gmic = true;
     app->gmic_typing = param;
@@ -1553,7 +1553,7 @@ bool gmic_button(app_state_t *app, int32_t id) {
 
 /* Enter in the box: a parameter's text kept, or the command typed made a step. */
 void gmic_typed(app_state_t *app) {
-    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_ec.te);
     int32_t param = app->gmic_typing;
     rename_end(app);
     if (param >= 0 && param < RUBRAVIEW_GMIC_MAX_SHOWN) {
@@ -1838,9 +1838,9 @@ bool ffmpeg_row_changed(app_state_t *app, int32_t id, double v) {
 static void ffmpeg_type_begin(app_state_t *app, int32_t option) {
     if (app->rename_active) rename_end(app);
     const char *now = option >= 0 ? app->ffmpeg_texts[option] : app->ffmpeg_last_typed;
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, cstr(now));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, cstr(now));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_is_ffmpeg = true;
     app->ffmpeg_typing = option;
@@ -1886,7 +1886,7 @@ bool ffmpeg_button(app_state_t *app, int32_t id) {
 
 /* Enter in the box: an option's text kept, or the graph typed made a step. */
 void ffmpeg_typed(app_state_t *app) {
-    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_ec.te);
     int32_t option = app->ffmpeg_typing;
     rename_end(app);
     if (option >= 0 && option < RUBRAVIEW_FFILTER_MAX_SHOWN) {

@@ -4079,3 +4079,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: D-356 put copies and moves apart; an extraction and an archive's writing still ran on the viewer's threads, their readers of untrusted archives inside the viewer, a viewer gone leaving `.rvpart` files or an archive between its two renames.
 - Decision: phase J first, for every job's process: a note written when it starts and deleted when it ends as it should; the viewer, not the job, says a note left behind (the job cannot say its own death), at start, when a pipe breaks and once a minute, by the process's id and start time so a reused id is not taken for the job. The owner likened it to a journaling file system: it is the journal's first half — what was begun is known — without replaying or undoing it. A staging file a killed copy leaves is named in the log, not deleted (another job may be writing one there). Then X1 (extraction) and X2 (archive writing, the swap made one `ReplaceFileW` with its backup) as copies are.
 - Consequences: T459; VM T460.
+
+## D-358: One Edit Control For Every Field
+
+- Date: 2026-11-15
+- Status: Accepted (owner 2026-11-15: "에디트 컨트롤을 정식으로 만들어 주세요 ... 많은 곳에서 같이 쓰도록 ... 그 자리에서 바로 고칠 수 있게요"; answers: all the listed troubles and Shift selection; lines in the subtitles editor only; rename where the name is shown; plan `docs/plans/active/2026-11-15-RV-293-edit-control.md`).
+- Context: a one-line `textedit` and `textbox_key` shared by some fields; fifteen files drawing and keying their own; no pointer, words, undo or menu anywhere.
+- Decision: the logic in core (`editctl`, host-tested) over `textedit`, the app's part one file (`editbox.c`) any field calls; undo keeps whole states (fields are short), not differences. Found on the VM: the window drew a field's change only when something else redrew it (the scene signature did not hold the field), so a selection made with Shift and the arrows showed nothing — the trouble the owner named; the signature now holds the field's text, caret, selection and the IME's syllable. Phases: E1 the input card and the open-file screen's path and filter (main window); E2 every other field and the subtitles' lines; E3 in place.
+- Consequences: T461; VM T462.

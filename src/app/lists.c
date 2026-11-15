@@ -165,9 +165,9 @@ static void list_filter_begin(app_state_t *app, bool in_files) {
         return;
     }
     if (app->rename_active) rename_end(app);
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
-    rubraview_textedit_set(&app->rename_edit, cstr(app->list_filter));
-    rubraview_textedit_select_all(&app->rename_edit);
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, cstr(app->list_filter));
+    rubraview_textedit_select_all(&app->rename_ec.te);
     app->rename_active = true;
     app->rename_is_listfilter = true;
     app->rename_composing_length = 0;
@@ -176,7 +176,7 @@ static void list_filter_begin(app_state_t *app, bool in_files) {
 
 void list_filter_follow(app_state_t *app) {
     if (!app->rename_active || !app->rename_is_listfilter) return;
-    list_filter_set(app, rubraview_textedit_text(&app->rename_edit));
+    list_filter_set(app, rubraview_textedit_text(&app->rename_ec.te));
 }
 
 void list_filter_files_end(app_state_t *app) {

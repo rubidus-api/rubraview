@@ -414,7 +414,7 @@ void password_ask(app_state_t *app, proven_u8str_view_t archive_path, bool wrong
     proven_sys_mem_copy(app->password_for, archive_path.ptr, archive_path.size);
     app->password_for_len = archive_path.size;
     if (app->rename_active) rename_end(app);
-    app->rename_edit = rubraview_textedit_make(app->rename_buffer, sizeof(app->rename_buffer));
+    rename_field_begin(app);
     app->rename_active = true;
     app->rename_is_password = true;
     app->rename_composing_length = 0;
@@ -428,7 +428,7 @@ void password_commit(app_state_t *app) {
     rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     app->rename_composing_length = 0;
     char typed[sizeof(app->rename_buffer)];
-    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_edit);
+    proven_u8str_view_t text = rubraview_textedit_text(&app->rename_ec.te);
     size_t n = text.size < sizeof(typed) ? text.size : sizeof(typed) - 1;
     proven_sys_mem_copy(typed, text.ptr, n);
     char path[sizeof(app->password_for)];
