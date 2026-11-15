@@ -7,6 +7,17 @@
 #include "rubraview/fileop.h"
 #include "rubraview/pal/pal_window.h"
 #include "rubraview/pal/pal_render.h"
+#include "rubraview/pal/pal_thumbs.h"
+#include "rubraview/ui_scrollbar.h"
+
+/* RV-289.7: a file's picture, kept while the list is open (by its path, size and time) */
+typedef struct clashui_thumb {
+    char    *path;
+    uint64_t size;
+    int64_t  mtime;
+    int      state;               /* 0 not asked, 1 asked, 2 made, 3 none to be had */
+    rubraview_texture_t *texture;
+} clashui_thumb_t;
 
 typedef struct clashui_row {
     uint32_t owner;           /* whose question: a job's id, or an extraction's / an archive's mark */
@@ -40,7 +51,18 @@ struct clashui {
     rubraview_renderer_t *renderer;
     int32_t            frame[4];
     double             px, py;
+    /* RV-289.6: the scroll bar, in rows */
+    rubraview_scrollbar_t      sb;
+    rubraview_scrollbar_hold_t hold;
+    int32_t            rows_shown;
+    /* RV-289.7: the thumbnails — those on screen asked first, then the rows near them */
+    rubraview_thumbs_t *thumbs;
+    clashui_thumb_t    *cache;
+    size_t              ncache, cap;
 };
+
+/* Once a pass: what a held scroll bar does, and the thumbnails taken and asked. */
+void clashui_tick(clashui_t *ui);
 
 /** The rows now waiting (taken over; the ticks of a row already shown are kept). */
 void clashui_set_rows(clashui_t *ui, clashui_row_t *rows, size_t n);

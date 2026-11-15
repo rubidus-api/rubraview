@@ -34,8 +34,83 @@ void clashui_set_rows(clashui_t *ui, clashui_row_t *rows, size_t n) {
     ui->dirty = true;
 }
 
+/* ---- RV-289.7: the thumbnails ---- */
+
+static void clash_thumbs_wake(void *ctx) { (void)ctx; }
+
+/* The cache's slot for a file as it is now (a new slot when its size or time changed). */
+static size_t thumb_slot(clashui_t *ui, const char *path, uint64_t size, int64_t mtime) {
+    for (size_t i = 0; i < ui->ncache; ++i)
+        if (ui->cache[i].path && ui->cache[i].size == size && ui->cache[i].mtime == mtime && rubraview_cstr_cmp(ui->cache[i].path, path) == 0) return i;
+    if (ui->ncache == ui->cap) {
+        size_t cap = ui->cap ? ui->cap * 2 : 64;
+        clashui_thumb_t *more = (clashui_thumb_t *)rubraview_realloc((proven_mem_mut_t){ .ptr = (proven_byte_t *)ui->cache, .size = cap * sizeof *more });
+        if (!more) return SIZE_MAX;
+        ui->cache = more;
+        ui->cap = cap;
+    }
+    ui->cache[ui->ncache] = (clashui_thumb_t){ .path = rubraview_strdup(path), .size = size, .mtime = mtime };
+    return ui->ncache++;
+}
+
+/* Textures belong to the window's renderer: gone with it; what was asked is asked again next time. */
+static void thumbs_drop(clashui_t *ui) {
+    if (ui->thumbs) { rubraview_pal_thumbs_stop(ui->thumbs); ui->thumbs = NULL; }
+    for (size_t i = 0; i < ui->ncache; ++i) {
+        if (ui->cache[i].texture) rubraview_pal_texture_destroy(ui->cache[i].texture);
+        ui->cache[i].texture = NULL;
+        if (ui->cache[i].state != 3) ui->cache[i].state = 0;
+    }
+}
+
+/* A row's side's picture: asked unless it has been. */
+static void thumb_ask(clashui_t *ui, const char *path, uint64_t size, int64_t mtime) {
+    if (!ui->thumbs || !path) return;
+    size_t k = thumb_slot(ui, path, size, mtime);
+    if (k == SIZE_MAX || ui->cache[k].state != 0) return;
+    ui->cache[k].state = rubraview_pal_thumbs_request(ui->thumbs, 1, k, false, 1.0, cstr(path)) ? 1 : 3;
+}
+
+static void row_ask(clashui_t *ui, size_t r) {
+    if (r >= ui->nrows) return;
+    thumb_ask(ui, ui->rows[r].target, ui->rows[r].tsize, ui->rows[r].tmtime);
+    thumb_ask(ui, ui->rows[r].source, ui->rows[r].ssize, ui->rows[r].smtime);
+}
+
+void clashui_tick(clashui_t *ui) {
+    if (!ui->open) return;
+    if (ui->hold.part != RUBRAVIEW_SCROLLBAR_NONE) {   /* RV-289.6: the thumb dragged, or the track or a button held */
+        int32_t first = (int32_t)lround(rubraview_scrollbar_held(&ui->sb, &ui->hold, ui->px, ui->py, rubraview_pal_time_now_seconds()));
+        if (first != ui->scroll) { ui->scroll = first; ui->dirty = true; }
+    }
+    if (!ui->thumbs) return;
+    rubraview_thumb_result_t done;
+    while (rubraview_pal_thumbs_take(ui->thumbs, &done)) {
+        if (done.index < ui->ncache) {
+            clashui_thumb_t *t = &ui->cache[done.index];
+            rubraview_texture_t *texture = NULL;
+            if (done.bgra) {
+                texture = rubraview_pal_texture_create_bgra(ui->renderer, done.width, done.height);
+                if (texture && !rubraview_pal_texture_upload_bgra(texture, done.bgra, done.width * 4)) { rubraview_pal_texture_destroy(texture); texture = NULL; }
+            }
+            if (t->texture) rubraview_pal_texture_destroy(t->texture);
+            t->texture = texture;
+            t->state = texture ? 2 : 3;
+            ui->dirty = true;
+        }
+        rubraview_free(done.bgra);
+    }
+    /* The newest asked is made first: the rows near the screen asked before those on it, so those come first. */
+    int32_t first = ui->scroll, shown = ui->rows_shown > 0 ? ui->rows_shown : 1;
+    for (int32_t r = first + 2 * shown - 1; r >= first + shown; --r) if (r >= 0) row_ask(ui, (size_t)r);
+    for (int32_t r = first - 1; r >= first - shown; --r) if (r >= 0) row_ask(ui, (size_t)r);
+    for (int32_t r = first + shown - 1; r >= first; --r) if (r >= 0) row_ask(ui, (size_t)r);
+}
+
 void clashui_close(clashui_t *ui) {
     if (!ui->open) return;
+    thumbs_drop(ui);
+    ui->hold.part = RUBRAVIEW_SCROLLBAR_NONE;
     rubraview_pal_window_get_frame(ui->window, &ui->frame[0], &ui->frame[1], &ui->frame[2], &ui->frame[3]);
     if (ui->renderer) rubraview_pal_render_destroy(ui->renderer);
     if (ui->window) rubraview_pal_window_destroy(ui->window);
@@ -61,6 +136,8 @@ bool clashui_show(clashui_t *ui, proven_arena_t *arena) {
     ui->open = true;
     ui->dirty = true;
     ui->scroll = 0;
+    ui->thumbs = rubraview_pal_thumbs_start(PROVEN_LIT(IMAGE_FILTER), PROVEN_LIT(VIDEO_FILTER), PROVEN_LIT(ARCHIVE_FILTER), clash_thumbs_wake, NULL);
+    if (ui->thumbs) rubraview_pal_thumbs_generation(ui->thumbs, 1);
     return true;
 }
 
@@ -75,13 +152,14 @@ void clashui_draw(clashui_t *ui) {
     rubraview_renderer_t *r = ui->renderer;
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(ui->window, &w, &h);
-    double dpi = rubraview_pal_window_dpi_scale(ui->window), pad = 12.0 * dpi, row_h = 54.0 * dpi, box = 20.0 * dpi;
+    double dpi = rubraview_pal_window_dpi_scale(ui->window), pad = 12.0 * dpi, row_h = 78.0 * dpi, box = 20.0 * dpi;
+    double pic = 64.0 * dpi, sbw = 14.0 * dpi;
     rubraview_pal_render_begin(r, CW_BACK);
     char head[200];
     int n = rubraview_fmt(head, sizeof head, T("{} names already there — the other files go on being copied or moved meanwhile"), PROVEN_ARG(ui->nrows));
     if (n > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)head, .size = (size_t)n },
                                               (rubraview_pal_rect_t){ pad, pad * 0.5, (double)w - 2 * pad, 26.0 * dpi }, 15.0 * dpi, CW_TEXT, RUBRAVIEW_TEXT_LEFT);
-    double col0 = pad + 10.0 * dpi, col1 = pad + 64.0 * dpi, text_x = pad + 104.0 * dpi, top = 38.0 * dpi;
+    double col0 = pad + 10.0 * dpi, col1 = pad + 64.0 * dpi, pics_x = pad + 100.0 * dpi, text_x = pics_x + 2.0 * pic + 20.0 * dpi, top = 38.0 * dpi;
     rubraview_pal_render_draw_text(r, TU8("coming"), (rubraview_pal_rect_t){ col0 + box * 0.5 - 26.0 * dpi, top, 52.0 * dpi, 18.0 * dpi }, 11.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_CENTER);
     rubraview_pal_render_draw_text(r, TU8("there"), (rubraview_pal_rect_t){ col1 + box * 0.5 - 26.0 * dpi, top, 52.0 * dpi, 18.0 * dpi }, 11.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_CENTER);
     double y = top + 22.0 * dpi, foot = (double)h - 96.0 * dpi;
@@ -89,6 +167,12 @@ void clashui_draw(clashui_t *ui) {
     if (rows < 1) rows = 1;
     if (ui->scroll > (int32_t)ui->nrows - rows) ui->scroll = (int32_t)ui->nrows - rows;
     if (ui->scroll < 0) ui->scroll = 0;
+    ui->rows_shown = rows;
+    /* RV-289.6: a bar at the right as soon as the rows are more than the window shows */
+    ui->sb = (rubraview_scrollbar_t){ .area = { (double)w - pad * 0.5 - sbw, y, sbw, (double)rows * row_h }, .button = sbw, .total = (double)ui->nrows,
+                                      .shown = (double)rows, .first = (double)ui->scroll, .step = 1.0, .min_thumb = 24.0 * dpi };
+    bool bar = rubraview_scrollbar_needed(&ui->sb);
+    double right = bar ? ui->sb.area.x - 6.0 * dpi : (double)w - pad;
     cw_nbox = 0;
     for (int32_t k = 0; k < rows && (size_t)(ui->scroll + k) < ui->nrows; ++k) {
         clashui_row_t *row = &ui->rows[ui->scroll + k];
@@ -103,8 +187,29 @@ void clashui_draw(clashui_t *ui) {
             if (cw_nbox < 256) { cw_box[cw_nbox][c] = b; }
         }
         if (cw_nbox < 256) cw_box_row[cw_nbox++] = (size_t)(ui->scroll + k);
+        for (int c = 0; c < 2; ++c) {   /* RV-289.7: the one coming, then the one there */
+            const char *path = c == 0 ? row->source : row->target;
+            size_t k = SIZE_MAX;
+            for (size_t i = 0; path && i < ui->ncache && k == SIZE_MAX; ++i)
+                if (ui->cache[i].size == (c == 0 ? row->ssize : row->tsize) && ui->cache[i].mtime == (c == 0 ? row->smtime : row->tmtime) &&
+                    rubraview_cstr_cmp(ui->cache[i].path, path) == 0) k = i;
+            rubraview_pal_rect_t frame = { pics_x + (double)c * (pic + 8.0 * dpi), ry + (row_h - pic) * 0.5, pic, pic };
+            rubraview_pal_render_fill_rect(r, frame, 0xFF22262Cu, 3.0 * dpi);
+            const clashui_thumb_t *t = k != SIZE_MAX ? &ui->cache[k] : NULL;
+            if (t && t->texture) {
+                int32_t tw = 0, th = 0;
+                rubraview_pal_texture_size(t->texture, &tw, &th);
+                double sc = tw > 0 && th > 0 ? fmin(pic / (double)tw, pic / (double)th) : 1.0;
+                double dx = frame.x + (pic - (double)tw * sc) * 0.5, dy = frame.y + (pic - (double)th * sc) * 0.5;
+                rubraview_pal_render_draw_texture(r, t->texture, rubraview_mat3x2_multiply(rubraview_mat3x2_scale(sc, sc), rubraview_mat3x2_translate(dx, dy)),
+                                                  RUBRAVIEW_INTERP_LINEAR);
+            } else {   /* not yet, or none: its kind in words */
+                proven_u8str_view_t ext = rubraview_path_ext(cstr(path ? path : ""));
+                rubraview_pal_render_draw_text(r, t && t->state == 3 ? ext : PROVEN_LIT("..."), frame, 11.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_CENTER);
+            }
+        }
         proven_u8str_view_t name = rubraview_path_basename(cstr(row->target));
-        rubraview_pal_render_draw_text(r, name, (rubraview_pal_rect_t){ text_x, ry + 4.0 * dpi, (double)w - text_x - pad, 22.0 * dpi }, 14.0 * dpi, CW_TEXT, RUBRAVIEW_TEXT_LEFT);
+        rubraview_pal_render_draw_text(r, name, (rubraview_pal_rect_t){ text_x, ry + 12.0 * dpi, right - text_x, 22.0 * dpi }, 14.0 * dpi, CW_TEXT, RUBRAVIEW_TEXT_LEFT);
         char ss[32], ts[32], sw[64], tw[64], line[1400];
         (void)rubraview_picker_size_text(ss, sizeof ss, row->ssize);
         (void)rubraview_picker_size_text(ts, sizeof ts, row->tsize);
@@ -113,7 +218,22 @@ void clashui_draw(clashui_t *ui) {
                               PROVEN_ARG(rubraview_path_dirname(cstr(row->source))), PROVEN_ARG(ts), PROVEN_ARG(tw),
                               PROVEN_ARG(row->kind_differs ? T("   (a file and a folder: skip or keep both)") : ""));
         if (m > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)m < sizeof line ? (size_t)m : sizeof line - 1 },
-                                                  (rubraview_pal_rect_t){ text_x, ry + 26.0 * dpi, (double)w - text_x - pad, 20.0 * dpi }, 12.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_LEFT);
+                                                  (rubraview_pal_rect_t){ text_x, ry + 38.0 * dpi, right - text_x, 20.0 * dpi }, 12.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_LEFT);
+    }
+    if (bar) {   /* drawn as the viewer's lists draw theirs (scrollbars.c) */
+        rubraview_scrollbar_part_t over = rubraview_scrollbar_hit(&ui->sb, ui->px, ui->py);
+        rubraview_rect_t tr = rubraview_scrollbar_track(&ui->sb), th = rubraview_scrollbar_thumb(&ui->sb);
+        double radius = sbw * 0.5;
+        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ tr.x, tr.y, tr.width, tr.height }, 0x28FFFFFFu, radius);
+        uint32_t thumb = ui->hold.part == RUBRAVIEW_SCROLLBAR_THUMB ? 0xF0B0B0B0u : over != RUBRAVIEW_SCROLLBAR_NONE ? 0xE0909090u : 0xB0808080u;
+        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ th.x + 2.0 * dpi, th.y + 1.0 * dpi, th.width - 4.0 * dpi, th.height - 2.0 * dpi }, thumb, radius - 2.0 * dpi);
+        for (int i = 0; i < 2; ++i) {
+            rubraview_scrollbar_part_t part = i == 0 ? RUBRAVIEW_SCROLLBAR_UP : RUBRAVIEW_SCROLLBAR_DOWN;
+            rubraview_rect_t b = i == 0 ? rubraview_scrollbar_up(&ui->sb) : rubraview_scrollbar_down(&ui->sb);
+            rubraview_pal_rect_t bx = { b.x, b.y + 1.0 * dpi, b.width, b.height - 1.0 * dpi };
+            rubraview_pal_render_fill_rect(r, bx, ui->hold.part == part ? 0x70FFFFFFu : over == part ? 0x40FFFFFFu : 0x20FFFFFFu, 2.0 * dpi);
+            rubraview_pal_render_draw_text(r, i == 0 ? PROVEN_LIT("\xE2\x96\xB2") : PROVEN_LIT("\xE2\x96\xBC"), bx, b.width * 0.62, 0xE0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        }
     }
     /* the foot: what the boxes mean, the answers for all, the copy's same file */
     rubraview_pal_render_draw_text(r, TU8("Both ticked: both kept (the one coming as \"name (2)\"). Only the one coming: it replaces the one there (that one to the Recycle Bin). Otherwise: left as it is."),
@@ -194,7 +314,16 @@ size_t clashui_pump(clashui_t *ui) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL: ui->scroll += event.mouse.wheel_delta > 0 ? -2 : 2; ui->dirty = true; break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: ui->px = event.mouse.x; ui->py = event.mouse.y; ui->dirty = true; break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
-                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT) press(ui, event.mouse.x, event.mouse.y);
+                if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                if (rubraview_scrollbar_hit(&ui->sb, event.mouse.x, event.mouse.y) != RUBRAVIEW_SCROLLBAR_NONE) {   /* RV-289.6 */
+                    ui->scroll = (int32_t)lround(rubraview_scrollbar_press(&ui->sb, &ui->hold, event.mouse.x, event.mouse.y, rubraview_pal_time_now_seconds()));
+                    ui->dirty = true;
+                    break;
+                }
+                press(ui, event.mouse.x, event.mouse.y);
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (ui->hold.part != RUBRAVIEW_SCROLLBAR_NONE) { ui->hold.part = RUBRAVIEW_SCROLLBAR_NONE; ui->dirty = true; }
                 break;
             case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
                 if (key_is(event.key.combo, "Escape")) { closed(ui); return handled; }

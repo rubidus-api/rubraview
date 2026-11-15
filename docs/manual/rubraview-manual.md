@@ -1543,8 +1543,8 @@ RAR, ALZ or EGG cannot be written as it is: it asks to become a ZIP or a
 Move here first check every name in the folder. What clashes with nothing
 is copied or moved at once, in the background (the line at the top counts
 it); the names already there wait in **Rubraview - names already there**:
-for each, the one coming and the one there (size, date, folder) and two
-ticks. Both ticked keeps both (the one coming as `name (2).jpg`), only the
+for each, the one coming and the one there (a picture of each, the size,
+date and folder) and two ticks; a long list scrolls with its bar or the wheel. Both ticked keeps both (the one coming as `name (2).jpg`), only the
 one coming replaces the one there (that one goes to the Recycle Bin), and
 otherwise it is left. **Apply the ticks** (`Enter`), or answer all at once:
 **Overwrite all**, **Keep both, all**, **Skip all**, **Only the same ones**

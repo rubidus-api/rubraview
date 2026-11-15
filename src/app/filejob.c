@@ -347,6 +347,7 @@ void draw_clash_window(app_state_t *app) { (void)app; clashui_draw(&g_ui); }
 size_t clash_pump(app_state_t *app) {
     bool was = g_ui.open;
     size_t n = clashui_pump(&g_ui);
+    clashui_tick(&g_ui);
     if (was && !g_ui.open) window_block_give(app, &app->clash_block);
     return n;
 }

@@ -485,6 +485,7 @@ int jobproc_main(const wchar_t *pipe_name) {
             clashui_close(&ui);
         }
         (void)clashui_pump(&ui);
+        clashui_tick(&ui);
         clashui_draw(&ui);
         if (pw_pump(&pw)) {   /* closed: while it works, the job stops after the file in hand */
             if (!ended) { InterlockedExchange(&J.stop, 1); SetEvent(J.wake); }
