@@ -92,6 +92,9 @@ const char *rubraview_default_keymap(void) {
     "copy_to_other_folder = \"Alt+C\"\n"
     "move_to_other_folder = \"Alt+M\"\n"
     "toggle_classify = \"K\"\n"   /* RV-133: set files aside for the nine folders */
+    /* RV-296, RV-297 (owner, 2026-11-16: "g의 파일 정리 동작을 이미지 뿐만 아니라 다른 동영상이나 음악, 텍스트파일에도"):
+       the folders card for any file on screen */
+    "folder_card = \"G\"\n"
     /* RV-108: the frame on screen of a film or an animation, or the picture itself; a text's selection is its own Ctrl+C. */
     "copy_frame = \"Ctrl+C\"\n"
     "save_frame = \"Ctrl+Shift+E\"\n"
@@ -159,9 +162,8 @@ const char *rubraview_default_keymap(void) {
     "flip_horizontal = \"H\"\n"
     "flip_vertical = \"V\"\n"
     "toggle_nearest = \"N\"\n"
-    /* RV-296 (owner, 2026-11-16: "기본 단축키는 g"): the folders card; the pixel grid moves to Shift+G */
-    "folder_card = \"G\"\n"
-    "toggle_pixel_grid = \"Shift+G\"\n"
+    /* RV-297 (owner, 2026-11-16: "그 이전 g의 기본 동작은 j로"): the pixel grid on J (G until 1.45, Shift+G in 1.46) */
+    "toggle_pixel_grid = \"J\"\n"
     "toggle_layout = \"B\"\n"
     "toggle_spread_detect = \"Shift+B\"\n"
     "\n"
@@ -284,6 +286,11 @@ const char *rubraview_default_keymap_retired(void) {
     "toggle_slideshow = \"S, F5\"\n"
     /* RV-214: the arrows' defaults before Shift moved the picture */
     "[image]\n"
+    "toggle_pixel_grid = \"G\"\n"         /* RV-297: the grid's keys before J */
+    "toggle_pixel_grid = \"Shift+G\"\n"
+    /* RV-297 (owner, 2026-11-16: "단축키 설정에 g로 폴더에 이동 혹은 복사가 안되어요"): a keymap.ini kept from before 1.46 had
+       G on the grid, so 1.46 added the folders card with no key at all; it takes G now that the grid has J */
+    "folder_card = \"\"\n"
     "pan_left = \"Left\"\n"
     "pan_right = \"Right\"\n"
     "pan_up = \"Up\"\n"

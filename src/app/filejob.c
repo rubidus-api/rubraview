@@ -165,6 +165,7 @@ void jobnotes_check(app_state_t *app) {
 static void put_start(fj_job_t *job, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, app_state_t *app) {
     rubraview_jobwire_start_t st = {
         .moving = job->moving, .dir = dir, .basket = job->basket, .from_cut = job->from_cut, .viewer_page = job->viewer_page,
+        .quiet = job->viewer_page >= 0,   /* RV-297: the file on screen: said in the viewer, no window unless needed */
         .viewer_path = cstr(job->viewer_path ? job->viewer_path : ""), .temp_dir = cstr(job->temp_dir ? job->temp_dir : ""),
         .same_recycles_copy = g_same_recycles_copy, .lang_file = cstr(lang_file_in_use()),
         .ui_font = rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("ui_font")),

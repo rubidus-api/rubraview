@@ -111,6 +111,7 @@ ships with, so it cannot drift from them.
 | `Alt+C` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
 | `Alt+M` | Move the file on screen to a folder typed or browsed; one not there yet is made |
 | `K` | Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once |
+| `G` | Folders card: the default folder and folders 1 to 9; CC / MM copy / move the file to the default one, C1 / M1 to folder 1 |
 | `Ctrl+C` | Copy the frame on screen (a film, an animation), or the picture itself |
 | `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
 
@@ -159,8 +160,7 @@ ships with, so it cannot drift from them.
 | `H` | Flip left-right |
 | `V` | Flip upside down |
 | `N` | Crisp scaling for pixel art |
-| `G` | Folders card: the default folder and folders 1 to 9; CC / MM copy / move the file to the default one, C1 / M1 to folder 1 |
-| `Shift+G` | Pixel grid past 400% |
+| `J` | Pixel grid past 400% |
 | `B` | Layout: one page, two pages, webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
 

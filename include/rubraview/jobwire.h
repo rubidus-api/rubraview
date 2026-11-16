@@ -86,6 +86,7 @@ bool rubraview_jobwire_done(const rubraview_jobwire_msg_t *msg);
 
 typedef struct rubraview_jobwire_start {
     bool     moving;
+    bool     quiet;                 /* RV-297: no window unless it takes long, asks or fails; gone when it ended well (in moving's byte, bit 1) */
     proven_u8str_view_t dir;        /* the folder they go into */
     int32_t  basket;                /* the basket it empties as it moves, or -1 */
     bool     from_cut;

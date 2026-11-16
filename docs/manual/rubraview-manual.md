@@ -933,7 +933,7 @@ Moves, copies and renames do undo properly.
 
 ### The folders card
 
-`G` on a page opens a card listing the **default folder** (Settings ›
+`G` on any file — a picture, a film, a song or a text — opens a card listing the **default folder** (Settings ›
 Files › Copy to) and **folders 1 to 9**. Click a path, or light its row
 with the arrows and press `Enter`, to type it in place (`Enter` keeps it,
 `Esc` leaves it); **Browse...** picks it with Windows' dialog. Then:
@@ -944,7 +944,7 @@ with the arrows and press `Enter`, to type it in place (`Enter` keeps it,
 
 A move takes the file out of the list and shows the next one; when it
 was the last, the list is empty. A name already there is asked about, as
-a paste's is. The pixel grid, `G` before, is `Shift+G`.
+a paste's is. The pixel grid, `G` before, is `J`.
 
 ### Classifying
 
@@ -2255,6 +2255,7 @@ listed under a later heading only means that while that is on screen.
 | `Alt+C` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
 | `Alt+M` | Move the file on screen to a folder typed or browsed; one not there yet is made |
 | `K` | Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once |
+| `G` | Folders card: the default folder and folders 1 to 9; CC / MM copy / move the file to the default one, C1 / M1 to folder 1 |
 | `Ctrl+C` | Copy the frame on screen (a film, an animation), or the picture itself |
 | `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
 
@@ -2303,8 +2304,7 @@ listed under a later heading only means that while that is on screen.
 | `H` | Flip left-right |
 | `V` | Flip upside down |
 | `N` | Crisp scaling for pixel art |
-| `G` | Folders card: the default folder and folders 1 to 9; CC / MM copy / move the file to the default one, C1 / M1 to folder 1 |
-| `Shift+G` | Pixel grid past 400% |
+| `J` | Pixel grid past 400% |
 | `B` | Layout: one page, two pages, webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
 

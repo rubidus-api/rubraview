@@ -4111,3 +4111,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: the curation folders 1 to 9 and the copy and move folders were set only in Settings › Files; copying to them took Ctrl+Shift+C / M or the classify window.
 - Decision: `foldercard.c`, `folder_card` on G in the image context (the pixel grid to Shift+G): the default folder is Settings' "Copy to" (`curation.copy_dir`), used by CC and MM both — "Move to" (`curation.move_dir`) stays Ctrl+Shift+M's —, rows 1..9 `curation.dir_N`; a path is edited on the one edit control (D-358), kept in settings at once; C or M then C / M / a digit puts the file through `filing_put_to` (the file job, D-311's names, the page taken out of the list when a move ends); a folder not set is edited instead. The list emptied by the last move shows nothing and the plain caption.
 - Consequences: R323; T467 on the VM, `test_default_keymap`.
+
+## D-362: The Folders Card On Every File, The Grid On J, The Viewer's Own Copies Quiet
+
+- Date: 2026-11-16
+- Status: Accepted (owner 2026-11-16: "동영상이나 음악, 텍스트파일에도 ... 그 이전 g의 기본 동작은 j로", "단축키 설정에 g로 폴더에 이동 혹은 복사가 안되어요", "창이 아예 안뜨고 메인 창에서 잠시 메시지만"; RV-297).
+- Context: D-361 put `folder_card` in [image]; a keymap.ini saved before (the grid on G) was given the card with no key by `rubraview_keymap_add_missing`, so G kept the grid and the card had no key to change; each copy of the file on screen opened a progress window that stayed with its summary.
+- Decision: `folder_card = "G"` in [file] (asked in every mode); `toggle_pixel_grid = "J"`; retired: the grid's `G` and `Shift+G` and the card's empty binding, so such a file gets today's keys. START carries `quiet` (bit 1 of moving's byte) for a job of the file on screen (`viewer_page` ≥ 0): the job opens its window only after 1.5 s, or when it ended badly; ended well it closes it; the clash window comes as before; the viewer says "copied: name" / "moved: name".
+- Consequences: R324; `test_keymap`, `test_default_keymap`, VM T468.

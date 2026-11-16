@@ -123,7 +123,7 @@ void rubraview_jobwire_put_start(rubraview_jobwire_out_t *out, const rubraview_j
                                  const proven_u8str_view_t *sources, size_t count) {
     if (!out || !s || count > UINT32_MAX) return;
     rubraview_jobwire_begin(out, RUBRAVIEW_JOBWIRE_START);
-    rubraview_jobwire_put_u8(out, s->moving);
+    rubraview_jobwire_put_u8(out, (uint8_t)((s->moving ? 1u : 0u) | (s->quiet ? 2u : 0u)));
     rubraview_jobwire_put_str(out, s->dir);
     rubraview_jobwire_put_i32(out, s->basket);
     rubraview_jobwire_put_u8(out, s->from_cut);
@@ -141,7 +141,9 @@ void rubraview_jobwire_put_start(rubraview_jobwire_out_t *out, const rubraview_j
 
 void rubraview_jobwire_get_start(rubraview_jobwire_msg_t *msg, rubraview_jobwire_start_t *s) {
     if (!s) return;
-    s->moving = rubraview_jobwire_get_u8(msg) != 0;
+    uint8_t m = rubraview_jobwire_get_u8(msg);
+    s->moving = (m & 1u) != 0;
+    s->quiet = (m & 2u) != 0;
     s->dir = rubraview_jobwire_get_str(msg);
     s->basket = rubraview_jobwire_get_i32(msg);
     s->from_cut = rubraview_jobwire_get_u8(msg) != 0;

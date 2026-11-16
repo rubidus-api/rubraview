@@ -29,6 +29,8 @@ static struct {
     _Atomic uint64_t copied;
     bool    prepared, finished, skip_clashes;   /* skip_clashes: the clash window closed unanswered (RV-289.5) */
     bool    recycles;
+    bool    quiet, quiet_shown;                 /* RV-297: the viewer's file on screen: a window only when it takes long or did not go well */
+    double  began;
     jp_answer_t answers[JP_ANSWERS];
     size_t  nanswers;
     /* what the worker shows the main thread */
@@ -730,6 +732,8 @@ static bool start_job(proven_arena_t *arena, rubraview_jobwire_msg_t *m, clashui
     char *face = rubraview_strndup_view(st.ui_font);
     ui->ui_font = face ? proven_u8str_view_from_cstr(face) : PROVEN_LIT("");
     pw->moving = st.moving;
+    J.quiet = st.quiet;
+    J.began = rubraview_pal_time_now_seconds();
     (void)rubraview_fmt(pw->head, sizeof pw->head, st.moving ? T("moving {} into {}") : T("copying {} into {}"),
                         PROVEN_ARG(st.count), PROVEN_ARG(rubraview_path_basename(st.dir)));
     ui->same_recycles_copy = J.recycles = st.same_recycles_copy;
@@ -792,7 +796,7 @@ int jobproc_main(const wchar_t *pipe_name) {
                 if (m.type == RUBRAVIEW_JOBWIRE_START && !started) {
                     started = start_job(arena, &m, &ui, &lang, &temp_dir, &pw);
                     if (!started) { code = 3; goto out; }
-                    (void)pw_show(&pw, arena, ui.ui_font, rubraview_pal_time_now_seconds());
+                    if (!J.quiet) (void)pw_show(&pw, arena, ui.ui_font, rubraview_pal_time_now_seconds());
                 } else if (m.type == RUBRAVIEW_JOBWIRE_ARCHIVE && !started) {   /* RV-292 */
                     started = start_archive(arena, &m, &ui, &lang, &pw);
                     if (!started) { code = 3; goto out; }
@@ -947,6 +951,15 @@ int jobproc_main(const wchar_t *pipe_name) {
             if (temp_dir) (void)rubraview_pal_fs_delete_tree(cstr(temp_dir));   /* a page out of an archive, written for the job */
             pw_summary(&pw);
             clashui_close(&ui);
+            if (J.quiet) {   /* RV-297 (owner, 2026-11-16: "창이 자동으로 닫혀야 ... 메인 창에서 잠시 메시지만"): the viewer says it */
+                bool well = now.failed == 0 && J.stop == 0;
+                if (well) pw_close(&pw);
+                else if (!pw.open) (void)pw_show(&pw, arena, ui.ui_font, t);   /* what went wrong is read here */
+            }
+        }
+        if (J.quiet && !J.quiet_shown && !ended && !pw.open && t - J.began > 1.5) {   /* a long one shows how far it is, once */
+            J.quiet_shown = true;
+            (void)pw_show(&pw, arena, ui.ui_font, t);
         }
         (void)clashui_pump(&ui);
         clashui_tick(&ui);

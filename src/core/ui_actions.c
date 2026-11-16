@@ -277,7 +277,7 @@ uint32_t rubraview_pin_icon(bool on) {
 const char *rubraview_action_hint(proven_u8str_view_t action) {
     const struct { const char *action; const char *hint; } HINTS[] = {
         { "toggle_nearest", T("Crisp - enlarged, every pixel stays a sharp square instead of being smoothed (pixel art, icons, old games). Click: on / off (N)") },
-        { "toggle_pixel_grid", T("Grid - zoomed past 400 %, a thin line around every pixel, to see each one. Click: on / off (Shift+G)") },
+        { "toggle_pixel_grid", T("Grid - zoomed past 400 %, a thin line around every pixel, to see each one. Click: on / off (J)") },
     };
     for (size_t i = 0; i < sizeof(HINTS) / sizeof(HINTS[0]); ++i) {
         if (proven_u8str_view_eq(action, proven_u8str_view_from_cstr(HINTS[i].action))) return HINTS[i].hint;
