@@ -123,7 +123,8 @@ bool clashui_show(clashui_t *ui, proven_arena_t *arena) {
     if (ui->open) return true;
     if (ui->nrows == 0 || !arena) return false;
     /* RV-289: no owner — a job's window outlives the viewer that started it */
-    rubraview_window_config_t config = { .title = T("Rubraview - names already there"), .width = 980, .height = 620 };
+    rubraview_window_config_t config = { .title = T("Rubraview - names already there"), .width = 980, .height = 620,
+                                         .no_activate = true };   /* RV-298 (owner, 2026-11-16: "포커스는 여전히 메인 창에 유지"): shown, not given the keys */
     ui->window = rubraview_pal_window_create(arena, &config);
     if (!ui->window) return false;
     if (ui->frame[2] > 0 && ui->frame[3] > 0) rubraview_pal_window_set_frame(ui->window, ui->frame[0], ui->frame[1], ui->frame[2], ui->frame[3]);

@@ -4119,3 +4119,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: D-361 put `folder_card` in [image]; a keymap.ini saved before (the grid on G) was given the card with no key by `rubraview_keymap_add_missing`, so G kept the grid and the card had no key to change; each copy of the file on screen opened a progress window that stayed with its summary.
 - Decision: `folder_card = "G"` in [file] (asked in every mode); `toggle_pixel_grid = "J"`; retired: the grid's `G` and `Shift+G`, so such a file has the grid on J; a card with no key is never given one (owner, same day: "진짜 일부러 비워둘 수 있잖아요" — an empty key may be the reader's choice), it is set in Settings › Keys by function, where keyless actions are listed; a file without the card gets G from `add_missing`. START carries `quiet` (bit 1 of moving's byte) for a job of the file on screen (`viewer_page` ≥ 0): the job opens its window only after 1.5 s, or when it ended badly; ended well it closes it; the clash window comes as before; the viewer says "copied: name" / "moved: name".
 - Consequences: R324; `test_keymap`, `test_default_keymap`, VM T468.
+
+## D-363: A Job's Windows Are Shown, Not Activated
+
+- Date: 2026-11-16
+- Status: Accepted (owner 2026-11-16: "포커스는 여전히 메인 창에 유지", "압축 풀거나 할 때도 마찬가지로요"; RV-298).
+- Context: RV-296 (D-361) showed the progress windows with `no_activate`; the clash window ("names already there", `clashui.c`, in a job and in the viewer for an extraction's names) still took the foreground.
+- Decision: `clashui_show` makes its window with `no_activate` too; every job window is now shown without activation and takes the keys only when clicked. `packwin` (Compress) keeps activating: it is asked for and typed in at once. Explorer's extraction window (`extractwin`, the viewer hidden) is the only window then and keeps its way.
+- Consequences: R325; VM T469.
