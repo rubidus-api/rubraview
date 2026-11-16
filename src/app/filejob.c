@@ -333,6 +333,13 @@ static void job_take(app_state_t *app, fj_job_t *job, rubraview_jobwire_msg_t *m
         job->done_fields = (uint8_t *)rubraview_alloc(m->left ? m->left : 1);
         if (job->done_fields) { proven_sys_mem_copy(job->done_fields, m->p, m->left); job->done_len = m->left; }
         job->ended = true;
+    } else if (m->type == RUBRAVIEW_JOBWIRE_PACK_CHOICES) {   /* RV-294: kept as the viewer's settings */
+        bool sevenz = rubraview_jobwire_get_u8(m) != 0;
+        int32_t level = rubraview_jobwire_get_i32(m), method = rubraview_jobwire_get_i32(m);
+        bool solid_off = rubraview_jobwire_get_u8(m) != 0;
+        uint64_t split = rubraview_jobwire_get_u64(m);
+        bool names = rubraview_jobwire_get_u8(m) != 0;
+        if (rubraview_jobwire_done(m)) archwork_pack_choices_taken(app, sevenz, level, method, solid_off, split, names);
     } else if (m->type == RUBRAVIEW_JOBWIRE_END) {
         rubraview_jobwire_end_t e;
         rubraview_jobwire_get_end(m, &e);

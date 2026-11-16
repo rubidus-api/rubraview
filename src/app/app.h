@@ -1297,7 +1297,6 @@ typedef struct app_state {
        memory only — never the settings, a log or the clipboard — and are
        wiped when the viewer closes. */
     bool                   rename_is_password;
-    bool                   rename_is_pack;          /* RV-207: the Compress box (the new archive's place) */
     bool                   password_for_extract;    /* the password box asks for an archive being extracted */
     bool                   rename_is_extract;       /* RV-240: the box asks where an extraction goes */
     bool                   extract_done;            /* RV-240: an extraction ended; its card asks what next */
@@ -1308,24 +1307,12 @@ typedef struct app_state {
     char                   playlist_ask_path[RUBRAVIEW_ARCHIVE_PATH];
     rubraview_pal_rect_t   playlist_ask_btn[4];
     bool                   password_shown;          /* D-262: the eye: an unpacking password shown, any letter taken */
-    int32_t                pack_level;              /* the Compress window's level step: 0 store ... 5 ultra (D-260) */
+    int32_t                pack_level;              /* the kept Compress choices, handed to its job's window (D-266, RV-294): the level step 0 store ... 5 ultra */
     int32_t                pack_method;             /* its codec (rubraview_pack_method_t; DEFAULT = the format's first) */
     bool                   pack_solid_off;          /* 7z: one block a file */
     char                   pack_split[32];          /* RV-248: its split size as typed ("700M", "10,000,000"; empty none) */
     size_t                 pack_split_len;
-#define PACK_CHIPS_MAX 32   /* D-260: the Compress window's chips */
-    rubraview_pal_rect_t   pack_chip[PACK_CHIPS_MAX];
-    int32_t                pack_chip_kind[PACK_CHIPS_MAX];
-    bool                   pack_chip_off[PACK_CHIPS_MAX];
-    int32_t                pack_chip_n;
-    rubraview_pal_rect_t   pack_panel;              /* the window's rows: a press there is its own */
-    int32_t                pack_focus;              /* D-261: the field typed in: 0 the name, 1 the password, 2 it again, 3 the split size (RV-248) */
-    char                   pack_name[1024];         /* the name while a password is typed */
-    size_t                 pack_name_len;
-    char                   pack_pw[2][256];         /* the password and its repeat: memory only, wiped when done */
-    size_t                 pack_pw_len[2];
     bool                   pack_names_hidden;       /* 7z: its names behind the password (not written yet) */
-    rubraview_pal_rect_t   pack_field[4];           /* the name box, the password's, the repeat's, the split size's */
     bool                   pack_ask;                /* D-267: an older split set's parts in the way: recycle them? */
     size_t                 pack_ask_parts;
     char                   pack_ask_set[RUBRAVIEW_ARCHIVE_PATH];
@@ -1917,10 +1904,6 @@ extern double g_col_w[RUBRAVIEW_PICKER_SORT_COUNT];
 
 /* Moved from main.c: more than one file uses them (RV-163). */
 enum { RENAME_BTN_OK = 1, RENAME_BTN_CANCEL, RENAME_BTN_BROWSE, RENAME_BTN_BACK, RENAME_BTN_EYE /* D-262 */ };
-/* D-260: the Compress window's rows; a chip's kind is its row * 16 + its place in the row */
-enum { PACK_ROW_FORMAT = 0, PACK_ROW_LEVEL, PACK_ROW_METHOD, PACK_ROW_SOLID, PACK_ROW_SPLIT,
-       PACK_ROW_PASSWORD, PACK_ROW_AGAIN, PACK_ROW_NAMES,   /* D-261: the password typed twice, the names hidden or not */
-       PACK_ROWS };
 
 
 /* Shared variables, defined in the file that owns them. */
@@ -2335,16 +2318,10 @@ void picker_leave_archive(app_state_t *app);
 bool picker_archive_rel(const app_state_t *app, proven_u8str_view_t path, char *out, size_t cap);
 void archwork_compress_quick(app_state_t *app);
 void archwork_compress_ask(app_state_t *app);
-void archwork_pack_typed(app_state_t *app);
-void archwork_pack_cancelled(app_state_t *app);
-bool archwork_pack_is_7z(const app_state_t *app);
-void archwork_pack_focus(app_state_t *app, int32_t to);
+void archwork_pack_choices_taken(app_state_t *app, bool sevenz, int32_t level, int32_t method, bool solid_off, uint64_t split, bool names_hidden);
 bool password_plain_only(const app_state_t *app);              /* D-262: the box takes only `!` to `~` */
 void rename_take_text(app_state_t *app, proven_u8str_view_t text);
 void password_eye_toggle(app_state_t *app);
-void archwork_pack_set_format(app_state_t *app, bool sevenz);
-rubraview_pack_method_t archwork_pack_method(const app_state_t *app, bool sevenz);
-bool pack_window_press(app_state_t *app, double x, double y);   /* D-260: a chip of the Compress window */
 void archwork_pack_ask_answer(app_state_t *app, bool yes);     /* D-267 */
 /* RV-240: where an extraction goes, asked in a card; what to do when it is done */
 void archwork_extract_dest_typed(app_state_t *app);

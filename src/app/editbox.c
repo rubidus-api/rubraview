@@ -155,7 +155,7 @@ void editbox_draw(rubraview_renderer_t *r, const rubraview_editctl_t *ec, editbo
     v->x0 = v->box.x + pad - v->scroll;
     size_t a = 0, b = 0;
     rubraview_textedit_selection_range(te, &a, &b);
-    if (a != b) {
+    if (a != b && focused) {   /* RV-294: a field left keeps its selection unshown, as Windows' do */
         double xa = 0.0, xb = 0.0;
         (void)rubraview_pal_render_measure_text(r, (proven_u8str_view_t){ .ptr = all.ptr, .size = map[a] }, v->size, &xa);
         (void)rubraview_pal_render_measure_text(r, (proven_u8str_view_t){ .ptr = all.ptr, .size = map[b] }, v->size, &xb);

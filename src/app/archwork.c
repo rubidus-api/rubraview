@@ -19,6 +19,7 @@ typedef struct xpark {
 typedef struct archwork {
     bool compress;
     bool windowed;                            /* RV-272: asked from Explorer: shown in its own window, not the viewer */
+    bool ask;                                 /* RV-294: the Compress window is the job's: it asks there, then packs */
     /* extracting: the archives in turn */
     char **archives;
     size_t count, at;
@@ -89,6 +90,7 @@ static bool work_start(app_state_t *app, archwork_t *w) {
         a.solid_off = w->pk.solid_off;
         a.names_hidden = w->pk.names_hidden;
         a.volume_bytes = w->pk.volume_bytes;
+        if (w->ask) { a.mode = 1; a.dest = proven_u8str_view_from_cstr(w->dir); }   /* RV-294: asked in the job, a bare name put here */
     } else {
         a.dest = proven_u8str_view_from_cstr(w->dest);
         a.mode = (uint8_t)w->mode;
@@ -326,7 +328,6 @@ static void offered_name(app_state_t *app, archwork_t *w, const char *ext, char 
     rubraview_fmt(out, cap, "{}{}{}.{}", PROVEN_ARG(rubraview_bytes_view((const char *)dir.ptr, (int)dir.size)), PROVEN_ARG(dir_sep(w->dir)), PROVEN_ARG(stem), PROVEN_ARG(ext));
 }
 
-static archwork_t *g_packing;   /* the work being set up by the Compress box and its password */
 static archwork_t *g_older;     /* D-267: the work refused for an older set's parts, waiting for the answer */
 
 static void pack_start(app_state_t *app, archwork_t *w, rubraview_pack_format_t format, int level, rubraview_pack_method_t method,
@@ -388,17 +389,6 @@ static void pack_choices_load(app_state_t *app) {
     app->pack_names_hidden = rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_names")) > 0.5;
 }
 
-static void pack_choices_save(app_state_t *app) {
-    static const char *const KEYS[] = { "pack_format", "pack_level", "pack_method", "pack_solid", "pack_split_bytes", "pack_names" };
-    uint64_t split = 0;   /* RV-248: a size that does not read is not kept */
-    (void)rubraview_pack_split_parse((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_split, .size = app->pack_split_len }, &split);
-    double v[] = { archwork_pack_is_7z(app) ? 1.0 : 0.0, app->pack_level, app->pack_method, app->pack_solid_off ? 1.0 : 0.0,
-                   (double)split, app->pack_names_hidden ? 1.0 : 0.0 };
-    for (size_t i = 0; i < sizeof KEYS / sizeof *KEYS; ++i)
-        rubraview_settings_set(&app->settings, PROVEN_LIT("archive"), proven_u8str_view_from_cstr(KEYS[i]), v[i]);
-    settings_write_if_changed(app, false);
-}
-
 static void compress_go(app_state_t *app, archwork_t *w, bool ask) {
     if (w->source_count == 0) { work_free(w); osd_say(app, TU8("pick the files to compress first")); return; }
     sources_dir(w);
@@ -407,199 +397,36 @@ static void compress_go(app_state_t *app, archwork_t *w, bool ask) {
         pack_start(app, w, RUBRAVIEW_PACK_ZIP, 6, RUBRAVIEW_PACK_METHOD_DEFAULT, false, NULL);
         return;
     }
-    char offer[RUBRAVIEW_ARCHIVE_PATH];
+    /* RV-294 (owner, 2026-11-16: "압축을 실행하는 분리된 프로세스에서 별개의 창으로"): the window is the job's; it is
+       handed the offered name and the kept choices (D-266), and sends back what was chosen to be kept again. */
     pack_choices_load(app);
-    offered_name(app, w, rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_format")) > 0.5 ? "7z" : "zip", offer, sizeof offer);
-    if (g_packing) work_free(g_packing);
-    g_packing = w;
-    if (app->rename_active) rename_end(app);
-    rename_field_begin(app);
-    rubraview_textedit_set(&app->rename_ec.te, proven_u8str_view_from_cstr(offer));
-    rubraview_textedit_select_all(&app->rename_ec.te);
-    app->rename_active = true;
-    app->rename_is_pack = true;
-    app->pack_focus = 0;   /* D-261: the name first; the password fields empty */
-    secure_wipe(rubraview_mem_mut(app->pack_pw, sizeof app->pack_pw));
-    app->pack_pw_len[0] = app->pack_pw_len[1] = 0;
-    app->rename_composing_length = 0;
-    rubraview_pal_window_text_input(app->window, true);
-    osd_say(app, TU8("where the new archive goes, and how it is packed (Tab: the password)"));
+    bool sevenz = rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("pack_format")) > 0.5;
+    offered_name(app, w, sevenz ? "7z" : "zip", w->output, sizeof w->output);
+    uint64_t split = 0;
+    (void)rubraview_pack_split_parse((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_split, .size = app->pack_split_len }, &split);
+    w->ask = true;
+    w->compress = true;
+    w->pk.format = sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP;
+    w->pk.level = app->pack_level;   /* the step: the window's chips */
+    w->pk.method = (rubraview_pack_method_t)app->pack_method;
+    w->pk.solid_off = app->pack_solid_off;
+    w->pk.volume_bytes = split;
+    w->pk.names_hidden = app->pack_names_hidden;
+    w->pk.sources = (const char *const *)w->sources;
+    w->pk.source_count = w->source_count;
+    w->pk.output = w->output;
+    work_start(app, w);
 }
 
-static bool ends_with_ci(const char *s, const char *tail) {
-    size_t n = proven_cstr_len(s), t = proven_cstr_len(tail);
-    return n >= t && rubraview_cstr_cmp_ci(s + n - t, tail) == 0;
-}
-
-/* D-260: the Compress window's format is the name's ending; a chip changes the ending. D-261: the name is in the box
-   while it is typed, in pack_name while a password is. */
-static proven_u8str_view_t pack_name_text(const app_state_t *app) {
-    return app->pack_focus == 0 ? rubraview_textedit_text(&app->rename_ec.te)
-                                : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len };
-}
-
-bool archwork_pack_is_7z(const app_state_t *app) {
-    proven_u8str_view_t t = pack_name_text(app);
-    return t.size >= 3 && t.ptr[t.size - 3] == '.' && t.ptr[t.size - 2] == '7' && (t.ptr[t.size - 1] | 0x20) == 'z';
-}
-
-void archwork_pack_set_format(app_state_t *app, bool sevenz) {
-    if (archwork_pack_is_7z(app) == sevenz) return;
-    proven_u8str_view_t t = pack_name_text(app);
-    char s[RUBRAVIEW_ARCHIVE_PATH];
-    if (t.size + 5 >= sizeof s || t.size + 5 >= sizeof app->pack_name) return;
-    proven_sys_mem_copy(s, t.ptr, t.size);
-    s[t.size] = '\0';
-    size_t n = t.size;
-    if (n >= 4 && rubraview_cstr_cmp_ci(s + n - 4, ".zip") == 0) n -= 4;
-    else if (n >= 3 && rubraview_cstr_cmp_ci(s + n - 3, ".7z") == 0) n -= 3;
-    rubraview_fmt(s + n, sizeof s - n, sevenz ? ".7z" : ".zip");
-    if (app->pack_focus == 0) rubraview_textedit_set(&app->rename_ec.te, proven_u8str_view_from_cstr(s));
-    else { app->pack_name_len = proven_cstr_len(s); proven_sys_mem_copy(app->pack_name, s, app->pack_name_len); }
-    /* a codec the other format does not take goes back to the format's first */
-    if (!rubraview_pack_method_fits(sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP, (rubraview_pack_method_t)app->pack_method))
-        app->pack_method = RUBRAVIEW_PACK_METHOD_DEFAULT;
-}
-
-/* What the box holds put back in its field. */
-static void pack_field_keep(app_state_t *app) {
-    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
-    app->rename_composing_length = 0;
-    proven_u8str_view_t t = rubraview_textedit_text(&app->rename_ec.te);
-    if (app->pack_focus == 0) {
-        app->pack_name_len = t.size < sizeof app->pack_name ? t.size : sizeof app->pack_name - 1;
-        proven_sys_mem_copy(app->pack_name, t.ptr, app->pack_name_len);
-    } else if (app->pack_focus == 3) {   /* RV-248 */
-        app->pack_split_len = t.size < sizeof app->pack_split ? t.size : sizeof app->pack_split - 1;
-        proven_sys_mem_copy(app->pack_split, t.ptr, app->pack_split_len);
-    } else {
-        int k = app->pack_focus - 1;
-        app->pack_pw_len[k] = t.size < sizeof app->pack_pw[k] ? t.size : sizeof app->pack_pw[k] - 1;
-        proven_sys_mem_copy(app->pack_pw[k], t.ptr, app->pack_pw_len[k]);
-    }
-}
-
-/* D-261: the box moves to the name, the password or its repeat (Tab, or a click on the field); RV-248: or the split size. */
-void archwork_pack_focus(app_state_t *app, int32_t to) {
-    if (!app->rename_is_pack || to < 0 || to > 3 || to == app->pack_focus) return;
-    pack_field_keep(app);
-    secure_wipe(rubraview_mem_mut(app->rename_buffer, sizeof app->rename_buffer));
-    secure_wipe(rubraview_mem_mut(app->rename_composing, sizeof app->rename_composing));
-    rename_field_begin(app);
-    proven_u8str_view_t v = to == 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len }
-                          : to == 3 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_split, .size = app->pack_split_len }
-                                    : (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_pw[to - 1], .size = app->pack_pw_len[to - 1] };
-    rubraview_textedit_set(&app->rename_ec.te, v);
-    if (to == 3) rubraview_textedit_select_all(&app->rename_ec.te);   /* RV-248: a new size types over the old */
-    app->pack_focus = to;
-    app->rename_is_password = to == 1 || to == 2;   /* dots, never copied out, wiped when it ends */
-    rubraview_pal_window_text_ime(app->window, to == 0);   /* D-262: a new archive's password in plain letters */
-}
-
-/* The codec the window shows lit: the one chosen, or the format's first. */
-rubraview_pack_method_t archwork_pack_method(const app_state_t *app, bool sevenz) {
-    rubraview_pack_format_t f = sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP;
-    rubraview_pack_method_t m = (rubraview_pack_method_t)app->pack_method;
-    if (m != RUBRAVIEW_PACK_METHOD_DEFAULT && rubraview_pack_method_ready(f, m)) return m;
-    rubraview_pack_method_t first[8];
-    return rubraview_pack_methods(f, first, 8) ? first[0] : RUBRAVIEW_PACK_METHOD_DEFAULT;
-}
-
-/* A chip of the Compress window pressed (D-260). True when the press was one of them. */
-bool pack_window_press(app_state_t *app, double x, double y) {
-    for (int32_t i = 0; i < app->pack_chip_n; ++i) {
-        if (!pal_rect_has(app->pack_chip[i], x, y)) continue;
-        int32_t row = app->pack_chip_kind[i] / 16, k = app->pack_chip_kind[i] % 16;
-        bool sevenz = archwork_pack_is_7z(app);
-        if (app->pack_chip_off[i]) {
-            osd_say(app, row == PACK_ROW_SOLID ? TU8("ZIP packs each file on its own")
-                       : row == PACK_ROW_NAMES && !sevenz ? TU8("ZIP keeps its names readable; 7z can hide them")
-                       : row == PACK_ROW_METHOD && app->pack_level == 0 ? TU8("Store keeps the files as they are: no codec")
-                       : TU8("FultaArc does not write that yet"));
-            return true;
-        }
-        switch (row) {
-            case PACK_ROW_FORMAT: archwork_pack_set_format(app, k == 1); break;
-            case PACK_ROW_LEVEL:  app->pack_level = k; break;
-            case PACK_ROW_METHOD: {
-                rubraview_pack_method_t m[8];
-                size_t n = rubraview_pack_methods(sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP, m, 8);
-                if ((size_t)k < n) app->pack_method = (int32_t)m[k];
-                break;
-            }
-            case PACK_ROW_SOLID:  app->pack_solid_off = k == 1; break;
-            case PACK_ROW_SPLIT: {   /* RV-248: a chip writes its size into the field */
-                static const uint64_t PRESET_MIB[] = { 0, 10, 100, 700, 4095 };
-                if (app->pack_focus == 3) archwork_pack_focus(app, 0);
-                app->pack_split_len = rubraview_pack_split_text(app->pack_split, sizeof app->pack_split,
-                                                                k > 0 && k < 5 ? PRESET_MIB[k] << 20 : 0u);
-                break;
-            }
-            case PACK_ROW_NAMES:  app->pack_names_hidden = k == 1; break;
-            default:              break;
-        }
-        pack_choices_save(app);   /* D-266 */
-        return true;
-    }
-    for (int32_t f = 0; f < 4; ++f) if (pal_rect_has(app->pack_field[f], x, y)) { archwork_pack_focus(app, f); return true; }   /* D-261, RV-248 */
-    return pal_rect_has(app->pack_panel, x, y);   /* between the chips: nothing under it is pressed */
-}
-
-/* Enter in the Compress window (D-261): the two passwords the same, then it is packed. */
-void archwork_pack_typed(app_state_t *app) {
-    pack_field_keep(app);
-    if (app->pack_names_hidden && archwork_pack_is_7z(app) && app->pack_pw_len[0] == 0) {   /* D-263 */
-        osd_say(app, TU8("hidden names need a password: type one"));
-        archwork_pack_focus(app, 1);
-        return;
-    }
-    if (app->pack_pw_len[0] != app->pack_pw_len[1] || proven_sys_mem_cmp(app->pack_pw[0], app->pack_pw[1], app->pack_pw_len[0]) != 0) {
-        osd_say(app, TU8("the two passwords differ: type it again"));
-        archwork_pack_focus(app, app->pack_pw_len[0] ? 2 : 1);
-        return;
-    }
-    uint64_t split_bytes = 0;   /* RV-248: the size as typed, read before anything is done */
-    if (!rubraview_pack_split_parse((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_split, .size = app->pack_split_len }, &split_bytes)) {
-        osd_say(app, TU8("the split size is a number with K, M, G, T or P: 700M, 4G, 10,000,000"));
-        archwork_pack_focus(app, 3);
-        return;
-    }
-    if (split_bytes > 0 && split_bytes < 65536u) {   /* FULTA_ARC_VOLUME_MIN: said, not made larger unasked */
-        osd_say(app, TU8("a split part is 64K at least"));
-        archwork_pack_focus(app, 3);
-        return;
-    }
-    pack_choices_save(app);   /* D-266: the format the name's ending says, too */
-    archwork_t *w = g_packing;
-    g_packing = NULL;
-    proven_u8str_view_t t = { .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len };
-    char pw[256];
-    proven_sys_mem_copy(pw, app->pack_pw[0], app->pack_pw_len[0]);
-    pw[app->pack_pw_len[0]] = '\0';
-    secure_wipe(rubraview_mem_mut(app->pack_pw, sizeof app->pack_pw));
-    app->pack_pw_len[0] = app->pack_pw_len[1] = 0;
-    rename_end(app);
-    if (w && (t.size == 0 || t.size >= sizeof w->output)) { osd_say(app, TU8("not compressed: no name")); work_free(w); w = NULL; }
-    bool bare = true;   /* a name alone goes beside the files, not where the program was started */
-    for (size_t i = 0; w && i < t.size; ++i) if (t.ptr[i] == '\\' || t.ptr[i] == '/' || t.ptr[i] == ':') bare = false;
-    if (w && bare) {
-        int n = rubraview_fmt(w->output, sizeof w->output, "{}{}{}", PROVEN_ARG(w->dir), PROVEN_ARG(dir_sep(w->dir)), PROVEN_ARG(rubraview_bytes_view((const char *)t.ptr, (int)t.size)));
-        if (n <= 0 || (size_t)n >= sizeof w->output) { osd_say(app, TU8("not compressed: no name")); work_free(w); w = NULL; }
-    } else if (w) {
-        proven_sys_mem_copy(w->output, t.ptr, t.size);
-        w->output[t.size] = '\0';
-    }
-    if (w && !ends_with_ci(w->output, ".zip") && !ends_with_ci(w->output, ".7z")) {
-        if (proven_cstr_len(w->output) + 5 < sizeof w->output) rubraview_cstr_append(w->output, sizeof w->output, ".zip");
-    }
-    if (w) {
-        bool sevenz = ends_with_ci(w->output, ".7z");
-        w->pk.names_hidden = sevenz && pw[0] && app->pack_names_hidden;
-        w->pk.volume_bytes = split_bytes;   /* D-263, RV-248: as typed; the 4 GB chip is 4095M, as FAT32's largest file allows */
-        pack_start(app, w, sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP, rubraview_pack_level_of(app->pack_level),
-                   archwork_pack_method(app, sevenz), sevenz && app->pack_solid_off, pw);
-    }
-    secure_wipe(rubraview_mem_mut(pw, sizeof pw));
+/* RV-294: the Compress window's choices, sent by its job, kept for the next one (D-266). */
+void archwork_pack_choices_taken(app_state_t *app, bool sevenz, int32_t level, int32_t method, bool solid_off, uint64_t split, bool names_hidden) {
+    double v[] = { sevenz ? 1.0 : 0.0, level >= 0 && level < RUBRAVIEW_PACK_LEVEL_STEPS ? level : RUBRAVIEW_PACK_LEVEL_NORMAL,
+                   method >= RUBRAVIEW_PACK_METHOD_DEFAULT && method <= RUBRAVIEW_PACK_METHOD_ZSTD ? method : RUBRAVIEW_PACK_METHOD_DEFAULT,
+                   solid_off ? 1.0 : 0.0, (double)split, names_hidden ? 1.0 : 0.0 };
+    static const char *const KEYS[] = { "pack_format", "pack_level", "pack_method", "pack_solid", "pack_split_bytes", "pack_names" };
+    for (size_t i = 0; i < sizeof KEYS / sizeof *KEYS; ++i)
+        rubraview_settings_set(&app->settings, PROVEN_LIT("archive"), proven_u8str_view_from_cstr(KEYS[i]), v[i]);
+    settings_write_if_changed(app, false);
 }
 
 /* D-267 (owner, 2026-11-03: "예전 분할 조각 지우기 제안"): the older set's parts to the Recycle Bin and the same work
@@ -620,12 +447,6 @@ void archwork_pack_ask_answer(app_state_t *app, bool yes) {
     w->pk.files = w->pk.folders = 0;
     atomic_store(&w->pk.cancel, false);
     if (work_start(app, w)) osd_say(app, TU8("older parts recycled: compressing again"));
-}
-
-void archwork_pack_cancelled(app_state_t *app) {
-    if (g_packing) { work_free(g_packing); g_packing = NULL; }
-    secure_wipe(rubraview_mem_mut(app->pack_pw, sizeof app->pack_pw));
-    app->pack_pw_len[0] = app->pack_pw_len[1] = 0;
 }
 
 /* ---- each pass ---- */
@@ -721,7 +542,7 @@ void archwork_poll(app_state_t *app, bool quitting) {
     const uint8_t *fields = NULL;
     size_t flen = 0;
     int state = filejob_archive_state(w->job, &w->prog, &fields, &flen);
-    if (state == 0) { say_progress(app, w); return; }
+    if (state == 0) { if (!w->ask) say_progress(app, w); return; }   /* RV-294: an asked compression shows in its own windows */
     app->archwork = NULL;
     progress_end(app, PROGRESS_ARCHWORK);   /* RV-268 */
     if (state < 0) {   /* its process went before it said how it went */

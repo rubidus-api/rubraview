@@ -9,6 +9,7 @@
    items its alone), the writer (the pipe's writing, so a viewer that hangs never holds the copy). */
 #include "app.h"
 #include "clashui.h"
+#include "packwin.h"
 #include "rubraview/fileop.h"
 #include "rubraview/jobwire.h"
 #include "rubraview/jobnote.h"
@@ -233,10 +234,14 @@ typedef struct jp_win {
     rubraview_pal_rect_t button;
     char   head[300], summary[300];
     rubraview_progress_t rate;
+    const char *title;                 /* RV-292: the window's title for an archive's work ("" the copy's or move's) */
+    const char *yes;                   /* RV-294: a question with the summary (an older split's parts): its button */
+    rubraview_pal_rect_t yes_btn;
+    bool   yes_pressed;
 } jp_win_t;
 
 static bool pw_show(jp_win_t *w, proven_arena_t *arena, proven_u8str_view_t ui_font, double now) {
-    rubraview_window_config_t config = { .title = w->moving ? T("Rubraview - moving") : T("Rubraview - copying"), .width = 600, .height = 230 };
+    rubraview_window_config_t config = { .title = w->title ? w->title : w->moving ? T("Rubraview - moving") : T("Rubraview - copying"), .width = 600, .height = 230 };
     w->window = rubraview_pal_window_create(arena, &config);
     if (!w->window) return false;
     int32_t ww = 0, hh = 0;
@@ -314,6 +319,15 @@ static void pw_draw(jp_win_t *w, const rubraview_jobwire_progress_t *p, bool end
         rubraview_pal_render_stroke_rect(r, w->button, 0xFF4A525Cu, 1.0, 4.0 * dpi);
         rubraview_pal_render_draw_text(r, cstr(word), w->button, 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
+    w->yes_btn = (rubraview_pal_rect_t){0};
+    if (ended && w->yes) {   /* RV-294: the question's own button, left of Close */
+        double yw = 0.0;
+        (void)rubraview_pal_render_measure_text(r, cstr(w->yes), 13.0 * dpi, &yw);
+        w->yes_btn = (rubraview_pal_rect_t){ w->button.x - yw - 48.0 * dpi, w->button.y, yw + 40.0 * dpi, w->button.height };
+        bool on = pal_rect_has(w->yes_btn, w->px, w->py);
+        rubraview_pal_render_fill_rect(r, w->yes_btn, on ? 0xFF4F9CF7u : PW_ON, 4.0 * dpi);
+        rubraview_pal_render_draw_text(r, cstr(w->yes), w->yes_btn, 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
     if (!rubraview_pal_render_end(r)) w->dirty = true;
 }
 
@@ -329,6 +343,7 @@ static bool pw_pump(jp_win_t *w) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: w->px = event.mouse.x; w->py = event.mouse.y; w->dirty = true; break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
                 if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && pal_rect_has(w->button, event.mouse.x, event.mouse.y)) closed = true;
+                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && w->yes && pal_rect_has(w->yes_btn, event.mouse.x, event.mouse.y)) w->yes_pressed = true;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
                 if (key_is(event.key.combo, "Escape") || key_is(event.key.combo, "Enter")) closed = true;
@@ -412,6 +427,9 @@ static struct {
     char last_root[RUBRAVIEW_ARCHIVE_PATH];
     jp_park_t *parked;
     size_t pn, pcap;
+    bool asking;                      /* RV-294: the Compress window is open, the work not begun */
+    packwin_t pack;
+    char *dir;                        /* the sources' folder: a bare name goes there */
     /* RV-292 X2: files into an archive */
     rubraview_arcedit_job_t aj;
     int add_result;
@@ -541,6 +559,18 @@ static bool start_archive(proven_arena_t *arena, rubraview_jobwire_msg_t *m, cla
     }
     if (m->bad) return false;
     if (A.kind == RUBRAVIEW_JOBWIRE_ADD) A.pk.format = (rubraview_pack_format_t)a.format;   /* the arcedit target, kept here */
+    if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS && a.mode == 1) {   /* RV-294: asked here, in a window of this process */
+        A.asking = true;
+        A.dir = dup_of(a.dest);
+        packwin_init(&A.pack, a.output, a.level, (rubraview_pack_method_t)a.method, a.solid_off, a.volume_bytes, a.names_hidden);
+        if (A.n == 1) (void)rubraview_fmt(A.pack.what, sizeof A.pack.what, "{}", PROVEN_ARG(rubraview_path_basename(cstr(A.names[0]))));
+        else (void)rubraview_fmt(A.pack.what, sizeof A.pack.what, T("{} files and folders"), PROVEN_ARG(A.n));
+        if (!packwin_show(&A.pack, arena, ui->ui_font)) return false;
+        note_begin(a.journal_dir, false, a.output, proven_u8str_view_from_cstr(A.names[0]), A.n);
+        if (g_note_path[0]) { (void)rubraview_fmt(g_note.kind, sizeof g_note.kind, "compress"); note_write(); }
+        pw->title = T("Rubraview - compressing");
+        return true;
+    }
     if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS) {
         A.pk = (rubraview_compress_job_t){ .sources = (const char *const *)A.names, .source_count = A.n, .output = A.output,
                                            .format = (rubraview_pack_format_t)a.format, .level = a.level, .method = (rubraview_pack_method_t)a.method,
@@ -554,10 +584,58 @@ static bool start_archive(proven_arena_t *arena, rubraview_jobwire_msg_t *m, cla
                             PROVEN_ARG(A.kind == RUBRAVIEW_JOBWIRE_COMPRESS ? "compress" : A.kind == RUBRAVIEW_JOBWIRE_ADD ? "archive" : "extract"));
         note_write();
     }
+    pw->title = A.kind == RUBRAVIEW_JOBWIRE_COMPRESS ? T("Rubraview - compressing") : A.kind == RUBRAVIEW_JOBWIRE_ADD ? T("Rubraview - writing into an archive")
+                                                     : T("Rubraview - extracting");
     proven_u8str_view_t first = rubraview_path_basename(proven_u8str_view_from_cstr(A.kind == RUBRAVIEW_JOBWIRE_COMPRESS ? A.output
                                                                                     : A.kind == RUBRAVIEW_JOBWIRE_ADD ? A.dest : A.names[0]));
     (void)rubraview_fmt(pw->head, sizeof pw->head, A.kind == RUBRAVIEW_JOBWIRE_COMPRESS ? T("Compressing into {}")
                                                    : A.kind == RUBRAVIEW_JOBWIRE_ADD ? T("Putting files into {}") : T("Extracting {}"), PROVEN_ARG(first));
+    A.thread = CreateThread(NULL, 0, archive_worker, NULL, 0, NULL);
+    return A.thread != NULL;
+}
+
+/* RV-294: Compress pressed: the archive's place from the name (a bare one beside the files, ".zip" when it has no
+   ending), the choices to the viewer for its settings, the window gone, the work begun. */
+static bool pack_begin(jp_win_t *pw, proven_arena_t *arena, proven_u8str_view_t ui_font) {
+    packwin_t *p = &A.pack;
+    proven_u8str_view_t t = rubraview_textedit_text(&p->field[PACKWIN_NAME].te);
+    bool bare = true;
+    for (size_t i = 0; i < t.size; ++i) if (t.ptr[i] == '\\' || t.ptr[i] == '/' || t.ptr[i] == ':') bare = false;
+    char out[RUBRAVIEW_ARCHIVE_PATH];
+    int n = bare ? rubraview_fmt(out, sizeof out, "{}{}{}", PROVEN_ARG(A.dir ? A.dir : ""), PROVEN_ARG(A.dir && A.dir[0] && A.dir[proven_cstr_len(A.dir) - 1] != '\\' ? "\\" : ""), PROVEN_ARG(t))
+                 : rubraview_fmt(out, sizeof out, "{}", PROVEN_ARG(t));
+    if (n <= 0 || (size_t)n >= sizeof out - 5) return false;
+    bool sevenz = packwin_7z(p);
+    bool zip_end = n >= 4 && (out[n - 4] == '.' && (out[n - 3] | 0x20) == 'z' && (out[n - 2] | 0x20) == 'i' && (out[n - 1] | 0x20) == 'p');
+    if (!sevenz && !zip_end) rubraview_cstr_append(out, sizeof out, ".zip");
+    rubraview_free(A.output);
+    A.output = rubraview_strdup(out);
+    rubraview_free(A.password);
+    A.password = rubraview_strndup_view(rubraview_textedit_text(&p->field[PACKWIN_PW].te));
+    rubraview_pack_format_t format = sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP;
+    A.pk = (rubraview_compress_job_t){ .sources = (const char *const *)A.names, .source_count = A.n, .output = A.output, .format = format,
+                                       .level = rubraview_pack_level_of(p->level), .method = packwin_method(p), .solid_off = sevenz && p->solid_off,
+                                       .volume_bytes = p->split, .names_hidden = sevenz && p->names_hidden && A.password && A.password[0],
+                                       .password = A.password && A.password[0] ? A.password : NULL };
+    if (!P.broken) {   /* the choices kept by the viewer (D-266) */
+        AcquireSRWLockExclusive(&P.lock);
+        rubraview_jobwire_begin(&P.out, RUBRAVIEW_JOBWIRE_PACK_CHOICES);
+        rubraview_jobwire_put_u8(&P.out, sevenz);
+        rubraview_jobwire_put_i32(&P.out, p->level);
+        rubraview_jobwire_put_i32(&P.out, (int32_t)p->method);
+        rubraview_jobwire_put_u8(&P.out, p->solid_off);
+        rubraview_jobwire_put_u64(&P.out, p->split);
+        rubraview_jobwire_put_u8(&P.out, p->names_hidden);
+        (void)rubraview_jobwire_finish(&P.out);
+        ReleaseSRWLockExclusive(&P.lock);
+        SetEvent(P.wake);
+    }
+    packwin_close(p);
+    packwin_free(p);
+    A.asking = false;
+    if (g_note_path[0]) { (void)rubraview_fmt(g_note.where, sizeof g_note.where, "{}", PROVEN_ARG(A.output)); note_write(); }
+    (void)rubraview_fmt(pw->head, sizeof pw->head, T("Compressing into {}"), PROVEN_ARG(rubraview_path_basename(cstr(A.output))));
+    (void)pw_show(pw, arena, ui_font, rubraview_pal_time_now_seconds());
     A.thread = CreateThread(NULL, 0, archive_worker, NULL, 0, NULL);
     return A.thread != NULL;
 }
@@ -716,7 +794,7 @@ int jobproc_main(const wchar_t *pipe_name) {
                 } else if (m.type == RUBRAVIEW_JOBWIRE_ARCHIVE && !started) {   /* RV-292 */
                     started = start_archive(arena, &m, &ui, &lang, &pw);
                     if (!started) { code = 3; goto out; }
-                    if (!A.quiet) (void)pw_show(&pw, arena, ui.ui_font, rubraview_pal_time_now_seconds());
+                    if (!A.quiet && !A.asking) (void)pw_show(&pw, arena, ui.ui_font, rubraview_pal_time_now_seconds());
                 } else if (m.type == RUBRAVIEW_JOBWIRE_STOP) {
                     InterlockedExchange(&J.stop, 1);
                     if (J.wake) SetEvent(J.wake);
@@ -739,6 +817,22 @@ int jobproc_main(const wchar_t *pipe_name) {
             Sleep(20);
             continue;
         }
+        if (A.on && A.asking) {   /* RV-294: the Compress window, then the work */
+            int v = packwin_pump(&A.pack);
+            packwin_draw(&A.pack);
+            if (v > 0 && !pack_begin(&pw, arena, ui.ui_font)) v = -1;
+            if (v < 0) {   /* not compressed: said to the viewer, nothing left behind */
+                packwin_close(&A.pack);
+                packwin_free(&A.pack);
+                A.asking = false;
+                A.pk.result = RUBRAVIEW_ARCHIVE_CANCELLED;
+                archive_send_done();
+                note_end();
+                break;
+            }
+            (void)MsgWaitForMultipleObjects(0, NULL, FALSE, 30, QS_ALLINPUT);
+            continue;
+        }
         if (A.on) {   /* RV-292: an extraction or a compression */
             double t = rubraview_pal_time_now_seconds();
             bool fin = InterlockedCompareExchange(&A.done, 0, 0) != 0;
@@ -755,12 +849,47 @@ int jobproc_main(const wchar_t *pipe_name) {
             if (fin && !ended) {
                 ended = true;
                 WaitForSingleObject(A.thread, 5000);
-                archive_send_done();
-                note_end();
-                archive_summary(&pw);
+                if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS && A.pk.older_parts && A.pk.set_name[0] && pw.open) {
+                    /* D-267, RV-294: asked here, where the password is: the older set's parts to the Recycle Bin and again */
+                    char parts[64][RUBRAVIEW_PACK_PART_PATH];
+                    size_t np = rubraview_pack_set_parts(A.pk.format, A.pk.set_name, parts, 64);
+                    (void)rubraview_fmt(pw.summary, sizeof pw.summary, T("Parts of an older split {} are in the way ({} files)."),
+                                        PROVEN_ARG(rubraview_path_basename(cstr(A.pk.set_name))), PROVEN_ARG(np));
+                    pw.yes = T("Recycle them and compress");
+                    pw.dirty = true;
+                } else {
+                    archive_send_done();
+                    note_end();
+                    archive_summary(&pw);
+                }
+            }
+            if (ended && pw.yes && pw.yes_pressed) {
+                char parts[64][RUBRAVIEW_PACK_PART_PATH];
+                size_t np = rubraview_pack_set_parts(A.pk.format, A.pk.set_name, parts, 64), gone = 0;
+                for (size_t i = 0; i < np; ++i) gone += rubraview_pal_fs_recycle(cstr(parts[i])) ? 1u : 0u;
+                pw.yes = NULL;
+                pw.yes_pressed = false;
+                if (gone == np) {   /* again, as it was asked */
+                    A.pk.result = RUBRAVIEW_ARCHIVE_DONE;
+                    A.pk.why[0] = A.pk.written[0] = '\0';
+                    A.pk.older_parts = false;
+                    A.pk.files = A.pk.folders = 0;
+                    atomic_store(&A.pk.cancel, false);
+                    InterlockedExchange(&A.done, 0);
+                    CloseHandle(A.thread);
+                    A.thread = CreateThread(NULL, 0, archive_worker, NULL, 0, NULL);
+                    ended = false;
+                } else {
+                    (void)rubraview_fmt(A.pk.why, sizeof A.pk.why, "{}", PROVEN_ARG(T("the older parts could not all be moved to the Recycle Bin")));
+                    A.pk.older_parts = false;
+                    archive_send_done();
+                    note_end();
+                    archive_summary(&pw);
+                }
             }
             if (pw_pump(&pw)) {
                 if (!ended) { InterlockedExchange(&A.stop, 1); atomic_store(&A.ex.cancel, true); atomic_store(&A.pk.cancel, true); }
+                else if (pw.yes) { pw.yes = NULL; A.pk.older_parts = false; archive_send_done(); note_end(); }   /* the question left: not compressed */
                 pw_close(&pw);
             }
             pw_draw(&pw, &shown, ended, A.stop != 0, t);

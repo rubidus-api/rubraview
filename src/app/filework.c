@@ -271,7 +271,6 @@ void rename_end(app_state_t *app) {
     app->rename_is_listfilter = false;
     app->rename_is_target = false;
     app->rename_is_extract = false;   /* RV-240: its work is started or dropped by who ended it */
-    app->rename_is_pack = false;
     app->rename_is_find = false;
     app->rename_is_value = false;
     app->rename_is_number = false;
@@ -297,7 +296,7 @@ void rename_end(app_state_t *app) {
 /* D-262: a new archive's password, and an unpacking one while hidden, take English letters, digits and symbols only;
    the eye shows an unpacking one and takes any letter (another program's archive may have Hangul in it). */
 bool password_plain_only(const app_state_t *app) {
-    return app->rename_is_password && (app->rename_is_pack || !app->password_shown);
+    return app->rename_is_password && !app->password_shown;
 }
 
 void rename_take_text(app_state_t *app, proven_u8str_view_t text) {
@@ -307,12 +306,11 @@ void rename_take_text(app_state_t *app, proven_u8str_view_t text) {
     size_t n = rubraview_password_keep_plain(text, kept, sizeof kept, &dropped);
     rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)kept, .size = n });
     secure_wipe(rubraview_mem_mut(kept, sizeof kept));
-    if (dropped) osd_say(app, app->rename_is_pack ? TU8("a new archive's password takes English letters, digits and symbols only")
-                                                  : TU8("English letters, digits and symbols only: the eye shows the password and takes any letter"));
+    if (dropped) osd_say(app, TU8("English letters, digits and symbols only: the eye shows the password and takes any letter"));
 }
 
 void password_eye_toggle(app_state_t *app) {
-    if (!app->rename_is_password || app->rename_is_pack) return;
+    if (!app->rename_is_password) return;
     app->password_shown = !app->password_shown;
     rubraview_pal_window_text_ime(app->window, app->password_shown);
 }
@@ -662,7 +660,6 @@ void rename_commit(app_state_t *app) {
     if (app->rename_is_listfilter) { list_filter_follow(app); rename_end(app); return; }   /* 1.25.0: kept */
     if (app->rename_is_target) { target_commit(app); return; }
     if (app->rename_is_extract) { archwork_extract_dest_typed(app); return; }   /* RV-240 */
-    if (app->rename_is_pack) { archwork_pack_typed(app); return; }   /* RV-207 */
     if (app->rename_is_password) { password_commit(app); return; }
     if (app->rename_favorite >= 0) { favorite_rename_commit(app); return; }
     /* Enter with a syllable still being built: it is part of the name. */

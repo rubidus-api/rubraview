@@ -33,6 +33,8 @@ typedef enum rubraview_jobwire_type {
     RUBRAVIEW_JOBWIRE_END = 18,
     RUBRAVIEW_JOBWIRE_ANSWER = 19,    /* the answer to a row of ROWS */
     RUBRAVIEW_JOBWIRE_ARCHIVE_DONE = 20,   /* RV-292: how an extraction or a compression went: rubraview_jobwire_archive_done_t */
+    RUBRAVIEW_JOBWIRE_PACK_CHOICES = 21,   /* RV-294: the Compress window's choices, for the viewer's settings: u8 7z, i32 level,
+                                              i32 codec, u8 file by file, u64 split bytes, u8 hidden names */
 } rubraview_jobwire_type_t;
 
 /* ---- writing ---- */

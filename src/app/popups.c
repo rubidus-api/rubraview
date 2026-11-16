@@ -646,205 +646,6 @@ void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi
     }
 }
 
-/* D-260 (owner, 2026-11-02: "압축할 때 옵션 창 ... 압축포맷 압축률 압축코덱 분할압축 등"): the Compress window's rows over
-   its name box. The format is the name's ending; a greyed chip is one FultaArc does not write yet. */
-static const char *const PACK_LEVEL_WORD[RUBRAVIEW_PACK_LEVEL_STEPS] = { N_("Store"), N_("Fastest"), N_("Fast"), N_("Normal"),
-                                                                         N_("Maximum"), N_("Ultra") };
-static const char *const PACK_SPLIT_WORD[] = { N_("None"), "10 MB", "100 MB", "700 MB", "4 GB" };
-#define PACK_SPLITS ((int32_t)(sizeof PACK_SPLIT_WORD / sizeof *PACK_SPLIT_WORD))
-
-static const char *pack_method_word(rubraview_pack_method_t m) {
-    switch (m) {
-        case RUBRAVIEW_PACK_METHOD_DEFLATE: return "Deflate";
-        case RUBRAVIEW_PACK_METHOD_BZIP2:   return "BZip2";
-        case RUBRAVIEW_PACK_METHOD_LZMA:    return "LZMA";
-        case RUBRAVIEW_PACK_METHOD_LZMA2:   return "LZMA2";
-        case RUBRAVIEW_PACK_METHOD_PPMD:    return "PPMd";
-        case RUBRAVIEW_PACK_METHOD_ZSTD:    return "Zstandard";
-        default:                            return "";
-    }
-}
-
-#define PACK_TITLE_H 34.0
-#define PACK_LINE_H 40.0     /* one line of chips */
-#define PACK_LABEL_W 110.0   /* the rows' names, beside their chips when there is room */
-#define PACK_WIDE_MIN 470.0  /* below this inside width a row's name stands on a line of its own over its chips */
-
-/* What the window's two notes say: what the choice means, then the split set's names or what is greyed. */
-static void pack_notes(app_state_t *app, const char **note, const char **note2) {
-    bool sevenz = archwork_pack_is_7z(app);
-    rubraview_pack_format_t format = sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP;
-    rubraview_pack_method_t lit = archwork_pack_method(app, sevenz);
-    bool store = app->pack_level == 0;
-    /* D-265 (owner, 2026-11-03: "7-Zip과 같게 + 안내"): LZMA's dictionary at Maximum and Ultra as 7-Zip's (FultaArc 3ca96f0) */
-    bool lzma = lit == RUBRAVIEW_PACK_METHOD_LZMA || lit == RUBRAVIEW_PACK_METHOD_LZMA2;
-    *note = lzma && app->pack_level == 5 ? T("Ultra: a large file may take about 3 GB of memory to pack, as in 7-Zip")
-          : lzma && app->pack_level == 4 ? T("Maximum: a large file may take about 1.5 GB of memory to pack, as in 7-Zip")
-          : app->pack_pw_len[0] || app->pack_focus == 1 || app->pack_focus == 2 ? (sevenz ? T("Password: AES-256 (7-Zip's own)") : T("Password: AES-256 (WinZip's; Windows' own ZIP cannot open it)"))
-          : store ? T("Store: the files go in as they are, the codec unused")
-          : !sevenz && rubraview_pack_method_plain(format, lit) ? T("ZIP with Deflate: Windows opens it too")
-          : !sevenz ? T("ZIP with this codec: 7-Zip, Bandizip and this viewer open it, Windows' own does not")
-          : T("7z: 7-Zip, Bandizip and this viewer open it");
-    /* D-263: the split set's names, or what the greyed chips are; RV-248: how a size is typed while it is */
-    *note2 = app->pack_focus == 3 ? T("Split: a size such as 700M, 4G or 10,000,000 (K, M, G, T, P count by 1024); empty for none")
-           : app->pack_split_len > 0 ? (sevenz ? T("Split: name.7z.001, .002 ... (open the .001)") : T("Split: name.z01, .z02 ... name.zip (open the .zip)"))
-           : app->pack_names_hidden && sevenz ? T("Hidden names: the archive is not even listed without its password")
-           : !sevenz ? T("Greyed: ZIP packs each file on its own and keeps its names readable") : "";
-}
-
-/* RV-248 (owner, 2026-11-07: "압축 팝업창을 공간 효율적으로 그리고 좌우 폭에 상관없이 잘 레이아웃이 변할 수 있도록 ... html에서
-   inline 요소들 처리하듯이 가로가 좁으면 다음 줄로 밀리게요"): the window's rows laid out in `panel`'s width — the chips of a row
-   flow as inline words (rubraview_flow_inline), a row's name beside them or, narrow, on its own line over them; the
-   notes wrap. Its height; drawn, and its chips and fields kept for the presses, only with `draw`. */
-static double pack_window_pass(app_state_t *app, rubraview_pal_rect_t panel, double dpi, bool draw) {
-    bool sevenz = archwork_pack_is_7z(app);
-    rubraview_pack_format_t format = sevenz ? RUBRAVIEW_PACK_7Z : RUBRAVIEW_PACK_ZIP;
-    rubraview_pack_method_t methods[8];
-    size_t method_n = rubraview_pack_methods(format, methods, 8);
-    rubraview_pack_method_t lit = archwork_pack_method(app, sevenz);
-    bool store = app->pack_level == 0;
-    double pad = 12.0 * dpi, line_h = PACK_LINE_H * dpi, gap = 6.0 * dpi, inner = panel.width - 2.0 * pad;
-    bool wide = inner >= PACK_WIDE_MIN * dpi;
-    double label_w = wide ? PACK_LABEL_W * dpi : 0.0, room = inner - label_w, name_h = 22.0 * dpi;
-    uint64_t split_now = 0;
-    bool split_reads = rubraview_pack_split_parse((proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_split, .size = app->pack_split_len }, &split_now);
-    if (draw) {
-        app->pack_chip_n = 0;
-        rubraview_pal_render_draw_text(app->renderer, TU8("Compress"), (rubraview_pal_rect_t){ panel.x + pad, panel.y, inner, PACK_TITLE_H * dpi },
-                                       16.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-    }
-    static const char *const ROW_WORD[PACK_ROWS] = { N_("Format"), N_("Level"), N_("Codec"), N_("Solid"), N_("Split"),
-                                                     N_("Password"), N_("Again"), N_("Names") };
-    double y = panel.y + PACK_TITLE_H * dpi;
-    for (int32_t row = 0; row < PACK_ROWS; ++row) {
-        const char *words[8];
-        bool on[8] = { 0 }, off[8] = { 0 };
-        int32_t n = 0, field = -1;   /* a typed field first in the row: 1 the password, 2 it again, 3 the split size */
-        switch (row) {
-            case PACK_ROW_FORMAT:
-                words[n] = "ZIP"; on[n++] = !sevenz;
-                words[n] = "7z";  on[n++] = sevenz;
-                break;
-            case PACK_ROW_LEVEL:
-                for (int32_t k = 0; k < RUBRAVIEW_PACK_LEVEL_STEPS; ++k) { words[n] = rubraview_tr(PACK_LEVEL_WORD[k]); on[n++] = app->pack_level == k; }
-                break;
-            case PACK_ROW_METHOD:
-                for (size_t k = 0; k < method_n && n < 8; ++k) {
-                    words[n] = pack_method_word(methods[k]);
-                    on[n] = !store && methods[k] == lit;
-                    off[n++] = store || !rubraview_pack_method_ready(format, methods[k]);
-                }
-                break;
-            case PACK_ROW_SOLID:
-                words[n] = T("Solid");        on[n] = sevenz && !app->pack_solid_off; off[n++] = !sevenz;
-                words[n] = T("File by file"); on[n] = !sevenz || app->pack_solid_off;  off[n++] = !sevenz;
-                break;
-            case PACK_ROW_NAMES:   /* D-261: 7z only, not written by FultaArc yet */
-                words[n] = T("Readable"); on[n] = !sevenz || !app->pack_names_hidden; off[n++] = !sevenz;
-                words[n] = T("Hidden by the password"); on[n] = sevenz && app->pack_names_hidden;
-                off[n++] = !sevenz || !rubraview_pack_names_hidden_supported(format);
-                break;
-            case PACK_ROW_PASSWORD: field = 1; break;
-            case PACK_ROW_AGAIN:    field = 2; break;
-            default: {   /* RV-248: the size typed, then the chips that write one in */
-                static const uint64_t PRESET_MIB[] = { 0, 10, 100, 700, 4095 };
-                field = 3;
-                for (int32_t k = 0; k < PACK_SPLITS; ++k) {
-                    words[n] = k == 0 ? rubraview_tr(PACK_SPLIT_WORD[0]) : PACK_SPLIT_WORD[k];
-                    on[n] = split_reads && split_now == (PRESET_MIB[k] << 20);
-                    off[n++] = k > 0 && !rubraview_pack_split_supported(format);
-                }
-                break;
-            }
-        }
-        /* the items' widths: the field, then the chips */
-        double widths[9];
-        int32_t items = 0;
-        if (field > 0) widths[items++] = fmin((field == 3 ? 150.0 : 320.0) * dpi, room);
-        for (int32_t k = 0; k < n; ++k) {
-            double tw = 0.0;
-            (void)rubraview_pal_render_measure_text(app->renderer, cstr(words[k]), 14.0 * dpi, &tw);
-            widths[items++] = fmin(fmax(tw + 24.0 * dpi, 64.0 * dpi), room);
-        }
-        uint32_t line_of[9];
-        double x_of[9];
-        size_t lines = rubraview_flow_inline(widths, (size_t)items, gap, room, line_of, x_of);
-        double label_y = y;
-        if (!wide) y += name_h;   /* the row's name on its own line */
-        if (draw) {
-            rubraview_pal_render_draw_text(app->renderer, cstr(rubraview_tr(ROW_WORD[row])),
-                                           wide ? (rubraview_pal_rect_t){ panel.x + pad, label_y, label_w, line_h - 6.0 * dpi }
-                                                : (rubraview_pal_rect_t){ panel.x + pad, label_y, inner, name_h },
-                                           wide ? 14.0 * dpi : 13.0 * dpi, 0xC0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
-            double x0 = panel.x + pad + label_w;
-            for (int32_t i = 0; i < items; ++i) {
-                rubraview_pal_rect_t r = { x0 + x_of[i], y + (double)line_of[i] * line_h + 3.0 * dpi, widths[i], line_h - 8.0 * dpi };
-                if (field > 0 && i == 0) {   /* D-261: a field; the box itself is drawn there when typed in */
-                    app->pack_field[field] = r;
-                    if (app->pack_focus == field) continue;
-                    rubraview_pal_render_fill_rect(app->renderer, r, COLOR_BOX_FILL, 3.0);
-                    rubraview_pal_render_stroke_rect(app->renderer, r, COLOR_BOX_BORDER, 1.0, 3.0);
-                    rubraview_pal_rect_t in = { r.x + 10.0 * dpi, r.y, r.width - 20.0 * dpi, r.height };
-                    if (field == 3) {
-                        if (app->pack_split_len) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_split, .size = app->pack_split_len },
-                                                                                in, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-                        else rubraview_pal_render_draw_text(app->renderer, cstr(rubraview_tr(PACK_SPLIT_WORD[0])), in, 13.0 * dpi, 0x80F0F0F0u, RUBRAVIEW_TEXT_LEFT);
-                        continue;
-                    }
-                    char dots[3 * 256];
-                    size_t nd = 0;
-                    for (size_t c = 0; c < app->pack_pw_len[field - 1]; ++c)
-                        if (((unsigned char)app->pack_pw[field - 1][c] & 0xC0) != 0x80) { proven_sys_mem_copy(dots + nd, "\xE2\x97\x8F", 3); nd += 3; }
-                    if (nd) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)dots, .size = nd },
-                                                           in, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-                    else if (field == 1) rubraview_pal_render_draw_text(app->renderer, TU8("none (Tab or a click to type one)"), in, 13.0 * dpi, 0x80F0F0F0u, RUBRAVIEW_TEXT_LEFT);
-                    continue;
-                }
-                int32_t k = field > 0 ? i - 1 : i;
-                bool over = pal_rect_has(r, app->pointer_x, app->pointer_y);
-                rubraview_pal_render_fill_rect(app->renderer, r, on[k] ? COLOR_TILE_CURRENT : over && !off[k] ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
-                rubraview_pal_render_stroke_rect(app->renderer, r, COLOR_BOX_BORDER, 1.0, 3.0);
-                rubraview_pal_render_draw_text(app->renderer, cstr(words[k]), r, 14.0 * dpi, off[k] ? 0x60F0F0F0u : COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-                if (app->pack_chip_n < PACK_CHIPS_MAX) {
-                    app->pack_chip[app->pack_chip_n] = r;
-                    app->pack_chip_kind[app->pack_chip_n] = row * 16 + k;
-                    app->pack_chip_off[app->pack_chip_n++] = off[k];
-                }
-            }
-        }
-        y += (double)(lines ? lines : 1) * line_h;
-    }
-    /* the notes, wrapped in the width there is */
-    const char *note, *note2;
-    pack_notes(app, &note, &note2);
-    const char *notes[2] = { note, note2 };
-    for (int i = 0; i < 2; ++i) {
-        if (!notes[i][0]) continue;
-        double tw = 0.0, th = 0.0;
-        if (!rubraview_pal_render_measure_text_wrapped(app->renderer, cstr(notes[i]), 13.0 * dpi, inner, &tw, &th)) th = 18.0 * dpi;
-        double h = th + 6.0 * dpi;
-        if (draw) rubraview_pal_render_draw_text(app->renderer, cstr(notes[i]), (rubraview_pal_rect_t){ panel.x + pad, y, inner, h },
-                                                 13.0 * dpi, i == 0 ? 0xC0F0F0F0u : 0x90F0F0F0u, RUBRAVIEW_TEXT_LEFT);
-        y += h;
-    }
-    return y + 10.0 * dpi - panel.y;
-}
-
-/* The window over its name box: as wide as the label under it, its rows laid out for that width. */
-static double pack_window_height(app_state_t *app, double width, double dpi) {
-    return pack_window_pass(app, (rubraview_pal_rect_t){ 0.0, 0.0, width, 0.0 }, dpi, false);
-}
-
-static void draw_pack_window(app_state_t *app, rubraview_pal_rect_t name_label, double dpi) {
-    double panel_h = pack_window_height(app, name_label.width, dpi);
-    rubraview_pal_rect_t panel = { name_label.x, name_label.y - panel_h - 8.0 * dpi, name_label.width, panel_h };
-    if (panel.y < 4.0 * dpi) panel.y = 4.0 * dpi;
-    app->pack_panel = panel;
-    rubraview_pal_render_fill_rect(app->renderer, panel, 0xF6202020u, 4.0 * dpi);
-    rubraview_pal_render_stroke_rect(app->renderer, panel, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
-    (void)pack_window_pass(app, panel, dpi, true);
-}
-
 /* D-267: an older split set's parts in the way, asked about over everything (the open-file screen too). */
 static void draw_pack_ask(app_state_t *app, double win_w, double win_h, double dpi) {
     if (!app->pack_ask) return;
@@ -1052,7 +853,7 @@ bool pack_ask_press(app_state_t *app, double x, double y) {
 /* RV-265 (R296): the box as a modeless card. Which kind of question it is (its place is kept by kind), -1 for the
    boxes that are fields of their own screens: the open-file screen's path and filter, the Compress window. */
 int32_t card_kind_now(const app_state_t *app) {
-    if (!app->rename_active || app->rename_is_path || app->rename_is_filter || app->rename_is_pack) return -1;
+    if (!app->rename_active || app->rename_is_path || app->rename_is_filter) return -1;
     if (app->rename_is_find) return CARD_FIND;
     if (app->rename_is_listfilter) return CARD_LIST_FILTER;
     if (app->rename_is_target) return CARD_TARGET;
@@ -1262,18 +1063,13 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
         /* RV-238: a card — title, the line saying what the keys do, the field, the buttons — over a dimmed window;
            the open-file screen's typed path and filter stay in its path bar, Compress keeps its own window */
         bool inplace = app->rename_inplace && app->rename_inplace_rect.width > 0.0;   /* RV-293 E3: where the name is shown */
-        bool card = !(app->rename_is_path || app->rename_is_filter || app->rename_is_pack || inplace);
+        bool card = !(app->rename_is_path || app->rename_is_filter || inplace);
         bool live = app->rename_is_find || app->rename_is_listfilter;   /* what it filters stays in sight, undimmed */
         rubraview_pal_rect_t card_rect = {0};
         bool focused = true;
-        double box_w = (app->rename_is_pack ? 680.0 : 560.0) * dpi, box_h = 72.0 * dpi;   /* 1.25.0: roomier; D-260: the Compress window's rows */
+        double box_w = 560.0 * dpi, box_h = 72.0 * dpi;   /* 1.25.0: roomier */
         if (box_w > win_w - 16.0 * dpi) box_w = win_w - 16.0 * dpi;   /* a narrow Edit window (RV-137) */
         rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
-        if (app->rename_is_pack) {   /* D-260: the rows, the label, the box and its buttons centred together */
-            double above = pack_window_height(app, fmin(box_w + 80.0 * dpi, win_w - 16.0 * dpi), dpi) + 38.0 * dpi, below = box_h + 68.0 * dpi;
-            double top = (win_h - above - below) * 0.5;
-            box.y = (top > 8.0 * dpi ? top : 8.0 * dpi) + above;
-        }
         if (card) {
             double pad = 20.0 * dpi, title_h = 30.0 * dpi, hint_h = 22.0 * dpi, field_h = 46.0 * dpi, btn_h = 38.0 * dpi;
             double row_h = 34.0 * dpi, rows_h = app->rename_is_extension ? row_h * (double)app->ext_n + 8.0 * dpi : 0.0;
@@ -1315,26 +1111,6 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
                 fy += rows_h;
             }
             box = (rubraview_pal_rect_t){ cx + pad, fy, cw - 2.0 * pad, field_h };
-        }
-        if (app->rename_is_pack) {   /* RV-207: the new archive's place */
-            /* RV-248: never wider than the window; its words smaller rather than cut off */
-            double lw = fmin(box.width + 80.0 * dpi, win_w - 16.0 * dpi);
-            rubraview_pal_rect_t label = { (win_w - lw) * 0.5, box.y - 30.0 * dpi, lw, 26.0 * dpi };
-            proven_u8str_view_t into = TU8("Compress into:  its ending (.zip or .7z) says which  ·  Tab: the password  ·  Enter compresses");
-            double font = 14.0 * dpi, tw = 0.0;
-            if (rubraview_pal_render_measure_text(app->renderer, into, font, &tw) && tw > lw - 12.0 * dpi)
-                font = fmax(10.0 * dpi, font * (lw - 12.0 * dpi) / tw);
-            rubraview_pal_render_fill_rect(app->renderer, label, COLOR_BOX_FILL, 3.0);
-            rubraview_pal_render_draw_text(app->renderer, into, label, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-            draw_pack_window(app, label, dpi);   /* D-260 */
-            app->pack_field[0] = box;
-            if (app->pack_focus > 0) {   /* D-261: the name stays where it is; the box types the password in its row */
-                rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
-                rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
-                rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->pack_name, .size = app->pack_name_len },
-                                               box, 18.0 * dpi, 0xC0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
-                box = app->pack_field[app->pack_focus];
-            }
         }
         /* The typed path sits where the path is, as an address bar does. */
         if (app->rename_is_path || app->rename_is_filter) {
@@ -1422,7 +1198,6 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
             words[n] = T("Close"); kinds[n++] = RENAME_BTN_CANCEL;
         } else {
             words[n] = app->rename_is_extension ? (app->ext_at + 1 < app->ext_n ? T("Next") : T("Apply"))
-                     : app->rename_is_pack ? T("Compress")
                      : app->rename_is_extract ? T("Extract")
                      : app->rename_is_password ? (app->password_for_extract ? T("Extract") : T("Open")) : app->rename_is_filter || app->rename_is_listfilter ? T("Done") : T("OK");
             kinds[n++] = RENAME_BTN_OK;
@@ -1436,7 +1211,7 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
             double tw = 0.0;
             if (rubraview_pal_render_measure_text(app->renderer, cstr(words[i]), 15.0 * dpi, &tw) && tw + 36.0 * dpi > bw) bw = tw + 36.0 * dpi;
         }
-        rubraview_pal_rect_t at = app->rename_is_pack ? app->pack_field[0] : box;   /* D-261: under the name, whichever field is typed in */
+        rubraview_pal_rect_t at = box;
         double bx = app->rename_is_path || app->rename_is_filter ? at.x + at.width - (bw + gap) * (double)n
                                                                    : at.x + (at.width - (bw + gap) * (double)n + gap) * 0.5;
         double by = at.y + at.height + 10.0 * dpi;
@@ -1458,7 +1233,7 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
         }
         /* D-262 (owner, 2026-11-02: "눈알 버튼을 달아서 그걸로 보면서 입력할 때는 다른 문자도 입력 가능"): an unpacking
            password's eye, at the box's right end: shown as typed, any letter through the IME; hidden, plain letters */
-        if (app->rename_is_password && !app->rename_is_pack && n < 4) {
+        if (app->rename_is_password && n < 4) {
             rubraview_pal_rect_t eye = { box.x + box.width - box.height, box.y, box.height, box.height };
             bool over = pal_rect_has(eye, app->pointer_x, app->pointer_y);
             if (over || app->password_shown) rubraview_pal_render_fill_rect(app->renderer, eye, app->password_shown ? COLOR_TILE_CURRENT : 0x40FFFFFFu, 3.0);
