@@ -159,7 +159,8 @@ ships with, so it cannot drift from them.
 | `H` | Flip left-right |
 | `V` | Flip upside down |
 | `N` | Crisp scaling for pixel art |
-| `G` | Pixel grid past 400% |
+| `G` | Folders card: the default folder and folders 1 to 9; CC / MM copy / move the file to the default one, C1 / M1 to folder 1 |
+| `Shift+G` | Pixel grid past 400% |
 | `B` | Layout: one page, two pages, webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
 

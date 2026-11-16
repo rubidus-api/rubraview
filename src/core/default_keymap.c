@@ -159,7 +159,9 @@ const char *rubraview_default_keymap(void) {
     "flip_horizontal = \"H\"\n"
     "flip_vertical = \"V\"\n"
     "toggle_nearest = \"N\"\n"
-    "toggle_pixel_grid = \"G\"\n"
+    /* RV-296 (owner, 2026-11-16: "기본 단축키는 g"): the folders card; the pixel grid moves to Shift+G */
+    "folder_card = \"G\"\n"
+    "toggle_pixel_grid = \"Shift+G\"\n"
     "toggle_layout = \"B\"\n"
     "toggle_spread_detect = \"Shift+B\"\n"
     "\n"

@@ -2318,6 +2318,19 @@ void picker_leave_archive(app_state_t *app);
 bool picker_archive_rel(const app_state_t *app, proven_u8str_view_t path, char *out, size_t cap);
 void archwork_compress_quick(app_state_t *app);
 void archwork_compress_ask(app_state_t *app);
+/* RV-296: the folders card (foldercard.c) */
+bool foldercard_open(const app_state_t *app);
+uint64_t foldercard_signature(const app_state_t *app);
+void foldercard_show(app_state_t *app);
+void foldercard_close(app_state_t *app);
+bool foldercard_key(app_state_t *app, rubraview_key_combo_t combo);
+bool foldercard_text(app_state_t *app, const rubraview_window_event_t *event);
+bool foldercard_press(app_state_t *app, double x, double y, bool shift);
+bool foldercard_motion(app_state_t *app, double x);
+void foldercard_release(app_state_t *app);
+void draw_foldercard(app_state_t *app, double win_w, double win_h, double dpi);
+bool archwork_extract_then(app_state_t *app, const char *archive, const char *inner, const size_t *only, size_t only_count, const char *dest,
+                           void (*then)(app_state_t *app, bool ok, void *ctx), void *ctx);   /* RV-295 */
 void archwork_pack_choices_taken(app_state_t *app, bool sevenz, int32_t level, int32_t method, bool solid_off, uint64_t split, bool names_hidden);
 bool password_plain_only(const app_state_t *app);              /* D-262: the box takes only `!` to `~` */
 void rename_take_text(app_state_t *app, proven_u8str_view_t text);

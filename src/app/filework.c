@@ -29,7 +29,7 @@ void reopen_after_removal(app_state_t *app, size_t removed_index) {
     bool asc = true;   /* RV-288: the shuffle follows a page taken out (not a list sorted at random: that is a new order) */
     app->shuffle_removed = folder_sort_mode(app, &asc) == RUBRAVIEW_SORT_RANDOM ? -1 : (int32_t)removed_index;
     open_folder(app, dir);
-    if (page_count(app) == 0) return;
+    if (page_count(app) == 0) { update_window_title(app); return; }   /* RV-296: the last one gone: an empty list, its caption too */
     if (target >= page_count(app)) target = page_count(app) - 1;
 
     finish_open(app, target);

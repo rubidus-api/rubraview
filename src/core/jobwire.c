@@ -263,7 +263,7 @@ void rubraview_jobwire_put_archive(rubraview_jobwire_out_t *out, const rubraview
     if (!out || !a) return;
     rubraview_jobwire_begin(out, RUBRAVIEW_JOBWIRE_ARCHIVE);
     rubraview_jobwire_put_u8(out, a->kind);
-    rubraview_jobwire_put_u8(out, a->quiet);
+    rubraview_jobwire_put_u8(out, (uint8_t)((a->quiet ? 1u : 0u) | (a->step ? 2u : 0u)));
     rubraview_jobwire_put_str(out, a->journal_dir);
     rubraview_jobwire_put_str(out, a->lang_file);
     rubraview_jobwire_put_str(out, a->ui_font);
@@ -291,7 +291,9 @@ void rubraview_jobwire_put_archive(rubraview_jobwire_out_t *out, const rubraview
 void rubraview_jobwire_get_archive(rubraview_jobwire_msg_t *msg, rubraview_jobwire_archive_t *a) {
     if (!a) return;
     a->kind = rubraview_jobwire_get_u8(msg);
-    a->quiet = rubraview_jobwire_get_u8(msg) != 0;
+    uint8_t q = rubraview_jobwire_get_u8(msg);
+    a->quiet = (q & 1u) != 0;
+    a->step = (q & 2u) != 0;
     a->journal_dir = rubraview_jobwire_get_str(msg);
     a->lang_file = rubraview_jobwire_get_str(msg);
     a->ui_font = rubraview_jobwire_get_str(msg);

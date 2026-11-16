@@ -126,6 +126,8 @@ typedef struct rubraview_window_config {
     bool hidden;
     /** RV-272: a top-level window of its own (its own taskbar button, no owner) whose end is not the program's. */
     bool stands_alone;
+    /** RV-296: shown without taking the keyboard (a job's progress: the viewer keeps the keys being pressed). */
+    bool no_activate;
 } rubraview_window_config_t;
 
 /* ---- §3.19 lifecycle and shell integration ---- */
@@ -350,6 +352,12 @@ void rubraview_pal_clipboard_clear(rubraview_window_t *window);
 uint32_t rubraview_pal_drag_out(rubraview_window_t *window, const proven_u8str_view_t *paths, size_t count, uint32_t allowed,
                                 bool right, bool (*ready)(void *ctx), void *ctx);
 bool rubraview_pal_dragging_out(void);
+/** RV-295: the folder under the pointer, when it is an Explorer window's or the desktop's view (1: its folder, 2: a
+    folder item in it); 0 elsewhere — the navigation pane, a file, another program, this one. `out` UTF-8. */
+int rubraview_pal_drop_folder_here(char *out, size_t cap);
+/** RV-295: a right drag let go on such a folder: Copy here, Move here (left out when its word is empty) or Cancel at
+    the pointer; 1 copy, 2 move, 0 neither. */
+int rubraview_pal_drop_menu(rubraview_window_t *window, proven_u8str_view_t copy_word, proven_u8str_view_t move_word, proven_u8str_view_t cancel_word);
 /** RV-226 (D-283): a target that takes the drop on a thread of its own (Explorer) makes rubraview_pal_drag_out return
     RUBRAVIEW_DROP_PENDING at once; `finished` is then true once, with what it did, when it has finished; `forget` lets
     one go unheard (a long wait, the viewer closing). */

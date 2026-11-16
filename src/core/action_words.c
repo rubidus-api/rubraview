@@ -57,6 +57,7 @@ static const struct { const char *action; const char *words; } WORDS[] = {
     { "fit_window", "Fit to the window" },
     { "flip_horizontal", "Flip left-right" },
     { "flip_vertical", "Flip upside down" },
+    { "folder_card", "Folders card: the default folder and folders 1 to 9; CC / MM copy / move the file to the default one, C1 / M1 to folder 1" },
     { "hide_boxes", "Hide the title bar and the Floating Widget until the picture is clicked" },
     { "interval_cycle", "The slide show's delay: a tap lists 1, 2, 3, 5 and 10 seconds; the wheel over it, or a drag up or down, moves it half a second" },
     { "interval_down", "Faster slides (0.5 s)" },

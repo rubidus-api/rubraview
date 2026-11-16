@@ -167,6 +167,7 @@ enum { RUBRAVIEW_JOBWIRE_EXTRACT = 1, RUBRAVIEW_JOBWIRE_COMPRESS = 2,
 typedef struct rubraview_jobwire_archive {
     uint8_t  kind;                     /* RUBRAVIEW_JOBWIRE_EXTRACT or _COMPRESS */
     bool     quiet;                    /* no window of its own (Explorer's extraction window shows it) */
+    bool     step;                     /* RV-295: a step of a drag: its window goes by itself when it ended well (in quiet's byte, bit 1) */
     proven_u8str_view_t journal_dir, lang_file, ui_font;
     uint32_t count;                    /* the archives (extract) or the sources (compress) that follow, as strings */
     /* extract */

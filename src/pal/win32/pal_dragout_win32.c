@@ -18,6 +18,8 @@
 #include <shlobj.h>
 #include <shellapi.h>
 #include <shldisp.h>
+#include <exdisp.h>
+#include <uiautomationclient.h>
 #include <stddef.h>
 #include "rubraview/pal/pal_window.h"
 #include "rubraview/pal/pal_wide.h"
@@ -456,4 +458,144 @@ bool rubraview_pal_wait_with_progress(rubraview_window_t *window, bool (*done)(v
     if (popup) DestroyWindow(popup);
     if (given_up) swallow_escape();
     return finished && !given_up;
+}
+
+/* ---- RV-295: the folder a drag is let go on ---- */
+
+/* GUIDs asked for here, kept apart from the headers' (which want INITGUID somewhere). */
+static const GUID RV_CLSID_ShellWindows = { 0x9ba05972, 0xf6a8, 0x11cf, { 0xa4, 0x42, 0x00, 0xa0, 0xc9, 0x0a, 0x8f, 0x39 } };
+static const GUID RV_IID_IShellWindows = { 0x85cb6900, 0x4d95, 0x11cf, { 0x96, 0x0c, 0x00, 0x80, 0xc7, 0xf4, 0xee, 0x85 } };
+static const GUID RV_IID_IServiceProvider = { 0x6d5140c1, 0x7436, 0x11ce, { 0x80, 0x34, 0x00, 0xaa, 0x00, 0x60, 0x09, 0xfa } };
+static const GUID RV_SID_STopLevelBrowser = { 0x4c96be40, 0x915c, 0x11cf, { 0x99, 0xd3, 0x00, 0xaa, 0x00, 0x4a, 0xe8, 0x37 } };
+static const GUID RV_IID_IShellBrowser = { 0x000214e2, 0x0000, 0x0000, { 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46 } };
+static const GUID RV_IID_IFolderView = { 0xcde725b0, 0xccc9, 0x4519, { 0x91, 0x7e, 0x32, 0x5d, 0x72, 0xfa, 0xb4, 0xce } };
+static const GUID RV_IID_IPersistFolder2 = { 0x1ac3d9f0, 0x175c, 0x11d1, { 0x95, 0xbe, 0x00, 0x60, 0x97, 0x97, 0xea, 0x4f } };
+static const GUID RV_CLSID_CUIAutomation = { 0xff48dba4, 0x60ef, 0x4201, { 0xaa, 0x87, 0x54, 0x10, 0x3e, 0xef, 0x59, 0x4e } };
+static const GUID RV_IID_IUIAutomation = { 0x30cbe57d, 0xd9d0, 0x452a, { 0xab, 0x13, 0x7a, 0xc5, 0xac, 0x48, 0x25, 0xee } };
+
+/* A shell window's (an Explorer tab's, the desktop's) folder and its view's window. */
+static bool view_of(IDispatch *disp, HWND *view, WCHAR *folder, size_t cap) {
+    bool ok = false;
+    IServiceProvider *sp = NULL;
+    IShellBrowser *sb = NULL;
+    IShellView *sv = NULL;
+    IFolderView *fv = NULL;
+    IPersistFolder2 *pf = NULL;
+    PIDLIST_ABSOLUTE pidl = NULL;
+    if (SUCCEEDED(IDispatch_QueryInterface(disp, &RV_IID_IServiceProvider, (void **)&sp)) &&
+        SUCCEEDED(IServiceProvider_QueryService(sp, &RV_SID_STopLevelBrowser, &RV_IID_IShellBrowser, (void **)&sb)) &&
+        SUCCEEDED(IShellBrowser_QueryActiveShellView(sb, &sv)) && SUCCEEDED(IShellView_GetWindow(sv, view)) &&
+        SUCCEEDED(IShellView_QueryInterface(sv, &RV_IID_IFolderView, (void **)&fv)) &&
+        SUCCEEDED(IFolderView_GetFolder(fv, &RV_IID_IPersistFolder2, (void **)&pf)) && SUCCEEDED(IPersistFolder2_GetCurFolder(pf, &pidl)) &&
+        cap >= MAX_PATH && SHGetPathFromIDListW(pidl, folder))
+        ok = true;
+    if (pidl) CoTaskMemFree(pidl);
+    if (pf) IPersistFolder2_Release(pf);
+    if (fv) IFolderView_Release(fv);
+    if (sv) IShellView_Release(sv);
+    if (sb) IShellBrowser_Release(sb);
+    if (sp) IServiceProvider_Release(sp);
+    return ok;
+}
+
+/* The name of the list item under `at` (the element there or one of its three parents), "" when none. */
+static void item_name_at(POINT at, WCHAR *name, size_t cap) {
+    name[0] = 0;
+    IUIAutomation *ua = NULL;
+    IUIAutomationElement *e = NULL;
+    IUIAutomationTreeWalker *walk = NULL;
+    if (FAILED(CoCreateInstance(&RV_CLSID_CUIAutomation, NULL, CLSCTX_INPROC_SERVER, &RV_IID_IUIAutomation, (void **)&ua)) || !ua) return;
+    if (SUCCEEDED(IUIAutomation_ElementFromPoint(ua, at, &e)) && e && SUCCEEDED(IUIAutomation_get_RawViewWalker(ua, &walk)) && walk) {
+        for (int up = 0; up < 4 && e; ++up) {
+            CONTROLTYPEID type = 0;
+            if (SUCCEEDED(IUIAutomationElement_get_CurrentControlType(e, &type)) && type == UIA_ListItemControlTypeId) {
+                BSTR b = NULL;
+                if (SUCCEEDED(IUIAutomationElement_get_CurrentName(e, &b)) && b) { (void)rubraview_wcopy(name, cap, b); SysFreeString(b); }
+                break;
+            }
+            IUIAutomationElement *parent = NULL;
+            if (FAILED(IUIAutomationTreeWalker_GetParentElement(walk, e, &parent))) parent = NULL;
+            IUIAutomationElement_Release(e);
+            e = parent;
+        }
+    }
+    if (e) IUIAutomationElement_Release(e);
+    if (walk) IUIAutomationTreeWalker_Release(walk);
+    IUIAutomation_Release(ua);
+}
+
+int rubraview_pal_drop_folder_here(char *out, size_t cap) {
+    if (!out || cap == 0) return 0;
+    out[0] = '\0';
+    POINT at;
+    if (!GetCursorPos(&at)) return 0;
+    HWND h = WindowFromPoint(at);
+    DWORD pid = 0;
+    if (!h || (GetWindowThreadProcessId(h, &pid), pid == GetCurrentProcessId())) return 0;
+    IShellWindows *sw = NULL;
+    if (FAILED(CoCreateInstance(&RV_CLSID_ShellWindows, NULL, CLSCTX_ALL, &RV_IID_IShellWindows, (void **)&sw)) || !sw) return 0;
+    WCHAR folder[MAX_PATH] = { 0 };
+    bool found = false;
+    long count = 0;
+    (void)IShellWindows_get_Count(sw, &count);
+    for (long i = -1; i < count && !found; ++i) {   /* -1: the desktop */
+        IDispatch *disp = NULL;
+        VARIANT v;
+        VariantInit(&v);
+        if (i < 0) {
+            VARIANT empty;
+            VariantInit(&empty);
+            long hw = 0;
+            if (FAILED(IShellWindows_FindWindowSW(sw, &empty, &empty, SWC_DESKTOP, &hw, SWFO_NEEDDISPATCH, &disp))) disp = NULL;
+        } else {
+            v.vt = VT_I4;
+            v.lVal = i;
+            if (FAILED(IShellWindows_Item(sw, v, &disp))) disp = NULL;
+        }
+        if (!disp) continue;
+        HWND view = NULL;
+        WCHAR f[MAX_PATH];
+        if (view_of(disp, &view, f, MAX_PATH) && view && (h == view || IsChild(view, h))) { found = true; (void)rubraview_wcopy(folder, MAX_PATH, f); }
+        IDispatch_Release(disp);
+    }
+    IShellWindows_Release(sw);
+    if (!found || !folder[0]) return 0;   /* not a folder's view: the navigation pane, the address bar, another program */
+    WCHAR item[MAX_PATH], full[MAX_PATH * 2];
+    item_name_at(at, item, MAX_PATH);
+    int kind = 1;
+    if (item[0]) {   /* on an item: a folder is gone into; anything else (a file, a drive by its label) is not ours */
+        (void)rubraview_wcopy(full, RUBRAVIEW_COUNT_OF(full), folder);
+        size_t n = rubraview_wlen(full);
+        if (n && full[n - 1] != L'\\') (void)rubraview_wcat(full, RUBRAVIEW_COUNT_OF(full), L"\\");
+        (void)rubraview_wcat(full, RUBRAVIEW_COUNT_OF(full), item);
+        DWORD a = GetFileAttributesW(full);
+        if (a == INVALID_FILE_ATTRIBUTES || !(a & FILE_ATTRIBUTE_DIRECTORY)) return 0;
+        (void)rubraview_wcopy(folder, MAX_PATH, full);
+        kind = 2;
+    }
+    if (WideCharToMultiByte(CP_UTF8, 0, folder, -1, out, (int)cap, NULL, NULL) <= 0) { out[0] = '\0'; return 0; }
+    return kind;
+}
+
+int rubraview_pal_drop_menu(rubraview_window_t *window, proven_u8str_view_t copy_word, proven_u8str_view_t move_word, proven_u8str_view_t cancel_word) {
+    HWND owner = window ? (HWND)rubraview_pal_window_native_handle(window) : NULL;
+    HMENU m = CreatePopupMenu();
+    if (!m) return 0;
+    proven_u8str_view_t words[3] = { copy_word, move_word, cancel_word };
+    UINT ids[3] = { 1, 2, 0x10 };
+    for (int i = 0; i < 3; ++i) {
+        if (words[i].size == 0) continue;
+        WCHAR wide[128];
+        proven_size_t n = 0;
+        if (proven_utf8_to_utf16(words[i], (proven_u16 *)wide, RUBRAVIEW_COUNT_OF(wide) - 1, &n) != PROVEN_OK) n = 0;
+        wide[n] = 0;
+        if (i == 2) AppendMenuW(m, MF_SEPARATOR, 0, NULL);
+        AppendMenuW(m, MF_STRING, ids[i], wide);
+    }
+    POINT at;
+    GetCursorPos(&at);
+    if (owner) SetForegroundWindow(owner);   /* or the menu does not go when clicked off */
+    int got = (int)TrackPopupMenuEx(m, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, at.x, at.y, owner, NULL);
+    DestroyMenu(m);
+    return got == 1 ? 1 : got == 2 ? 2 : 0;
 }

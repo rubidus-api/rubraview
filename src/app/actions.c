@@ -433,7 +433,7 @@ bool edit_denies(proven_u8str_view_t action) {
         "toggle_slideshow", "interval_cycle", "open_picker", "open_folder", "up_to_folder", "open_batch", "print",
         "rename_file", "delete_file", "purge_file", "copy_to_folder", "move_to_folder", "copy_to_other_folder",
         "move_to_other_folder", "convert_archive", "toggle_miniplayer", "toggle_subtitle_window", "toggle_subtitles",
-        "next_audio_track", "next_subtitle_track", "toggle_classify", "send_file",
+        "next_audio_track", "next_subtitle_track", "toggle_classify", "send_file", "folder_card",
     };
     for (size_t i = 0; i < sizeof(NO) / sizeof(NO[0]); ++i) if (proven_u8str_view_eq(action, proven_u8str_view_from_cstr(NO[i]))) return true;
     static const char *const PREFIX[] = { "media_", "anim_", "subpage_", "text_", "zoom_strip" };
@@ -839,6 +839,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         if (current_page_index(app) >= 0) chooser_open_tile(app, action, chooser_main_x(app), chooser_main_y(app), chooser_main_y(app));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_maximize"))) {
         rubraview_pal_window_toggle_maximize(app->window);   /* RV-234: the title bar's □ on a key */
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("folder_card"))) {
+        foldercard_show(app);   /* RV-296 */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("copy_to_folder"))) {
         filing_put(app, false);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("move_to_folder"))) {
@@ -1677,6 +1679,7 @@ void audio_track_set(app_state_t *app, int32_t next) {
 void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
     size_t reading_done = 0, reading_count = 0;
     bool reading_sizes = true;
+    if (foldercard_key(app, combo)) return;   /* RV-296: the folders card has the keys while it is open */
     if (app->extract_done) {   /* RV-240: Enter opens the folder here, Esc closes the card; nothing else meanwhile */
         if (key_is(combo, "Enter")) extract_done_answer(app, 0);
         else if (key_is(combo, "Escape")) extract_done_answer(app, 2);

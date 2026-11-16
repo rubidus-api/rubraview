@@ -931,6 +931,21 @@ file is in the Recycle Bin.
 that undo for File Explorer. Restore it from the recycle bin instead.
 Moves, copies and renames do undo properly.
 
+### The folders card
+
+`G` on a page opens a card listing the **default folder** (Settings ›
+Files › Copy to) and **folders 1 to 9**. Click a path, or light its row
+with the arrows and press `Enter`, to type it in place (`Enter` keeps it,
+`Esc` leaves it); **Browse...** picks it with Windows' dialog. Then:
+
+- `C` `C` copies the file on screen to the default folder, `M` `M`
+  moves it there;
+- `C` `1` ... `C` `9` copy it to that folder, `M` `1` ... `M` `9` move it.
+
+A move takes the file out of the list and shows the next one; when it
+was the last, the list is empty. A name already there is asked about, as
+a paste's is. The pixel grid, `G` before, is `Shift+G`.
+
 ### Classifying
 
 `K` (or Classify... in the right click) opens a window of the nine
@@ -2288,7 +2303,8 @@ listed under a later heading only means that while that is on screen.
 | `H` | Flip left-right |
 | `V` | Flip upside down |
 | `N` | Crisp scaling for pixel art |
-| `G` | Pixel grid past 400% |
+| `G` | Folders card: the default folder and folders 1 to 9; CC / MM copy / move the file to the default one, C1 / M1 to folder 1 |
+| `Shift+G` | Pixel grid past 400% |
 | `B` | Layout: one page, two pages, webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
 | `Shift+B` | Detect two-page spreads |
 

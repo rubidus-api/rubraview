@@ -39,6 +39,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
 
         case RUBRAVIEW_WINDOW_EVENT_TEXT:
         case RUBRAVIEW_WINDOW_EVENT_COMPOSITION:
+            if (foldercard_text(app, event)) break;   /* RV-296 */
             rename_text(app, event);
             break;
 
@@ -47,6 +48,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             break;
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
+            if (foldercard_motion(app, event->mouse.x)) { app->pointer_x = event->mouse.x; app->pointer_y = event->mouse.y; break; }   /* RV-296 */
             if (rename_field_drag(app, event->mouse.x, event->mouse.y)) { app->pointer_x = event->mouse.x; app->pointer_y = event->mouse.y; break; }   /* RV-293 */
             if (volpop_motion(app, event->mouse.x, event->mouse.y)) break;   /* RV-237: the volume's bar dragged */
             if (edge_press_motion(app, event->mouse.x, event->mouse.y)) break;   /* RV-285: a side held, along its column */
@@ -202,6 +204,8 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
             app->titlebar_armed = RUBRAVIEW_TITLEBAR_NONE;   /* RV-257: a new press; titlebar_click arms it again if it is X, _, [] */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT) app->edge_press.on = false;   /* RV-285: a press whose release was lost */
+            if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && foldercard_press(app, event->mouse.x, event->mouse.y, (event->mouse.modifiers & RUBRAVIEW_MOD_SHIFT) != 0)) break;   /* RV-296 */
+            if (foldercard_open(app)) break;   /* RV-296: nothing under the card is pressed */
             if (chooser_press(app, CHOOSE_IN_MAIN, event->mouse.x, event->mouse.y)) break;   /* 1.24.0 */
             if (rename_field_press(app, event->mouse.x, event->mouse.y, event->mouse.button, event->mouse.modifiers)) break;   /* RV-293 */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && progress_card_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-268 */
@@ -561,6 +565,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
 
         case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
             app->rename_dragging = false;   /* RV-293 */
+            foldercard_release(app);   /* RV-296 */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && titlebar_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-257 */
             if (volpop_release(app)) break;   /* RV-237 */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && edge_press_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-285 */

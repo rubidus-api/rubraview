@@ -304,7 +304,7 @@ static void pending_poll(app_state_t *app, bool quitting) {
     if (!g_pending) return;
     bool all_gone = true;
     for (size_t i = 0; all_gone && i < g_pending->count; ++i) all_gone = !rubraview_pal_fs_exists(proven_u8str_view_from_cstr(g_pending->tops[i]));
-    if (!all_gone && !quitting && rubraview_pal_time_now_seconds() < g_pending_until) return;
+    if (!all_gone && !quitting && (g_pending_until < 0.0 ? filejob_busy() : rubraview_pal_time_now_seconds() < g_pending_until)) return;
     if (!quitting) cut_arrived(app, g_pending);
     pick_free(g_pending);
     g_pending = NULL;
@@ -316,7 +316,14 @@ static void pending_poll(app_state_t *app, bool quitting) {
 static pick_t *g_async_pick;
 static double g_async_since;
 
-typedef struct drag_ctx { app_state_t *app; pick_t *pick; bool ok; } drag_ctx_t;
+typedef struct drag_ctx {
+    app_state_t *app;
+    pick_t *pick;
+    bool ok, right;
+    bool apart;                                  /* RV-295: let go on a folder: our jobs carry them there */
+    bool moving;
+    char target[RUBRAVIEW_ARCHIVE_PATH];
+} drag_ctx_t;
 
 static bool out_done(void *ctx, double *share) {
     out_job_t *j = ctx;
@@ -329,6 +336,18 @@ static bool out_done(void *ctx, double *share) {
 static bool drag_ready(void *ctx) {
     drag_ctx_t *d = ctx;
     if (!d->pick->from_archive) return d->ok = true;
+    /* RV-295 (owner, 2026-11-16: "별도의 프로세스와 그 위의 별개 외부창으로"): a drag let go on an Explorer
+       folder or the desktop (a right one's Copy here / Move here asked here) is not handed to Explorer: the drop is given up here and our jobs take it — the entries
+       written to our folder by an extraction's process, then moved on by a file job's (its progress and its names
+       already there in its windows) —, the viewer free all the while. Elsewhere (another program, the navigation
+       pane, a file) the files are written now, as before. */
+    if (rubraview_pal_drop_folder_here(d->target, sizeof d->target) > 0) {
+        int how = 1;   /* a left drag copies (D-278); a right one asks, here, as Explorer's menu did */
+        if (d->right) how = rubraview_pal_drop_menu(d->app->window, TU8("Copy here"), d->pick->movable ? TU8("Move here") : PROVEN_LIT(""), TU8("Cancel"));
+        d->apart = how > 0;
+        d->moving = how == 2;
+        return d->ok = false;
+    }
     out_job_t *j = out_start(d->app, d->pick);
     if (!j) return d->ok = false;
     char text[256];
@@ -401,13 +420,61 @@ static void folder_dropped(app_state_t *app, const proven_u8str_view_t *views, s
     chooser_open_drop(app, x, y);
 }
 
+/* ---- RV-295: let go on a folder, carried by our jobs ---- */
+
+typedef struct apart {
+    pick_t *pick;
+    char target[RUBRAVIEW_ARCHIVE_PATH];
+    bool moving;
+} apart_t;
+
+static apart_t *g_apart;   /* the one between its extraction and its file job */
+
+/* Written into our folder: now moved to the folder it was let go on by a file job; a move out of the archive takes
+   out what left our folder once that job is over (pending_poll). */
+static void apart_extracted(app_state_t *app, bool ok, void *ctx) {
+    apart_t *a = ctx;
+    if (a != g_apart) return;
+    g_apart = NULL;
+    pick_t *p = a->pick;
+    if (ok) {
+        proven_u8str_view_t *views = pick_views(app, p);
+        /* a copy is copied on from our folder (its words say copying; our folder goes when the viewer closes), a move moved */
+        ok = views && filejob_start(app, app_keep(app, cstr(a->target)), views, p->count, a->moving, -1, false);
+    }
+    if (!ok) {
+        (void)rubraview_pal_fs_delete_tree(cstr(p->dest));
+        pick_free(p);
+    } else if (a->moving) {
+        move_told(app, p);
+        g_pending_until = -1.0;   /* until the file job is over */
+    } else {
+        pick_free(p);
+    }
+    rubraview_free(a);
+}
+
+static void apart_start(app_state_t *app, pick_t *p, const char *target, bool moving) {
+    apart_t *a = g_apart ? NULL : rubraview_alloc_zero(1, sizeof *a);
+    if (!a) { osd_say(app, TU8("another drag out of an archive is still being written: wait for it")); pick_free(p); return; }
+    a->pick = p;
+    a->moving = moving;
+    rubraview_fmt(a->target, sizeof a->target, "{}", PROVEN_ARG(target));
+    g_apart = a;
+    if (!archwork_extract_then(app, p->archive, p->inner, p->only, p->only_count, p->dest, apart_extracted, a)) {
+        g_apart = NULL;
+        rubraview_free(a);
+        pick_free(p);
+    }
+}
+
 void picker_drag_out(app_state_t *app, size_t pressed, bool right) {
     if (rubraview_pal_dragging_out() || archwork_busy(app)) return;
     pick_t *p = pick_make(app, pressed);
     if (!p) return;
     proven_u8str_view_t *views = pick_views(app, p);
     uint32_t allowed = rubraview_dragout_effects(p->from_archive, p->movable, right);
-    drag_ctx_t ctx = { .app = app, .pick = p };
+    drag_ctx_t ctx = { .app = app, .pick = p, .right = right };
     /* RV-227: files on disk may be let go on the basket button (an archive's entries have no path to keep) */
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
@@ -436,6 +503,10 @@ void picker_drag_out(app_state_t *app, size_t pressed, bool right) {
             chooser_open_basket(app, BASKET_LIST_PUT_IN, basket.x, basket.y + basket.height, upper.y);
         }
         pick_free(p);
+        return;
+    }
+    if (ctx.apart) {   /* RV-295: our two jobs, one after the other */
+        apart_start(app, p, ctx.target, ctx.moving);
         return;
     }
     if (done & RUBRAVIEW_DROP_PENDING) {   /* RV-226: the target takes them on its own thread; the viewer goes on */

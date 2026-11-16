@@ -20,6 +20,8 @@ typedef struct archwork {
     bool compress;
     bool windowed;                            /* RV-272: asked from Explorer: shown in its own window, not the viewer */
     bool ask;                                 /* RV-294: the Compress window is the job's: it asks there, then packs */
+    void (*then)(app_state_t *app, bool ok, void *ctx);   /* RV-295: a drag's first step: told how it went, nothing said here */
+    void *then_ctx;
     /* extracting: the archives in turn */
     char **archives;
     size_t count, at;
@@ -92,6 +94,7 @@ static bool work_start(app_state_t *app, archwork_t *w) {
         a.volume_bytes = w->pk.volume_bytes;
         if (w->ask) { a.mode = 1; a.dest = proven_u8str_view_from_cstr(w->dir); }   /* RV-294: asked in the job, a bare name put here */
     } else {
+        a.step = w->then != NULL;   /* RV-295 */
         a.dest = proven_u8str_view_from_cstr(w->dest);
         a.mode = (uint8_t)w->mode;
         a.only_count = (uint32_t)w->only_count;
@@ -214,6 +217,28 @@ static void extract_go(app_state_t *app, archwork_t *w) {
     if (app->password_count > 0 && rubraview_archive_wants_password(w->archives[0], app->archive_codepage) == 1)
         rubraview_fmt(w->password, sizeof w->password, "{}", PROVEN_ARG(rubraview_bytes_view(app->passwords[app->password_count - 1], (int)app->password_lens[app->password_count - 1])));
     work_start(app, w);
+}
+
+/* RV-295: a drag out of an archive let go on a folder: the entries `only` (picked in `inner`) of `archive` written
+   into `dest` by a job's process in its own window, the viewer free meanwhile; `then` told how it went. */
+bool archwork_extract_then(app_state_t *app, const char *archive, const char *inner, const size_t *only, size_t only_count, const char *dest,
+                           void (*then)(app_state_t *app, bool ok, void *ctx), void *ctx) {
+    if (app->archwork) { osd_say(app, TU8("an archive is already being worked on (Esc stops it)")); return false; }
+    archwork_t *w = rubraview_alloc_zero(1, sizeof *w);
+    if (!w) return false;
+    w->archives = rubraview_alloc_zero(1, sizeof *w->archives);
+    w->only = only_count ? rubraview_alloc(only_count * sizeof *w->only) : NULL;
+    if (!w->archives || !(w->archives[0] = rubraview_strdup(archive)) || !w->only) { work_free(w); return false; }
+    w->count = 1;
+    proven_sys_mem_copy(w->only, only, only_count * sizeof *w->only);
+    w->only_count = only_count;
+    rubraview_fmt(w->inner, sizeof w->inner, "{}", PROVEN_ARG(inner));
+    rubraview_fmt(w->dest, sizeof w->dest, "{}", PROVEN_ARG(dest));
+    w->mode = RUBRAVIEW_EXTRACT_AS_IS;
+    w->then = then;
+    w->then_ctx = ctx;
+    extract_go(app, w);
+    return app->archwork == w;
 }
 
 void archwork_extract(app_state_t *app, int mode, bool choose_folder) {
@@ -542,7 +567,7 @@ void archwork_poll(app_state_t *app, bool quitting) {
     const uint8_t *fields = NULL;
     size_t flen = 0;
     int state = filejob_archive_state(w->job, &w->prog, &fields, &flen);
-    if (state == 0) { if (!w->ask) say_progress(app, w); return; }   /* RV-294: an asked compression shows in its own windows */
+    if (state == 0) { if (!w->ask && !w->then) say_progress(app, w); return; }   /* RV-294, RV-295: shown in the job's own windows */
     app->archwork = NULL;
     progress_end(app, PROGRESS_ARCHWORK);   /* RV-268 */
     if (state < 0) {   /* its process went before it said how it went */
@@ -551,12 +576,25 @@ void archwork_poll(app_state_t *app, bool quitting) {
         app_log(app, "archive", PROVEN_LIT("an extraction's or a compression's process ended before it said how it went"));
         jobnotes_check(app);
         if (w->windowed) extractwin_finished(app, false, false, TU8("the work's process ended without its report"), PROVEN_LIT(""));
+        if (w->then) w->then(app, false, w->then_ctx);
         if (app->picker_open) picker_navigate(app, app->picker_dir);
         work_free(w);
         return;
     }
     archwork_take_done(w, fields, flen);   /* its answer into the fields this file read when the work was its thread's */
     filejob_archive_forget(w->job);
+    if (w->then && w->ex.result != RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED && w->ex.result != RUBRAVIEW_ARCHIVE_PASSWORD_WRONG) {   /* RV-295 */
+        bool ok = (w->ex.result == RUBRAVIEW_ARCHIVE_DONE || w->ex.result == RUBRAVIEW_ARCHIVE_NOTHING) && w->failed == 0;
+        if (ok && w->password[0]) password_remember(app, proven_u8str_view_from_cstr(w->password));
+        if (!ok) {
+            char why[512];
+            rubraview_fmt(why, sizeof why, "{}{}{}", PROVEN_ARG(rubraview_archive_result_text(w->ex.result)), PROVEN_ARG(w->ex.why[0] ? "  -  " : ""), PROVEN_ARG(w->ex.why));
+            osd_say(app, cstr(why));
+        }
+        w->then(app, ok, w->then_ctx);
+        work_free(w);
+        return;
+    }
     char line[512];
     if (w->compress) {
         rubraview_archive_result_t r = w->pk.result;

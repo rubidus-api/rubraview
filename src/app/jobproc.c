@@ -241,7 +241,8 @@ typedef struct jp_win {
 } jp_win_t;
 
 static bool pw_show(jp_win_t *w, proven_arena_t *arena, proven_u8str_view_t ui_font, double now) {
-    rubraview_window_config_t config = { .title = w->title ? w->title : w->moving ? T("Rubraview - moving") : T("Rubraview - copying"), .width = 600, .height = 230 };
+    rubraview_window_config_t config = { .title = w->title ? w->title : w->moving ? T("Rubraview - moving") : T("Rubraview - copying"), .width = 600, .height = 230,
+                                         .no_activate = true };   /* RV-296: the viewer keeps the keys */
     w->window = rubraview_pal_window_create(arena, &config);
     if (!w->window) return false;
     int32_t ww = 0, hh = 0;
@@ -410,7 +411,7 @@ static void note_end(void) {
 typedef struct jp_park { uint32_t archive; char root[RUBRAVIEW_ARCHIVE_PATH]; rubraview_extract_parked_t p; } jp_park_t;
 
 static struct {
-    bool on, quiet;
+    bool on, quiet, step;   /* RV-295: step, a drag's: the window goes by itself when it ended well */
     uint8_t kind;
     char **names;
     size_t n, at;
@@ -539,6 +540,7 @@ static bool start_archive(proven_arena_t *arena, rubraview_jobwire_msg_t *m, cla
     A.on = true;
     A.kind = a.kind;
     A.quiet = a.quiet;
+    A.step = a.step;
     A.n = a.count;
     A.names = (char **)rubraview_alloc_zero(a.count, sizeof *A.names);
     if (!A.names) return false;
@@ -861,6 +863,8 @@ int jobproc_main(const wchar_t *pipe_name) {
                     archive_send_done();
                     note_end();
                     archive_summary(&pw);
+                    if (A.step && A.kind == RUBRAVIEW_JOBWIRE_EXTRACT && A.ex.result == RUBRAVIEW_ARCHIVE_DONE && A.failed == 0 && pw.open)
+                        pw_close(&pw);   /* RV-295: the next step's window says the rest */
                 }
             }
             if (ended && pw.yes && pw.yes_pressed) {

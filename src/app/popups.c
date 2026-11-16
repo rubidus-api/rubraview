@@ -633,6 +633,7 @@ void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi
     draw_book_ask(app, win_w, win_h, chrome_dpi);   /* RV-276 */
     draw_list_del(app, win_w, win_h, chrome_dpi);       /* RV-256 */
     draw_arcadd_card(app, win_w, win_h, chrome_dpi);    /* RV-260 */
+    draw_foldercard(app, win_w, win_h, chrome_dpi);     /* RV-296 */
     if (app->notice_seconds > 0.0 && app->notice_length > 0) {
         double k = name_scale(app);   /* 1.25.0 */
         int before = place_font_begin(app, PF_NAME, NULL);

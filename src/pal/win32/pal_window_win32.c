@@ -298,9 +298,16 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                    picture's edges were cut, at 90 % they showed (owner, 2026-10-14). The client is
                    the monitor's work area then. Full screen places itself and is left alone. */
                 if (IsZoomed(hwnd) && !w->fullscreen) {
+                    /* RV-295 (owner, 2026-11-16: "다른 모니터로 드래그해서 상단에 올리면 ... 테두리만 그 모니터에 최대화되어
+                       보이고 그 내용물은 비어있고"): the monitor is the one the window is going to, read from the rectangle
+                       Windows proposes — MonitorFromWindow named the one it was leaving, so a window snapped onto another
+                       monitor got a client on the old one, outside itself, and nothing of it showed. The client is the
+                       proposed rectangle cut to that monitor's work area. */
                     NCCALCSIZE_PARAMS *params = (NCCALCSIZE_PARAMS*)lparam;
                     MONITORINFO mi = { .cbSize = sizeof(mi) };
-                    if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) params->rgrc[0] = mi.rcWork;
+                    RECT proposed = params->rgrc[0], inside;
+                    if (GetMonitorInfoW(MonitorFromRect(&proposed, MONITOR_DEFAULTTONEAREST), &mi))
+                        params->rgrc[0] = IntersectRect(&inside, &proposed, &mi.rcWork) ? inside : mi.rcWork;
                 }
                 return 0;
             }
@@ -783,7 +790,7 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
 
     if (w->tool) SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
     if (config->hidden) return w;   /* RV-272: shown later, if ever */
-    ShowWindow(hwnd, w->tool ? SW_SHOWNOACTIVATE : SW_SHOW);
+    ShowWindow(hwnd, w->tool || config->no_activate ? SW_SHOWNOACTIVATE : SW_SHOW);
     UpdateWindow(hwnd);
     return w;
 }
