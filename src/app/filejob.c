@@ -162,6 +162,12 @@ void jobnotes_check(app_state_t *app) {
     }
 }
 
+/* RV-299 (owner, 2026-11-16: "종료 후 타이머 ... n초 후 자동으로 꺼지게요(0초면 안꺼짐)"): Settings › Files. */
+static uint32_t close_after_of(app_state_t *app) {
+    double s = rubraview_settings_get(&app->settings, PROVEN_LIT("jobs"), PROVEN_LIT("close_after_s"));
+    return s > 0.0 && s <= 3600.0 ? (uint32_t)lround(s) : 0u;
+}
+
 static void put_start(fj_job_t *job, proven_u8str_view_t dir, const proven_u8str_view_t *sources, size_t n, app_state_t *app) {
     rubraview_jobwire_start_t st = {
         .moving = job->moving, .dir = dir, .basket = job->basket, .from_cut = job->from_cut, .viewer_page = job->viewer_page,
@@ -170,6 +176,7 @@ static void put_start(fj_job_t *job, proven_u8str_view_t dir, const proven_u8str
         .same_recycles_copy = g_same_recycles_copy, .lang_file = cstr(lang_file_in_use()),
         .ui_font = rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("ui_font")),
         .journal_dir = jobnotes_dir(app),
+        .close_after = close_after_of(app),
     };
     rubraview_jobwire_put_start(&job->out, &st, sources, n);
 }
@@ -547,6 +554,7 @@ static void put_archive_of(fj_job_t *job, app_state_t *app, const void *what) {
     const archive_what_t *w = (const archive_what_t *)what;
     rubraview_jobwire_archive_t a = *w->a;
     a.journal_dir = jobnotes_dir(app);
+    a.close_after = close_after_of(app);
     a.lang_file = cstr(lang_file_in_use());
     a.ui_font = rubraview_settings_get_text(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("ui_font"));
     rubraview_jobwire_put_archive(&job->out, &a, w->names, w->only, w->rules);

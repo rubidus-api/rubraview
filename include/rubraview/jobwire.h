@@ -97,6 +97,7 @@ typedef struct rubraview_jobwire_start {
     proven_u8str_view_t lang_file;  /* the language pack the viewer reads ("" English), for the job's windows */
     proven_u8str_view_t ui_font;    /* Settings › General › the windows' face, as the setting holds it */
     proven_u8str_view_t journal_dir;/* RV-292: where the job leaves its note ("" none) */
+    uint32_t close_after;           /* RV-299: seconds its window stays once the work has ended (0: until closed) */
     uint32_t count;                 /* the sources that follow */
 } rubraview_jobwire_start_t;
 
@@ -186,6 +187,7 @@ typedef struct rubraview_jobwire_archive {
     uint64_t volume_bytes;
     /* both */
     proven_u8str_view_t password;      /* "" none; never written anywhere else */
+    uint32_t close_after;              /* RV-299: seconds its window stays once the work has ended (0: until closed) */
 } rubraview_jobwire_archive_t;
 
 /** ARCHIVE with its names, then its picked entries and their rules. */

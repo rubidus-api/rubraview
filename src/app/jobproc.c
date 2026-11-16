@@ -40,6 +40,9 @@ static struct {
     rubraview_jobwire_progress_t progress;
 } J = { .lock = SRWLOCK_INIT };
 
+static uint32_t g_close_after;   /* RV-299: seconds the window stays once the work has ended (0: until closed) */
+static double   g_ended_at;      /* when it ended, for that */
+
 /* ---- the pipe ---- */
 
 static struct {
@@ -542,6 +545,7 @@ static bool start_archive(proven_arena_t *arena, rubraview_jobwire_msg_t *m, cla
     A.on = true;
     A.kind = a.kind;
     A.quiet = a.quiet;
+    g_close_after = a.close_after;
     A.step = a.step;
     A.n = a.count;
     A.names = (char **)rubraview_alloc_zero(a.count, sizeof *A.names);
@@ -733,6 +737,7 @@ static bool start_job(proven_arena_t *arena, rubraview_jobwire_msg_t *m, clashui
     ui->ui_font = face ? proven_u8str_view_from_cstr(face) : PROVEN_LIT("");
     pw->moving = st.moving;
     J.quiet = st.quiet;
+    g_close_after = st.close_after;
     J.began = rubraview_pal_time_now_seconds();
     (void)rubraview_fmt(pw->head, sizeof pw->head, st.moving ? T("moving {} into {}") : T("copying {} into {}"),
                         PROVEN_ARG(st.count), PROVEN_ARG(rubraview_path_basename(st.dir)));
@@ -854,6 +859,7 @@ int jobproc_main(const wchar_t *pipe_name) {
             if (t - noted > 3.0 && !fin && g_note_path[0]) { g_note.done = now.done; note_write(); noted = t; }
             if (fin && !ended) {
                 ended = true;
+                g_ended_at = t;
                 WaitForSingleObject(A.thread, 5000);
                 if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS && A.pk.older_parts && A.pk.set_name[0] && pw.open) {
                     /* D-267, RV-294: asked here, where the password is: the older set's parts to the Recycle Bin and again */
@@ -895,6 +901,7 @@ int jobproc_main(const wchar_t *pipe_name) {
                     archive_summary(&pw);
                 }
             }
+            if (ended && pw.open && !pw.yes && g_close_after > 0 && t - g_ended_at >= (double)g_close_after) pw_close(&pw);   /* RV-299 */
             if (pw_pump(&pw)) {
                 if (!ended) { InterlockedExchange(&A.stop, 1); atomic_store(&A.ex.cancel, true); atomic_store(&A.pk.cancel, true); }
                 else if (pw.yes) { pw.yes = NULL; A.pk.older_parts = false; archive_send_done(); note_end(); }   /* the question left: not compressed */
@@ -945,6 +952,7 @@ int jobproc_main(const wchar_t *pipe_name) {
         }
         if (finished && !ended) {
             ended = true;
+            g_ended_at = t;
             WaitForSingleObject(J.worker, 5000);
             send_items_and_end(J.stop != 0);
             note_end();   /* RV-292: it ended as it should (finished or stopped) */
@@ -964,6 +972,7 @@ int jobproc_main(const wchar_t *pipe_name) {
         (void)clashui_pump(&ui);
         clashui_tick(&ui);
         clashui_draw(&ui);
+        if (ended && pw.open && g_close_after > 0 && t - g_ended_at >= (double)g_close_after) pw_close(&pw);   /* RV-299 */
         if (pw_pump(&pw)) {   /* closed: while it works, the job stops after the file in hand */
             if (!ended) { InterlockedExchange(&J.stop, 1); SetEvent(J.wake); }
             pw_close(&pw);

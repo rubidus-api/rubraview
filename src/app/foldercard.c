@@ -126,6 +126,17 @@ static void put(app_state_t *app, int row, bool moving) {
     filing_put_to(app, dir, moving);
 }
 
+/* RV-299: the navigator's Copy and Move: the default folder at once, as G C C / G M M; not set, the card asks for it. */
+void foldercard_put_default(app_state_t *app, bool moving) {
+    if (current_page_index(app) < 0) return;
+    if (row_dir(app, 0).size == 0) { foldercard_show(app); put(app, 0, moving); return; }
+    put(app, 0, moving);
+}
+
+proven_u8str_view_t foldercard_default_dir(const app_state_t *app) {
+    return row_dir(app, 0);
+}
+
 bool foldercard_key(app_state_t *app, rubraview_key_combo_t combo) {
     if (!F.open) return false;
     if (F.editing) {

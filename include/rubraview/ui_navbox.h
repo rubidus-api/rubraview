@@ -19,7 +19,9 @@ extern "C" {
  * Over a picture or a book: on top a page bar and the X; under it four pairs, left the one before and right the one
  * after whatever the reading direction: the page turn (a spread in two pages), the file turn (one file, always), the
  * first and the last, the archive or folder beside. Over a film or music: on top play / pause, a time bar and the X;
- * the pairs 5 s, 5 % of its length, the file, the folder or archive. Geometry and the actions only: the viewer paints.
+ * the pairs 5 s, 5 % of its length, the file, the folder or archive. RV-299 (owner, 2026-11-16: "네비 바 하단에 미리 지정 폴더로
+ * 복사 버튼과 지정 폴더로 이동 버튼 ... g 단계를 거치지 말고 곧바로"): under the pairs, Copy and Move to the default folder.
+ * Geometry and the actions only: the viewer paints.
  */
 
 typedef enum rubraview_navbox_part {
@@ -31,6 +33,8 @@ typedef enum rubraview_navbox_part {
     RUBRAVIEW_NAVBOX_BOOK_PREV, RUBRAVIEW_NAVBOX_BOOK_NEXT,
     RUBRAVIEW_NAVBOX_CLOSE,
     RUBRAVIEW_NAVBOX_PLAY,          /* RV-285: a film or music only, left of its time bar */
+    RUBRAVIEW_NAVBOX_COPY,          /* RV-299: the file on screen copied to the default folder (as G C C), a row under the pairs */
+    RUBRAVIEW_NAVBOX_MOVE,          /* RV-299: moved there (as G M M) */
     RUBRAVIEW_NAVBOX_PARTS,
 } rubraview_navbox_part_t;
 

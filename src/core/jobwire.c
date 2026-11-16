@@ -134,6 +134,7 @@ void rubraview_jobwire_put_start(rubraview_jobwire_out_t *out, const rubraview_j
     rubraview_jobwire_put_str(out, s->lang_file);
     rubraview_jobwire_put_str(out, s->ui_font);
     rubraview_jobwire_put_str(out, s->journal_dir);
+    rubraview_jobwire_put_u32(out, s->close_after);
     rubraview_jobwire_put_u32(out, (uint32_t)count);
     for (size_t i = 0; i < count; ++i) rubraview_jobwire_put_str(out, sources[i]);
     (void)rubraview_jobwire_finish(out);
@@ -154,6 +155,7 @@ void rubraview_jobwire_get_start(rubraview_jobwire_msg_t *msg, rubraview_jobwire
     s->lang_file = rubraview_jobwire_get_str(msg);
     s->ui_font = rubraview_jobwire_get_str(msg);
     s->journal_dir = rubraview_jobwire_get_str(msg);
+    s->close_after = rubraview_jobwire_get_u32(msg);
     s->count = rubraview_jobwire_get_u32(msg);
 }
 
@@ -284,6 +286,7 @@ void rubraview_jobwire_put_archive(rubraview_jobwire_out_t *out, const rubraview
     rubraview_jobwire_put_u8(out, a->names_hidden);
     rubraview_jobwire_put_u64(out, a->volume_bytes);
     rubraview_jobwire_put_str(out, a->password);
+    rubraview_jobwire_put_u32(out, a->close_after);
     for (uint32_t i = 0; names && i < a->count; ++i) rubraview_jobwire_put_str(out, names[i]);
     for (uint32_t i = 0; only && i < a->only_count; ++i) rubraview_jobwire_put_u64(out, only[i]);
     for (uint32_t i = 0; rules && i < a->rules_count; ++i) rubraview_jobwire_put_u8(out, rules[i]);
@@ -314,6 +317,7 @@ void rubraview_jobwire_get_archive(rubraview_jobwire_msg_t *msg, rubraview_jobwi
     a->names_hidden = rubraview_jobwire_get_u8(msg) != 0;
     a->volume_bytes = rubraview_jobwire_get_u64(msg);
     a->password = rubraview_jobwire_get_str(msg);
+    a->close_after = rubraview_jobwire_get_u32(msg);
 }
 
 void rubraview_jobwire_begin_archive_done(rubraview_jobwire_out_t *out, const rubraview_jobwire_archive_done_t *d) {

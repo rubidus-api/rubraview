@@ -8,12 +8,19 @@
 #include "rubraview/ui_navbox.h"
 #include "rubraview/playback.h"
 
+/* RV-299 (owner, 2026-11-16: "상단의 타이틀바에 핀 상태로 놓아 항상 보이는 상황에서는 네비 바가 보이지 않습니다"): the title
+   bar in the way only while it is passing — come up under the pointer —, not pinned */
+static bool titlebar_passing(app_state_t *app) {
+    if (!app->titlebar.shown) return false;
+    return rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("titlebar_pinned")) < 0.5;
+}
+
 /* `pressing`: a press is being decided (the click that opens it): the button held is not in the way then. */
 static bool navbox_allowed(app_state_t *app, bool pressing) {
     if (rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("navigator")) < 0.5) return false;
     if (app->navbox_shown && app->pagebar_dragging && !app->pagebar_detached) return true;   /* its bar being dragged */
     return app->pointer_inside && !app->cursor.hidden && page_count(app) > 0 && !app->picker_open &&
-           !app->settings_open && !app->panel.open && !app->titlebar.shown && !app->text &&
+           !app->settings_open && !app->panel.open && !titlebar_passing(app) && !app->text &&
            (pressing || (!app->view_pressed && !app->view_dragging)) && !app->pagebar_dragging && !app->ctx_open &&
            !app->tmenu_open && !window_taking_input(app) && app->zoom <= 1.001 && !strip_active(app);
 }
@@ -83,6 +90,11 @@ bool navbox_press(app_state_t *app, double x, double y) {
             pagebar_press(app, bar.x, bar.width, x, false);
         }
         note_activity(app);
+        return true;
+    }
+    if (part == RUBRAVIEW_NAVBOX_COPY || part == RUBRAVIEW_NAVBOX_MOVE) {   /* RV-299: straight to the default folder */
+        app->navbox_shown = false;
+        foldercard_put_default(app, part == RUBRAVIEW_NAVBOX_MOVE);
         return true;
     }
     if (part == RUBRAVIEW_NAVBOX_CLOSE) {   /* owner, 2026-11-14: "X는 상자만 닫는 것으로" */
@@ -157,6 +169,21 @@ void draw_navbox(app_state_t *app) {
     rubraview_pal_render_fill_rect(r, xb, over == RUBRAVIEW_NAVBOX_CLOSE ? COLOR_CLOSE_HOVER : COLOR_TILE_FILL, 4.0 * dpi);
     if (!rubraview_pal_render_draw_icon(r, 0xE8BB, xb, xb.height * 0.45, COLOR_TEXT))
         rubraview_pal_render_draw_text(r, PROVEN_LIT("X"), xb, xb.height * 0.6, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+
+    /* RV-299: Copy and Move to the default folder, named when it is set */
+    proven_u8str_view_t dd = rubraview_path_basename(foldercard_default_dir(app));
+    for (int32_t k = 0; k < 2; ++k) {
+        rubraview_navbox_part_t part = k ? RUBRAVIEW_NAVBOX_MOVE : RUBRAVIEW_NAVBOX_COPY;
+        rubraview_rect_t pr = rubraview_navbox_part_rect(nav, part);
+        rubraview_pal_rect_t pb = { pr.x, pr.y, pr.width, pr.height };
+        rubraview_pal_render_fill_rect(r, pb, over == part ? 0x50FFFFFFu : COLOR_TILE_FILL, 4.0 * dpi);
+        rubraview_pal_render_stroke_rect(r, pb, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
+        char words[200];
+        int wn = dd.size ? rubraview_fmt(words, sizeof words, k ? T("Move to {}") : T("Copy to {}"), PROVEN_ARG(dd))
+                         : rubraview_fmt(words, sizeof words, "{}", PROVEN_ARG(k ? T("Move to the default folder") : T("Copy to the default folder")));
+        if (wn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)words, (size_t)wn },
+                                                   (rubraview_pal_rect_t){ pb.x + 6.0 * dpi, pb.y, pb.width - 12.0 * dpi, pb.height }, 12.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
 
     /* the four pairs: left the one before, right the one after (whatever the reading direction) */
     static const uint32_t ICON[2][8] = { { 0xE76B, 0xE76C, 0xE72B, 0xE72A, 0xEB9E, 0xEB9D, 0xE892, 0xE893 },

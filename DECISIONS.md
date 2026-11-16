@@ -4127,3 +4127,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: RV-296 (D-361) showed the progress windows with `no_activate`; the clash window ("names already there", `clashui.c`, in a job and in the viewer for an extraction's names) still took the foreground.
 - Decision: `clashui_show` makes its window with `no_activate` too; every job window is now shown without activation and takes the keys only when clicked. `packwin` (Compress) keeps activating: it is asked for and typed in at once. Explorer's extraction window (`extractwin`, the viewer hidden) is the only window then and keeps its way.
 - Consequences: R325; VM T469.
+
+## D-364: The Navigator Under A Pinned Title Bar, Its Copy And Move, A Timer For Job Windows
+
+- Date: 2026-11-16
+- Status: Accepted (owner 2026-11-16, RV-299, quoted in R326).
+- Context: `navbox_allowed` refused while `titlebar.shown`, which a pinned title bar always is; copying to the default folder took G C C; a job's window stayed with its summary until closed.
+- Decision: only a title bar shown and not pinned (`general.titlebar_pinned`) keeps the navigator away. Core `ui_navbox` gains RUBRAVIEW_NAVBOX_COPY and _MOVE, a row of two halves under the pairs' words (the box taller by 0.8 of a button); `navbox_press` closes the box and calls `foldercard_put_default` (D-361's default folder, `curation.copy_dir`; not set: the card opens on it). `jobs.close_after_s` (0..3600, 0 never) goes in START and ARCHIVE (`close_after`); the job closes its progress window that many seconds after its work ended, not while it asks something (an older split's parts).
+- Consequences: R326; `test_ui_navbox`, `test_settings_doc`, `test_ui_settings`; VM T470.

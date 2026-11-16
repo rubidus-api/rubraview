@@ -277,6 +277,10 @@ static const char *const PARTS[] = {
 "  path   batch.last               \"Batch choices\"           hidden wired\n"
 "  path   edit.copy_name           \"Edit copies' name\"       hidden wired\n"
 "  note \"Ctrl+Shift+C copies the file on screen to the first folder and Ctrl+Shift+M moves it to the second; a page inside an archive can only be copied. A name already there gets -1, -2, ... added.\"\n"
+"",   /* the page goes on in the next part (4095 a literal) */
+"  section \"Copies, moves and extractions\"\n"
+"  int    jobs.close_after_s       \"Their window closes after\" 0..3600 step 1 unit \"s\" = 0 wired\n"
+"  note \"A copy's, a move's, an extraction's or a compression's own window, once the work has ended: closed by itself after so many seconds; 0 keeps it until it is closed.\"\n"
 "  section \"Number keys send the file to\"\n"
 "  choice curation.curation_mode   \"Number keys\"             move | copy = move wired\n"
 "  path   curation.dir_1           \"Folder 1\"                wired\n"

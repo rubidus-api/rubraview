@@ -2323,6 +2323,8 @@ bool foldercard_open(const app_state_t *app);
 uint64_t foldercard_signature(const app_state_t *app);
 void foldercard_show(app_state_t *app);
 void foldercard_close(app_state_t *app);
+void foldercard_put_default(app_state_t *app, bool moving);   /* RV-299 */
+proven_u8str_view_t foldercard_default_dir(const app_state_t *app);
 bool foldercard_key(app_state_t *app, rubraview_key_combo_t combo);
 bool foldercard_text(app_state_t *app, const rubraview_window_event_t *event);
 bool foldercard_press(app_state_t *app, double x, double y, bool shift);
