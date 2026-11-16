@@ -288,9 +288,6 @@ const char *rubraview_default_keymap_retired(void) {
     "[image]\n"
     "toggle_pixel_grid = \"G\"\n"         /* RV-297: the grid's keys before J */
     "toggle_pixel_grid = \"Shift+G\"\n"
-    /* RV-297 (owner, 2026-11-16: "단축키 설정에 g로 폴더에 이동 혹은 복사가 안되어요"): a keymap.ini kept from before 1.46 had
-       G on the grid, so 1.46 added the folders card with no key at all; it takes G now that the grid has J */
-    "folder_card = \"\"\n"
     "pan_left = \"Left\"\n"
     "pan_right = \"Right\"\n"
     "pan_up = \"Up\"\n"
