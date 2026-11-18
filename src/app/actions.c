@@ -433,7 +433,7 @@ bool edit_denies(proven_u8str_view_t action) {
         "toggle_slideshow", "interval_cycle", "open_picker", "open_folder", "up_to_folder", "open_batch", "print",
         "rename_file", "delete_file", "purge_file", "copy_to_folder", "move_to_folder", "copy_to_other_folder",
         "move_to_other_folder", "convert_archive", "toggle_miniplayer", "toggle_subtitle_window", "toggle_subtitles",
-        "next_audio_track", "next_subtitle_track", "toggle_classify", "send_file", "folder_card",
+        "next_audio_track", "next_subtitle_track", "toggle_classify", "send_file", "folder_card", "copy_to_default", "move_to_default",
     };
     for (size_t i = 0; i < sizeof(NO) / sizeof(NO[0]); ++i) if (proven_u8str_view_eq(action, proven_u8str_view_from_cstr(NO[i]))) return true;
     static const char *const PREFIX[] = { "media_", "anim_", "subpage_", "text_", "zoom_strip" };
@@ -530,6 +530,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
             }
             if (folded) { rubraview_menu_reset(&app->menu); sync_menubox_tiles(app); return; }
         }
+        if (app->close_widget_only) return;   /* RFC-0010: Q, with nothing open, does nothing */
         if (!subs_may_leave(app)) return;   /* a subtitle not saved is still asked about, as on Ctrl+Q */
         rubraview_pal_window_request_close(app->window);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("next_page")) && cue_step(app, +1)) {
@@ -823,7 +824,14 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         /* §3.18.1: a permanent delete asks first, every time. */
         app->confirm_purge = true;
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("undo"))) {
+        if (app->key_repeat) return;   /* RFC-0010: a held Z undoes one, a press each */
+        if (filejob_busy()) { osd_say(app, TU8("a copy or move is still running")); return; }
         if (!arc_undo(app) && !dragout_undo(app)) triage_undo(app);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("copy_to_default")) || proven_u8str_view_eq(action, PROVEN_LIT("move_to_default"))) {
+        /* RFC-0010 (D-367): C / X, as G C C / G M M and the navigator's buttons; held down, once */
+        if (!app->key_repeat) foldercard_put_default(app, proven_u8str_view_eq(action, PROVEN_LIT("move_to_default")));
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("close_widget"))) {
+        /* Q reaches here only from a menu or with a field open: the keys' Q is Esc (events.c) */
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("rename_file"))) {
         rename_begin(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_file_list"))) {

@@ -1,7 +1,8 @@
 #include "rubraview/default_keymap.h"
+#include "rubraview/core.h"
 
-const char *rubraview_default_keymap(void) {
-    return
+/* RFC-0010: past the 4095 bytes a C literal may hold, so in two parts joined once */
+static const char *const KEYMAP_PARTS[] = {
 
     /* RV-184 (D-219): a section a kind of file, asked in the order rubraview_keymap_mode_chain gives — a mode's
        own (text; a film's, playing's, a picture's), then navigation, file and common. One key means one thing
@@ -31,7 +32,7 @@ const char *rubraview_default_keymap(void) {
     /* §3.22.1. RV-211 (owner, 2026-10-31: "펑션키 F1~F12 쓰는 단축키는 다른 키로 옮겨주세요"): no function keys —
        the help on ? (Shift+/), as many programs have it; F1 too, the one function key kept (owner, 2026-11-07, RV-231). */
     "open_settings = \"Ctrl+Comma\"\n"
-    "toggle_help = \"Shift+Slash, F1\"\n"
+    "toggle_help = \"H, Shift+Slash, F1\"\n"   /* RFC-0010 (D-367) */
     /* Owner, 2026-09-29: the file's size, pixels, codec, EXIF — in a window whose text can be copied. */
     "toggle_info = \"I, Ctrl+I\"\n"
     /* RV-256 (owner, 2026-11-08: "내부 로그 창도 있으면 좋겠어요"; asked, "Ctrl+Shift+L과 ☰ › 로그"): this window's log */
@@ -46,6 +47,8 @@ const char *rubraview_default_keymap(void) {
        Backquote puts the window down and the sound off at once. */
     "quit = \"Ctrl+Q\"\n"
     "close_or_quit = \"Escape\"\n"
+    /* RFC-0010 (D-367): Q closes the widget on top, as Esc does, and never the program */
+    "close_widget = \"Q\"\n"
     "minimize_mute = \"Backquote\"\n"
     /* D-16 (owner, 2026-09-15): Ctrl + arrows size the window, Alt +
        arrows move it — everywhere, whatever is on screen. */
@@ -59,8 +62,8 @@ const char *rubraview_default_keymap(void) {
     "window_move_down = \"Alt+Down\"\n"
     /* RV-214 (owner, 2026-10-31: "위아래는 동영상과 이미지 둘 다 볼륨조절로"): Up and Down the volume wherever, a text's own
        lines first; with a picture it is the music behind it. */
-    "media_volume_up = \"Up\"\n"
-    "media_volume_down = \"Down\"\n"
+    "media_volume_up = \"W, Up\"\n"   /* RFC-0010 (D-367) */
+    "media_volume_down = \"S, Down\"\n"
     "\n"
 
     /* What is done to files: opening, saving, changing, keeping (RV-184: once in [ui]). */
@@ -77,7 +80,7 @@ const char *rubraview_default_keymap(void) {
        Shift+Delete asks before it is not. */
     "delete_file = \"Delete\"\n"
     "purge_file = \"Shift+Delete\"\n"
-    "undo = \"Ctrl+Z\"\n"
+    "undo = \"Z, Ctrl+Z\"\n"   /* RFC-0010 (D-367) */
     "rename_file = \"Ctrl+M, F2\"\n"   /* RV-211: was F2; RV-293 (owner, 2026-11-15): F2 again, renaming where the name is */
     /* Owner, 2026-10-09: an Explorer window with the file on screen picked
        out — the archive itself for a page inside one. */
@@ -95,11 +98,15 @@ const char *rubraview_default_keymap(void) {
     /* RV-296, RV-297 (owner, 2026-11-16: "g의 파일 정리 동작을 이미지 뿐만 아니라 다른 동영상이나 음악, 텍스트파일에도"):
        the folders card for any file on screen */
     "folder_card = \"G\"\n"
+    /* RFC-0010 (D-367): the file on screen to the folders card's default folder at once, as G C C / G M M */
+    "copy_to_default = \"C\"\n"
+    "move_to_default = \"X\"\n"
     /* RV-108: the frame on screen of a film or an animation, or the picture itself; a text's selection is its own Ctrl+C. */
     "copy_frame = \"Ctrl+C\"\n"
     "save_frame = \"Ctrl+Shift+E\"\n"
     "\n"
 
+    ,
     "[navigation]\n"
     /* Owner, 2026-09-09: page turning is on these keys and nothing else
        — PageDown/PageUp, Space/Enter and Backspace. The arrows, J/K and
@@ -109,8 +116,8 @@ const char *rubraview_default_keymap(void) {
        and in an animation or a film its frames ([playback]). */
     /* RV-214 (owner, 2026-10-31: "좌우키는 시간 이동이나 다음이전 페이지로 넘기는 기능으로"): Right and Left turn the page
        again; a film's own (seek) are asked first. */
-    "next_page = \"PageDown, Space, Period, Right\"\n"   /* RV-281: Enter is full screen */
-    "prev_page = \"PageUp, Backspace, Shift+Space, Comma, Left\"\n"
+    "next_page = \"D, PageDown, Space, Period, Right\"\n"   /* RV-281: Enter is full screen */
+    "prev_page = \"A, PageUp, Backspace, Shift+Space, Comma, Left\"\n"   /* RFC-0010 (D-367): A / D as the arrows */
     "first_page = \"Home, Ctrl+Home\"\n"
     "last_page = \"End, Ctrl+End\"\n"
     "skip_forward = \"Ctrl+PageDown\"\n"   /* RV-214: Shift+arrows move the picture now */
@@ -128,7 +135,7 @@ const char *rubraview_default_keymap(void) {
     "prev_archive = \"BracketLeft\"\n"
     /* Owner, 2026-10-08: the list of what the archive (or the folder) holds,
        with a preview, in a window of its own. */
-    "toggle_file_list = \"Ctrl+L\"\n"   /* RV-211: was F3 */
+    "toggle_file_list = \"L, Ctrl+L\"\n"   /* RV-211: was F3 */
     "toggle_filmstrip = \"Shift+F\"\n"  /* RV-211: was F4; F is the whole screen */
     /* Owner, 2026-09-29: the playlist (or this folder's files), floating over the picture. */
     "toggle_playlist = \"P\"\n"
@@ -136,7 +143,7 @@ const char *rubraview_default_keymap(void) {
        files and folders copied in Explorer join the list, folders walked down */
     "list_paste = \"Ctrl+V\"\n"
     /* The open archive's names, read in the next code page (owner, 2026-10-01); a text's own is the same key. */
-    "archive_names_cycle = \"Shift+N\"\n"
+    "archive_names_cycle = \"Alt+N\"\n"   /* RFC-0010: Shift+N is the first page alone; nowhere else to reach it */
     "\n"
 
     "[image]\n"
@@ -147,25 +154,26 @@ const char *rubraview_default_keymap(void) {
     "zoom_reset = \"0\"\n"                 /* back to the fitted size, which is 100% (D-97); 4 is real size (owner, 2026-10-15) */
     "smart_fit = \"5\"\n"
     "fit_stretch = \"6\"\n"
-    "aspect_cycle = \"Shift+A\"\n"       /* the shape the picture is shown in, round (D-94) */
-    "toggle_fit_lock = \"L\"\n"
-    "zoom_in = \"Plus\"\n"
-    "zoom_out = \"Minus\"\n"
+    "aspect_cycle = \"Ctrl+Shift+A\"\n"   /* RFC-0010: Shift+A is kept clear */       /* the shape the picture is shown in, round (D-94) */
+    "toggle_fit_lock = \"Shift+L\"\n"
+    "zoom_in = \"R, Plus\"\n"   /* RFC-0010 (D-367) */
+    "zoom_out = \"V, Minus\"\n"
     /* RV-214 (owner, 2026-10-31: "쉬프트 화살표키를 동영상, 이미지 둘 다에서 화면 위에서 이동하는 키로"): Shift and an
        arrow move a picture or a film larger than the window (the arrows alone did, 2026-10-14). */
     "pan_left = \"Shift+Left\"\n"
     "pan_right = \"Shift+Right\"\n"
     "pan_up = \"Shift+Up\"\n"
     "pan_down = \"Shift+Down\"\n"
-    "rotate_cw = \"R\"\n"
-    "rotate_ccw = \"Shift+R\"\n"
-    "flip_horizontal = \"H\"\n"
-    "flip_vertical = \"V\"\n"
-    "toggle_nearest = \"N\"\n"
+    "rotate_cw = \"Y\"\n"
+    "rotate_ccw = \"Shift+Y\"\n"
+    "flip_horizontal = \"B\"\n"
+    "flip_vertical = \"Shift+B\"\n"
+    "toggle_nearest = \"Shift+J\"\n"   /* RFC-0010: beside the pixel grid */
     /* RV-297 (owner, 2026-11-16: "그 이전 g의 기본 동작은 j로"): the pixel grid on J (G until 1.45, Shift+G in 1.46) */
     "toggle_pixel_grid = \"J\"\n"
-    "toggle_layout = \"B\"\n"
-    "toggle_spread_detect = \"Shift+B\"\n"
+    "toggle_layout = \"N\"\n"
+    "toggle_first_page_alone = \"Shift+N\"\n"
+    "toggle_spread_detect = \"\"\n"
     "\n"
 
     /* §3.20.2. A multi-page TIFF or an ICO does not advance by itself,
@@ -178,7 +186,7 @@ const char *rubraview_default_keymap(void) {
     /* Asked first while one runs; S starts one from anywhere (asked last otherwise; F5 too until RV-211). Ctrl+] is faster —
        a shorter wait — as it is a film's speed and a text's scrolling (RV-184). */
     "[slideshow]\n"
-    "toggle_slideshow = \"S\"\n"
+    "toggle_slideshow = \"U\"\n"   /* RFC-0010: S is down */
     "interval_down = \"Ctrl+BracketRight\"\n"
     "interval_up = \"Ctrl+BracketLeft\"\n"
     "interval_down_fine = \"Ctrl+Shift+BracketRight\"\n"
@@ -197,14 +205,14 @@ const char *rubraview_default_keymap(void) {
     /* D-16 (owner, 2026-09-15): the arrows seek 5 s and change the volume
        5 % while a video or music page is on screen. They turn no pages
        (owner, 2026-09-09), so nothing else is lost. */
-    "media_seek_forward = \"Right\"\n"
-    "media_seek_back = \"Left\"\n"
+    "media_seek_forward = \"D, Right\"\n"   /* RFC-0010 (D-367) */
+    "media_seek_back = \"A, Left\"\n"
     /* 30 s (owner, 2026-09-29); RV-214: on Shift+PageDown / PageUp, Shift+arrows moving the picture. */
     "media_seek_forward_long = \"Shift+PageDown\"\n"
     "media_seek_forward_fine = \"Ctrl+Shift+Right\"\n"
     "media_seek_back_fine = \"Ctrl+Shift+Left\"\n"
     "media_seek_back_long = \"Shift+PageUp\"\n"
-    "media_mute = \"Shift+M\"\n"
+    "media_mute = \"M\"\n"   /* RFC-0010 (D-367) */
     /* D-15 A-B repeat: the brackets with Shift (RV-184), the two ends marked. */
     "media_ab_a = \"Shift+BracketLeft\"\n"
     "media_ab_b = \"Shift+BracketRight\"\n"
@@ -218,17 +226,17 @@ const char *rubraview_default_keymap(void) {
     "[video]\n"
     /* §3.16.1 / R135: an external subtitle that runs early or late is
        nudged half a second at a time. */
-    "subtitle_earlier = \"Z\"\n"
-    "subtitle_later = \"X\"\n"
+    "subtitle_earlier = \"U\"\n"   /* RFC-0010: Z / X / C are the file's */
+    "subtitle_later = \"Shift+U\"\n"
     /* A tenth of a second at a time, and back to the file's own times (owner, 2026-10-16). */
-    "subtitle_earlier_fine = \"Shift+Z\"\n"
-    "subtitle_later_fine = \"Shift+X\"\n"
-    "subtitle_sync_reset = \"Alt+Z\"\n"
+    "subtitle_earlier_fine = \"Ctrl+U\"\n"
+    "subtitle_later_fine = \"Ctrl+Shift+U\"\n"
+    "subtitle_sync_reset = \"Alt+U\"\n"
     /* §3.16.2 / R135: the next sound track, and the next subtitle. */
-    "next_audio_track = \"A\"\n"
-    "next_subtitle_track = \"C\"\n"
+    "next_audio_track = \"R\"\n"
+    "next_subtitle_track = \"B\"\n"
     /* RV-115: the subtitles as a list in a window of its own. */
-    "toggle_subtitle_window = \"Shift+C\"\n"
+    "toggle_subtitle_window = \"Shift+B\"\n"
     /* RV-270 (owner, 2026-11-11: "E를 기존의 동작으로 그대로 유지하고, 새로 생긴 필터 기능은 다른 단축키로"): beside E,
        which edits a paused film's frame; Shift+E was bound nowhere. */
     "film_adjust = \"Shift+E\"\n"
@@ -240,28 +248,44 @@ const char *rubraview_default_keymap(void) {
        its speed too. RV-184: faster and slower on Ctrl+] and Ctrl+[, bigger and smaller on Plus and Minus,
        the spacing with Alt (as Alt+wheel), the encoding on Shift+N; E is Edit and Ctrl+L the file list here too. */
     "[text]\n"
-    "text_autoscroll = \"S, Space\"\n"   /* S, akin to the slide show (owner, 2026-10-20); Space too (2026-10-18) */
+    "text_autoscroll = \"Space\"\n"   /* RFC-0010 (D-367): S is a line down */
+    "text_reload = \"Ctrl+R\"\n"   /* S, akin to the slide show (owner, 2026-10-20); Space too (2026-10-18) */
     "text_faster = \"Ctrl+BracketRight, Shift+Up\"\n"
     "text_slower = \"Ctrl+BracketLeft, Shift+Down\"\n"
-    "text_line_down = \"Down\"\n"
-    "text_line_up = \"Up\"\n"
-    "text_screen_down = \"PageDown\"\n"
-    "text_screen_up = \"PageUp, Shift+Space\"\n"
+    "text_line_down = \"S, Down\"\n"
+    "text_line_up = \"W, Up\"\n"
+    "text_screen_down = \"D, PageDown\"\n"
+    "text_screen_up = \"A, PageUp, Shift+Space\"\n"
     "text_top = \"Home\"\n"
     "text_bottom = \"End\"\n"
-    "text_bigger = \"Plus, Ctrl+Plus\"\n"
-    "text_smaller = \"Minus, Ctrl+Minus\"\n"
+    "text_bigger = \"R, Plus, Ctrl+Plus\"\n"
+    "text_smaller = \"V, Minus, Ctrl+Minus\"\n"
     "text_spacing_more = \"Alt+Plus\"\n"
     "text_spacing_less = \"Alt+Minus\"\n"
     "text_breaks = \"B\"\n"
     "text_indent = \"Shift+B\"\n"
-    "text_wrap = \"W\"\n"
+    "text_wrap = \"U\"\n"
     "text_find = \"Ctrl+F\"\n"
     "text_find_next = \"Ctrl+G\"\n"
     "text_find_prev = \"Ctrl+Shift+G\"\n"
-    "text_encoding = \"Shift+N\"\n"
+    "text_encoding = \"N\"\n"
     "text_copy = \"Ctrl+C\"\n"
-    "text_select_all = \"Ctrl+A\"\n";
+    "text_select_all = \"Ctrl+A\"\n"
+};
+
+const char *rubraview_default_keymap(void) {
+    static char joined[8192];
+    if (joined[0] == '\0') {
+        size_t at = 0;
+        for (size_t i = 0; i < sizeof KEYMAP_PARTS / sizeof KEYMAP_PARTS[0]; ++i) {
+            size_t n = proven_cstr_len(KEYMAP_PARTS[i]);
+            if (at + n >= sizeof joined) break;
+            proven_sys_mem_copy(joined + at, KEYMAP_PARTS[i], n);
+            at += n;
+        }
+        joined[at] = '\0';
+    }
+    return joined;
 }
 
 const char *rubraview_default_keymap_retired(void) {
@@ -304,5 +328,55 @@ const char *rubraview_default_keymap_retired(void) {
     "media_seek_forward_long = \"Shift+Right\"\n"
     "media_seek_back_long = \"Shift+Left\"\n"
     "media_volume_up = \"Up\"\n"
-    "media_volume_down = \"Down\"\n";
+    "media_volume_down = \"Down\"\n"
+    /* RFC-0010 (D-367, owner 2026-11-18: "새 키 기준으로 ... 그대로 유지된 것은 기존 값 그대로"): 1.48's defaults; a row still
+       holding one of them takes the new keys, a row the user changed stays theirs */
+    "[common]\n"
+    "toggle_help = \"Shift+Slash, F1\"\n"
+    "media_volume_up = \"Up\"\n"
+    "media_volume_down = \"Down\"\n"
+    "[file]\n"
+    "undo = \"Ctrl+Z\"\n"
+    "[navigation]\n"
+    "next_page = \"PageDown, Space, Period, Right\"\n"
+    "prev_page = \"PageUp, Backspace, Shift+Space, Comma, Left\"\n"
+    "toggle_file_list = \"Ctrl+L\"\n"
+    "archive_names_cycle = \"Shift+N\"\n"
+    "[image]\n"
+    "aspect_cycle = \"Shift+A\"\n"
+    "toggle_fit_lock = \"L\"\n"
+    "zoom_in = \"Plus\"\n"
+    "zoom_out = \"Minus\"\n"
+    "rotate_cw = \"R\"\n"
+    "rotate_ccw = \"Shift+R\"\n"
+    "flip_horizontal = \"H\"\n"
+    "flip_vertical = \"V\"\n"
+    "toggle_nearest = \"N\"\n"
+    "toggle_layout = \"B\"\n"
+    "toggle_spread_detect = \"Shift+B\"\n"
+    "[slideshow]\n"
+    "toggle_slideshow = \"S\"\n"
+    "[playback]\n"
+    "media_seek_forward = \"Right\"\n"
+    "media_seek_back = \"Left\"\n"
+    "media_mute = \"Shift+M\"\n"
+    "[video]\n"
+    "subtitle_earlier = \"Z\"\n"
+    "subtitle_later = \"X\"\n"
+    "subtitle_earlier_fine = \"Shift+Z\"\n"
+    "subtitle_later_fine = \"Shift+X\"\n"
+    "subtitle_sync_reset = \"Alt+Z\"\n"
+    "next_audio_track = \"A\"\n"
+    "next_subtitle_track = \"C\"\n"
+    "toggle_subtitle_window = \"Shift+C\"\n"
+    "[text]\n"
+    "text_autoscroll = \"S, Space\"\n"
+    "text_line_down = \"Down\"\n"
+    "text_line_up = \"Up\"\n"
+    "text_screen_down = \"PageDown\"\n"
+    "text_screen_up = \"PageUp, Shift+Space\"\n"
+    "text_bigger = \"Plus, Ctrl+Plus\"\n"
+    "text_smaller = \"Minus, Ctrl+Minus\"\n"
+    "text_wrap = \"W\"\n"
+    "text_encoding = \"Shift+N\"\n";
 }

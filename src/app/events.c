@@ -33,8 +33,20 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 if (edit_panel_open(app)) panel_build_edit(app);
                 break;
             }
-            if (key_is(event->key.combo, "Escape") && navbox_escape(app)) break;   /* RV-285: the navigator, not the program */
-            dispatch_key(app, event->key.combo);
+            {
+                /* RFC-0010 (D-367): Q (close_widget) closes the widget on top as Esc does, never the program; a field typed in keeps it */
+                rubraview_key_combo_t combo = event->key.combo;
+                bool q = !rubraview_pal_window_text_input_on(app->window) &&
+                         proven_u8str_view_eq(rubraview_keymap_find_action(&app->keymap, PROVEN_LIT(""), combo), PROVEN_LIT("close_widget"));
+                if (q) combo = (rubraview_key_combo_t){ .key_name = PROVEN_LIT("Escape"), .modifiers = 0 };
+                if (q && app->sel_mode) { sel_mode_set(app, false); if (edit_panel_open(app)) panel_build_edit(app); break; }
+                if (key_is(combo, "Escape") && navbox_escape(app)) break;   /* RV-285: the navigator, not the program */
+                app->key_repeat = event->key.repeat;
+                app->close_widget_only = q;
+                dispatch_key(app, combo);
+                app->key_repeat = false;
+                app->close_widget_only = false;
+            }
             break;
 
         case RUBRAVIEW_WINDOW_EVENT_TEXT:

@@ -1248,6 +1248,8 @@ typedef struct app_state {
     uint32_t               undo_batch;   /* 1.23.0: the last batch number given to a move, copy or bin of many */
     rubraview_curation_t   curation;
     bool                   rename_active;
+    bool                   key_repeat;          /* RFC-0010: the key now dispatched is Windows' auto-repeat */
+    bool                   close_widget_only;   /* RFC-0010: Q is Esc that never ends the program */
     struct save_job       *save_job;   /* Save a copy in progress on its own thread, or NULL */
     struct page_job       *page_job;   /* a far page being read on its own thread, or NULL */
     SRWLOCK                source_lock;/* held around every read of the page source */

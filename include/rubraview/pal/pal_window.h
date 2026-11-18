@@ -70,6 +70,7 @@ typedef struct rubraview_window_event {
 
     struct {
         rubraview_key_combo_t combo; /* symbolic key name + modifier bitmask */
+        bool repeat;                 /* RFC-0010: the key held down, Windows' auto-repeat */
     } key;
 
     struct {
@@ -158,6 +159,7 @@ void rubraview_pal_window_accept_drops(rubraview_window_t *window, bool accept);
  * is using do not also arrive as KEY_DOWN. Off drops any unfinished text.
  */
 void rubraview_pal_window_text_input(rubraview_window_t *window, bool on);
+bool rubraview_pal_window_text_input_on(const rubraview_window_t *window);   /* RFC-0010: Q types in a field */
 /* D-262: while text is taken, the IME attached (any language) or not (the keyboard's plain letters, a password's);
    text_input(true) attaches it again. */
 void rubraview_pal_window_text_ime(rubraview_window_t *window, bool ime);

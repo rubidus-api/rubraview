@@ -411,6 +411,7 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             if (name) {
                 rubraview_window_event_t e = { .kind = RUBRAVIEW_WINDOW_EVENT_KEY_DOWN };
                 e.key.combo.modifiers = current_modifiers();
+                e.key.repeat = (lparam & (1 << 30)) != 0;
                 e.key.combo.key_name = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = proven_cstr_len(name) };
                 queue_push(w, e);
             }
@@ -1634,6 +1635,10 @@ void rubraview_pal_window_text_input(rubraview_window_t *window, bool on) {
         window->high_surrogate = 0;
         ImmAssociateContext(window->hwnd, NULL);   /* K5: keys are keys again */
     }
+}
+
+bool rubraview_pal_window_text_input_on(const rubraview_window_t *window) {
+    return window && window->text_input;
 }
 
 void rubraview_pal_window_text_ime(rubraview_window_t *window, bool ime) {

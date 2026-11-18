@@ -247,6 +247,9 @@ void triage_undo(app_state_t *app) {
         osd_say(app, TU8("undone"));
     }
     if (app->picker_open) picker_navigate(app, app->picker_dir);   /* what it lists has changed */
+    else if ((action.op == RUBRAVIEW_FILE_OP_MOVE || action.op == RUBRAVIEW_FILE_OP_RENAME) &&
+             rubraview_path_same(rubraview_path_dirname(action.source_path), app->source_dir))
+        reopen_on_path(app, action.source_path, action.playlist_index);   /* RFC-0010: the file moved back is shown again */
     else reopen_after_removal(app, action.playlist_index);
 }
 
