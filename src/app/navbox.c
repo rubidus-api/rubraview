@@ -97,6 +97,11 @@ bool navbox_press(app_state_t *app, double x, double y) {
         foldercard_put_default(app, part == RUBRAVIEW_NAVBOX_MOVE);
         return true;
     }
+    if (part == RUBRAVIEW_NAVBOX_UNDO) {   /* RFC-0010 §5: as Z */
+        app->navbox_shown = false;
+        handle_action(app, PROVEN_LIT("undo"));
+        return true;
+    }
     if (part == RUBRAVIEW_NAVBOX_CLOSE) {   /* owner, 2026-11-14: "X는 상자만 닫는 것으로" */
         app->navbox_shown = false;
         return true;
@@ -183,6 +188,15 @@ void draw_navbox(app_state_t *app) {
                          : rubraview_fmt(words, sizeof words, "{}", PROVEN_ARG(k ? T("Move to the default folder") : T("Copy to the default folder")));
         if (wn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)words, (size_t)wn },
                                                    (rubraview_pal_rect_t){ pb.x + 6.0 * dpi, pb.y, pb.width - 12.0 * dpi, pb.height }, 12.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+
+    {   /* RFC-0010 §5: Undo, as Z */
+        rubraview_rect_t ur = rubraview_navbox_part_rect(nav, RUBRAVIEW_NAVBOX_UNDO);
+        rubraview_pal_rect_t ub = { ur.x, ur.y, ur.width, ur.height };
+        rubraview_pal_render_fill_rect(r, ub, over == RUBRAVIEW_NAVBOX_UNDO ? 0x50FFFFFFu : COLOR_TILE_FILL, 4.0 * dpi);
+        rubraview_pal_render_stroke_rect(r, ub, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
+        if (!rubraview_pal_render_draw_icon(r, 0xE7A7, ub, ub.height * 0.5, COLOR_TEXT))
+            rubraview_pal_render_draw_text(r, PROVEN_LIT("Z"), ub, ub.height * 0.5, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 
     /* the four pairs: left the one before, right the one after (whatever the reading direction) */

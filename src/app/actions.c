@@ -688,7 +688,13 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_osd"))) {
         app->osd.always_on = !app->osd.always_on;
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_filmstrip"))) {
-        app->filmstrip.visible = !app->filmstrip.visible;
+        if (rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("thumb_bar")) <= 0.5) {   /* RFC-0010 §5: on again */
+            rubraview_settings_set(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("thumb_bar"), 1.0);
+            settings_took_effect(app);
+            app->filmstrip.visible = true;
+        } else {
+            app->filmstrip.visible = !app->filmstrip.visible;
+        }
         int32_t page = current_page_index(app);
         if (page >= 0) strip_follow(app, (size_t)page);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("layout_single"))) {

@@ -59,6 +59,7 @@ void strip_peek(app_state_t *app) {
     if (page_count(app) < 2) return;
     /* 1.22.0 (owner, 2026-10-19: "마우스 휠로 이미지 파일 사이를 이동할 때 하단에 보이는 썸네일 ... 끄고 킬 수 있게") */
     if (rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("wheel_strip")) <= 0.5) return;
+    if (rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("thumb_bar")) <= 0.5) return;   /* RFC-0010 §5 */
     app->strip_peek_until = rubraview_pal_time_now_seconds() + STRIP_PEEK_SECONDS;
 }
 

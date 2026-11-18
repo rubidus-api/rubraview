@@ -341,10 +341,15 @@ it, left the one before and right the one after whatever the reading
 direction, the page turn, the file turn, the first and the last, and the
 archive or folder beside; over a film or music, play / pause and a time
 bar on top, then 5 s, 5 % of its length, the file, and the folder or
-archive. Its X, `Esc`, a click outside it (which does nothing else) or
+archive. Under them, Copy to and Move to the default folder and an
+Undo button (as `C`, `X` and `Z`). Its X, `Esc`, a click outside it (which does nothing else) or
 the pointer away from it for 2 seconds closes it (Settings › Viewer ›
 **Navigator in the middle of the window** turns it off). **The two
-sides** (a tenth of the width each) are below. **Anywhere else** a click
+sides** (a tenth of the width each) are below; **Clicks on the sides
+turn** (Settings › Viewer) turns them off, the sides then being the
+picture's like the rest. **Thumbnail bar** there, off, keeps every
+thumbnail bar away — the wheel's and `Shift+F`'s — until `Shift+F` turns
+it on again. **Anywhere else** a click
 plays or pauses a film or music and does nothing on a picture or a book;
 a double click puts the picture's middle back on the window's. Holding the button
 still for a moment opens the right-click list, as a right click does.

@@ -38,9 +38,12 @@ rubraview_rect_t rubraview_navbox_part_rect(const rubraview_navbox_t *nav, rubra
         return nav->media ? (rubraview_rect_t){ b.x + nav->pad, b.y + nav->pad, nav->bar_h * 1.5, nav->bar_h } : none;
     if (part == RUBRAVIEW_NAVBOX_BAR)
         return (rubraview_rect_t){ b.x + nav->pad + play_w, b.y + nav->pad, b.width - 3.0 * nav->pad - nav->bar_h - play_w, nav->bar_h };
-    if (part == RUBRAVIEW_NAVBOX_COPY || part == RUBRAVIEW_NAVBOX_MOVE) {   /* RV-299: two halves of a row under the pairs' words */
-        double half = (b.width - 2.0 * nav->pad - nav->gap) * 0.5;
+    if (part == RUBRAVIEW_NAVBOX_COPY || part == RUBRAVIEW_NAVBOX_MOVE || part == RUBRAVIEW_NAVBOX_UNDO) {
+        /* RV-299: Copy and Move, two halves of a row under the pairs' words; RFC-0010: Undo, one button wide, at its right */
+        double undo_w = nav->button;
+        double half = (b.width - 2.0 * nav->pad - 2.0 * nav->gap - undo_w) * 0.5;
         double y = b.y + nav->pad + nav->bar_h + nav->pad * 0.8 + nav->button_h + nav->label_h + nav->pad * 0.1;
+        if (part == RUBRAVIEW_NAVBOX_UNDO) return (rubraview_rect_t){ b.x + b.width - nav->pad - undo_w, y, undo_w, nav->button_h * 0.8 };
         return (rubraview_rect_t){ b.x + nav->pad + (part == RUBRAVIEW_NAVBOX_MOVE ? half + nav->gap : 0.0), y, half, nav->button_h * 0.8 };
     }
     if (part < RUBRAVIEW_NAVBOX_PAGE_PREV || part > RUBRAVIEW_NAVBOX_BOOK_NEXT) return none;

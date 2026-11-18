@@ -1008,6 +1008,7 @@ void ui_font_apply_all(app_state_t *app) {
 
 void settings_took_effect(app_state_t *app) {
     ui_font_apply_all(app);
+    if (rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("thumb_bar")) <= 0.5) app->filmstrip.visible = false;   /* RFC-0010 §5 */
     app_log_limit(app);   /* RV-256 */
     {   /* RFC-0007: plug-ins on or off, or another folder: looked for again */
         size_t before = g_plugin_count;

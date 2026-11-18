@@ -35,6 +35,7 @@ typedef enum rubraview_navbox_part {
     RUBRAVIEW_NAVBOX_PLAY,          /* RV-285: a film or music only, left of its time bar */
     RUBRAVIEW_NAVBOX_COPY,          /* RV-299: the file on screen copied to the default folder (as G C C), a row under the pairs */
     RUBRAVIEW_NAVBOX_MOVE,          /* RV-299: moved there (as G M M) */
+    RUBRAVIEW_NAVBOX_UNDO,          /* RFC-0010 §5: the last copy, move or rename undone (as Z), right of Move */
     RUBRAVIEW_NAVBOX_PARTS,
 } rubraview_navbox_part_t;
 

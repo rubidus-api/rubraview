@@ -274,7 +274,9 @@ size_t files_pump(app_state_t *app) {
                     break;
                 }
                 /* Any other key is the viewer's: its own key closes this window, the rest work as there. */
+                app->key_repeat = event.key.repeat;   /* RFC-0010: a held C / X / Z acts once here too */
                 dispatch_key(app, combo);
+                app->key_repeat = false;
                 app->files_dirty = true;
                 break;
             }

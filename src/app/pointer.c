@@ -53,7 +53,8 @@ void apply_intent(app_state_t *app, rubraview_pointer_intent_t intent) {
    page, with nothing else of the viewer's in the way (owner, 2026-09-29). */
 static bool edge_nav_allowed(const app_state_t *app) {
     return app->pointer_inside && !app->cursor.hidden && page_count(app) > 0 && !app->picker_open &&
-           !app->settings_open && !app->panel.open && !app->titlebar.shown;
+           !app->settings_open && !app->panel.open && !app->titlebar.shown &&
+           rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("side_areas")) > 0.5;   /* RFC-0010 §5 */
 }
 
 static bool over_a_box(app_state_t *app, double x, double y) {

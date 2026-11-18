@@ -815,7 +815,9 @@ static size_t owned_pump(app_state_t *app, int which) {
                 continue;
             }
             if (key_is(event.key.combo, "Escape")) { batch_after(app, which == 1 ? BATCH_AFTER_CLOSE : BATCH_AFTER_NAMES_CLOSE); owned_after(app); break; }
+            app->key_repeat = event.key.repeat;   /* RFC-0010: a held C / X / Z acts once here too */
             dispatch_key(app, event.key.combo);   /* the rest are the viewer's keys */
+            app->key_repeat = false;
             continue;
         }
         if (event.kind == RUBRAVIEW_WINDOW_EVENT_TEXT || event.kind == RUBRAVIEW_WINDOW_EVENT_COMPOSITION) {
