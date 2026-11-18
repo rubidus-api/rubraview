@@ -64,6 +64,7 @@ typedef struct rubraview_flowmenu_metrics {
     double gap;         /* between two buttons of a group, and between two lines */
     double group_gap;   /* between two groups on one line */
     double pad;         /* inside the frame, all round */
+    bool group_lines;   /* RV-303 (RFC-0010 §6): each group starts a line of its own */
 } rubraview_flowmenu_metrics_t;
 
 /**
@@ -87,6 +88,27 @@ int32_t rubraview_flowmenu_step_vertical(const rubraview_rect_t *cells, const bo
 double rubraview_flowmenu_scroll_clamp(double scroll, double content, double view, double pitch);
 /** The scroll that shows a button whose top is `top` below the frame's (unscrolled) top, moving as little as it can. */
 double rubraview_flowmenu_scroll_to(double scroll, double top, double content, double view, double pitch, double pad);
+
+/*
+ * RV-303 (RFC-0010 §6, D-367): the ☰'s categories, in the order shown, each under its heading (words, not a
+ * button). Every action is in one; one this table does not know is in the last.
+ */
+enum {
+    RUBRAVIEW_MENUCAT_OPEN = 0,    /* Open and lists */
+    RUBRAVIEW_MENUCAT_MOVE,        /* Move */
+    RUBRAVIEW_MENUCAT_FILES,       /* File and folders */
+    RUBRAVIEW_MENUCAT_VIEW,        /* View and reading */
+    RUBRAVIEW_MENUCAT_PLAY,        /* Play and sound */
+    RUBRAVIEW_MENUCAT_SUBTITLES,   /* Subtitles */
+    RUBRAVIEW_MENUCAT_EDIT,        /* Edit and output */
+    RUBRAVIEW_MENUCAT_ARCHIVES,    /* Archives */
+    RUBRAVIEW_MENUCAT_WIDGETS,     /* Widgets and help */
+    RUBRAVIEW_MENUCAT_COUNT
+};
+/** The category `action` is shown under. */
+int rubraview_menu_category(proven_u8str_view_t action);
+/** A category's heading, the reader's words (N_). */
+const char *rubraview_menu_category_heading(int category);
 
 #ifdef __cplusplus
 }

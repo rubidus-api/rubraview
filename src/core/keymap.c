@@ -487,6 +487,23 @@ bool rubraview_keymap_unbind_last(rubraview_keymap_t *keymap, size_t index) {
     return true;
 }
 
+bool rubraview_keymap_unbind_combo(proven_arena_t *arena, rubraview_keymap_t *keymap, size_t index, rubraview_key_combo_t combo) {
+    if (!arena || !keymap || index >= keymap->count) return false;
+    rubraview_key_binding_t *b = &keymap->bindings[index];
+    size_t at = b->combo_count;
+    for (size_t c = 0; c < b->combo_count && at == b->combo_count; ++c) if (rubraview_key_combo_equal(b->combos[c], combo)) at = c;
+    if (at == b->combo_count) return false;
+    if (b->combo_count == 1) { b->combo_count = 0; return true; }
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, b->combo_count - 1, sizeof(rubraview_key_combo_t));
+    if (!proven_is_ok(res.err)) return false;
+    rubraview_key_combo_t *kept = (rubraview_key_combo_t *)res.value.ptr;
+    size_t n = 0;
+    for (size_t c = 0; c < b->combo_count; ++c) if (c != at) kept[n++] = b->combos[c];
+    b->combos = kept;
+    b->combo_count = n;
+    return true;
+}
+
 proven_u8str_view_t rubraview_keymap_serialize(proven_arena_t *arena, const rubraview_keymap_t *keymap) {
     if (!arena || !keymap) return PROVEN_LIT("");
     rubraview_ini_doc_t doc = {0};

@@ -4,6 +4,7 @@
  */
 #include "rubraview/core.h"
 #include "rubraview/keyboard.h"
+#include "rubraview/lang.h"
 
 #include <string.h>
 
@@ -162,4 +163,109 @@ int32_t rubraview_keyboard_cap_at(double x, double y) {
         if (x >= k->x && x < k->x + k->w && y >= k->y && y < k->y + k->h) return (int32_t)i;
     }
     return -1;
+}
+
+/* ---- RV-303 (RFC-0010 §4.8, D-367): the keys by keyboard row ---- */
+
+static const char *const ROW_HEADING[RUBRAVIEW_KEYROW_COUNT] = {
+    [RUBRAVIEW_KEYROW_FUNCTION] = N_("Esc and the function keys"),
+    [RUBRAVIEW_KEYROW_NUMBER]   = N_("The number row"),
+    [RUBRAVIEW_KEYROW_TOP]      = N_("The top letter row"),
+    [RUBRAVIEW_KEYROW_HOME]     = N_("The middle letter row"),
+    [RUBRAVIEW_KEYROW_BOTTOM]   = N_("The bottom letter row"),
+    [RUBRAVIEW_KEYROW_SPACE]    = N_("The space bar"),
+    [RUBRAVIEW_KEYROW_EDITING]  = N_("The editing keys"),
+    [RUBRAVIEW_KEYROW_ARROWS]   = N_("The arrows"),
+    [RUBRAVIEW_KEYROW_PAD]      = N_("The number pad"),
+    [RUBRAVIEW_KEYROW_OTHER]    = N_("Other keys"),
+};
+
+const char *rubraview_keyboard_row_heading(size_t row) {
+    return row < RUBRAVIEW_KEYROW_COUNT ? ROW_HEADING[row] : ROW_HEADING[RUBRAVIEW_KEYROW_OTHER];
+}
+
+size_t rubraview_keyboard_row_of(size_t cap) {
+    if (cap >= sizeof CAPS / sizeof CAPS[0]) return RUBRAVIEW_KEYROW_OTHER;
+    const rubraview_keycap_t *k = &CAPS[cap];
+    if (k->y >= LOW) return k->x >= PAD ? RUBRAVIEW_KEYROW_PAD : k->y < LOW + 3.5f ? RUBRAVIEW_KEYROW_EDITING : RUBRAVIEW_KEYROW_ARROWS;
+    if (k->y < 1.0f) return RUBRAVIEW_KEYROW_FUNCTION;
+    if (k->y < 2.0f) return RUBRAVIEW_KEYROW_NUMBER;
+    if (k->y < 3.0f) return RUBRAVIEW_KEYROW_TOP;
+    if (k->y < 4.0f) return RUBRAVIEW_KEYROW_HOME;
+    if (k->y < 5.0f) return RUBRAVIEW_KEYROW_BOTTOM;
+    return RUBRAVIEW_KEYROW_SPACE;
+}
+
+/* The bindings of `chain` that hold `combo`, in the chain's order: the first acts, the second is the one it hides. */
+static void rows_resolve(const rubraview_keymap_t *keymap, const proven_u8str_view_t *chain, size_t links, rubraview_key_combo_t combo,
+                         int32_t *acts, int32_t *hidden) {
+    *acts = -1;
+    *hidden = -1;
+    for (size_t l = 0; l < links && *hidden < 0; ++l)
+        for (size_t i = 0; i < keymap->count && *hidden < 0; ++i) {
+            const rubraview_key_binding_t *b = &keymap->bindings[i];
+            if (!proven_u8str_view_eq(b->context, chain[l])) continue;
+            for (size_t c = 0; c < b->combo_count; ++c) {
+                if (!rubraview_key_combo_equal(b->combos[c], combo)) continue;
+                if (*acts < 0) *acts = (int32_t)i;
+                else if (*acts != (int32_t)i) *hidden = (int32_t)i;
+                break;
+            }
+        }
+}
+
+static bool rows_in_chain(proven_u8str_view_t context, const proven_u8str_view_t *chain, size_t links) {
+    for (size_t l = 0; l < links; ++l) if (proven_u8str_view_eq(context, chain[l])) return true;
+    return false;
+}
+
+size_t rubraview_keymap_rows(const rubraview_keymap_t *keymap, rubraview_key_mode_t mode, rubraview_keyrow_entry_t *out, size_t cap) {
+    if (!keymap || !out || cap == 0) return 0;
+    proven_u8str_view_t chain[8];
+    size_t links = 0;
+    if (mode == RUBRAVIEW_KEY_MODE_COUNT) chain[links++] = PROVEN_LIT("");
+    else links = rubraview_keymap_mode_chain(mode, false, chain, 8);
+    size_t n = 0;
+#define ROWS_PUSH(...) do { if (n < cap) out[n++] = (rubraview_keyrow_entry_t){ __VA_ARGS__ }; } while (0)
+    for (size_t row = 0; row < RUBRAVIEW_KEYROW_OTHER; ++row) {
+        ROWS_PUSH(.row = (uint8_t)row, .heading = true, .binding = -1, .hidden = -1);
+        for (size_t k = 0; k < sizeof CAPS / sizeof CAPS[0]; ++k) {
+            if (!CAPS[k].name || rubraview_keyboard_row_of(k) != row) continue;
+            proven_u8str_view_t name = proven_u8str_view_from_cstr(CAPS[k].name);
+            uint32_t mods = 0;   /* bit m: the key with modifiers m is bound in the chain */
+            for (size_t i = 0; i < keymap->count; ++i) {
+                const rubraview_key_binding_t *b = &keymap->bindings[i];
+                if (!rows_in_chain(b->context, chain, links)) continue;
+                for (size_t c = 0; c < b->combo_count; ++c)
+                    if (same_name(b->combos[c].key_name, CAPS[k].name)) mods |= 1u << (b->combos[c].modifiers & 7u);
+            }
+            if (mods == 0) { ROWS_PUSH(.row = (uint8_t)row, .combo = { .modifiers = 0, .key_name = name }, .binding = -1, .hidden = -1); continue; }
+            for (uint32_t m = 0; m < 8; ++m) {
+                if (!(mods & (1u << m))) continue;
+                rubraview_key_combo_t combo = { .modifiers = m, .key_name = name };
+                int32_t acts = -1, hidden = -1;
+                rows_resolve(keymap, chain, links, combo, &acts, &hidden);
+                ROWS_PUSH(.row = (uint8_t)row, .combo = combo, .binding = acts, .hidden = hidden);
+            }
+        }
+    }
+    size_t other = n;
+    for (size_t l = 0; l < links; ++l)
+        for (size_t i = 0; i < keymap->count; ++i) {
+            const rubraview_key_binding_t *b = &keymap->bindings[i];
+            if (!proven_u8str_view_eq(b->context, chain[l])) continue;
+            for (size_t c = 0; c < b->combo_count; ++c) {
+                rubraview_key_combo_t combo = b->combos[c];
+                if (combo.key_name.size == 0 || on_layout(combo.key_name)) continue;
+                bool seen = false;
+                for (size_t e = other; e < n && !seen; ++e) seen = !out[e].heading && rubraview_key_combo_equal(out[e].combo, combo);
+                if (seen) continue;
+                if (n == other) ROWS_PUSH(.row = RUBRAVIEW_KEYROW_OTHER, .heading = true, .binding = -1, .hidden = -1);
+                int32_t acts = -1, hidden = -1;
+                rows_resolve(keymap, chain, links, combo, &acts, &hidden);
+                ROWS_PUSH(.row = RUBRAVIEW_KEYROW_OTHER, .combo = combo, .binding = acts, .hidden = hidden);
+            }
+        }
+#undef ROWS_PUSH
+    return n;
 }

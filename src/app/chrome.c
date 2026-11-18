@@ -39,8 +39,8 @@ static const char *const TMENU_NOT[] = { "toggle_slideshow", "open_edit", "explo
    less what its own rows already do and TMENU_NOT; RV-287: buttons as wide as their words, laid like inline
    elements and wrapped at the window's right, scrolled by whole lines when the window is too low
    (rubraview_flowmenu_*). */
-#define TMENU_MAX (TMENU_COUNT + RUBRAVIEW_CONTEXT_MAX_ITEMS + 1)
-typedef struct tmenu_row { proven_u8str_view_t words, action; int32_t group; } tmenu_row_t;
+#define TMENU_MAX (TMENU_COUNT + RUBRAVIEW_CONTEXT_MAX_ITEMS + 1 + RUBRAVIEW_MENUCAT_COUNT)
+typedef struct tmenu_row { proven_u8str_view_t words, action; int32_t group; bool heading; } tmenu_row_t;
 
 static bool tmenu_left_out(proven_u8str_view_t action) {
     for (int32_t k = 0; k < TMENU_COUNT; ++k) if (proven_u8str_view_eq(action, cstr(TMENU[k].action))) return true;
@@ -48,18 +48,39 @@ static bool tmenu_left_out(proven_u8str_view_t action) {
     return false;
 }
 
+/* RV-303 (RFC-0010 §6, D-367): every row under its category's heading, the categories in their order, a row's
+   place among its category's kept; a category with no row on this screen is left out */
+static size_t tmenu_rows_flat(const app_state_t *app, tmenu_row_t *rows);
 static size_t tmenu_rows(const app_state_t *app, tmenu_row_t *rows) {
+    static tmenu_row_t flat[TMENU_MAX];
+    size_t all = tmenu_rows_flat(app, flat), n = 0;
+    for (int c = 0; c < RUBRAVIEW_MENUCAT_COUNT; ++c) {
+        bool headed = false;
+        for (size_t i = 0; i < all && n < TMENU_MAX; ++i) {
+            if (rubraview_menu_category(flat[i].action) != c) continue;
+            if (!headed && n + 1 < TMENU_MAX) {
+                rows[n++] = (tmenu_row_t){ rubraview_tr_u8(cstr(rubraview_menu_category_heading(c))), PROVEN_LIT(""), c, true };
+                headed = true;
+            }
+            rows[n] = flat[i];
+            rows[n++].group = c;
+        }
+    }
+    return n;
+}
+
+static size_t tmenu_rows_flat(const app_state_t *app, tmenu_row_t *rows) {
     size_t n = 0;
     for (int32_t i = 0; i < TMENU_COUNT; ++i)
-        rows[n++] = (tmenu_row_t){ rubraview_tr_u8(cstr(TMENU[i].words)), cstr(TMENU[i].action), TMENU[i].group };
+        rows[n++] = (tmenu_row_t){ rubraview_tr_u8(cstr(TMENU[i].words)), cstr(TMENU[i].action), TMENU[i].group, false };
     const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
     const rubraview_toolbox_profile_t *list = rubraview_boxes_context(doc, cstr(toolbox_profile_name(app)));
     for (int32_t i = 0; list && i < list->tile_count && n < TMENU_MAX; ++i) {
         const rubraview_box_tile_t *item = &doc->context_items[list->first_tile + i];
         if (tmenu_left_out(item->action)) continue;
-        rows[n++] = (tmenu_row_t){ rubraview_tr_ctx_u8("menu", item->caption), item->action, item->group + TMENU_GROUPS };
+        rows[n++] = (tmenu_row_t){ rubraview_tr_ctx_u8("menu", item->caption), item->action, item->group + TMENU_GROUPS, false };
     }
-    if (n < TMENU_MAX) rows[n] = (tmenu_row_t){ TU8("Quit"), PROVEN_LIT("quit"), (n ? rows[n - 1].group : 0) + 1 }, n++;   /* RV-246: last */
+    if (n < TMENU_MAX) rows[n] = (tmenu_row_t){ TU8("Quit"), PROVEN_LIT("quit"), (n ? rows[n - 1].group : 0) + 1, false }, n++;   /* RV-246: last */
     return n;
 }
 
@@ -105,10 +126,18 @@ static void tmenu_layout(app_state_t *app, tmenu_layout_t *L) {
     int before = place_font_begin(app, PF_MENU, NULL);   /* measured in the face it is drawn in */
     L->n = tmenu_rows(app, L->rows);
     L->size = 15.0 * dpi * k;
-    L->m = (rubraview_flowmenu_metrics_t){ .cell_height = 34.0 * dpi * k, .gap = 4.0 * dpi, .group_gap = 18.0 * dpi, .pad = 6.0 * dpi };
+    L->m = (rubraview_flowmenu_metrics_t){ .cell_height = 34.0 * dpi * k, .gap = 4.0 * dpi, .group_gap = 18.0 * dpi, .pad = 6.0 * dpi,
+                                           .group_lines = true };   /* RV-303: a line a category */
     rubraview_action_facts_t facts = action_facts(app);
     for (size_t i = 0; i < L->n; ++i) {
         L->groups[i] = L->rows[i].group;
+        if (L->rows[i].heading) {   /* RV-303: words, never focused or pressed */
+            double hw = 0.0;
+            L->enabled[i] = false;
+            (void)rubraview_pal_render_measure_text(app->renderer, L->rows[i].words, L->size * 0.82, &hw);
+            L->widths[i] = 8.0 * dpi + hw + 10.0 * dpi;
+            continue;
+        }
         L->enabled[i] = rubraview_action_state(L->rows[i].action, &facts).enabled;
         char scratch[160], keybuf[48];
         double tw = 0.0, aw = 0.0, kw = 0.0;
@@ -161,7 +190,7 @@ static bool tmenu_shown(const tmenu_layout_t *L, size_t i) {
 static int32_t tmenu_at(const tmenu_layout_t *L, double x, double y) {
     if (!rubraview_rect_contains(L->frame, x, y)) return -1;
     int32_t i = rubraview_flowmenu_at(L->cells, L->n, x, y);
-    return i >= 0 && tmenu_shown(L, (size_t)i) ? i : -1;
+    return i >= 0 && tmenu_shown(L, (size_t)i) && !L->rows[i].heading ? i : -1;
 }
 
 /* A cell chosen, by a click or Enter. Delete asks a second time, as the right click's does. */
@@ -206,6 +235,11 @@ static void draw_tmenu_in(app_state_t *app) {
         if (!tmenu_shown(&L, i)) continue;
         rubraview_rect_t c = L.cells[i];
         rubraview_pal_rect_t r = { c.x, c.y, c.width, c.height };
+        if (L.rows[i].heading) {   /* RV-303 (RFC-0010 §6): a category's heading, words in a quiet blue, no button round them */
+            rubraview_pal_render_draw_text(app->renderer, L.rows[i].words, (rubraview_pal_rect_t){ r.x + 4.0 * dpi, r.y, r.width - 4.0 * dpi, r.height },
+                                           size * 0.82, 0xFF9DB0CCu, RUBRAVIEW_TEXT_LEFT);
+            continue;
+        }
         bool on = pinned && proven_u8str_view_eq(L.rows[i].action, PROVEN_LIT("toggle_titlebar_pin"));
         rubraview_pal_render_fill_rect(app->renderer, r, on ? TITLEBAR_ON : 0x18FFFFFFu, 3.0 * dpi);   /* a button */
         if (L.enabled[i] && ((int32_t)i == hover || (int32_t)i == app->tmenu_focus))

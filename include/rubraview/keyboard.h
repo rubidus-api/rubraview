@@ -57,6 +57,44 @@ int rubraview_keyboard_dot_at(double x, double y, double w, double h, double uni
 /* The cap at (x, y) key units, or -1. */
 int32_t rubraview_keyboard_cap_at(double x, double y);
 
+/* ---- RV-303 (RFC-0010 §4.8, D-367): the keys by keyboard row ---- */
+
+/* The keyboard's rows, top to bottom, then the blocks under it, then the keys it does not show. */
+enum {
+    RUBRAVIEW_KEYROW_FUNCTION = 0,   /* Esc, F1-F12 */
+    RUBRAVIEW_KEYROW_NUMBER,         /* ` 1 2 ... 0 - = Backspace */
+    RUBRAVIEW_KEYROW_TOP,            /* Tab Q W E R T Y ... \ */
+    RUBRAVIEW_KEYROW_HOME,           /* A S D F ... Enter */
+    RUBRAVIEW_KEYROW_BOTTOM,         /* Z X C V ... / */
+    RUBRAVIEW_KEYROW_SPACE,          /* Space */
+    RUBRAVIEW_KEYROW_EDITING,        /* Insert, Home, Page Up, Delete, End, Page Down */
+    RUBRAVIEW_KEYROW_ARROWS,
+    RUBRAVIEW_KEYROW_PAD,            /* the number pad */
+    RUBRAVIEW_KEYROW_OTHER,          /* bound, but not on the keyboard drawn */
+    RUBRAVIEW_KEYROW_COUNT
+};
+
+/* A row's name, the reader's words (N_). */
+const char *rubraview_keyboard_row_heading(size_t row);
+/* The row a cap of rubraview_keyboard_caps is in. */
+size_t rubraview_keyboard_row_of(size_t cap);
+
+typedef struct rubraview_keyrow_entry {
+    uint8_t row;                   /* RUBRAVIEW_KEYROW_* */
+    bool heading;                  /* the row's own line: its name and its keys */
+    rubraview_key_combo_t combo;   /* a key and its modifiers; the key alone for one with nothing bound */
+    int32_t binding;               /* the binding that acts on this screen, -1 for none ("not set") */
+    int32_t hidden;                /* a binding of a later context in the chain with the same key, never reached; -1 */
+} rubraview_keyrow_entry_t;
+
+/* What every key does on one screen, row by row: each row's heading line, then each of its keys — every
+   combination of it bound in a context `mode` asks (rubraview_keymap_mode_chain, no slide show running), in the
+   order none, Shift, Ctrl, Ctrl+Shift, Alt, ..., each with the binding that acts and one it hides; a key with none
+   bound once, "not set". `mode` RUBRAVIEW_KEY_MODE_COUNT is the common context alone. The keys bound that the
+   keyboard does not show come last under RUBRAVIEW_KEYROW_OTHER (that row only when there are some). Returns how
+   many entries (at most `cap` are written; the count is of what was written). */
+size_t rubraview_keymap_rows(const rubraview_keymap_t *keymap, rubraview_key_mode_t mode, rubraview_keyrow_entry_t *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

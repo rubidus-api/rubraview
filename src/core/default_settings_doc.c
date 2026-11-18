@@ -529,11 +529,15 @@ static const char *const PARTS[] = {
 "  action keys.import              \"Import keys from a file\"\n"
 "  action keys.by_key              \"Show by key / by function\"\n"
 "  action keys.layout              \"Show the keyboard\"\n"
+"  action keys.by_row              \"Show by keyboard row\"\n"
 "  choice keys.key_order           \"By key, in the order of\" keyboard | abc = keyboard wired\n"
+"  choice keys.row_screen          \"By keyboard row, on\" everywhere | picture | film | music | text = picture wired\n"
 "  note   \"By function: each kind of file's keys under its heading, which says when they are asked. By key: a key's\"\n"
 "  note   \"family together (A, Shift+A, Ctrl+A, ...), a row for each kind of file it does something in.\"\n"
 "  note   \"The keyboard: a dot on each key for each way it does something: alone red, with Shift yellow, Ctrl blue,\"\n"
 "  note   \"Alt green, with two or more of them purple. Click a key for what it does.\"\n"
+"  note   \"By keyboard row: a row of the keyboard, then what each of its keys does on the screen chosen, a common\"\n"
+"  note   \"key marked so and a key an earlier one hides named. Enter: another key for it; Delete: take it off.\"\n"
 "  table  keymap\n",
 /* The owner (2026-10-17): a fuller explanation on each harder setting's name. */
 "help general.reuse_window \"On: a file opened from Explorer goes to the window already open instead of starting a second viewer. Off: every file opens its own window.\"\n"
@@ -597,6 +601,7 @@ static const char *const PARTS[] = {
 "help cache.film_gb \"How much room the copies of films and songs on network drives may take; the least recently played go first. Nothing of a folder kept out of Recent is copied, nor anything when Recent keeps nothing.\"\n"
 "help cache.film_ahead \"On: while a network film plays, the rest of it is fetched as fast as the link allows, so a film the link is too slow for plays smoothly once enough is here.\"\n"
 "help cache.lookahead \"How many pages after the one on screen are read ahead, so the next page appears at once.\"\n"
+"help keys.row_screen \"The screen Show by keyboard row is for: everywhere (the keys that do the same on every screen), a picture or a comic's page, a film, music or a text. A key asked first on that screen hides the same key further down; both are named.\"\n"
 "help keys.key_order \"The keys by key: as they lie on the keyboard (Esc, F1 to F12, the number row, Q W E R T Y ...) or A to Z, then 0 to 9 and F1 to F12. Each key's Shift, Ctrl and Alt follow it.\"\n"
 "help cache.keep_details \"Camera details, comments, XMP and IPTC, when Export, Edit or the batch writes a picture again: dropped; kept in the new file where its format has a place (JPEG, PNG, GIF, WebP, AVIF, JPEG XL; the rest in words in its comment); or that, and what the file cannot hold in a .txt of the same name beside it (photo.txt, then photo-1.txt). Never with the metadata stripped.\"\n"
 "help cache.privacy_clean \"On: every exported or batch-saved picture loses its metadata (camera, GPS place, dates) unless you choose otherwise there.\"\n"

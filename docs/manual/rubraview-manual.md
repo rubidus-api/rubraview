@@ -1311,10 +1311,13 @@ the Floating Icon Group, New window, Open file, Recent files, Batch, Print; the
 copies and moves to a folder and Classify; Playlist, Settings and Help;
 after them everything a right click on the picture, the film or the text
 would offer (also what the Toolbar has; not Slide show, Adjust picture or
-the Explorer menus), and Quit last. Each is a button as wide as its words,
-with its key in small print at its right, laid along the line and onto the
-next at the window's right edge, so the list takes the window's shape; a
-group that would break over a line's end starts the next line. When the
+the Explorer menus), and Quit last, all at once under their headings —
+Open and lists, Move, File and folders, View and reading, Play and sound,
+Subtitles, Edit and output, Archives, Widgets and help — each on a line
+of its own; a heading with nothing under it on this screen is left out.
+A heading is only words: the arrows and a click pass it by. Each item is a
+button as wide as its words, with its key in small print at its right,
+laid along the line and onto the next at the window's right edge. When the
 window is too low for them all, the wheel over the list scrolls it a line
 at a time. The arrow keys move between them (Up and Down to the nearest on
 the next line) and `Enter` presses one. `Esc` closes what is open — a list, a panel,
@@ -2176,7 +2179,17 @@ key's family together (`A`, `Shift+A`, `Ctrl+A`, ...), with a row for each
 kind of file it does something in (`Space`: next page, play or pause,
 auto-scroll). **By key, in the order of** puts the keys as they lie on the
 keyboard (Esc, F1 to F12, the number row, Q W E R T Y ...) or A to Z, then
-0 to 9 and F1 to F12. The help (`?` or `H`) ends with a list by key too.
+0 to 9 and F1 to F12. **Show by keyboard row** lists the keys as the
+keyboard's rows lie — Esc and the function keys, the number row, the three
+rows of letters, the space bar, the editing keys, the arrows, the number
+pad, then any other key — each row's keys first, then under it every one
+of them with what it does on the screen **By keyboard row, on** names
+(everywhere, a picture, a film, music or a text): each of a key's
+combinations on its own line (`R`, `Shift+R`, `Ctrl+R`), a key with
+nothing on it *not set*, a common key marked *[everywhere]*, and a key
+that an earlier one hides named after it (*hides: ...*). There `Enter`
+on a key and then another key gives the action that key instead;
+`Delete` takes the key off. The help (`?` or `H`) ends with a list by key too.
 
 **The left hand's keys (RFC-0010).** `W` `A` `S` `D` do what the arrows do
 where the arrows mean the same: `A` / `D` the page before and after on a

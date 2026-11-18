@@ -193,6 +193,10 @@ rubraview_bind_result_t rubraview_keymap_bind(proven_arena_t *arena, rubraview_k
 /** Remove binding `index`'s last key; false when it had none. */
 bool rubraview_keymap_unbind_last(rubraview_keymap_t *keymap, size_t index);
 
+/** RV-303: remove `combo` from binding `index`'s keys (the others kept in order, in a new array from `arena`, so a
+    copy sharing the old one is untouched); false when it does not have it. */
+bool rubraview_keymap_unbind_combo(proven_arena_t *arena, rubraview_keymap_t *keymap, size_t index, rubraview_key_combo_t combo);
+
 /**
  * keymap.ini in the INI and TOML subset (D-13): a section per context in
  * order of first appearance, the global one as `[common]`, every value a

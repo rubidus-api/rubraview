@@ -69,6 +69,8 @@ void settings_read_file(app_state_t *app) {
 #define KEY_ROWS_MAX 1024
 typedef struct { size_t binding, combo; } key_combo_row_t;
 static bool g_keys_by_key;
+static bool g_keys_by_row;                       /* RV-303 (RFC-0010 §4.8): a keyboard row's heading, then what each of its keys does on one screen */
+static rubraview_keyrow_entry_t g_key_rows[KEY_ROWS_MAX];
 static bool g_keys_layout;                       /* RV-217: the keyboard drawn, a dot a kind of binding on each key */
 #define KEYS_LAYOUT_ROWS 33                       /* RV-244: 29 for the keyboard (12.5 key units, 2.3 rows a key), the dots' key, what is not on it */
 static bool keys_layout_click(app_state_t *app, double px, double py);
@@ -77,6 +79,25 @@ static int32_t g_keys_dot_hover = -1;   /* RV-252: the circle the pointer rests 
 static int32_t g_key_row[KEY_ROWS_MAX];          /* by function: a binding, or -(context + 1) for a heading */
 static key_combo_row_t g_key_combo[KEY_ROWS_MAX];  /* by key: every key of every binding, sorted (RV-193) */
 static size_t g_key_row_count;
+
+/* RV-303: the screen Keys › by keyboard row shows — everywhere (the common keys alone), a picture, a film, music, a text */
+static rubraview_key_mode_t keys_row_mode(app_state_t *app) {
+    static const rubraview_key_mode_t MODES[] = { RUBRAVIEW_KEY_MODE_COUNT, RUBRAVIEW_KEY_MODE_PICTURE, RUBRAVIEW_KEY_MODE_FILM,
+                                                  RUBRAVIEW_KEY_MODE_MUSIC, RUBRAVIEW_KEY_MODE_TEXT };
+    double at = rubraview_settings_get(&app->settings, PROVEN_LIT("keys"), PROVEN_LIT("row_screen"));
+    int i = at >= 0.0 && at < 5.0 ? (int)at : 1;
+    return MODES[i];
+}
+
+/* Its name, as the Keys page's headings by function call it */
+static const char *keys_row_screen_words(app_state_t *app) {
+    static const char *const CONTEXT_OF[] = { [RUBRAVIEW_KEY_MODE_PICTURE] = "image", [RUBRAVIEW_KEY_MODE_FILM] = "video",
+                                              [RUBRAVIEW_KEY_MODE_MUSIC] = "audio", [RUBRAVIEW_KEY_MODE_TEXT] = "text", [RUBRAVIEW_KEY_MODE_COUNT] = "" };
+    rubraview_key_mode_t m = keys_row_mode(app);
+    const char *name = CONTEXT_OF[m] ? CONTEXT_OF[m] : "";
+    const rubraview_key_context_info_t *info = rubraview_keymap_context_info(proven_u8str_view_from_cstr(name));
+    return info ? rubraview_tr(info->heading) : "";
+}
 
 /* RV-185: the folder rubraview.exe runs from, with Windows' separator. */
 static proven_u8str_view_t program_folder(app_state_t *app) {
@@ -355,6 +376,51 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
         }
         return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
     }
+    if (g_keys_by_row) {   /* RV-303 */
+        int n = 0;
+        if (index == 0) {
+            n = rubraview_fmt(buffer, capacity, T("on {}: what each key does  (Enter: another key for it, Delete: take it off)"), PROVEN_ARG(keys_row_screen_words(app)));
+        } else if (index <= g_key_row_count) {
+            const rubraview_keyrow_entry_t *e = &g_key_rows[index - 1];
+            if (e->heading) {
+                n = rubraview_fmt(buffer, capacity, "-- {}", PROVEN_ARG(rubraview_tr(rubraview_keyboard_row_heading(e->row))));
+                size_t count = 0;
+                const rubraview_keycap_t *caps = rubraview_keyboard_caps(&count);
+                bool first = true;   /* the row's keys as written on them, in their order */
+                for (size_t k = 0; k < count && n > 0 && (size_t)n + 16 < capacity; ++k) {
+                    if (!caps[k].name || rubraview_keyboard_row_of(k) != e->row) continue;
+                    n += rubraview_fmt(buffer + n, capacity - (size_t)n, "{}{}", PROVEN_ARG(first ? ": " : "  "), PROVEN_ARG(caps[k].label));
+                    first = false;
+                }
+                if (n > 0 && (size_t)n + 4 < capacity) n += rubraview_fmt(buffer + n, capacity - (size_t)n, " --");
+            } else {
+                char one[64];
+                proven_u8str_view_t named = rubraview_key_combo_format(one, sizeof(one), e->combo);
+                int32_t pad = 18 - (int32_t)named.size;
+                n = rubraview_fmt(buffer, capacity, "  {}{} ", PROVEN_ARG(named), PROVEN_ARG(rubraview_spaces(pad > 0 ? (int)pad : 0)));
+                if (n > 0 && app->key_capture == (int32_t)index) {
+                    n += rubraview_fmt(buffer + n, capacity - (size_t)n, "{}", PROVEN_ARG(T("> press the key to use instead (Esc: leave it as it is)")));
+                } else if (n > 0 && e->binding < 0) {
+                    n += rubraview_fmt(buffer + n, capacity - (size_t)n, "{}", PROVEN_ARG(T("not set")));
+                } else if (n > 0) {
+                    const rubraview_key_binding_t *b = &app->keymap.bindings[e->binding];
+                    const char *words = rubraview_action_words(b->action);
+                    n += words ? rubraview_fmt(buffer + n, capacity - (size_t)n, "{}", PROVEN_ARG(rubraview_tr(words)))
+                               : rubraview_fmt(buffer + n, capacity - (size_t)n, "{}", PROVEN_ARG(b->action));
+                    /* RFC-0010 §4.8: a common key named so on a screen's own list */
+                    if (n > 0 && (size_t)n < capacity && b->context.size == 0 && keys_row_mode(app) != RUBRAVIEW_KEY_MODE_COUNT)
+                        n += rubraview_fmt(buffer + n, capacity - (size_t)n, "  [{}]", PROVEN_ARG(T("everywhere")));
+                    if (n > 0 && (size_t)n < capacity && e->hidden >= 0) {
+                        const rubraview_key_binding_t *h = &app->keymap.bindings[e->hidden];
+                        const char *hw = rubraview_action_words(h->action);
+                        n += hw ? rubraview_fmt(buffer + n, capacity - (size_t)n, T("  (hides: {})"), PROVEN_ARG(rubraview_tr(hw)))
+                                : rubraview_fmt(buffer + n, capacity - (size_t)n, T("  (hides: {})"), PROVEN_ARG(h->action));
+                    }
+                }
+            }
+        }
+        return n > 0 ? (size_t)n < capacity ? (size_t)n : capacity - 1 : 0;
+    }
     if (index == 0) {
         int32_t pad_key = 20 - rubraview_settings_text_cells(proven_u8str_view_from_cstr(T("key")));
         int32_t pad = 14 - rubraview_settings_text_cells(proven_u8str_view_from_cstr(T("where")));
@@ -451,6 +517,11 @@ static int key_row_compare(const void *pa, const void *pb) {
 
 void keymap_table_refresh(app_state_t *app) {
     g_key_row_count = 0;
+    if (g_keys_by_row) {   /* RV-303 */
+        g_key_row_count = rubraview_keymap_rows(&app->keymap, keys_row_mode(app), g_key_rows, KEY_ROWS_MAX);
+        rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)g_key_row_count + 1);
+        return;
+    }
     if (g_keys_layout) {   /* RV-217 */
         g_key_row_count = KEYS_LAYOUT_ROWS;
         rubraview_settings_view_set_table_rows(&app->settings_view, KEYS_LAYOUT_ROWS + 1);
@@ -487,6 +558,7 @@ void keymap_table_refresh(app_state_t *app) {
 /* The binding a Keys row is, or -1 for a heading or a row of the by-key list. */
 static int32_t keymap_row_binding(int32_t row) {
     if (g_keys_by_key || g_keys_layout || row < 1 || (size_t)row > g_key_row_count) return -1;
+    if (g_keys_by_row) return g_key_rows[row - 1].heading ? -1 : g_key_rows[row - 1].binding;   /* RV-303 */
     return g_key_row[row - 1];
 }
 
@@ -818,6 +890,12 @@ static void settings_apply_rest(app_state_t *app) {
     if (key_order != last_key_order) {
         last_key_order = key_order;
         if (g_keys_by_key) keymap_table_refresh(app);
+    }
+    static double last_row_screen = -1.0;   /* RV-303: the screen the keys by keyboard row are for */
+    double row_screen = rubraview_settings_get(st, PROVEN_LIT("keys"), PROVEN_LIT("row_screen"));
+    if (row_screen != last_row_screen) {
+        last_row_screen = row_screen;
+        if (g_keys_by_row) keymap_table_refresh(app);
     }
 
     /* General */
@@ -1456,6 +1534,25 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                 break;
             }
             if (g_keys_by_key) { settings_say(app, T("the keys by key are to read: Show by function to change them")); break; }
+            if (g_keys_by_row && row >= 1 && (size_t)row <= g_key_row_count && !g_key_rows[row - 1].heading) {   /* RV-303 */
+                const rubraview_keyrow_entry_t *e = &g_key_rows[row - 1];
+                char text[200], one[64];
+                proven_u8str_view_t named = rubraview_key_combo_format(one, sizeof(one), e->combo);
+                if (e->binding < 0) {
+                    rubraview_fmt(text, sizeof(text), T("{} is not set: Show by function, then Enter on an action, gives it a key"), PROVEN_ARG(named));
+                } else if (event == RUBRAVIEW_SEVENT_TABLE_EDIT) {
+                    app->key_capture = row;
+                    rubraview_fmt(text, sizeof(text), T("press the key {} should use instead of {} (Esc: leave it as it is)"),
+                                  PROVEN_ARG(app->keymap.bindings[e->binding].action), PROVEN_ARG(named));
+                } else {
+                    proven_u8str_view_t action = app->keymap.bindings[e->binding].action;
+                    rubraview_keymap_unbind_combo(app->arena, &app->keymap, (size_t)e->binding, e->combo);
+                    rubraview_fmt(text, sizeof(text), T("took {} off {} (Revert puts it back)"), PROVEN_ARG(named), PROVEN_ARG(action));
+                    keymap_table_refresh(app);
+                }
+                settings_say(app, text);
+                break;
+            }
             int32_t at = keymap_row_binding(row);
             if (at < 0) break;   /* a context's heading */
             const rubraview_key_binding_t *b = &app->keymap.bindings[at];
@@ -1525,16 +1622,26 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
                                       : T("the browser could not be started"));
             } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("keys.layout"))) {   /* RV-217 */
                 g_keys_layout = !g_keys_layout;
+                g_keys_by_row = false;
                 app->key_capture = 0;
                 keymap_table_refresh(app);
                 settings_say(app, g_keys_layout ? T("the keyboard: red alone, yellow Shift, blue Ctrl, green Alt, purple two or more")
                                                 : g_keys_by_key ? T("the keys by key: what each does, and where") : T("the keys by function, a context at a time"));
             } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("keys.by_key"))) {   /* RV-184 */
                 g_keys_layout = false;
+                g_keys_by_row = false;
                 g_keys_by_key = !g_keys_by_key;
                 app->key_capture = 0;
                 keymap_table_refresh(app);
                 settings_say(app, g_keys_by_key ? T("the keys by key: what each does, and where") : T("the keys by function, a context at a time"));
+            } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("keys.by_row"))) {   /* RV-303 (RFC-0010 §4.8) */
+                g_keys_layout = false;
+                g_keys_by_key = false;
+                g_keys_by_row = !g_keys_by_row;
+                app->key_capture = 0;
+                keymap_table_refresh(app);
+                settings_say(app, g_keys_by_row ? T("the keys by keyboard row: a row, then what each of its keys does on the screen chosen")
+                                                : T("the keys by function, a context at a time"));
             } else if (proven_u8str_view_eq(node->name, PROVEN_LIT("app.open_folder"))) {   /* RV-185 */
                 settings_say(app, rubraview_pal_shell_open_folder(program_folder(app), false)
                                       ? T("Rubraview's folder is opening") : T("the folder could not be opened"));
@@ -1631,7 +1738,8 @@ static bool settings_key_of(rubraview_key_combo_t combo, rubraview_settings_key_
 /* The key pressed for a Keys row (D-14): added, or refused with the name
    of the action that has it — never taken away from it (owner, 2026-09-14). */
 static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) {
-    int32_t at = keymap_row_binding(app->key_capture);
+    int32_t row = app->key_capture;
+    int32_t at = keymap_row_binding(row);
     app->key_capture = 0;
     if (at < 0) return;
     size_t index = (size_t)at;
@@ -1642,6 +1750,27 @@ static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) 
     char one[64], text[200];
     proven_u8str_view_t name = rubraview_key_combo_format(one, sizeof(one), combo);
     const rubraview_key_binding_t *holder = NULL;
+    if (g_keys_by_row) {
+        /* RV-303 (RFC-0010 §4.8): the key of the row chosen is given up for the one pressed; refused, it stays */
+        rubraview_key_combo_t old = g_key_rows[row - 1].combo;
+        char was[64];
+        proven_u8str_view_t old_name = rubraview_key_combo_format(was, sizeof(was), old);
+        rubraview_keymap_unbind_combo(app->arena, &app->keymap, index, old);
+        rubraview_bind_result_t got = rubraview_keymap_bind(app->arena, &app->keymap, index, combo, &holder);
+        proven_u8str_view_t action = app->keymap.bindings[index].action;
+        if (got == RUBRAVIEW_BIND_ADDED || got == RUBRAVIEW_BIND_ALREADY)
+            rubraview_fmt(text, sizeof(text), T("{}: {} instead of {}"), PROVEN_ARG(action), PROVEN_ARG(name), PROVEN_ARG(old_name));
+        else {
+            rubraview_keymap_bind(app->arena, &app->keymap, index, old, NULL);
+            if (got == RUBRAVIEW_BIND_TAKEN && holder)
+                rubraview_fmt(text, sizeof(text), T("not changed: {} is {}'s key{}{}{}"), PROVEN_ARG(name), PROVEN_ARG(holder->action),
+                              PROVEN_ARG(holder->context.size ? " (" : ""), PROVEN_ARG(holder->context), PROVEN_ARG(holder->context.size ? ")" : ""));
+            else rubraview_fmt(text, sizeof(text), T("could not add {}"), PROVEN_ARG(name));
+        }
+        keymap_table_refresh(app);
+        settings_say(app, text);
+        return;
+    }
     rubraview_bind_result_t result = rubraview_keymap_bind(app->arena, &app->keymap, index, combo, &holder);
     const rubraview_key_binding_t *b = &app->keymap.bindings[index];
     switch (result) {

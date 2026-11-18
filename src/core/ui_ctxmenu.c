@@ -1,4 +1,5 @@
 #include "rubraview/ui_ctxmenu.h"
+#include "rubraview/lang.h"
 
 #include <math.h>
 
@@ -69,6 +70,7 @@ rubraview_rect_t rubraview_flowmenu_layout(double x, double y, double max_width,
     for (size_t i = 0; i < count; ++i) {
         double w = widths[i] < 0.0 ? 0.0 : (widths[i] > inner ? inner : widths[i]);
         bool starts = i == 0 || groups[i] != groups[i - 1];
+        if (starts && cx > 0.0 && m->group_lines) { line++; cx = 0.0; }   /* RV-303: a line a group */
         double space = cx > 0.0 ? (starts ? m->group_gap : m->gap) : 0.0;
         if (starts && cx > 0.0) {   /* the whole group on the next line when it does not fit here but fits there */
             double gw = 0.0;
@@ -133,4 +135,67 @@ double rubraview_flowmenu_scroll_to(double scroll, double top, double content, d
     if (line_top < s) s = line_top;
     else if (line_top + pitch > s + (view - pad * 2.0) + 1e-9) s = line_top + pitch - (view - pad * 2.0);
     return rubraview_flowmenu_scroll_clamp(ceil(s / pitch - 1e-9) * pitch, content, view, pitch);
+}
+
+/* ---- RV-303 (RFC-0010 §6): the ☰'s categories ---- */
+
+static const char *const MENUCAT_HEADING[RUBRAVIEW_MENUCAT_COUNT] = {
+    [RUBRAVIEW_MENUCAT_OPEN]      = N_("Open and lists"),
+    [RUBRAVIEW_MENUCAT_MOVE]      = N_("Move"),
+    [RUBRAVIEW_MENUCAT_FILES]     = N_("File and folders"),
+    [RUBRAVIEW_MENUCAT_VIEW]      = N_("View and reading"),
+    [RUBRAVIEW_MENUCAT_PLAY]      = N_("Play and sound"),
+    [RUBRAVIEW_MENUCAT_SUBTITLES] = N_("Subtitles"),
+    [RUBRAVIEW_MENUCAT_EDIT]      = N_("Edit and output"),
+    [RUBRAVIEW_MENUCAT_ARCHIVES]  = N_("Archives"),
+    [RUBRAVIEW_MENUCAT_WIDGETS]   = N_("Widgets and help"),
+};
+
+const char *rubraview_menu_category_heading(int category) {
+    return category >= 0 && category < RUBRAVIEW_MENUCAT_COUNT ? MENUCAT_HEADING[category] : MENUCAT_HEADING[RUBRAVIEW_MENUCAT_WIDGETS];
+}
+
+/* The actions by name first; then by how their names begin; anything else is the last category's. */
+static const struct { const char *action; int category; } MENUCAT_OF[] = {
+    { "new_window", RUBRAVIEW_MENUCAT_OPEN }, { "open_picker", RUBRAVIEW_MENUCAT_OPEN }, { "open_folder", RUBRAVIEW_MENUCAT_OPEN },
+    { "open_recent_list", RUBRAVIEW_MENUCAT_OPEN }, { "open_favorites", RUBRAVIEW_MENUCAT_OPEN }, { "toggle_playlist", RUBRAVIEW_MENUCAT_OPEN },
+    { "toggle_favorite", RUBRAVIEW_MENUCAT_OPEN }, { "picker_favorite", RUBRAVIEW_MENUCAT_OPEN }, { "picker_open_item", RUBRAVIEW_MENUCAT_OPEN },
+    { "picker_add_to_list", RUBRAVIEW_MENUCAT_OPEN }, { "picker_make_playlist", RUBRAVIEW_MENUCAT_OPEN }, { "list_open", RUBRAVIEW_MENUCAT_OPEN },
+    { "list_take_out", RUBRAVIEW_MENUCAT_OPEN }, { "recent_clear", RUBRAVIEW_MENUCAT_OPEN },
+    { "next_page", RUBRAVIEW_MENUCAT_MOVE }, { "prev_page", RUBRAVIEW_MENUCAT_MOVE }, { "first_page", RUBRAVIEW_MENUCAT_MOVE },
+    { "last_page", RUBRAVIEW_MENUCAT_MOVE }, { "next_archive", RUBRAVIEW_MENUCAT_MOVE }, { "prev_archive", RUBRAVIEW_MENUCAT_MOVE },
+    { "page_over_back", RUBRAVIEW_MENUCAT_MOVE }, { "subpage_next", RUBRAVIEW_MENUCAT_MOVE }, { "subpage_prev", RUBRAVIEW_MENUCAT_MOVE },
+    { "anim_step_back", RUBRAVIEW_MENUCAT_MOVE }, { "anim_step_forward", RUBRAVIEW_MENUCAT_MOVE },
+    { "copy_to_folder", RUBRAVIEW_MENUCAT_FILES }, { "move_to_folder", RUBRAVIEW_MENUCAT_FILES }, { "copy_to_other_folder", RUBRAVIEW_MENUCAT_FILES },
+    { "move_to_other_folder", RUBRAVIEW_MENUCAT_FILES }, { "copy_to_default", RUBRAVIEW_MENUCAT_FILES }, { "move_to_default", RUBRAVIEW_MENUCAT_FILES },
+    { "undo", RUBRAVIEW_MENUCAT_FILES }, { "toggle_classify", RUBRAVIEW_MENUCAT_FILES }, { "delete_file", RUBRAVIEW_MENUCAT_FILES },
+    { "rename_file", RUBRAVIEW_MENUCAT_FILES }, { "reveal_in_explorer", RUBRAVIEW_MENUCAT_FILES }, { "file_properties", RUBRAVIEW_MENUCAT_FILES },
+    { "explorer_menu", RUBRAVIEW_MENUCAT_FILES }, { "explorer_menu_classic", RUBRAVIEW_MENUCAT_FILES },
+    { "list_copy_path", RUBRAVIEW_MENUCAT_FILES }, { "list_delete_file", RUBRAVIEW_MENUCAT_FILES }, { "list_reveal", RUBRAVIEW_MENUCAT_FILES },
+    { "toggle_first_page_alone", RUBRAVIEW_MENUCAT_VIEW }, { "toggle_info", RUBRAVIEW_MENUCAT_VIEW }, { "toggle_fullscreen", RUBRAVIEW_MENUCAT_VIEW },
+    { "toggle_miniplayer", RUBRAVIEW_MENUCAT_PLAY }, { "next_audio_track", RUBRAVIEW_MENUCAT_PLAY }, { "toggle_shuffle", RUBRAVIEW_MENUCAT_PLAY },
+    { "toggle_slideshow", RUBRAVIEW_MENUCAT_PLAY },
+    { "choose_subtitle_track", RUBRAVIEW_MENUCAT_SUBTITLES }, { "extract_subtitles", RUBRAVIEW_MENUCAT_SUBTITLES },
+    { "toggle_subtitle_window", RUBRAVIEW_MENUCAT_SUBTITLES }, { "toggle_subtitles", RUBRAVIEW_MENUCAT_SUBTITLES },
+    { "open_batch", RUBRAVIEW_MENUCAT_EDIT }, { "print", RUBRAVIEW_MENUCAT_EDIT }, { "copy_frame", RUBRAVIEW_MENUCAT_EDIT },
+    { "save_frame", RUBRAVIEW_MENUCAT_EDIT }, { "open_edit", RUBRAVIEW_MENUCAT_EDIT }, { "quick_export", RUBRAVIEW_MENUCAT_EDIT },
+    { "picker_look_inside", RUBRAVIEW_MENUCAT_ARCHIVES },
+    { "align_widget", RUBRAVIEW_MENUCAT_WIDGETS }, { "open_settings", RUBRAVIEW_MENUCAT_WIDGETS }, { "open_log", RUBRAVIEW_MENUCAT_WIDGETS },
+    { "toggle_help", RUBRAVIEW_MENUCAT_WIDGETS }, { "quit", RUBRAVIEW_MENUCAT_WIDGETS },
+};
+static const struct { const char *prefix; int category; } MENUCAT_PREFIX[] = {
+    { "picker_extract", RUBRAVIEW_MENUCAT_ARCHIVES }, { "picker_compress", RUBRAVIEW_MENUCAT_ARCHIVES },
+    { "picker_", RUBRAVIEW_MENUCAT_FILES }, { "subtitle_", RUBRAVIEW_MENUCAT_SUBTITLES }, { "media_", RUBRAVIEW_MENUCAT_PLAY },
+    { "layout_", RUBRAVIEW_MENUCAT_VIEW }, { "text_", RUBRAVIEW_MENUCAT_VIEW }, { "zoom_", RUBRAVIEW_MENUCAT_VIEW }, { "fit_", RUBRAVIEW_MENUCAT_VIEW },
+    { "rotate_", RUBRAVIEW_MENUCAT_VIEW }, { "flip_", RUBRAVIEW_MENUCAT_VIEW },
+};
+
+int rubraview_menu_category(proven_u8str_view_t action) {
+    for (size_t i = 0; i < sizeof MENUCAT_OF / sizeof MENUCAT_OF[0]; ++i)
+        if (proven_u8str_view_eq(action, proven_u8str_view_from_cstr(MENUCAT_OF[i].action))) return MENUCAT_OF[i].category;
+    for (size_t i = 0; i < sizeof MENUCAT_PREFIX / sizeof MENUCAT_PREFIX[0]; ++i) {
+        proven_u8str_view_t p = proven_u8str_view_from_cstr(MENUCAT_PREFIX[i].prefix);
+        if (action.size >= p.size && proven_u8str_view_eq(proven_u8str_view_slice(action, 0, p.size), p)) return MENUCAT_PREFIX[i].category;
+    }
+    return RUBRAVIEW_MENUCAT_WIDGETS;
 }
