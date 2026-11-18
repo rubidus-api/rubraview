@@ -132,7 +132,7 @@ void rubraview_confirm_clear(rubraview_confirm_t *confirm);
 #define RUBRAVIEW_ICON_RESTORE    0xE923u
 #define RUBRAVIEW_ICON_RESIZE     0xE740u   /* RV-234 (owner, 2026-11-07): arrows out to two corners, the diagonal two-headed arrow a window is sized with */
 #define RUBRAVIEW_ICON_CLOSE      0xE8BBu
-#define RUBRAVIEW_ICON_TOOLBAR    0xE80Au   /* a grid of buttons: the Floating Widget's F */
+#define RUBRAVIEW_ICON_TOOLBAR    0xE80Au   /* a grid of buttons: the Floating Icon Group's F */
 #define RUBRAVIEW_ICON_MOVE       0xE7C2u   /* arrows four ways: T (its drag goes through files and folders), the box moved */
 #define RUBRAVIEW_ICON_MENU       0xE700u   /* three lines */
 #define RUBRAVIEW_ICON_BASKET     0xE7BFu   /* a shopping cart: the open-file screen's baskets (D-286) */

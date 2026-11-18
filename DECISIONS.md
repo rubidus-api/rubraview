@@ -4143,3 +4143,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: "window", "card", "box" and "message" were used loosely in requests, the docs and the program's words: a job's progress window, the Classify "window" drawn inside the viewer, the input card, the words shown a moment.
 - Decision: a **window** (창) is outside the program's window — a top-level window of Windows'; a **widget** (위젯) is a card or a box drawn inside it; a **notice** (안내) is shown a moment and goes by itself. The glossary (SPEC §D17) holds them; new requirements, decisions, docs and words use them.
 - Consequences: the program's words, the manual and the language packs still say "window" or "card" for some widgets — RV-300.
+
+## D-366: The Terms' Kinds, The Floating Icon Group, And Where They Are Used
+
+- Date: 2026-11-18
+- Status: Accepted (owner 2026-11-18: "추천대로 하시고 위젯 안의 버튼 모임은 버튼 그룹이나 아이콘 그룹으로 합니다").
+- Context: D-365 named window, widget and notice; the proposal asked for kinds under them, a rule between notice and widget, the "Floating Widget" name now clashing with the kind, and how far the words go.
+- Decision: a thing is classed by where it is now (the Toolbar docked a widget, detached a window). Windows: the main window and job windows. Widgets: card, panel, bar, menu, tooltip; buttons kept together inside one are a button group or an icon group. A notice takes no input; anything with a button is a widget. The Floating Widget is the Floating Icon Group (플로팅 아이콘 그룹; ja フローティングアイコングループ, zh 浮动图标组 / 浮動圖示組, fa گروه نمادهای شناور). The docs and our talk use the terms; the program's words name each thing ("the folders card", "the navigator") and only where they called a widget a window are they changed (the equaliser's bands, Classify, the recent files and favourites lists, the navigator's help); names in the code stay, their comments follow.
+- Consequences: SPEC §D17; the language packs, README, manual and site; RV-300.

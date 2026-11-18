@@ -229,7 +229,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 /* D-110: the click that brings the bar and the boxes back
                    is only that — it turns no page and pauses nothing. */
                 chrome_hide(app, false);
-                osd_say(app, TU8("the title bar and the Floating Widget are back"));
+                osd_say(app, TU8("the title bar and the Floating Icon Group are back"));
                 break;
             }
             if (app->picker_open) {

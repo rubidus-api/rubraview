@@ -683,7 +683,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         if (app->toolbox_window) toolbox_dock(app, 0.0, 0.0);
         rubraview_box_snap_home(&app->toolbox, &m, (double)ww, (double)wh);
         if (app->osd.always_on) app->toolbox.anchor_y -= 28.0 * dpi;
-        osd_say(app, TU8("the Floating Widget is back in its corner"));
+        osd_say(app, TU8("the Floating Icon Group is back in its corner"));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_osd"))) {
         app->osd.always_on = !app->osd.always_on;
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_filmstrip"))) {
@@ -996,8 +996,8 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("hide_boxes"))) {
         /* D-110: asked again (a key), they come back as a click brings them. */
         chrome_hide(app, !app->chrome_hidden);
-        osd_say(app, app->chrome_hidden ? TU8("hidden: click the picture to bring the title bar and the Floating Widget back")
-                                        : TU8("the title bar and the Floating Widget are back"));
+        osd_say(app, app->chrome_hidden ? TU8("hidden: click the picture to bring the title bar and the Floating Icon Group back")
+                                        : TU8("the title bar and the Floating Icon Group are back"));
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_toolbox_pin"))) {
         rubraview_box_set_pinned(&app->toolbox, !app->toolbox.pinned);
         osd_say(app, app->toolbox.pinned ? TU8("Toolbar pinned open") : TU8("Toolbar unpinned"));
@@ -1062,7 +1062,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("menubox_opacity"), percent);
         rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_opacity"), percent);
         char line[32];
-        int n = rubraview_fmt(line, sizeof(line), T("Floating Widget {}%"), PROVEN_ARG((int)percent));
+        int n = rubraview_fmt(line, sizeof(line), T("Floating Icon Group {}%"), PROVEN_ARG((int)percent));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
     } else if (window_nudge(app, action)) {
         /* D-16: Ctrl + arrows size the window, Alt + arrows move it. */

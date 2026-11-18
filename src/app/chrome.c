@@ -9,7 +9,7 @@
 static const struct { const char *words, *action; int32_t group; } TMENU[] = {
     /* RV-246 (owner, 2026-11-07: "메인메뉴에서 전체화면 끔이랑 제목표시줄고정 끔은 없애고 대신 맨 마지막에 종료 항목 넣어줘요. 그리고
        각 항목 옆에 작은 글씨로 단축키"): the title bar's pin is its P button; Quit is the last row (tmenu_rows) */
-    { N_("Align the Floating Widget"), "align_widget", 0 },
+    { N_("Align the Floating Icon Group"), "align_widget", 0 },
     { N_("New window"), "new_window", 0 },
     { N_("Open file"), "open_picker", 0 },
     { N_("Recent files..."), "open_recent_list", 0 },

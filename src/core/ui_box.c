@@ -793,8 +793,8 @@ proven_u8str_view_t rubraview_box_hint(const rubraview_box_t *box, const rubravi
     rubraview_anchor_half_t half = rubraview_box_anchor_half_at(box, m, px, py);
     if (half == RUBRAVIEW_ANCHOR_CLICK) {
         text = menu ? T("Click: open the menu and keep it open (again: close). Drag: move it")
-                    : T("Floating Widget - Click: open or fold its toolbar. Drag: move it; past the window's edge it "
-                      "becomes a window of its own. Wheel: the Floating Widget's size, this button under the pointer; Alt+wheel: see-through");
+                    : T("Floating Icon Group - Click: open or fold its toolbar. Drag: move it; past the window's edge it "
+                      "becomes a window of its own. Wheel: the Floating Icon Group's size, this button under the pointer; Alt+wheel: see-through");
     } else if (half == RUBRAVIEW_ANCHOR_HOVER) {
         text = menu ? T("Rest the pointer here: the menu opens, and folds when the pointer leaves")
                     : T("Toolbar - Rest the pointer here: the toolbar opens, and folds when the pointer leaves "
@@ -802,7 +802,7 @@ proven_u8str_view_t rubraview_box_hint(const rubraview_box_t *box, const rubravi
     } else if (hint_in(rubraview_box_pin_rect(box, m), px, py)) {
         text = T("Pin: on, the toolbar stays open; off, it folds when the pointer leaves");
     } else if (hint_in(rubraview_box_grip_rect(box, m), px, py)) {
-        text = T("Resize: drag sideways for more or fewer buttons a row, away or back for bigger or smaller. Wheel: the Floating Widget's size");
+        text = T("Resize: drag sideways for more or fewer buttons a row, away or back for bigger or smaller. Wheel: the Floating Icon Group's size");
     } else if (!menu && hint_in(rubraview_box_timeline_rect(box, m), px, py)) {
         text = T("Click or drag: go to that moment (or page)");
     }

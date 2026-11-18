@@ -262,7 +262,7 @@ extern uint32_t g_accent;
 /* Settings › Display › Touch tile size (owner, 2026-09-30): 48, 64 or 96
    pixels a menu tile; the anchors and the toolbox's buttons grow with it. */
 extern double g_tile_base;
-/* RV-178 (owner, 2026-10-26): Settings › Display › Floating Widget size, the wheel over R: F, T, P and R themselves */
+/* RV-178 (owner, 2026-10-26): Settings › Display › Floating Icon Group size, the wheel over R: F, T, P and R themselves */
 extern double g_widget_scale;
 static inline rubraview_tile_metrics_t tile_metrics(double dpi_scale) {
     rubraview_tile_metrics_t m = rubraview_tile_metrics_default(dpi_scale);

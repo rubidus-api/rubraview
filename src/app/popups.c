@@ -476,7 +476,7 @@ void draw_hint(app_state_t *app, double win_w, double win_h) {
     double tw = 0.0, th = 0.0;
     if (rubraview_pal_render_measure_text(app->renderer, app->hint, font, &tw)) w = tw + 20.0 * dpi;
     double h = 28.0 * dpi;
-    /* 1.25.0: a long one in lines, never wider than most of the window (VM: the Floating Widget's ran off both edges) */
+    /* 1.25.0: a long one in lines, never wider than most of the window (VM: the Floating Icon Group's ran off both edges) */
     double most = fmin(win_w - 8.0 * dpi, 520.0 * dpi);
     if (w > most) {
         w = most;

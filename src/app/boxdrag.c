@@ -25,7 +25,7 @@ bool box_press(app_state_t *app, double x, double y) {
         if (half == RUBRAVIEW_ANCHOR_NONE) continue;
         if (boxes[i] == &app->toolbox && half == RUBRAVIEW_ANCHOR_HOVER) {
             /* 1.25.0 (owner, 2026-10-20): T held and dragged — up and down the files, sideways the folders or
-               the archives beside this one, a wider step; F still moves the Floating Widget */
+               the archives beside this one, a wider step; F still moves the Floating Icon Group */
             app->nav_drag = true;
             app->box_press_x = x;
             app->box_press_y = y;

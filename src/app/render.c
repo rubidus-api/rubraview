@@ -48,7 +48,7 @@ double box_opacity(const app_state_t *app, const rubraview_box_t *box) {
 }
 
 /* D-15: Alt + wheel over a box. Returns true when the wheel was spent on it. */
-/* 1.25.0 (owner, 2026-10-20; by the anchors' old names): the wheel over F with Alt makes the Floating Widget more
+/* 1.25.0 (owner, 2026-10-20; by the anchors' old names): the wheel over F with Alt makes the Floating Icon Group more
    or less see-through; over T its buttons bigger or smaller. RV-171 (owner, 2026-10-25): the plain wheel over F
    goes through the file list as the wheel over the picture does, the strip below shown as Settings say; the
    buttons a row, which it set before, are R's (the grip). */
@@ -58,11 +58,11 @@ static bool box_anchor_wheel(app_state_t *app, double x, double y, double notche
     rubraview_box_t *b = &app->toolbox;
     char line[64];
     int n = 0;
-    if (rubraview_rect_contains(rubraview_box_grip_rect(b, &metrics), x, y)) {   /* RV-178: R, the Floating Widget's own size */
+    if (rubraview_rect_contains(rubraview_box_grip_rect(b, &metrics), x, y)) {   /* RV-178: R, the Floating Icon Group's own size */
         double size = rubraview_box_widget_size_step(rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_size")), notches);
         rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_size"), size);
         g_widget_scale = size / 100.0;   /* at once; the settings file keeps it */
-        n = rubraview_fmt(line, sizeof(line), T("Floating Widget size {}%"), PROVEN_ARG((int)lround(size)));
+        n = rubraview_fmt(line, sizeof(line), T("Floating Icon Group size {}%"), PROVEN_ARG((int)lround(size)));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         note_activity(app);
         return true;
@@ -71,7 +71,7 @@ static bool box_anchor_wheel(app_state_t *app, double x, double y, double notche
     if (half == RUBRAVIEW_ANCHOR_NONE) return false;
     if (half == RUBRAVIEW_ANCHOR_CLICK && !(modifiers & RUBRAVIEW_MOD_ALT)) {
         /* RV-236 (owner, 2026-11-07: "플로팅 위젯 왼쪽 버튼 위에서 휠을 돌리면 플로팅 버튼 크기가 변하게 ... 현재 마우스 커서 위치에
-           왼쪽 버튼의 중앙이 오게 ... 동작 끝나면 화면 가장자리 바깥에 벗어나지 못하게 재조정"): F sizes the Floating Widget as R
+           왼쪽 버튼의 중앙이 오게 ... 동작 끝나면 화면 가장자리 바깥에 벗어나지 못하게 재조정"): F sizes the Floating Icon Group as R
            does (RV-171's file before or after is the picture's wheel's), F's centre kept under the pointer while the
            wheel turns; boxes_place brings it inside 0.8 s after the last notch */
         double size = rubraview_box_widget_size_step(rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_size")), notches);
@@ -81,7 +81,7 @@ static bool box_anchor_wheel(app_state_t *app, double x, double y, double notche
         b->anchor_x = x - a * 0.5;
         b->anchor_y = y - a * 0.5;
         app->widget_wheel_until = rubraview_pal_time_now_seconds() + 0.8;
-        n = rubraview_fmt(line, sizeof(line), T("Floating Widget size {}%"), PROVEN_ARG((int)lround(size)));
+        n = rubraview_fmt(line, sizeof(line), T("Floating Icon Group size {}%"), PROVEN_ARG((int)lround(size)));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
         note_activity(app);
         return true;
@@ -90,7 +90,7 @@ static bool box_anchor_wheel(app_state_t *app, double x, double y, double notche
         double next = rubraview_box_opacity_step(rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_opacity")), notches);
         rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_opacity"), next);
         rubraview_settings_set(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("toolbox_opacity"), next);   /* its toolbar with it */
-        n = rubraview_fmt(line, sizeof(line), T("Floating Widget {}%"), PROVEN_ARG((int)next));
+        n = rubraview_fmt(line, sizeof(line), T("Floating Icon Group {}%"), PROVEN_ARG((int)next));
     } else {
         double scale = (b->scale > 0.0 ? b->scale : 1.0) + (notches > 0.0 ? 0.1 : -0.1);
         rubraview_box_set_size(b, b->columns, scale);
@@ -500,7 +500,7 @@ static double tile_caption_size(app_state_t *app, proven_u8str_view_t caption, r
 
 static void draw_box_in(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                         const char *const *captions, int32_t caption_count, const rubraview_menu_state_t *menu);
-/* 1.25.0: the Floating Widget's words in the buttons' face (Settings › General) */
+/* 1.25.0: the Floating Icon Group's words in the buttons' face (Settings › General) */
 void draw_box(app_state_t *app, const rubraview_box_t *box, const rubraview_tile_metrics_t *metrics,
                      const char *const *captions, int32_t caption_count,
                      const rubraview_menu_state_t *menu) {
@@ -540,7 +540,7 @@ static void draw_box_in(app_state_t *app, const rubraview_box_t *box, const rubr
     rubraview_pal_rect_t right = { hover_half.x, hover_half.y, hover_half.width, hover_half.height };
 
     if (!box->headless) {
-        /* 1.25.0: F and T at the Floating Widget's own opacity (Settings › Display) */
+        /* 1.25.0: F and T at the Floating Icon Group's own opacity (Settings › Display) */
         double wo = rubraview_settings_get(&app->settings, PROVEN_LIT("ui"), PROVEN_LIT("widget_opacity"));
         rubraview_pal_render_fill_rect(app->renderer, left, rubraview_box_fade(COLOR_BOX_FILL, wo), 2.0);
         rubraview_pal_render_stroke_rect(app->renderer, left, rubraview_box_fade(COLOR_BOX_BORDER, wo), 1.0, 2.0);
@@ -548,7 +548,7 @@ static void draw_box_in(app_state_t *app, const rubraview_box_t *box, const rubr
         rubraview_pal_render_stroke_rect(app->renderer, right, rubraview_box_fade(COLOR_BOX_BORDER, wo), 1.0, 2.0);
 
         /* RFC-0002 §6.1 (owner, 2026-09-15): M for the menu box, T for the toolbox. */
-        /* 1.25.0 (owner, 2026-10-20): F (the Floating Widget) and T (its toolbar) */
+        /* 1.25.0 (owner, 2026-10-20): F (the Floating Icon Group) and T (its toolbar) */
         /* RV-181: icons — F a grid of buttons, T arrows four ways (M's three lines) */
         double sign = metrics->anchor_size * 0.42 * place_size(app, PF_BUTTONS);
         draw_sign(app->renderer, box->kind == RUBRAVIEW_BOX_MENU ? RUBRAVIEW_ICON_MENU : RUBRAVIEW_ICON_TOOLBAR,

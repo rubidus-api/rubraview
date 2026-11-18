@@ -1291,10 +1291,10 @@ the next file; the Toolbar has the list (**List**) too.
 blank line before and after it (`제2장`, `Chapter 2`) as a paragraph of
 its own in paragraphs mode. The information bar (`Shift+I`) says the
 encoding and how far through the file you are.
-## The title bar and the Floating Widget
+## The title bar and the Floating Icon Group
 
 The title bar starts with **☰**, a list of what the window does: Align
-the Floating Widget, New window, Open file, Recent files, Batch, Print; the
+the Floating Icon Group, New window, Open file, Recent files, Batch, Print; the
 copies and moves to a folder and Classify; Playlist, Settings and Help;
 after them everything a right click on the picture, the film or the text
 would offer (also what the Toolbar has; not Slide show, Adjust picture or
@@ -1338,8 +1338,8 @@ Toolbar also has **Centre** (the picture's middle on the window's, as a
 double click does) and **Wheel strip**: off, turning pages with the wheel
 brings up no thumbnails.
 
-The **Floating Widget** sits at the bottom right (over the information
-bar while it shows; ☰ › Align the Floating Widget puts it back there):
+The **Floating Icon Group** sits at the bottom right (over the information
+bar while it shows; ☰ › Align the Floating Icon Group puts it back there):
 
 - **F** — a click opens or folds the **Toolbar** (it never pins it);
   dragged, the widget moves, and past the window's edge the Toolbar gets
@@ -1354,9 +1354,9 @@ bar while it shows; ☰ › Align the Floating Widget puts it back there):
 - **P** — while the Toolbar is open: on, it stays open when the pointer
   leaves; off, it folds.
 - **R** — dragged sideways, more or fewer buttons a row; away or back,
-  bigger or smaller buttons. The wheel over R makes the Floating Widget
+  bigger or smaller buttons. The wheel over R makes the Floating Icon Group
   itself — F, T, P and R — bigger or smaller, 10 % a notch from 50 % to
-  250 %; Settings › Display › Floating Widget size holds the same number,
+  250 %; Settings › Display › Floating Icon Group size holds the same number,
   and settings.ini keeps it (`[ui] widget_size`; settings.ini's sections are its own, not the keys').
 
 The Toolbar changes with what is on screen — playing controls for a
@@ -1402,8 +1402,8 @@ numbers under Settings › Viewer › Shape. **On its side** turns the chosen
 ratio over (9:16; paper lying down). `Shift+A` goes round them, back to
 the file's own shape. The choice lasts until the viewer is closed.
 
-The Floating Widget starts in the bottom-right corner, and ☰ › Align the
-Floating Widget puts it back there. It is always whole
+The Floating Icon Group starts in the bottom-right corner, and ☰ › Align the
+Floating Icon Group puts it back there. It is always whole
 inside the window, and when the window changes size it stays the same
 part of the way across and down.
 
@@ -1762,7 +1762,7 @@ filename code page, the memory cap). Some worth knowing:
   folder named there, and every folder under it, is shown from the folder
   above as a plain tile with its name, and no picture of what is in it is
   made. Inside it, its files show their own thumbnails as anywhere else.
-- **Display** — the opacity of the Floating Widget, the Toolbar, the title
+- **Display** — the opacity of the Floating Icon Group, the Toolbar, the title
   bar and the thumbnail strip; the Toolbar's buttons a row and their size;
   the size of the Toolbar's buttons and anchors (48, 64 or 96); the size of
   file names and messages (the wheel over the Toolbar's bar sets it too);
@@ -1882,7 +1882,7 @@ filename code page, the memory cap). Some worth knowing:
   window's Live rows say **Film in memory**.
 - **Keys › Use keymap.ini** off uses the built-in keys whatever the file says.
 
-**H** on the title bar puts the title bar and the Floating Widget away, so nothing
+**H** on the title bar puts the title bar and the Floating Icon Group away, so nothing
 comes up under the pointer. The next click anywhere in the window brings
 them back, and does nothing else.
 
@@ -2239,7 +2239,7 @@ listed under a later heading only means that while that is on screen.
 |---|---|
 | `O`, `Ctrl+O` | Open a file |
 | `Ctrl+Shift+O` | Open a folder |
-| `Ctrl+Shift+R` | The recent files in a list window: when each was opened, its size and folder; take files off the list |
+| `Ctrl+Shift+R` | The recent files in a list widget: when each was opened, its size and folder; take files off the list |
 | `E` | Adjust the picture |
 | `Ctrl+E` | Export |
 | `Ctrl+Shift+S` | Save a copy as |
@@ -2254,7 +2254,7 @@ listed under a later heading only means that while that is on screen.
 | `Ctrl+Shift+M` | Move the file on screen to the folder set for it |
 | `Alt+C` | Copy the file on screen to a folder typed or browsed; one not there yet is made |
 | `Alt+M` | Move the file on screen to a folder typed or browsed; one not there yet is made |
-| `K` | Classify: the nine folders in a window; set pictures aside for them, then copy or move them all at once |
+| `K` | Classify: the nine folders in a panel; set pictures aside for them, then copy or move them all at once |
 | `G` | Folders card: the default folder and folders 1 to 9; CC / MM copy / move the file to the default one, C1 / M1 to folder 1 |
 | `Ctrl+C` | Copy the frame on screen (a film, an animation), or the picture itself |
 | `Ctrl+Shift+E` | Save the frame on screen as a PNG beside the file |
@@ -2399,14 +2399,14 @@ listed under a later heading only means that while that is on screen.
 | Toolbar `1x` | The next playback speed; dragged up or down, or with the wheel over it, 0.1x at a time; a tap on its button lists them to choose from |
 | Toolbar `A-B` | A-B repeat: from here, to here, off |
 | Toolbar `EQ` | The equaliser's next preset; a tap on its button lists them to choose from |
-| Toolbar `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a window over the picture |
+| Toolbar `EQ bands`, Right click `Equaliser window` | The equaliser's ten bands, in a widget over the picture |
 | Toolbar `Night` | Night mode: loud passages brought down |
 | Toolbar `Sub`, Right click `Subtitles on / off` | Subtitles on or off |
 | Toolbar `Centre` | The picture's middle on the window's, its size as it is (a double click does it too) |
 | Toolbar `100%` | Zoom round: real size (0%), 20%, 40% ... 200%, real size again; a tap on its button lists them to choose from |
 | Toolbar `Fit` | Fit round: window, width, height, smart, stretch, window again; a tap on its button lists them to choose from |
 | Toolbar `Send` | Send: where the file on screen goes, in a list (copy or move to the folder set or another, or Classify) |
-| Toolbar `Hide` | Hide the title bar and the Floating Widget until the picture is clicked |
+| Toolbar `Hide` | Hide the title bar and the Floating Icon Group until the picture is clicked |
 | Toolbar `Viz` | The analyser: bars, the wave, or none; a tap on its button lists them to choose from |
 | Toolbar `Wheel strip` | Thumbnails while the wheel turns pages |
 | Toolbar `First alone`, Right click `First page alone` | Two pages: the first page alone, as a book's cover |
@@ -2442,7 +2442,7 @@ listed under a later heading only means that while that is on screen.
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |
 | Right click `Take out of the list` | A file of a list, right-clicked: out of the list (the file stays) |
 | Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
-| Right click `Favourites...` | The favourites, files and folders, in a list window: open, reorder, remove |
+| Right click `Favourites...` | The favourites, files and folders, in a list widget: open, reorder, remove |
 | Right click `Add to favourites` | Make the file on screen a favourite, or no longer one |
 | Right click `Shuffle` | Shuffle on or off: Next picks at random among pictures, films and songs, Previous goes back the way it came |
 | Right click `One page` | Layout: one page at a time |
@@ -2450,6 +2450,6 @@ listed under a later heading only means that while that is on screen.
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
 | Right click `Extract subtitles` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
-| Title bar ☰ `Align the Floating Widget` | The Floating Widget back in the bottom-right corner, over the information bar when it is shown |
+| Title bar ☰ `Align the Floating Icon Group` | The Floating Icon Group back in the bottom-right corner, over the information bar when it is shown |
 
 <!-- keys:end -->

@@ -352,7 +352,7 @@ bool rubraview_box_tick(rubraview_box_t *box, double delta_seconds, double grace
  */
 double rubraview_box_opacity_step(double percent, double notches);
 
-/* The Floating Widget's own buttons (F, T, P, R), as a percent of their size (owner, 2026-10-26, RV-178). */
+/* The Floating Icon Group's own buttons (F, T, P, R), as a percent of their size (owner, 2026-10-26, RV-178). */
 #define RUBRAVIEW_WIDGET_SIZE_MIN 50.0
 #define RUBRAVIEW_WIDGET_SIZE_MAX 250.0
 #define RUBRAVIEW_WIDGET_SIZE_STEP 10.0
