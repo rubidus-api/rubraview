@@ -4135,3 +4135,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: `navbox_allowed` refused while `titlebar.shown`, which a pinned title bar always is; copying to the default folder took G C C; a job's window stayed with its summary until closed.
 - Decision: only a title bar shown and not pinned (`general.titlebar_pinned`) keeps the navigator away. Core `ui_navbox` gains RUBRAVIEW_NAVBOX_COPY and _MOVE, a row of two halves under the pairs' words (the box taller by 0.8 of a button); `navbox_press` closes the box and calls `foldercard_put_default` (D-361's default folder, `curation.copy_dir`; not set: the card opens on it). `jobs.close_after_s` (0..3600, 0 never) goes in START and ARCHIVE (`close_after`); the job closes its progress window that many seconds after its work ended, not while it asks something (an older split's parts).
 - Consequences: R326; `test_ui_navbox`, `test_settings_doc`, `test_ui_settings`; VM T470.
+
+## D-365: Window, Widget, Notice
+
+- Date: 2026-11-18
+- Status: Accepted (owner 2026-11-18: "우리 용어를 좀 정리합시다. 프로그램 외부에 뜨는건 창, 내부에 뜨는 카드나 창은 위젯, 잠시 표시했다가 사라지는건 안내notice로요").
+- Context: "window", "card", "box" and "message" were used loosely in requests, the docs and the program's words: a job's progress window, the Classify "window" drawn inside the viewer, the input card, the words shown a moment.
+- Decision: a **window** (창) is outside the program's window — a top-level window of Windows'; a **widget** (위젯) is a card or a box drawn inside it; a **notice** (안내) is shown a moment and goes by itself. The glossary (SPEC §D17) holds them; new requirements, decisions, docs and words use them.
+- Consequences: the program's words, the manual and the language packs still say "window" or "card" for some widgets — RV-300.
