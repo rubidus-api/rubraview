@@ -746,6 +746,17 @@ bool rubraview_batch_name_wants_size(proven_u8str_view_t name) {
     return false;
 }
 
+/* RV-309: a result kept with its own copy of the name, since the arena it was made in is reset for the next file */
+static void result_keep(rubraview_batch_item_result_t *out, const rubraview_batch_item_result_t *item) {
+    out->status = item->status;
+    out->input_path = item->input_path;
+    size_t n = item->output_name.size < RUBRAVIEW_BATCH_NAME_MAX - 1 ? item->output_name.size : RUBRAVIEW_BATCH_NAME_MAX - 1;
+    while (n > 0 && n < item->output_name.size && (item->output_name.ptr[n] & 0xC0u) == 0x80u) n--;   /* not inside a character */
+    if (n > 0) proven_sys_mem_copy(out->name, item->output_name.ptr, n);
+    out->name[n] = '\0';
+    out->output_name = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)out->name, .size = n };
+}
+
 rubraview_batch_report_t rubraview_batch_run(proven_arena_t *arena,
                                              const rubraview_batch_job_t *job,
                                              const rubraview_batch_input_t *inputs, size_t input_count,
@@ -770,7 +781,7 @@ rubraview_batch_report_t rubraview_batch_run(proven_arena_t *arena,
 
         if (!rubraview_batch_file_matches(job, name, input->size_bytes)) {
             report.skipped++;
-            if (out_results && i < results_capacity) out_results[i] = item;
+            if (out_results && i < results_capacity) result_keep(&out_results[i], &item);
             continue;
         }
 
@@ -800,7 +811,7 @@ rubraview_batch_report_t rubraview_batch_run(proven_arena_t *arena,
         item.status = ok ? RUBRAVIEW_BATCH_STATUS_OK : RUBRAVIEW_BATCH_STATUS_FAILED;
         if (ok) report.processed++; else report.failed++;
 
-        if (out_results && i < results_capacity) out_results[i] = item;
+        if (out_results && i < results_capacity) result_keep(&out_results[i], &item);
     }
 
     return report;

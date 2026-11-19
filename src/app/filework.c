@@ -60,6 +60,8 @@ void osd_say(app_state_t *app, proven_u8str_view_t text) {
     app->notice[n] = '\0';
     app->notice_length = n;
     app->notice_seconds = 2.5;
+    app->notice_serial++;   /* the late-frame watch: which notice a frame drew */
+    rubraview_pal_media_log("say: notice {} said: {}", PROVEN_ARG((uint64_t)app->notice_serial), PROVEN_ARG(rubraview_bytes_view(app->notice, (int)n)));
 }
 
 void triage_delete(app_state_t *app, bool permanent) {

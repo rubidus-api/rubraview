@@ -255,6 +255,13 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
         if (app->info_open && fc->last_render_seconds > 0.0 && now - fc->last_render_seconds > app->stats_worst)
             app->stats_worst = now - fc->last_render_seconds;
         render_frame(app);
+        /* the late-frame watch (backlog, 2026-11-07 / 2026-11-19): with RUBRAVIEW_MEDIA_LOG set, the first frame drawn
+           with a notice says so, the time it took to present with it */
+        if (app->notice_seconds > 0.0 && app->notice_serial != app->notice_drawn_serial) {
+            app->notice_drawn_serial = app->notice_serial;
+            rubraview_pal_media_log("frame: notice {} drawn and presented ({:.1} ms waiting for the screen)", PROVEN_ARG((uint64_t)app->notice_serial),
+                                    PROVEN_ARG(rubraview_pal_render_present_seconds(app->renderer) * 1000.0));
+        }
         if (app->info_open) {   /* RV-215 (D-248): drawing, and the wait for the screen apart */
             double present = rubraview_pal_render_present_seconds(app->renderer);
             app->stats_frames++;

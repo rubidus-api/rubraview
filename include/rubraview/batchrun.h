@@ -165,10 +165,13 @@ typedef enum rubraview_batch_status {
     RUBRAVIEW_BATCH_STATUS_FAILED,   /* the worker reported a failure */
 } rubraview_batch_status_t;
 
+#define RUBRAVIEW_BATCH_NAME_MAX 1024   /* a file name in UTF-8: Windows' 255 UTF-16 units are at most 765 bytes */
+
 typedef struct rubraview_batch_item_result {
     rubraview_batch_status_t status;
-    proven_u8str_view_t                  input_path;
-    proven_u8str_view_t                  output_name;  /* the name the pattern produced */
+    proven_u8str_view_t                  input_path;   /* the caller's, as given */
+    proven_u8str_view_t                  output_name;  /* the name the pattern produced: points into `name` below */
+    char                                 name[RUBRAVIEW_BATCH_NAME_MAX];   /* RV-309: kept here, not in the arena reset for the next file */
 } rubraview_batch_item_result_t;
 
 /**
@@ -193,7 +196,9 @@ typedef struct rubraview_batch_report {
  * regardless of how many files it holds.
  *
  * Results are written to `out_results` when it is given, up to
- * `results_capacity`; the counts in the report are complete either way.
+ * `results_capacity`; the counts in the report are complete either way. Each result's `output_name` is kept in the
+ * result itself and stays valid while `out_results` does (RV-309: it pointed into the arena, which the next file
+ * reset). A name that would not fit is cut at RUBRAVIEW_BATCH_NAME_MAX - 1 bytes, on a character's start.
  */
 rubraview_batch_report_t rubraview_batch_run(proven_arena_t *arena,
                                              const rubraview_batch_job_t *job,

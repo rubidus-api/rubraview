@@ -810,7 +810,8 @@ typedef struct app_state {
        접근 불가능한 기능이 있다면 ... 우클릭 컨텍스트 메뉴 쪽으로"): the menu's tree is the right click's lower
        rows, entered in place: the menu item shown (-1: the list itself), and the way back */
     bool                       ctx_on_picture;   /* opened on the picture: what the toolbox has is left out */
-    bool                       ctx_pkg_mode;     /* RV-308: the list shows the apps' Windows 11 items */
+    bool                       ctx_pkg_mode;
+    uint64_t                   notice_serial, notice_drawn_serial;   /* the late-frame watch (media log) */     /* RV-308: the list shows the apps' Windows 11 items */
     /* RV-279: the files the right-click list is about, on disk (an archive for its pages), and their registry verbs */
     char                     **shell_targets;
     size_t                     shell_target_count;
