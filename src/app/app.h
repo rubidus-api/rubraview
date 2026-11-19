@@ -1356,6 +1356,8 @@ typedef struct app_state {
     char                   spath_composing[64];
     size_t                 spath_composing_length;
     proven_u8str_view_t                spath_section, spath_key;
+    uint8_t                            spath_kind;   /* RV-311: rubraview_text_kind_t of what is typed */
+    proven_u8str_view_t                spath_before; /* RV-311: a search's value when the box opened, for Esc */
     int32_t                spath_list_index;   /* a folder of a list (`recent.skip_dirs`) being typed, or -1 */
     int32_t                spath_list;         /* which of FOLDER_LISTS that list is */
     rubraview_editctl_t    rename_ec;     /* RV-293: the text in rename_buffer, its caret and selection, its undo */
@@ -1934,6 +1936,7 @@ typedef struct frame_clock {
     double   last_render_seconds;
     double   last_input_seconds;
     int32_t  input_passes;   /* RV-262: passes left that draw whatever the summary says, after an input */
+    int32_t  trail_frames;   /* the late-frame watch: frames drawn again after the last change, a frame apart */
 } frame_clock_t;
 
 /* ---- functions called across files ---- */

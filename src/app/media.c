@@ -1557,7 +1557,7 @@ void media_tick(app_state_t *app) {
     } else if (!(app->media_paused && app->media_has_frame)) {
         rubraview_video_frame_t frame;
         /* RV-215 step 2 (D-270, owner 2026-11-03: "A가 좋겠네요"): the screen's free buffer waited for first, then the
-           picture chosen for the refresh it will be seen at, one period on; RUBRAVIEW_PACING_OLD (no waitable chain)
+           picture chosen for the refresh it will be seen at, one period on; RUBRAVIEW_PACING_WAITABLE unset (D-376: no waitable chain)
            chooses for now as before. A picture already waiting to be shown is not waited for again. */
         double ahead = 0.0;
         if (app->media_has_frame && rubraview_pal_render_paced(app->renderer) && !app->media_new_picture &&

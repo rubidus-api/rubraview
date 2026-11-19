@@ -69,6 +69,35 @@ void settings_read_file(app_state_t *app) {
 #define KEY_ROWS_MAX 1024
 typedef struct { size_t binding, combo; } key_combo_row_t;
 static bool g_keys_by_key;
+/* RV-311 (owner, 2026-11-19: "단일선택/체크박스/에디트컨트롤/안내메시지 등 뭔가 정형화되고 규격화된 느낌으로 최소한의 노력과
+   코드로"): how each kind of text setting is typed, checked and said, in one place; the window keeps no section or key
+   names for it. A font is not typed: the font picker chooses it. */
+typedef struct text_way {
+    bool browse;          /* Browse... and Ctrl+O */
+    bool must_be_there;   /* checked on the disk before it is kept */
+    bool folder_only;     /* and a folder, not a file */
+    const char *hint;     /* said when the box opens */
+    const char *kept, *cleared, *left, *missing;
+} text_way_t;
+
+static const text_way_t TEXT_WAYS[RUBRAVIEW_TEXT_KIND_COUNT] = {
+    [RUBRAVIEW_TEXT_PLAIN]   = { false, false, false, N_("type it; Enter keeps it, Esc leaves it, Ctrl+C copies"),
+                                 N_("kept (Delete clears it)"), N_("cleared"), N_("left as it was"), NULL },
+    [RUBRAVIEW_TEXT_FOLDER]  = { true, true, true, N_("type or paste a folder; Enter keeps it, Esc leaves it, Ctrl+O browses, Ctrl+C copies"),
+                                 N_("folder kept (Delete clears it)"), N_("folder cleared"), N_("folder left as it was"), N_("no such folder - put it right, or Esc") },
+    [RUBRAVIEW_TEXT_FILE]    = { true, true, false, N_("type or paste a file or its folder; Enter keeps it, Esc leaves it, Ctrl+O browses"),
+                                 N_("kept (Delete clears it)"), N_("cleared"), N_("left as it was"), N_("no such file or folder - put it right, or Esc") },
+    [RUBRAVIEW_TEXT_PATTERN] = { false, false, false, N_("type names like *.png;IMG_*; Enter keeps them, Esc leaves it"),
+                                 N_("kept (Delete clears it); patterns go with ; between them, as *.png;IMG_*"), N_("cleared"), N_("left as it was"), NULL },
+    [RUBRAVIEW_TEXT_FONT]    = { false, false, false, NULL, N_("kept (Delete clears it)"), N_("cleared"), N_("left as it was"), NULL },
+    [RUBRAVIEW_TEXT_SEARCH]  = { false, false, false, N_("type the letters to find; Enter keeps them, Esc leaves it as it was"),
+                                 N_("kept (Delete clears it)"), N_("cleared"), N_("left as it was"), NULL },
+};
+
+static const text_way_t *spath_way(const app_state_t *app) {
+    return &TEXT_WAYS[app->spath_kind < RUBRAVIEW_TEXT_KIND_COUNT ? app->spath_kind : RUBRAVIEW_TEXT_PLAIN];
+}
+
 static bool g_keys_by_row;                       /* RV-303 (RFC-0010 §4.8): a keyboard row's heading, then what each of its keys does on one screen */
 static rubraview_keyrow_entry_t g_key_rows[KEY_ROWS_MAX];
 static bool g_keys_layout;                       /* RV-217: the keyboard drawn, a dot a kind of binding on each key */
@@ -1615,13 +1644,12 @@ static void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             const rubraview_setting_def_t *def = &app->settings_view.doc->defs[node->setting];
             if (event == RUBRAVIEW_SEVENT_CLEAR_TEXT) {
                 rubraview_settings_set_text(&app->settings, def->section, def->key, PROVEN_LIT(""));
-                settings_say(app, "cleared");
+                settings_say(app, rubraview_tr(TEXT_WAYS[def->text_kind < RUBRAVIEW_TEXT_KIND_COUNT ? def->text_kind : 0].cleared));
                 break;
             }
-            /* RV-136 (owner, 2026-10-18): a font is chosen in the program's own picker. */
-            if ((proven_u8str_view_eq(def->section, PROVEN_LIT("video")) && proven_u8str_view_eq(def->key, PROVEN_LIT("subtitle_font"))) ||
-                (proven_u8str_view_eq(def->section, PROVEN_LIT("text")) && proven_u8str_view_eq(def->key, PROVEN_LIT("font"))) ||
-                (proven_u8str_view_eq(def->section, PROVEN_LIT("general")) && proven_u8str_view_eq(def->key, PROVEN_LIT("ui_font")))) {
+            /* RV-136 (owner, 2026-10-18): a font is chosen in the program's own picker; RV-311: every `font` (the places' faces
+               were taken as folders before) */
+            if (def->text_kind == RUBRAVIEW_TEXT_FONT) {
                 fontpick_show(app, def->section, def->key);
                 break;
             }
@@ -1835,9 +1863,6 @@ static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) 
    넣어서 복사해갈 수도 있게") ---- */
 
 /* RFC-0010 §4.8: the keys' search is letters, no folder: no Browse, nothing looked for on the disk */
-static bool spath_is_search(const app_state_t *app) {
-    return proven_u8str_view_eq(app->spath_section, PROVEN_LIT("keys")) && proven_u8str_view_eq(app->spath_key, PROVEN_LIT("row_find"));
-}
 
 void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def) {
     editbox_begin(&app->spath_ec, app->spath_buffer, sizeof(app->spath_buffer), false);
@@ -1846,12 +1871,13 @@ void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def) {
     rubraview_textedit_select_all(&app->spath_ec.te);
     app->spath_section = def->section;
     app->spath_key = def->key;
+    app->spath_kind = def->text_kind;
+    app->spath_before = app_keep(app, now);
     app->spath_list_index = -1;
     app->spath_composing_length = 0;
     app->spath_active = true;
     rubraview_pal_window_text_input(app->settings_window, true);
-    settings_say(app, spath_is_search(app) ? T("type the letters to find; Enter keeps them, Esc leaves it as it was")
-                                           : T("type or paste a folder; Enter keeps it, Esc leaves it, Ctrl+O browses, Ctrl+C copies"));
+    if (spath_way(app)->hint) settings_say(app, rubraview_tr(spath_way(app)->hint));
 }
 
 /* 1.24.0 (owner, 2026-10-19: "모든 슬라이드 컨트롤은 텍스트로 직접 입력"): a slider's number typed in the same box. */
@@ -1866,6 +1892,7 @@ void settings_number_begin(app_state_t *app) {
     rubraview_textedit_select_all(&app->spath_ec.te);
     app->spath_section = def->section;
     app->spath_key = def->key;
+    app->spath_kind = RUBRAVIEW_TEXT_PLAIN;
     app->spath_list_index = -1;
     app->spath_composing_length = 0;
     app->spath_number = true;
@@ -1902,14 +1929,11 @@ static void settings_path_commit(app_state_t *app) {
         settings_event(app, RUBRAVIEW_SEVENT_CHANGED);
         return;
     }
-    /* Explorer's "Copy as path" puts quotes round it; spaces at the ends are no part of a folder. */
-    while (text.size > 0 && (text.ptr[0] == ' ' || text.ptr[0] == '"')) { text.ptr++; text.size--; }
-    while (text.size > 0 && (text.ptr[text.size - 1] == ' ' || text.ptr[text.size - 1] == '"')) text.size--;
-    /* RV-106: "Only names like" is typed like a folder and is not one. */
-    bool is_folder = !spath_is_search(app) && !proven_u8str_view_eq(app->spath_section, PROVEN_LIT("text")) &&   /* 1.25.0: an editor, colours */
-                     !(proven_u8str_view_eq(app->spath_section, PROVEN_LIT("files")) && proven_u8str_view_eq(app->spath_key, PROVEN_LIT("pattern"))) &&
-                     (!proven_u8str_view_eq(app->spath_section, PROVEN_LIT("video")) ||   /* RV-107: a font's name, a language */
-                      proven_u8str_view_eq(app->spath_key, PROVEN_LIT("ffmpeg_dir")));
+    /* RV-311: what is typed is checked as its kind says (a folder list's row is a folder) */
+    const text_way_t *way = app->spath_list_index >= 0 ? &TEXT_WAYS[RUBRAVIEW_TEXT_FOLDER] : spath_way(app);
+    /* Explorer's "Copy as path" puts quotes round it; spaces at the ends are no part of a folder (a command keeps its own) */
+    while (way->must_be_there && text.size > 0 && (text.ptr[0] == ' ' || text.ptr[0] == '"')) { text.ptr++; text.size--; }
+    while (way->must_be_there && text.size > 0 && (text.ptr[text.size - 1] == ' ' || text.ptr[text.size - 1] == '"')) text.size--;
     if (app->spath_list_index >= 0) {
         /* A folder of the list kept out of Recent: put in its place, or added; empty takes it off. */
         rubraview_fs_entry_t is;
@@ -1939,22 +1963,14 @@ static void settings_path_commit(app_state_t *app) {
         rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, PROVEN_LIT(""));
         settings_path_end(app);
         settings_took_effect(app);
-        settings_say(app, is_folder ? T("folder cleared") : "cleared");
-        return;
-    }
-    rubraview_fs_entry_t found;
-    if (!is_folder) {
-        rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app_keep(app, text));
-        settings_path_end(app);
-        settings_took_effect(app);
-        settings_say(app, proven_u8str_view_eq(app->spath_section, PROVEN_LIT("files"))
-                              ? "kept (Delete clears it); patterns go with ; between them, as *.png;IMG_*"
-                              : T("kept (Delete clears it)"));
+        settings_say(app, rubraview_tr(way->cleared));
         return;
     }
     /* %LOCALAPPDATA%\ffmpeg is a folder too: looked for as Windows will read it. */
-    if (!rubraview_pal_fs_stat(app->arena, rubraview_pal_fs_expand_env(app->arena, text), &found) || !found.is_directory) {
-        settings_say(app, T("no such folder - put it right, or Esc"));
+    rubraview_fs_entry_t found;
+    if (way->must_be_there && (!rubraview_pal_fs_stat(app->arena, rubraview_pal_fs_expand_env(app->arena, text), &found) ||
+                               (way->folder_only && !found.is_directory))) {
+        settings_say(app, rubraview_tr(way->missing));
         return;
     }
     /* The settings borrow their text: a copy, not the box's own buffer,
@@ -1963,15 +1979,17 @@ static void settings_path_commit(app_state_t *app) {
     rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app_keep(app, text));
     settings_path_end(app);
     settings_took_effect(app);
-    settings_say(app, T("folder kept (Delete clears it)"));
+    settings_say(app, rubraview_tr(way->kept));
 }
 
 static void settings_path_browse(app_state_t *app) {
+    bool folder = spath_way(app)->folder_only;   /* RV-311: a file's kind picks a file */
     rubraview_file_dialog_opts_t opts = {
-        .title = T("Choose a folder"), .folder_mode = true,
+        .title = folder ? T("Choose a folder") : T("Choose a file"), .folder_mode = folder,
         .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
     };
-    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
+    rubraview_file_dialog_result_t picked = folder ? rubraview_pal_file_dialog_pick_folder(app->arena, &opts)
+                                                   : rubraview_pal_file_dialog_open(app->arena, &opts);
     if (picked.accepted && picked.count > 0 && picked.paths[0].size < sizeof(app->spath_buffer)) {
         rubraview_textedit_set(&app->spath_ec.te, picked.paths[0]);   /* in the box, for Enter to keep */
     }
@@ -1986,12 +2004,16 @@ static bool settings_path_key(app_state_t *app, rubraview_key_combo_t combo) {
         app->spath_composing_length = 0;
         settings_path_commit(app);
     } else if (key_is(combo, "Escape")) {
+        if (!app->spath_number && app->spath_kind == RUBRAVIEW_TEXT_SEARCH)   /* what it followed while typed, put back */
+            rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app->spath_before);
         settings_path_end(app);
-        settings_say(app, T("folder left as it was"));
-    } else if (ctrl && key_is(combo, "O") && !spath_is_search(app)) {
+        settings_say(app, rubraview_tr(spath_way(app)->left));
+    } else if (ctrl && key_is(combo, "O") && spath_way(app)->browse) {
         settings_path_browse(app);
     } else {
         (void)editbox_key(app->settings_window, &app->spath_ec, combo, false);   /* RV-293 */
+        if (!app->spath_number && app->spath_kind == RUBRAVIEW_TEXT_SEARCH)   /* RV-311: a search follows the letters as they are typed */
+            rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app_keep(app, rubraview_textedit_text(&app->spath_ec.te)));
     }
     app->settings_dirty = true;
     return true;   /* nothing else happens while typing */
@@ -2120,7 +2142,7 @@ static void settings_path_draw(app_state_t *app) {
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cx, y + 2.0, 1.5, ch - 4.0 }, SETTINGS_TEXT, 0.0);
     /* 1.24.0: its buttons on the row under it — OK, Cancel, and Browse... for a folder */
     const char *words[3] = { T("OK"), T("Cancel"), T("Browse...") };
-    int32_t n = app->spath_number || spath_is_search(app) || (proven_u8str_view_eq(app->spath_section, PROVEN_LIT("files")) && proven_u8str_view_eq(app->spath_key, PROVEN_LIT("pattern"))) ? 2 : 3;
+    int32_t n = !app->spath_number && spath_way(app)->browse ? 3 : 2;   /* RV-311: Browse... for the kinds that have it */
     double bx = box.x, by = box.y + box.height + pad, bh = ch + 2.0 * pad;
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ box.x, box.y + box.height, box.width, bh + 2.0 * pad }, SETTINGS_BACKGROUND, 0.0);   /* the rows under it covered */
     app->spath_btn_n = n;
@@ -2203,7 +2225,11 @@ size_t settings_pump(app_state_t *app) {
                     for (int32_t i = 0; i < app->spath_btn_n; ++i) if (pal_rect_has(app->spath_btn[i], event.mouse.x, event.mouse.y)) hit = i;
                     if (hit == 0) { editbox_text(&app->spath_ec, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length }, true);
                                     app->spath_composing_length = 0; settings_path_commit(app); app->settings_dirty = true; break; }
-                    if (hit == 1) { settings_path_end(app); app->settings_dirty = true; break; }
+                    if (hit == 1) {   /* Cancel: as Esc (a search put back as it was) */
+                        if (!app->spath_number && app->spath_kind == RUBRAVIEW_TEXT_SEARCH)
+                            rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app->spath_before);
+                        settings_path_end(app); app->settings_dirty = true; break;
+                    }
                     if (hit == 2) { settings_path_browse(app); app->settings_dirty = true; break; }
                 }
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
@@ -2345,6 +2371,8 @@ size_t settings_pump(app_state_t *app) {
                     if (event.kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
                         editbox_text(&app->spath_ec, typed, true);
                         app->spath_composing_length = 0;
+                        if (!app->spath_number && app->spath_kind == RUBRAVIEW_TEXT_SEARCH)   /* RV-311: a search follows what is typed */
+                            rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app_keep(app, rubraview_textedit_text(&app->spath_ec.te)));
                     } else {
                         size_t n = typed.size < sizeof(app->spath_composing) ? typed.size : sizeof(app->spath_composing) - 1;
                         proven_sys_mem_copy(app->spath_composing, typed.ptr, n);

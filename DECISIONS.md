@@ -4223,3 +4223,19 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: `rubraview_batch_run` resets its arena before each file (§3.11, what bounds a run's memory), and the `output_name` it put in `out_results` pointed into that arena: read after the run, the first of two names ("one_small.png") had become "four_small.pn". The tests read the names as each file was processed, not after; the CLI asks for no results, so no output name it uses was touched.
 - Decision: `rubraview_batch_item_result_t` holds the name (`name[RUBRAVIEW_BATCH_NAME_MAX]`, 1024 bytes; a longer one cut on a character's start) and `output_name` points there; `result_keep` copies each result. The arena stays reset per file.
 - Consequences: `test_batchrun` reads both names after the run returned and after the arena is used again (T489). A results array costs 1 KB a file more.
+
+## D-376: The Plain Flip Chain By Default, The Waitable One By RUBRAVIEW_PACING_WAITABLE (The Late Frames)
+
+- Date: 2026-11-19
+- Status: Accepted (the owner, 2026-11-19: "일단 RV307만 보류하고 다른 것 처리하고 진행"; the backlog's late frames, seen since 2026-11-07).
+- Context: T479 showed Ctrl+R's notice a press behind. VM T490 (media log: the notice said and its first frame presented within 2 ms; shots every 0.1-0.2 s): on the waitable chain (D-269) the 2nd and 3rd notices reached the screen about 1.5 s after their frame was presented; on the plain flip chain (`RUBRAVIEW_PACING_OLD`) every notice was on screen at the first shot. Variants on the waitable chain: no wait before the frame showed the frame presented before the last one; a latency of 2 was worse; presenting the last change three times more helped once (0 to 0.3 s) and not the next run. The plain chain measured again on a busier VM: 0.3 to 0.5 s, Present itself waiting 120 ms for the refresh. D-269 / D-270's gain for films was never measured on a real PC.
+- Decision: the swap chain is the plain flip chain unless `RUBRAVIEW_PACING_WAITABLE` is set (it was the waitable one unless `RUBRAVIEW_PACING_OLD`); on the waitable chain the last change is presented three more times a refresh apart. D-270's picture chosen for when it is seen applies on the waitable chain only, as before. The media log says when a notice is said and when its first frame is drawn and presented.
+- Consequences: VM T490. To decide again on a PC with a graphics card: the notice's delay and a film's dropped frames, both chains.
+
+## D-377: A Text Setting's Kind In The Document, Its Ways In One Table (RV-311)
+
+- Date: 2026-11-19
+- Status: Accepted (owner 2026-11-19, the plan `docs/plans/active/2026-11-19-RV-311-settings-kinds.md` confirmed with its answers: the rows' look kept and made the same, the kinds first; quoted in R335).
+- Context: `path` stood for folders, free text, a pattern, fonts and a search; the window told them apart by section and key names in six places, and missed some: the places' faces (Title bar's name, menus, names, lists, buttons, this window) were checked as folders, and G'MIC's "gmic.exe or its folder" as a folder only.
+- Decision: the document's six words; `TEXT_WAYS` (browse, must be there, folder only, the five sentences) the only place a kind's behaviour is written; every `font` opens the picker; a `file` is browsed as a file and kept when a file or a folder is there; quotes and outer spaces are trimmed from what must be on the disk only (a command or a colour keeps them); `search` applies as typed. `check-settings` and `check-lang` know the words.
+- Consequences: R335; `test_settings_doc`; VM T490. Next in the plan: applying by table, the files apart (RV-310).

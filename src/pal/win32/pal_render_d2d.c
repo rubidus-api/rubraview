@@ -386,10 +386,13 @@ static bool create_device(struct rubraview_renderer *r) {
     };
     bool layered = (GetWindowLongPtrW(r->hwnd, GWL_EXSTYLE) & WS_EX_LAYERED) != 0;
     /* RV-215 (D-269): a flip chain says when the screen can take a frame, and holds one at most; the frame is then
-       begun when it can be shown, and Present no longer blocks the loop for a refresh. RUBRAVIEW_PACING_OLD keeps
+       begun when it can be shown, and Present no longer blocks the loop for a refresh. RUBRAVIEW_PACING_WAITABLE (D-376) turns it on;
        the old way, to compare. */
-    wchar_t old_way[4];
-    bool waitable = GetEnvironmentVariableW(L"RUBRAVIEW_PACING_OLD", old_way, 4) == 0;
+    /* D-376: the waitable chain only when RUBRAVIEW_PACING_WAITABLE is set: on the VM it showed a frame presented at once
+       up to 1.5 s late, or only when another came (T490), where the plain flip chain showed it at once; its gain for
+       films (D-269, D-270) was never measured on a real PC */
+    wchar_t want[4];
+    bool waitable = GetEnvironmentVariableW(L"RUBRAVIEW_PACING_WAITABLE", want, 4) != 0;
     hr = E_FAIL;
     for (size_t i = layered ? 2 : 0; i < sizeof(effects) / sizeof(effects[0]); i++) {
         desc.SwapEffect = effects[i].effect;
@@ -2058,6 +2061,10 @@ bool rubraview_pal_render_vgrade_upscale(rubraview_renderer_t *renderer, float s
                                                dst->width, dst->height, src->fp16);
     if (ok) dst->content = ++renderer->content_serial;
     return ok;
+}
+
+bool rubraview_pal_render_trail_wanted(const rubraview_renderer_t *renderer) {
+    return renderer && renderer->frame_wait != NULL;   /* D-376: a waitable chain shows a frame once the next is presented */
 }
 
 #endif /* _WIN32 */

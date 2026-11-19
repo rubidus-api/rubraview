@@ -46,8 +46,20 @@ typedef enum rubraview_setting_type {
     RUBRAVIEW_SETTING_INT,
     RUBRAVIEW_SETTING_FLOAT,
     RUBRAVIEW_SETTING_CHOICE,   /* an index into `choices` */
-    RUBRAVIEW_SETTING_PATH,     /* free text; a folder */
+    RUBRAVIEW_SETTING_PATH,     /* text (kept as a string): what it holds is `text_kind` */
 } rubraview_setting_type_t;
+
+/* RV-311 (owner, 2026-11-19: "단일선택/체크박스/에디트컨트롤/안내메시지 등 ... 정형화되고 규격화된"): what a text setting
+   holds, named in the document by its line's word, so the window takes how it is typed, checked and said from it. */
+typedef enum rubraview_text_kind {
+    RUBRAVIEW_TEXT_PLAIN = 0,   /* `text`: kept as typed (a name, a colour, a command) */
+    RUBRAVIEW_TEXT_FOLDER,      /* `folder`: one that is there (Browse, Ctrl+O) */
+    RUBRAVIEW_TEXT_FILE,        /* `file`: a file or a folder that is there (Browse, Ctrl+O) */
+    RUBRAVIEW_TEXT_PATTERN,     /* `pattern`: names like *.png;IMG_* */
+    RUBRAVIEW_TEXT_FONT,        /* `font`: chosen in the font picker */
+    RUBRAVIEW_TEXT_SEARCH,      /* `search`: letters to look for */
+    RUBRAVIEW_TEXT_KIND_COUNT
+} rubraview_text_kind_t;
 
 typedef struct rubraview_setting_def {
     proven_u8str_view_t key;         /* the name in settings.ini */
@@ -84,6 +96,8 @@ typedef struct rubraview_setting_def {
      * holds the first box's caption, its `label` the second's.
      */
     uint16_t pair;
+    /** RV-311: a text setting's kind (rubraview_text_kind_t); 0 for the others. */
+    uint8_t text_kind;
     /** The owner (2026-10-17): a fuller explanation, the tooltip on its name (`help` lines). */
     proven_u8str_view_t help;
 } rubraview_setting_def_t;

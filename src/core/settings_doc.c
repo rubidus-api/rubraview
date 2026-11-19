@@ -303,7 +303,15 @@ static bool one_line(parser_t *p, proven_u8str_view_t line) {
     if (word_is(t[0], "choice")) return setting(p, t, n, RUBRAVIEW_SETTING_CHOICE);
     if (word_is(t[0], "int"))    return setting(p, t, n, RUBRAVIEW_SETTING_INT);
     if (word_is(t[0], "float"))  return setting(p, t, n, RUBRAVIEW_SETTING_FLOAT);
-    if (word_is(t[0], "path"))   return setting(p, t, n, RUBRAVIEW_SETTING_PATH);
+    /* RV-311: a text setting by what it holds */
+    static const char *const TEXT_WORDS[RUBRAVIEW_TEXT_KIND_COUNT] = { "text", "folder", "file", "pattern", "font", "search" };
+    for (int k = 0; k < RUBRAVIEW_TEXT_KIND_COUNT; ++k)
+        if (word_is(t[0], TEXT_WORDS[k])) {
+            size_t before = p->doc.def_count;
+            bool ok = setting(p, t, n, RUBRAVIEW_SETTING_PATH);
+            if (ok && p->doc.def_count > before) p->doc.defs[p->doc.def_count - 1].text_kind = (uint8_t)k;
+            return ok;
+        }
 
     if (word_is(t[0], "info")) {
         if (n != 3 || t[1].kind != TOKEN_QUOTED || t[2].kind != TOKEN_SOURCE) return fail(p, "info needs a \"label\" and a {source}");

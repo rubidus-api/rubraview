@@ -249,6 +249,13 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     bool draw = paced ? rubraview_media_redraw_due(app->media_new_picture, now - fc->last_render_seconds)
                       : (input_now || (!settled && moving_alone) || now - fc->last_idle_frame_seconds >= 10.0 ||
                          app->media_new_picture || scene_signature(app) != fc->last_scene_signature);
+    /* D-376 (the late frames, backlog 2026-11-07 / 2026-11-19): on the waitable chain (D-269) the VM showed a notice
+       presented at once 1.5 s later, the frames after it pushing it to the screen; the last change is presented again
+       three times, a refresh apart (VM T490: 1.5 s to 0 and 0.3 s; the chain without the wait showed it at once) */
+    bool trailing = false;
+    if (!draw && fc->trail_frames > 0 && now - fc->last_render_seconds >= 0.016 && rubraview_pal_render_trail_wanted(app->renderer)) {
+        draw = true; trailing = true; fc->trail_frames--;
+    }
     if (draw && app->main_hidden) draw = false;   /* RV-272: nothing to see in a window not shown */
     if (draw) {
         double drawn_at = rubraview_pal_time_now_seconds();
@@ -270,6 +277,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
         }
         fc->last_scene_signature = scene_signature(app);
         fc->last_render_seconds = now;
+        if (!trailing) fc->trail_frames = 3;
         app->media_new_picture = false;
         /* RV-270: the film took another size on screen; its upscaled picture is made for it, and drawn, next pass */
         if (app->media_up_retry) { app->media_up_retry = false; app->media_new_picture = true; }

@@ -120,6 +120,7 @@ double rubraview_pal_render_refresh_seconds(rubraview_renderer_t *renderer);
 double rubraview_pal_render_seen_in_seconds(rubraview_renderer_t *renderer);
 /* Of present_seconds, what was waited before the frame's picture was chosen (not within its drawing). */
 double rubraview_pal_render_ahead_seconds(const rubraview_renderer_t *renderer);
+bool rubraview_pal_render_trail_wanted(const rubraview_renderer_t *renderer);   /* D-376: present the last change again (a waitable chain) */
 
 /**
  * Draw a whole texture under `transform` (typically from
