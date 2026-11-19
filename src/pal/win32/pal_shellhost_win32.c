@@ -1041,6 +1041,11 @@ static int pkg_run(const WCHAR *key, WCHAR **paths, size_t count, int32_t x, int
             }
         }
         if (pick) {
+            /* asked its state and title for these files first, as Explorer does before Invoke (a command may set
+               itself up there) */
+            char title[256];
+            bool on = true;
+            (void)pkg_title(pick, arr, title, sizeof title, &on);
             hold_process();
             HRESULT inv = pick->lpVtbl->Invoke(pick, arr, NULL);
             hlog("Invoke", inv);
