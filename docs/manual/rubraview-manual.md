@@ -1917,8 +1917,12 @@ last; `Enter` opens it and `Backspace` goes up a folder.
 
 Every file in the folder is listed. One Rubraview does not show (a
 document, a PDF, a settings file) opens in the program Windows opens it
-with, as a double click in Explorer does; a program (`.exe`, `.bat`,
-`.msi`, a shortcut ...) is never run from here. **Every file** at the end
+with, as a double click in Explorer does, and a program or a script
+(`.exe`, `.com`, `.bat`, `.cmd`, `.ps1`, an installer's `.msi` or
+`.msix`, a shortcut ...) is run — each as a program of its own, which
+goes on when Rubraview ends. A program from another computer, or one
+asking to be administrator, goes through Windows, which warns or asks
+first. A file inside an archive is never run: extract it first. **Every file** at the end
 of the tool row switches to **Viewer's files** — folders and what
 Rubraview opens — and back, and is remembered (Settings › Files). In a
 book the files in it that are no page are listed too; extract them with

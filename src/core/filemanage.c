@@ -476,6 +476,16 @@ bool rubraview_shell_runs_program(proven_u8str_view_t name) {
                     extension);
 }
 
+rubraview_launch_kind_t rubraview_shell_launch_kind(proven_u8str_view_t name) {
+    size_t dot = name.size;
+    while (dot > 0 && name.ptr[dot - 1] != '.' && name.ptr[dot - 1] != '/' && name.ptr[dot - 1] != '\\') dot--;
+    if (dot == 0 || name.ptr[dot - 1] != '.') return RUBRAVIEW_LAUNCH_SHELL;
+    proven_u8str_view_t extension = { .ptr = name.ptr + dot, .size = name.size - dot };
+    if (extension.size > 0 && list_has("exe;com", extension)) return RUBRAVIEW_LAUNCH_PROCESS;
+    if (extension.size > 0 && list_has("ps1", extension)) return RUBRAVIEW_LAUNCH_POWERSHELL;
+    return RUBRAVIEW_LAUNCH_SHELL;
+}
+
 /* Is `extension` chosen by `words` — by its own name, its kind's word, or "all"? */
 static bool words_choose(proven_u8str_view_t words, proven_u8str_view_t extension, const char *kind_word) {
     proven_u8str_view_t word;

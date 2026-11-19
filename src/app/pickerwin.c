@@ -727,13 +727,13 @@ static void picker_open_picked(app_state_t *app) {
     rubraview_fs_entry_t *entries = NULL;
     size_t n = picker_picked_entries(app, &entries), files = 0, shell = 0, refused = 0, others = 0;
     /* D-268 (owner, 2026-11-03: ".ext 메뉴 정리"): what the viewer does not show goes to its Windows program, as one
-       such file opened alone does (D-258); a program or script never, and twenty at most */
+       such file opened alone does (D-258), a program run (RV-304); twenty at most */
     for (size_t i = 0; i < n; ++i) {
         if (entries[i].is_directory) continue;
         if (picker_viewer_opens(entries[i].name)) { entries[files++] = entries[i]; continue; }
         if (++others > PICKER_SHELL_OPEN_MAX) continue;
-        bool dangerous = false;
-        if (rubraview_shell_runs_program(entries[i].name) || !rubraview_pal_shell_open_file(entries[i].path, &dangerous)) refused++;
+        /* RV-304 (D-369): a program too, each a process of its own */
+        if (!rubraview_pal_shell_open_file(entries[i].path, (int)rubraview_shell_launch_kind(entries[i].name))) refused++;
         else shell++;
     }
     char line[160];
@@ -741,7 +741,7 @@ static void picker_open_picked(app_state_t *app) {
           : shell == 0 ? rubraview_fmt(line, sizeof(line), T("{} files opened together"), PROVEN_ARG((size_t)files))
                        : rubraview_fmt(line, sizeof(line), T("{} files opened together, {} in their Windows programs"), PROVEN_ARG((size_t)files), PROVEN_ARG((size_t)shell));
     if (k > 0 && (size_t)k < sizeof line && refused > 0)
-        k += rubraview_fmt(line + k, sizeof line - (size_t)k, T(";  {} not opened (programs, or Windows would not)"), PROVEN_ARG((size_t)refused));
+        k += rubraview_fmt(line + k, sizeof line - (size_t)k, T(";  {} Windows would not open"), PROVEN_ARG((size_t)refused));
     if (k > 0 && (size_t)k < sizeof line && others > PICKER_SHELL_OPEN_MAX)
         k += rubraview_fmt(line + k, sizeof line - (size_t)k, T(";  only the first {} of the others"), PROVEN_ARG((int)PICKER_SHELL_OPEN_MAX));
     if (k >= (int)sizeof line) k = (int)sizeof line - 1;
@@ -1022,15 +1022,18 @@ void picker_activate(app_state_t *app, size_t index) {
     picker_open_file(app, entry->path);
 }
 
-/* D-258: a file on disk chosen in the open-file screen: the viewer's own kinds in the viewer, any other in the
-   program Windows opens it with, never a program itself. */
+/* D-258, RV-304: a file on disk chosen in the open-file screen: the viewer's own kinds in the viewer, any other in the
+   program Windows opens it with, a program run by itself. */
 void picker_open_file(app_state_t *app, proven_u8str_view_t path) {
     proven_u8str_view_t name = rubraview_path_basename(path);
     /* RV-255: a playlist asks how: as text, added to the list, or in place of it */
     if (rubraview_shell_kind_of(rubraview_path_ext(name)) == RUBRAVIEW_SHELL_PLAYLISTS) { playlist_ask_open(app, path); return; }
     if (picker_viewer_opens(name)) { app->picker_open = false; open_path(app, path); return; }
-    if (rubraview_shell_runs_program(name)) { osd_say(app, TU8("a program is not run from here")); return; }
-    bool dangerous = false;
-    if (!rubraview_pal_shell_open_file(path, &dangerous))
-        osd_say(app, dangerous ? TU8("a program is not run from here") : TU8("Windows would not open it"));
+    /* RV-304 (owner, 2026-11-19, D-369): a program or a script is run, a document opened in its program, each a
+       process of its own that Rubraview's end leaves running */
+    bool program = rubraview_shell_runs_program(name);
+    if (!rubraview_pal_shell_open_file(path, (int)rubraview_shell_launch_kind(name)))
+        osd_say(app, TU8("Windows would not open it"));
+    else
+        osd_say(app, program ? TU8("started, apart from Rubraview") : TU8("opened in its Windows program"));
 }

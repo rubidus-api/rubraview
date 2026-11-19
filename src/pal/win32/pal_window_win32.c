@@ -2063,22 +2063,58 @@ bool rubraview_pal_shell_open_folder(proven_u8str_view_t path, bool make) {
     return ok != FALSE;
 }
 
-/* Windows' own list of types that run something (shlwapi's AssocIsDangerous, looked up: no import library needed) */
-static bool type_is_dangerous(const WCHAR *path) {
-    const WCHAR *dot = rubraview_wrchr(path, L'.'), *sep = rubraview_wrchr(path, L'\\');
-    if (!dot || (sep && dot < sep)) return false;
-    typedef BOOL (WINAPI *assoc_dangerous_fn)(PCWSTR);
-    HMODULE m = LoadLibraryExW(L"shlwapi.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if (!m) return false;
-    assoc_dangerous_fn f = (assoc_dangerous_fn)(void *)GetProcAddress(m, "AssocIsDangerous");
-    bool dangerous = f && f(dot);
-    FreeLibrary(m);
-    return dangerous;
+/* RV-304: the started program's own, never Rubraview's: no handle of ours given, out of any job we are in (a job
+   that does not let it go: as it is), its folder the file's. */
+static bool start_command(const WCHAR *program, WCHAR *command, const WCHAR *folder) {
+    const DWORD flags[2] = { CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | CREATE_DEFAULT_ERROR_MODE,
+                             CREATE_NEW_PROCESS_GROUP | CREATE_DEFAULT_ERROR_MODE };
+    for (int k = 0; k < 2; ++k) {
+        STARTUPINFOW si = { .cb = sizeof(si) };
+        PROCESS_INFORMATION pi = { 0 };
+        if (CreateProcessW(program, command, NULL, NULL, FALSE, flags[k], NULL, folder, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            return true;
+        }
+        if (GetLastError() != ERROR_ACCESS_DENIED) return false;   /* refused the breakaway: once more without it */
+    }
+    return false;
 }
 
-bool rubraview_pal_shell_open_file(proven_u8str_view_t path, bool *dangerous) {
-    if (dangerous) *dangerous = false;
-    WCHAR wide[MAX_PATH * 2];
+static bool start_process(WCHAR *wide, size_t n, const WCHAR *folder) {
+    WCHAR command[MAX_PATH * 2 + 4];
+    if (n + 3 > sizeof(command) / sizeof(command[0])) return false;
+    command[0] = L'"';
+    for (size_t i = 0; i < n; ++i) command[i + 1] = wide[i];
+    command[n + 1] = L'"';
+    command[n + 2] = L'\0';
+    return start_command(wide, command, folder);
+}
+
+/* RV-304: a PowerShell script as Explorer's "Run with PowerShell" runs it (SystemFileAssociations\.ps1\Shell\0): the
+   policy left alone when it is AllSigned, else Bypass for this one process; the path in single quotes, each ' doubled. */
+static bool start_powershell(const WCHAR *wide, size_t n, const WCHAR *folder) {
+    WCHAR program[MAX_PATH], command[MAX_PATH * 4 + 256];
+    UINT at = GetSystemDirectoryW(program, MAX_PATH);
+    static const WCHAR tail[] = L"\\WindowsPowerShell\\v1.0\\powershell.exe";
+    if (at == 0 || at + sizeof(tail) / sizeof(tail[0]) >= MAX_PATH) return false;
+    proven_sys_mem_copy(program + at, tail, sizeof(tail));
+    static const WCHAR head[] = L"powershell.exe -NoLogo -Command \"if ((Get-ExecutionPolicy) -ne 'AllSigned') { Set-ExecutionPolicy -Scope Process Bypass }; & '";
+    size_t k = sizeof(head) / sizeof(head[0]) - 1;
+    proven_sys_mem_copy(command, head, k * sizeof(WCHAR));
+    for (size_t i = 0; i < n; ++i) {
+        if (k + 8 >= sizeof(command) / sizeof(command[0])) return false;
+        if (wide[i] == L'\'') command[k++] = L'\'';
+        command[k++] = wide[i];
+    }
+    command[k++] = L'\'';
+    command[k++] = L'"';
+    command[k] = L'\0';
+    return start_command(program, command, folder);
+}
+
+bool rubraview_pal_shell_open_file(proven_u8str_view_t path, int kind) {
+    WCHAR wide[MAX_PATH * 2], folder[MAX_PATH * 2], zone[MAX_PATH * 2 + 20];
     if (path.size == 0 || path.size > INT_MAX) return false;
     int n = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)path.ptr, (int)path.size, wide, (int)(sizeof(wide) / sizeof(wide[0])) - 1);
     if (n <= 0) return false;
@@ -2086,9 +2122,24 @@ bool rubraview_pal_shell_open_file(proven_u8str_view_t path, bool *dangerous) {
     for (int i = 0; i < n; ++i) if (wide[i] == L'/') wide[i] = L'\\';
     DWORD at = GetFileAttributesW(wide);
     if (at == INVALID_FILE_ATTRIBUTES || (at & FILE_ATTRIBUTE_DIRECTORY)) return false;
-    if (type_is_dangerous(wide)) { if (dangerous) *dangerous = true; return false; }
+    proven_sys_mem_copy(folder, wide, ((size_t)n + 1) * sizeof(WCHAR));
+    WCHAR *sep = rubraview_wrchr(folder, L'\\');
+    if (sep) sep[sep == folder + 2 && folder[1] == L':' ? 1 : 0] = L'\0';   /* C:\ keeps its backslash */
+    /* a file from another computer goes through Windows, which warns of it as Explorer does */
+    bool marked = false;
+    if ((size_t)n + 17 < sizeof(zone) / sizeof(zone[0])) {
+        proven_sys_mem_copy(zone, wide, (size_t)n * sizeof(WCHAR));
+        proven_sys_mem_copy(zone + n, L":Zone.Identifier", 17 * sizeof(WCHAR));
+        marked = GetFileAttributesW(zone) != INVALID_FILE_ATTRIBUTES;
+    }
+    if (kind == RUBRAVIEW_LAUNCH_PROCESS && !marked) {
+        if (start_process(wide, (size_t)n, sep ? folder : NULL)) return true;
+        /* one that asks to be administrator (ERROR_ELEVATION_REQUIRED): Windows starts it, UAC asking */
+    }
+    if (kind == RUBRAVIEW_LAUNCH_POWERSHELL && !marked && start_powershell(wide, (size_t)n, sep ? folder : NULL)) return true;
     /* the default verb, as a double click; no association asks "Open with" */
-    SHELLEXECUTEINFOW info = { .cbSize = sizeof(info), .fMask = SEE_MASK_INVOKEIDLIST, .lpFile = wide, .nShow = SW_SHOWNORMAL };
+    SHELLEXECUTEINFOW info = { .cbSize = sizeof(info), .fMask = SEE_MASK_INVOKEIDLIST, .lpFile = wide,
+                               .lpDirectory = sep ? folder : NULL, .nShow = SW_SHOWNORMAL };
     return ShellExecuteExW(&info) != FALSE;
 }
 

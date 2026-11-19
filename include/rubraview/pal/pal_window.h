@@ -293,10 +293,12 @@ bool rubraview_pal_shell_reveal(proven_u8str_view_t path);
  *  nothing named is ever run. */
 bool rubraview_pal_shell_open_folder(proven_u8str_view_t path, bool make);
 
-/** D-258: a file the viewer does not show, opened as Explorer's double click opens it (its default program, or
- *  Windows' "Open with" when it has none). The caller keeps programs out (rubraview_shell_runs_program); a type
- *  Windows itself calls dangerous (AssocIsDangerous) is not opened either, `*dangerous` set. False when not opened. */
-bool rubraview_pal_shell_open_file(proven_u8str_view_t path, bool *dangerous);
+/** D-258, RV-304 (D-369): a file on disk the viewer does not show, started as `kind` (rubraview_launch_kind_t)
+ *  says: a program as a process of its own (out of Rubraview's job, its folder the file's; one asking to be
+ *  administrator, or one from another computer, through Windows, which asks or warns); a PowerShell script by
+ *  Explorer's "Run with PowerShell"; anything else as Explorer's double click (its default program, or Windows' "Open
+ *  with" when it has none). Nothing waits on it or ends with Rubraview. False when not started. */
+bool rubraview_pal_shell_open_file(proven_u8str_view_t path, int kind);
 
 /** RV-255: a text file in Windows' editor for it — its type's Edit verb, or Notepad when it has none. False when
  *  neither started. */

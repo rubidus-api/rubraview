@@ -302,6 +302,16 @@ size_t rubraview_shell_type_name(proven_u8str_view_t extension, char *out, size_
  */
 bool rubraview_shell_runs_program(proven_u8str_view_t name);
 
+/* RV-304 (owner, 2026-11-19: "압축 파일 내부가 아니라면 exe, com, bat, ps? 등의 실행 파일들도 실행 ... 루브라뷰가 끝나도 같이
+   종료되지 않고 영향을 안 주는 별개 프로세스로"; "msi, msix ... docx 같이 탐색기에 연결된 파일들은 연결 프로그램으로"): how a
+   file on disk the viewer does not show is started. */
+typedef enum rubraview_launch_kind {
+    RUBRAVIEW_LAUNCH_SHELL = 0,    /* as Explorer's double click: the program the type is opened with (bat, msi, docx ...) */
+    RUBRAVIEW_LAUNCH_PROCESS,      /* exe, com: a process of its own, out of any job Rubraview is in */
+    RUBRAVIEW_LAUNCH_POWERSHELL,   /* ps1: run by PowerShell, as Explorer's "Run with PowerShell" (its default is Notepad) */
+} rubraview_launch_kind_t;
+rubraview_launch_kind_t rubraview_shell_launch_kind(proven_u8str_view_t name);
+
 /**
  * D-86: a choice of extensions, written as words with commas between — an
  * extension ("jpg"), a kind ("pictures", "comics", "video", "music",
