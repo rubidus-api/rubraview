@@ -480,8 +480,8 @@ lists the audit entries to add, remove or change, and **Write** saves them.
 A file has **Previous Versions**: the file as the drive's restore points
 and backups' copies hold it, newest first, each with the date it was
 last changed and its size (one the same as the file now is not listed).
-**Open** shows the version (in Rubraview when it shows the kind, else in
-its program), **Copy...** copies it to a folder you choose, and
+**Open** shows a copy of the version made in the temporary folder (in
+Rubraview when it shows the kind, else in its program), **Copy...** copies it to a folder you choose, and
 **Restore...** copies it over the file — the copy's window asks first,
 and the file replaced goes to the Recycle Bin. A folder's versions are
 in Windows' own window.

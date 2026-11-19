@@ -2,8 +2,8 @@
  * RV-281 phase 3 (owner, 2026-11-14: "... 이전버젼의 파일 속성 윈도우의 모든 기능들을 자체 구현"): the properties window's
  * Previous Versions tab. A file as its volume's shadow copies hold it (restore points, backups' snapshots), read through
  * the shadows' devices, which the user may read without being administrator (VM spike, 2026-11-19); newest first, one of
- * each, none the same as the file now. Open shows the version (in Rubraview when it shows the kind, else in its Windows
- * program); Copy... copies it to a folder chosen; Restore copies it over the file through the copy job, whose window
+ * each, none the same as the file now. Open shows a copy of the version made in %TEMP%\\rubraview-versions (in Rubraview when it shows the kind,
+ * else in its Windows program); Copy... copies it to a folder chosen; Restore copies it over the file through the copy job, whose window
  * asks before anything is replaced (the file replaced goes to the Recycle Bin).
  */
 #include "app.h"
@@ -84,14 +84,25 @@ bool propsver_button(app_state_t *app, int which) {
     if (v->version_sel < 0 || (size_t)v->version_sel >= v->version_count) return true;
     proven_u8str_view_t from = proven_u8str_view_from_cstr(v->versions[v->version_sel].path);
     if (which == PB_VER_OPEN) {
+        /* a copy in %TEMP% first: the viewer's folder listing and other programs do not take the shadow's device path
+           (VM T483); the copy is named as the file, in a folder of its shadow's number */
         proven_u8str_view_t name = rubraview_path_basename(from);
+        char folder[96], whole[1200];
+        (void)rubraview_fmt(folder, sizeof folder, "%TEMP%\\rubraview-versions\\{}", PROVEN_ARG(v->versions[v->version_sel].shadow));
+        proven_u8str_view_t dir = rubraview_pal_fs_expand_env(app->arena, proven_u8str_view_from_cstr(folder));
+        int k = rubraview_fmt(whole, sizeof whole, "{}\\{}", PROVEN_ARG(dir), PROVEN_ARG(name));
+        if (dir.size == 0 || k <= 0 || (size_t)k >= sizeof whole || !rubraview_pal_fs_make_dirs(dir) ||
+            !rubraview_pal_fs_copy(from, proven_u8str_view_from_cstr(whole))) {
+            pw_say(v, T("the version could not be copied to open it"));
+            return true;
+        }
+        proven_u8str_view_t copy = app_keep(app, proven_u8str_view_from_cstr(whole));
         if (picker_viewer_opens(name)) {
-            proven_u8str_view_t keep = app_keep(app, from);
             props_close(app);   /* the viewer shows it */
-            open_path(app, keep);
+            open_path(app, copy);
             return false;
         }
-        if (!rubraview_pal_shell_open_file(from, (int)rubraview_shell_launch_kind(name))) pw_say(v, T("Windows would not open it"));
+        if (!rubraview_pal_shell_open_file(copy, (int)rubraview_shell_launch_kind(name))) pw_say(v, T("Windows would not open it"));
         return true;
     }
     proven_u8str_view_t dir;
@@ -107,6 +118,6 @@ bool propsver_button(app_state_t *app, int which) {
     if (!filejob_start(app, dir, &from, 1, false, -1, false)) { pw_say(v, T("the copy could not be started")); return true; }
     pw_say(v, which == PB_VER_COPY ? T("copying the version: its window shows how it goes")
                                    : T("restoring: the copy's window asks before the file is replaced"));
-    v->versions_read = false;   /* read again when the copy is done and the tab drawn */
+    /* the list stays as read (a restore's file is read again the next time the window opens) */
     return true;
 }
