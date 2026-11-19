@@ -55,6 +55,10 @@ size_t rubraview_pal_fileprops_audit_read(const char *path, rubraview_props_ace_
 bool rubraview_pal_fileprops_audit_write(const char *path, const rubraview_props_ace_t *aces, size_t count, bool protect, char *why, size_t cap);
 
 /** A user's or a group's name as typed ("Guests", "PC\\me") to its SID and its full name; false when Windows knows none. */
+/** RV-281 phase 3: the file `path` as its volume's shadow copies hold it, into `out` (not tidied: see
+ *  rubraview_props_versions_tidy); stops after `budget_ms`. No administrator rights needed. Returns how many. */
+size_t rubraview_pal_fileprops_versions(const char *path, rubraview_props_version_t *out, size_t cap, uint32_t budget_ms);
+
 bool rubraview_pal_fileprops_account(const char *typed, char *sid, size_t sid_cap, char *name, size_t name_cap);
 
 #ifdef __cplusplus

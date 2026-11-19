@@ -1,0 +1,112 @@
+/*
+ * RV-281 phase 3 (owner, 2026-11-14: "... 이전버젼의 파일 속성 윈도우의 모든 기능들을 자체 구현"): the properties window's
+ * Previous Versions tab. A file as its volume's shadow copies hold it (restore points, backups' snapshots), read through
+ * the shadows' devices, which the user may read without being administrator (VM spike, 2026-11-19); newest first, one of
+ * each, none the same as the file now. Open shows the version (in Rubraview when it shows the kind, else in its Windows
+ * program); Copy... copies it to a folder chosen; Restore copies it over the file through the copy job, whose window
+ * asks before anything is replaced (the file replaced goes to the Recycle Bin).
+ */
+#include "app.h"
+#include "rubraview/pal/pal_file_dialog.h"
+#include "rubraview/filemanage.h"
+
+#include "propsview.h"
+
+/* One file, not a folder: a folder's versions are left to Windows' own window. */
+bool propsver_tab(const props_view_t *v) {
+    return v->count == 1 && v->files && !v->files[0].is_folder;
+}
+
+static void versions_read(app_state_t *app) {
+    props_view_t *v = V(app);
+    v->versions_read = true;
+    v->version_sel = -1;
+    v->version_count = rubraview_pal_fileprops_versions(v->paths[0], v->versions, PROPS_VERSIONS_MAX, 1500);
+    v->version_count = rubraview_props_versions_tidy(v->versions, v->version_count, v->files[0].modified, v->files[0].size);
+}
+
+void propsver_draw(app_state_t *app, double y, double bottom) {
+    props_view_t *v = V(app);
+    rubraview_renderer_t *r = app->props_renderer;
+    double dpi = rubraview_pal_window_dpi_scale(app->props_window);
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->props_window, &w, &h);
+    if (!v->versions_read) versions_read(app);
+    double lx = 18.0 * dpi;
+    pw_text_at(r, T("Previous versions come from restore points and backups' copies of the drive."),
+               (rubraview_pal_rect_t){ lx, y, (double)w - 2.0 * lx, 20.0 * dpi }, 12.0 * dpi, PW_DIM);
+    y += 28.0 * dpi;
+    double name_w = (double)w * 0.42, when_x = lx + name_w, size_x = (double)w - 130.0 * dpi;
+    pw_text_at(r, T("Name"), (rubraview_pal_rect_t){ lx + 6.0 * dpi, y, name_w, 20.0 * dpi }, 12.0 * dpi, PW_HEADING);
+    pw_text_at(r, T("Date modified"), (rubraview_pal_rect_t){ when_x, y, size_x - when_x, 20.0 * dpi }, 12.0 * dpi, PW_HEADING);
+    pw_text_at(r, T("Size"), (rubraview_pal_rect_t){ size_x, y, 120.0 * dpi, 20.0 * dpi }, 12.0 * dpi, PW_HEADING);
+    y += 24.0 * dpi;
+    double list_bottom = bottom - 40.0 * dpi, rh = 24.0 * dpi;
+    proven_u8str_view_t name = rubraview_path_basename(proven_u8str_view_from_cstr(v->paths[0]));
+    char nm[300], when[64], size[64];
+    (void)rubraview_fmt(nm, sizeof nm, "{}", PROVEN_ARG(name));
+    if (v->version_count == 0)
+        pw_text_at(r, T("There are no previous versions available."), (rubraview_pal_rect_t){ lx + 6.0 * dpi, y + 4.0 * dpi, (double)w - 2.0 * lx, 20.0 * dpi }, 13.0 * dpi, PW_TEXT);
+    for (size_t i = 0; i < v->version_count; ++i) {
+        v->version_rect[i] = (rubraview_pal_rect_t){0};
+        if (y + rh > list_bottom) continue;
+        rubraview_pal_rect_t line = { lx, y, (double)w - 2.0 * lx, rh };
+        v->version_rect[i] = line;
+        if ((int32_t)i == v->version_sel) rubraview_pal_render_fill_rect(r, line, 0xFF2D4A6Bu, 3.0 * dpi);
+        else if (pal_rect_has(line, app->props_px, app->props_py)) rubraview_pal_render_fill_rect(r, line, 0x18FFFFFFu, 3.0 * dpi);
+        info_local_time(when, sizeof when, v->versions[i].modified);
+        rubraview_info_bytes(size, sizeof size, v->versions[i].size);
+        pw_text_at(r, nm, (rubraview_pal_rect_t){ lx + 6.0 * dpi, y + 2.0 * dpi, name_w - 8.0 * dpi, rh }, 13.0 * dpi, PW_TEXT);
+        pw_text_at(r, when, (rubraview_pal_rect_t){ when_x, y + 2.0 * dpi, size_x - when_x, rh }, 13.0 * dpi, PW_TEXT);
+        pw_text_at(r, size, (rubraview_pal_rect_t){ size_x, y + 2.0 * dpi, 120.0 * dpi, rh }, 13.0 * dpi, PW_TEXT);
+        y += rh;
+    }
+    bool one = v->version_sel >= 0 && (size_t)v->version_sel < v->version_count;
+    double by = bottom - 30.0 * dpi, bw = 100.0 * dpi, bx = (double)w - 3.0 * (bw + 8.0 * dpi) - 10.0 * dpi;
+    pw_button_at(app, PB_VER_OPEN, T("Open"), (rubraview_pal_rect_t){ bx, by, bw, 26.0 * dpi }, false, one);
+    pw_button_at(app, PB_VER_COPY, T("Copy..."), (rubraview_pal_rect_t){ bx + bw + 8.0 * dpi, by, bw, 26.0 * dpi }, false, one);
+    pw_button_at(app, PB_VER_RESTORE, T("Restore..."), (rubraview_pal_rect_t){ bx + 2.0 * (bw + 8.0 * dpi), by, bw, 26.0 * dpi }, false, one);
+}
+
+bool propsver_press(app_state_t *app, double x, double y) {
+    props_view_t *v = V(app);
+    for (size_t i = 0; i < v->version_count; ++i)
+        if (v->version_rect[i].width > 0 && pal_rect_has(v->version_rect[i], x, y)) {
+            v->version_sel = (int32_t)i;
+            app->props_dirty = true;
+            return true;
+        }
+    return false;
+}
+
+bool propsver_button(app_state_t *app, int which) {
+    props_view_t *v = V(app);
+    if (v->version_sel < 0 || (size_t)v->version_sel >= v->version_count) return true;
+    proven_u8str_view_t from = proven_u8str_view_from_cstr(v->versions[v->version_sel].path);
+    if (which == PB_VER_OPEN) {
+        proven_u8str_view_t name = rubraview_path_basename(from);
+        if (picker_viewer_opens(name)) {
+            proven_u8str_view_t keep = app_keep(app, from);
+            props_close(app);   /* the viewer shows it */
+            open_path(app, keep);
+            return false;
+        }
+        if (!rubraview_pal_shell_open_file(from, (int)rubraview_shell_launch_kind(name))) pw_say(v, T("Windows would not open it"));
+        return true;
+    }
+    proven_u8str_view_t dir;
+    if (which == PB_VER_COPY) {
+        rubraview_file_dialog_opts_t opts = { .title = T("Copy the version to"), .folder_mode = true,
+                                              .parent_window_handle = rubraview_pal_window_native_handle(app->props_window) };
+        rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
+        if (!picked.accepted || picked.count == 0) return true;
+        dir = picked.paths[0];
+    } else {
+        dir = rubraview_path_dirname(proven_u8str_view_from_cstr(v->paths[0]));   /* over the file: the job asks first */
+    }
+    if (!filejob_start(app, dir, &from, 1, false, -1, false)) { pw_say(v, T("the copy could not be started")); return true; }
+    pw_say(v, which == PB_VER_COPY ? T("copying the version: its window shows how it goes")
+                                   : T("restoring: the copy's window asks before the file is replaced"));
+    v->versions_read = false;   /* read again when the copy is done and the tab drawn */
+    return true;
+}

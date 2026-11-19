@@ -475,7 +475,18 @@ whether the folder above's permissions pass on (turned off keeping or
 removing them), every entry, and what you yourself may do. When Windows
 refuses a change, **Apply as administrator** asks Windows for the rights
 and makes it. **Auditing (administrator)...** asks for them too, then
-lists the audit entries to add, remove or change, and **Write** saves them. The mouse's back and
+lists the audit entries to add, remove or change, and **Write** saves them.
+
+A file has **Previous Versions**: the file as the drive's restore points
+and backups' copies hold it, newest first, each with the date it was
+last changed and its size (one the same as the file now is not listed).
+**Open** shows the version (in Rubraview when it shows the kind, else in
+its program), **Copy...** copies it to a folder you choose, and
+**Restore...** copies it over the file — the copy's window asks first,
+and the file replaced goes to the Recycle Bin. A folder's versions are
+in Windows' own window.
+
+The mouse's back and
 forward buttons turn the page, a middle click goes to real size and back,
 the wheel turns the page on a picture that fits the window (away from
 you the one before, towards you the next) and brings up the filmstrip
@@ -2257,7 +2268,7 @@ listed under a later heading only means that while that is on screen.
 | Keys | What it does |
 |---|---|
 | `F`, `Enter` | Full screen |
-| `Alt+Enter` | Rubraview's own properties window of the file (General, Digital Signatures, Security, Details; Windows' own a button away) |
+| `Alt+Enter` | Rubraview's own properties window of the file (General, Digital Signatures, Security, Details, Previous Versions; Windows' own a button away) |
 | `T` | Open or close the Toolbar |
 | `Shift+T` | Pin the Toolbar open |
 | `Ctrl+T` | Give the Toolbar a window of its own, or dock it |

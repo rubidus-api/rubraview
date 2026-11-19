@@ -19,7 +19,7 @@ static bool tab_shown(const props_view_t *v, int32_t tab) {
     if (tab == RUBRAVIEW_PROPS_GENERAL || tab == RUBRAVIEW_PROPS_DETAILS) return true;
     if (tab == RUBRAVIEW_PROPS_SIGNATURES) return propsec_sig_tab(v);   /* signed files only, as Windows */
     if (tab == RUBRAVIEW_PROPS_SECURITY) return v->count == 1;          /* several files: Windows has none either */
-    return false;   /* Previous Versions: phase 3 */
+    return propsver_tab(v);   /* Previous Versions: phase 3 (propsver.c) */
 }
 
 static void props_free(props_view_t *v) {
@@ -505,6 +505,7 @@ void draw_props_window(app_state_t *app) {
     if (v->tab == RUBRAVIEW_PROPS_DETAILS) draw_details(app, 50.0 * dpi, foot - 52.0 * dpi);   /* the hint above the message line */
     else if (v->tab == RUBRAVIEW_PROPS_SIGNATURES) propsec_draw_signatures(app, 50.0 * dpi, foot - 30.0 * dpi);
     else if (v->tab == RUBRAVIEW_PROPS_SECURITY) propsec_draw_security(app, 50.0 * dpi, foot - 30.0 * dpi);
+    else if (v->tab == RUBRAVIEW_PROPS_VERSIONS) propsver_draw(app, 50.0 * dpi, foot - 30.0 * dpi);
     else draw_general(app, 50.0 * dpi);
     /* what was said, and the foot's buttons */
     if (v->message[0])
@@ -540,6 +541,8 @@ static void props_button(app_state_t *app, int which) {
     } else if (which == PB_CANCEL) {
         props_close(app);
         return;
+    } else if (which >= PB_VER_OPEN) {
+        if (!propsver_button(app, which)) return;   /* the window closed: the viewer shows the version */
     } else if (which >= PB_CERT) {
         if (!propsec_button(app, which)) return;
     } else if (which == PB_RENAME) {
@@ -569,6 +572,7 @@ static void props_press(app_state_t *app, double x, double y) {
         }
     for (int b = 0; b < PB_COUNT; ++b)
         if (v->button[b].width > 0 && pal_rect_has(v->button[b], x, y)) { props_button(app, b); return; }
+    if (v->tab == RUBRAVIEW_PROPS_VERSIONS) { (void)propsver_press(app, x, y); return; }
     if (v->tab == RUBRAVIEW_PROPS_SIGNATURES || v->tab == RUBRAVIEW_PROPS_SECURITY) {
         if (v->editing == EDIT_NAME) edit_end(app, true);
         (void)propsec_press(app, x, y);

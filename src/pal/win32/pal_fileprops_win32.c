@@ -197,4 +197,57 @@ bool rubraview_pal_fileprops_unblock(const char *path) {
     return ok;
 }
 
+/* ---- RV-281 phase 3: Previous Versions ---- */
+
+/* The shadows of the file's volume, found by their devices (HarddiskVolumeShadowCopy1, 2, ...: numbers only grow, a
+   deleted shadow leaves a gap), each kept when it holds the file on the same volume (the serial the shadow keeps). */
+#define SHADOW_LAST 2048
+#define SHADOW_GAP  256   /* that many missing after the last found: no more */
+
+size_t rubraview_pal_fileprops_versions(const char *path, rubraview_props_version_t *out, size_t cap, uint32_t budget_ms) {
+    if (!path || !out || cap == 0) return 0;
+    WCHAR wide[WPATH];
+    if (!to_wide(path, wide, WPATH)) return 0;
+    HANDLE now = CreateFileW(wide, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                             FILE_FLAG_BACKUP_SEMANTICS, NULL);
+    if (now == INVALID_HANDLE_VALUE) return 0;
+    BY_HANDLE_FILE_INFORMATION mine;
+    BOOL ok = GetFileInformationByHandle(now, &mine);
+    CloseHandle(now);
+    if (!ok) return 0;
+    ULONGLONG until = GetTickCount64() + budget_ms;
+    size_t n = 0;
+    int32_t last_found = 0;
+    for (int32_t k = 1; k <= SHADOW_LAST && n < cap && k - last_found <= SHADOW_GAP; ++k) {
+        if (GetTickCount64() > until) break;
+        char shadow[1100];
+        WCHAR w[WPATH];
+        if (!rubraview_props_shadow_path(k, path, shadow, sizeof shadow) || !to_wide(shadow, w, WPATH)) return 0;
+        HANDLE h = CreateFileW(w, FILE_READ_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                               FILE_FLAG_BACKUP_SEMANTICS, NULL);
+        if (h == INVALID_HANDLE_VALUE) {
+            DWORD e = GetLastError();
+            if (e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND || e == ERROR_ACCESS_DENIED) {
+                /* the device may be there without the file: a gap only when the device itself is not */
+                WCHAR root[96];
+                char rootu[96];
+                (void)rubraview_fmt(rootu, sizeof rootu, "{}{}\\", PROVEN_ARG(RUBRAVIEW_SHADOW_DEVICE), PROVEN_ARG(k));
+                if (to_wide(rootu, root, 96) && GetFileAttributesW(root) != INVALID_FILE_ATTRIBUTES) last_found = k;
+            }
+            continue;
+        }
+        last_found = k;
+        BY_HANDLE_FILE_INFORMATION in;
+        bool same = GetFileInformationByHandle(h, &in) && in.dwVolumeSerialNumber == mine.dwVolumeSerialNumber &&
+                    !(in.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
+        CloseHandle(h);
+        if (!same) continue;
+        rubraview_props_version_t *v = &out[n++];
+        *v = (rubraview_props_version_t){ .modified = unix_of(in.ftLastWriteTime),
+                                          .size = ((uint64_t)in.nFileSizeHigh << 32) | in.nFileSizeLow, .shadow = k };
+        (void)rubraview_fmt(v->path, sizeof v->path, "{}", PROVEN_ARG(shadow));
+    }
+    return n;
+}
+
 #endif /* _WIN32 */

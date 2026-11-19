@@ -16,12 +16,15 @@
 enum { PB_WINDOWS = 0, PB_OK, PB_CANCEL, PB_APPLY, PB_CHANGE, PB_RENAME,
        /* phase 2 (propsec.c) */
        PB_CERT, PB_ADVANCED, PB_ADD, PB_REMOVE, PB_OWNER, PB_INH_COPY, PB_INH_DROP, PB_INH_ON, PB_ELEVATE,
-       PB_AUDIT, PB_AUDIT_ADD, PB_AUDIT_REMOVE, PB_AUDIT_APPLY, PB_COUNT };
+       PB_AUDIT, PB_AUDIT_ADD, PB_AUDIT_REMOVE, PB_AUDIT_APPLY,
+       /* phase 3 (propsver.c) */
+       PB_VER_OPEN, PB_VER_COPY, PB_VER_RESTORE, PB_COUNT };
 #define EDIT_NAME (-2)              /* v->editing: the Security tab's name field (Add..., Change... of the owner, an audit entry) */
 enum { NAME_NONE = 0, NAME_ADD, NAME_OWNER, NAME_AUDIT };
 #define PROPS_SIGS_MAX  8
 #define PROPS_ACES_MAX  256
 #define PROPS_PEOPLE_MAX 64
+#define PROPS_VERSIONS_MAX 64
 enum { ASK_NONE = 0, ASK_WAITING, ASK_DONE, ASK_FAILED };
 
 typedef struct props_view {
@@ -86,6 +89,12 @@ typedef struct props_view {
     rubraview_pal_rect_t         audit_kind_box[2];      /* Success, Failure */
     rubraview_pal_rect_t         star_rect[PROPS_ROWS_MAX][5];
     size_t                       rows_drawn_from, rows_drawn;
+    /* phase 3: Previous Versions */
+    rubraview_props_version_t    versions[PROPS_VERSIONS_MAX];
+    size_t                       version_count;
+    bool                         versions_read;
+    int32_t                      version_sel;
+    rubraview_pal_rect_t         version_rect[PROPS_VERSIONS_MAX];
     char                         message[300];
 } props_view_t;
 
@@ -120,5 +129,11 @@ bool propsec_changed(const props_view_t *v);
 bool propsec_apply(app_state_t *app);               /* true when done now (or nothing to do) */
 void propsec_free(props_view_t *v);
 void propsec_name_done(app_state_t *app, const char *typed);
+
+/* propsver.c (phase 3) */
+bool propsver_tab(const props_view_t *v);
+void propsver_draw(app_state_t *app, double y, double bottom);
+bool propsver_press(app_state_t *app, double x, double y);
+bool propsver_button(app_state_t *app, int which);   /* true when the window stays */
 
 #endif

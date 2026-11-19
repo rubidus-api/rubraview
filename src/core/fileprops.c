@@ -413,3 +413,36 @@ size_t rubraview_props_sec_read(proven_u8str_view_t text, rubraview_props_sec_t 
     }
     return n;
 }
+
+/* ---- RV-281 phase 3: Previous Versions ---- */
+
+bool rubraview_props_shadow_path(int32_t n, const char *path, char *out, size_t cap) {
+    if (!path || !out || cap == 0 || n < 0) return false;
+    bool letter = (path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z');
+    if (!letter || path[1] != ':' || (path[2] != '\\' && path[2] != '/') || path[3] == '\0') return false;
+    int k = rubraview_fmt(out, cap, "{}{}", PROVEN_ARG(RUBRAVIEW_SHADOW_DEVICE), PROVEN_ARG(n));
+    if (k <= 0 || (size_t)k >= cap) return false;
+    size_t at = (size_t)k;
+    for (const char *p = path + 2; *p; ++p) {
+        if (at + 1 >= cap) return false;
+        out[at++] = *p == '/' ? '\\' : *p;
+    }
+    out[at] = '\0';
+    return true;
+}
+
+size_t rubraview_props_versions_tidy(rubraview_props_version_t *versions, size_t n, int64_t now_modified, uint64_t now_size) {
+    if (!versions) return 0;
+    size_t kept = 0;
+    for (size_t i = 0; i < n; ++i) {
+        rubraview_props_version_t v = versions[i];
+        if (v.modified == now_modified && v.size == now_size) continue;   /* the file as it is */
+        bool seen = false;
+        for (size_t j = 0; j < kept && !seen; ++j) seen = versions[j].modified == v.modified && versions[j].size == v.size;
+        if (seen) continue;
+        size_t at = kept++;   /* newest first: in by insertion */
+        while (at > 0 && versions[at - 1].modified < v.modified) { versions[at] = versions[at - 1]; at--; }
+        versions[at] = v;
+    }
+    return kept;
+}

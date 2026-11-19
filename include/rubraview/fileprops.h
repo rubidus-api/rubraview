@@ -237,6 +237,28 @@ size_t rubraview_props_sec_read(proven_u8str_view_t text, rubraview_props_sec_t 
 /** The bits Windows' generic rights in an ACE stand for on a file (GENERIC_READ ...), mapped. */
 uint32_t rubraview_props_map_generic(uint32_t mask);
 
+/* ---- RV-281 phase 3: Previous Versions ---- */
+
+/* A file as a shadow copy of its volume (a restore point, a backup's snapshot) holds it. Read through the shadow's
+   device (`\\?\GLOBALROOT\Device\HarddiskVolumeShadowCopyN\...`), which the user may read without being
+   administrator (VM spike, 2026-11-19); listing the shadows through Windows' share or its WMI needs more. */
+typedef struct rubraview_props_version {
+    char     path[1100];   /* the version's own path, through the shadow's device */
+    int64_t  modified;     /* the file's time in it (Unix seconds): what Explorer's list shows */
+    uint64_t size;
+    int32_t  shadow;       /* N of HarddiskVolumeShadowCopyN */
+} rubraview_props_version_t;
+
+#define RUBRAVIEW_SHADOW_DEVICE "\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy"
+
+/** The path of `path` (a drive's: "C:\\x\\a.txt" or "C:/x/a.txt") in shadow copy `n`, into `out`; false for any other
+ *  path (a share's, a relative one) or when it does not fit. */
+bool rubraview_props_shadow_path(int32_t n, const char *path, char *out, size_t cap);
+
+/** The list as Explorer shows it: newest first, one of each time and size (the same file kept by several shadows), none
+ *  the same as the file now (`now_modified`, `now_size`). Returns how many are left. */
+size_t rubraview_props_versions_tidy(rubraview_props_version_t *versions, size_t n, int64_t now_modified, uint64_t now_size);
+
 #ifdef __cplusplus
 }
 #endif
