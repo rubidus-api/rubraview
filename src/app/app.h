@@ -810,11 +810,20 @@ typedef struct app_state {
        접근 불가능한 기능이 있다면 ... 우클릭 컨텍스트 메뉴 쪽으로"): the menu's tree is the right click's lower
        rows, entered in place: the menu item shown (-1: the list itself), and the way back */
     bool                       ctx_on_picture;   /* opened on the picture: what the toolbox has is left out */
+    bool                       ctx_pkg_mode;     /* RV-308: the list shows the apps' Windows 11 items */
     /* RV-279: the files the right-click list is about, on disk (an archive for its pages), and their registry verbs */
     char                     **shell_targets;
     size_t                     shell_target_count;
     bool                       shell_folder;
     rubraview_shellverb_t     *shell_verbs;      /* RUBRAVIEW_SHELLVERBS_MAX, from the heap the first time */
+    /* RV-308: the apps' Windows 11 items, asked of the child when the list's row for them is chosen; the list then
+       shows them in its place. 0 not asked, 1 waiting, 2 read, 3 failed */
+    int32_t                    pkg_state;
+    uint32_t                   pkg_ticket;
+    double                     pkg_asked_at;
+    rubraview_pkgcmd_t        *pkg_cmds;         /* RUBRAVIEW_PKGCMDS_MAX, from the heap the first time */
+    size_t                     pkg_count;
+    char                       pkg_cache_type[32];   /* the type the items were read for ("" none): asked once a type */
     /* RV-281: Rubraview's own properties window (propswin.c; its state is that file's) */
     bool                       props_open, props_dirty;
     rubraview_window_t        *props_window;
@@ -2289,6 +2298,9 @@ void explorer_targets_page(app_state_t *app);
 void explorer_targets_picker(app_state_t *app, size_t index);
 void explorer_targets_list_row(app_state_t *app, size_t row);
 bool explorer_rows_shown(const app_state_t *app);
+void explorer_apps_begin(app_state_t *app);          /* RV-308: the apps' Windows 11 items asked of the child (once a type) */
+size_t explorer_apps_poll(app_state_t *app);         /* their answer taken; 1 when the list changes */
+void explorer_apps_run(app_state_t *app, size_t i);  /* one run by the child on the targets */
 void explorer_menu_from_list(app_state_t *app, bool classic, rubraview_window_t *window, double x, double y);
 void explorer_menu_action(app_state_t *app, bool classic);
 bool explorer_shift_click_page(app_state_t *app, double x, double y);

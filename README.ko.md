@@ -290,6 +290,7 @@
 | 오른쪽 클릭 `Copy to...`, 오른쪽 클릭 `Copy them to...` | 고른 것을 폴더로 복사 |
 | 오른쪽 클릭 `Move to...`, 오른쪽 클릭 `Move them to...` | 고른 것을 폴더로 이동 |
 | 오른쪽 클릭 `To the recycle bin`, 오른쪽 클릭 `Them to the recycle bin` | 고른 것을 휴지통으로 |
+| 오른쪽 클릭 `Apps' items (Windows 11)` | 설치된 앱이 윈도 11 메뉴에 넣는 그 파일의 항목들(별도 프로세스가 읽어 이 목록에 보여 줌) |
 | 오른쪽 클릭 `Classic Explorer menu` | 파일의 구 탐색기 메뉴(추가 옵션 표시: 셸 확장, 보내기, 연결 프로그램) |
 | 오른쪽 클릭 `Make a playlist of them` | 고른 것으로 재생목록 만들기 |
 | 오른쪽 클릭 `Pick none` | 탐색기에서 고른 것 모두 해제 |

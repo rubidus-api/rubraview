@@ -170,7 +170,7 @@ static const struct { const char *action; int category; } MENUCAT_OF[] = {
     { "move_to_other_folder", RUBRAVIEW_MENUCAT_FILES }, { "copy_to_default", RUBRAVIEW_MENUCAT_FILES }, { "move_to_default", RUBRAVIEW_MENUCAT_FILES },
     { "undo", RUBRAVIEW_MENUCAT_FILES }, { "toggle_classify", RUBRAVIEW_MENUCAT_FILES }, { "delete_file", RUBRAVIEW_MENUCAT_FILES },
     { "rename_file", RUBRAVIEW_MENUCAT_FILES }, { "reveal_in_explorer", RUBRAVIEW_MENUCAT_FILES }, { "file_properties", RUBRAVIEW_MENUCAT_FILES },
-    { "explorer_menu", RUBRAVIEW_MENUCAT_FILES }, { "explorer_menu_classic", RUBRAVIEW_MENUCAT_FILES },
+    { "explorer_menu", RUBRAVIEW_MENUCAT_FILES }, { "explorer_apps", RUBRAVIEW_MENUCAT_FILES }, { "explorer_menu_classic", RUBRAVIEW_MENUCAT_FILES },
     { "list_copy_path", RUBRAVIEW_MENUCAT_FILES }, { "list_delete_file", RUBRAVIEW_MENUCAT_FILES }, { "list_reveal", RUBRAVIEW_MENUCAT_FILES },
     { "toggle_first_page_alone", RUBRAVIEW_MENUCAT_VIEW }, { "toggle_info", RUBRAVIEW_MENUCAT_VIEW }, { "toggle_fullscreen", RUBRAVIEW_MENUCAT_VIEW },
     { "toggle_miniplayer", RUBRAVIEW_MENUCAT_PLAY }, { "next_audio_track", RUBRAVIEW_MENUCAT_PLAY }, { "toggle_shuffle", RUBRAVIEW_MENUCAT_PLAY },

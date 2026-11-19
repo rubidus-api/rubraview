@@ -159,3 +159,66 @@ void explorer_verb_run(app_state_t *app, size_t verb) {
     if (!rubraview_pal_shellverbs_run(&app->shell_verbs[verb], (const char *const *)app->shell_targets, app->shell_target_count))
         osd_say(app, TU8("Windows could not start it"));
 }
+
+/* ---- RV-308 (owner, 2026-11-19: "빨리 할 수 있는 윈도11 흉내내기 컨텍스트 메뉴와, 시간이 좀 걸리는 COM 호출 컨텍스트
+   메뉴를 분리하여 다른 항목으로"; "이 우클릭 메뉴 흉내는 Win32 스타일 말고 루브라뷰 자체 스타일로"): the items installed
+   apps add to Windows 11's menu. Their COM objects are made by the child (`pkg-list`, PACKAGE_WAIT_MS each), so the
+   list's row for them asks and the list shows them when they come; read once a type for this run. ---- */
+
+#define PKG_ASK_SECONDS 20.0
+
+static void pkg_type_of(const app_state_t *app, char *out, size_t cap) {
+    out[0] = '\0';
+    if (app->shell_target_count == 0) return;
+    if (app->shell_folder) { (void)rubraview_fmt(out, cap, "<folder>"); return; }
+    proven_u8str_view_t ext = rubraview_path_ext(rubraview_path_basename(proven_u8str_view_from_cstr(app->shell_targets[0])));
+    size_t n = ext.size < cap - 1 ? ext.size : cap - 1;
+    for (size_t i = 0; i < n; ++i) { char c = (char)ext.ptr[i]; out[i] = c >= 'A' && c <= 'Z' ? (char)(c + 32) : c; }
+    out[n] = '\0';
+}
+
+void explorer_apps_begin(app_state_t *app) {
+    char type[32];
+    pkg_type_of(app, type, sizeof type);
+    if (app->shell_target_count == 0) { app->pkg_state = 3; return; }
+    if (app->pkg_state == 1) return;   /* one asking at a time */
+    if (app->pkg_state == 2 && rubraview_cstr_cmp(type, app->pkg_cache_type) == 0) return;   /* read for this type already */
+    if (!app->pkg_cmds) app->pkg_cmds = (rubraview_pkgcmd_t *)rubraview_alloc_zero(RUBRAVIEW_PKGCMDS_MAX, sizeof(rubraview_pkgcmd_t));
+    app->pkg_count = 0;
+    (void)rubraview_fmt(app->pkg_cache_type, sizeof app->pkg_cache_type, "{}", PROVEN_ARG(type));
+    bool asked = app->pkg_cmds && rubraview_pal_shellhost_ask("pkg-list", (const char *const *)app->shell_targets, app->shell_target_count,
+                                                              (proven_u8str_view_t){0}, &app->pkg_ticket);
+    app->pkg_state = asked ? 1 : 3;
+    app->pkg_asked_at = rubraview_pal_time_now_seconds();
+}
+
+size_t explorer_apps_poll(app_state_t *app) {
+    if (app->pkg_state != 1) return 0;
+    char *text = NULL;
+    size_t len = 0;
+    if (rubraview_pal_shellhost_answer(app->pkg_ticket, &text, &len) == 1) {
+        app->pkg_count = rubraview_pkgcmds_read((proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = len }, app->pkg_cmds, RUBRAVIEW_PKGCMDS_MAX);
+        rubraview_free(text);
+        app->pkg_state = 2;
+        char line[120];
+        int n = rubraview_fmt(line, sizeof line, "{} apps' Windows 11 items read in {:.2} s", PROVEN_ARG((uint32_t)app->pkg_count),
+                              PROVEN_ARG(rubraview_pal_time_now_seconds() - app->pkg_asked_at));
+        if (n > 0) app_log(app, "explorer", rubraview_bytes_view(line, (size_t)n < sizeof line ? (size_t)n : sizeof line - 1));
+    } else if (rubraview_pal_time_now_seconds() - app->pkg_asked_at > PKG_ASK_SECONDS) {
+        rubraview_pal_shellhost_forget(app->pkg_ticket);
+        app->pkg_state = 3;
+        app->pkg_cache_type[0] = '\0';
+    } else {
+        return 0;
+    }
+    if (app->ctx_in_files) app->files_dirty = true;
+    return 1;
+}
+
+void explorer_apps_run(app_state_t *app, size_t i) {
+    if (i >= app->pkg_count || app->shell_target_count == 0) return;
+    char kind[128];
+    if (rubraview_fmt(kind, sizeof kind, "pkg-run:{}", PROVEN_ARG(app->pkg_cmds[i].key)) <= 0 ||
+        !rubraview_pal_shellhost_show(kind, (const char *const *)app->shell_targets, app->shell_target_count, rubraview_pal_window_native_handle(app->window)))
+        osd_say(app, TU8("the app's item could not be started"));
+}

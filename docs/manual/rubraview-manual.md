@@ -438,7 +438,12 @@ and Delete). A row that cannot act now is grey. The arrow keys and
 Under Rubraview's own rows the list has **what Explorer's menu has for the
 file** in the registry — Edit, Print, Set as desktop background, Rotate,
 the items other programs put there — as many as the window has room for,
-in Windows' own words; one runs as Explorer runs it. The last row,
+in Windows' own words; one runs as Explorer runs it. **Apps' items
+(Windows 11)** turns the list to the items installed apps add to Windows
+11's menu for the file (Open in Terminal, an editor's Open with ...): a
+program of Rubraview's own reads them, which takes a moment the first time
+for a kind of file, and the list shows them when they come, drawn as the
+rest of it; one clicked runs in that program. The last row,
 **Classic Explorer menu**, opens Windows' own menu for the file where you
 clicked: Windows 11's "Show more options" (7-Zip, Bandizip, Send to, Open
 with, Properties...). It comes from a program of its own, so an item of another program's
@@ -2498,6 +2503,7 @@ listed under a later heading only means that while that is on screen.
 | Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |
 | Right click `Move to...`, Right click `Move them to...` | Move what is picked to a folder |
 | Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
+| Right click `Apps' items (Windows 11)` | The items installed apps add to Windows 11's menu for the file, read by a process of its own and shown in this list |
 | Right click `Classic Explorer menu` | Explorer's classic menu of the file (Show more options: shell extensions, Send to, Open with) |
 | Right click `Make a playlist of them` | Make a playlist of what is picked |
 | Right click `Pick none` | Pick nothing in the open-file screen |

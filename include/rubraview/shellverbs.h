@@ -83,6 +83,25 @@ bool rubraview_shellverb_command(const char *command, const char *path, char *ou
 /** The program a command line starts (its first token, without quotes), into `out`. False when it has none. */
 bool rubraview_shellverb_program(const char *command, char *out, size_t cap);
 
+/* ---- RV-308 (owner, 2026-11-19: "COM 호출 컨텍스트 메뉴를 분리하여 다른 항목으로"): the items installed apps add to
+   Windows 11's menu (IExplorerCommand objects their packages declare), read by the child (`--shell-menu-host
+   pkg-list`) and drawn in Rubraview's own list; one is run by the child (`pkg-run:<key>`). ---- */
+
+#define RUBRAVIEW_PKGCMDS_MAX 32
+
+typedef struct rubraview_pkgcmd {
+    char key[96];      /* "{CLSID}" for a command, "{CLSID}/k" for its k-th subcommand */
+    char title[256];   /* the app's words; a subcommand's "Parent › Child" */
+    bool enabled;
+} rubraview_pkgcmd_t;
+
+/** One item as a line, "A<TAB>key<TAB>e|d<TAB>title\n", the title escaped (\t \n \\); false when it does not fit or
+ *  the key has a tab or a newline. */
+bool rubraview_pkgcmd_line(const char *key, const char *title, bool enabled, char *out, size_t cap);
+
+/** The child's lines read back, other lines passed by; at most `cap`. Returns how many. */
+size_t rubraview_pkgcmds_read(proven_u8str_view_t text, rubraview_pkgcmd_t *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

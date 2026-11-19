@@ -32,7 +32,7 @@ static const struct { const char *words, *action; int32_t group; } TMENU[] = {
 
 /* RV-287 (owner, 2026-11-15: "이 메뉴에서 슬라이드 쇼와 그림 보정은 불필요한 항목이고, 탐색기 메뉴와 구 탐색기 메뉴 항목은
    파일관리 모드에서 우클릭해서 떠야 할 항목이니 사라지게"): the right click's items the ☰ leaves out. */
-static const char *const TMENU_NOT[] = { "toggle_slideshow", "open_edit", "explorer_menu", "explorer_menu_classic" };
+static const char *const TMENU_NOT[] = { "toggle_slideshow", "open_edit", "explorer_menu", "explorer_menu_classic", "explorer_apps" };
 
 /* RV-205 (owner, 2026-10-31: "화면 우클릭 컨텍스트 메뉴의 모든 항목들이 타이틀바 좌측의 메뉴에도 들어가게"): its own rows, then
    the right click's list for what is on screen (the right click leaves out what the Toolbar has; this does not),

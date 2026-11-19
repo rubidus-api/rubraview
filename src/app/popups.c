@@ -16,8 +16,13 @@ typedef struct ctx_row { proven_u8str_view_t caption, action; int32_t group; int
 #define CTX_VERB_GROUP 0x7000   /* the verbs' own group: a line before them and after */
 
 static bool ctx_is_explorer_row(proven_u8str_view_t action) {
-    return proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu")) || proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu_classic"));
+    return proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu")) || proven_u8str_view_eq(action, PROVEN_LIT("explorer_menu_classic")) ||
+           proven_u8str_view_eq(action, PROVEN_LIT("explorer_apps"));   /* RV-308 */
 }
+
+/* RV-308: a row of the apps' Windows 11 items (`verb` CTX_PKG_BASE + its index), or a line that says where they are */
+#define CTX_PKG_BASE 0x10000
+#define CTX_NOTE (-2)
 
 static rubraview_window_t *ctx_window(const app_state_t *app);
 static rubraview_ctxmenu_metrics_t ctx_metrics(const app_state_t *app);
@@ -42,6 +47,14 @@ static bool ctx_on_toolbox(const app_state_t *app, proven_u8str_view_t action) {
 static size_t ctx_row_list(const app_state_t *app, ctx_row_t *rows) {
     if (!app->ctx_list) return 0;
     size_t n = 0;
+    if (app->ctx_pkg_mode) {   /* RV-308: the list shows the apps' items in its place */
+        if (app->pkg_state == 1) rows[n++] = (ctx_row_t){ TU8("reading the apps' items..."), PROVEN_LIT(""), CTX_VERB_GROUP, CTX_NOTE };
+        else if (app->pkg_state != 2) rows[n++] = (ctx_row_t){ TU8("the apps' items could not be read"), PROVEN_LIT(""), CTX_VERB_GROUP, CTX_NOTE };
+        else if (app->pkg_count == 0) rows[n++] = (ctx_row_t){ TU8("no app adds an item for this file"), PROVEN_LIT(""), CTX_VERB_GROUP, CTX_NOTE };
+        for (size_t i = 0; app->pkg_state == 2 && i < app->pkg_count && n < CTX_ROWS; ++i)
+            rows[n++] = (ctx_row_t){ proven_u8str_view_from_cstr(app->pkg_cmds[i].title), PROVEN_LIT(""), CTX_VERB_GROUP, CTX_PKG_BASE + (int32_t)i };
+        return n;
+    }
     const rubraview_boxes_doc_t *doc = rubraview_boxes_document();
     bool explorer = explorer_rows_shown(app), verbs_done = false;
     size_t room = RUBRAVIEW_SHELLVERBS_MAX;
@@ -84,7 +97,9 @@ static size_t ctx_rows(const app_state_t *app, int32_t *groups, bool *enabled) {
     rubraview_action_facts_t facts = action_facts(app);
     for (size_t i = 0; i < n; ++i) {
         groups[i] = rows[i].group;
-        if (enabled) enabled[i] = rows[i].verb >= 0 || rubraview_action_state(rows[i].action, &facts).enabled;
+        if (enabled) enabled[i] = rows[i].verb >= CTX_PKG_BASE ? app->pkg_cmds[rows[i].verb - CTX_PKG_BASE].enabled
+                                : rows[i].verb == CTX_NOTE ? false
+                                : rows[i].verb >= 0 || rubraview_action_state(rows[i].action, &facts).enabled;
     }
     return n;
 }
@@ -119,6 +134,7 @@ void ctx_close(app_state_t *app) {
     app->ctx_list = NULL;
     app->ctx_focus = -1;
     app->ctx_on_picture = false;
+    app->ctx_pkg_mode = false;
     rubraview_confirm_clear(&app->ctx_confirm);
 }
 
@@ -158,6 +174,19 @@ static void ctx_choose(app_state_t *app, int32_t row) {
     if (row < 0 || (size_t)row >= n || !enabled[row]) return;
     ctx_row_t rows[CTX_ROWS];
     (void)ctx_row_list(app, rows);
+    if (rows[row].verb >= CTX_PKG_BASE) {   /* RV-308: an app's item, run by the child on the files the list was opened for */
+        size_t i = (size_t)(rows[row].verb - CTX_PKG_BASE);
+        ctx_close(app);
+        explorer_apps_run(app, i);
+        return;
+    }
+    if (proven_u8str_view_eq(rows[row].action, PROVEN_LIT("explorer_apps"))) {   /* RV-308: the list turns to the apps' items */
+        app->ctx_pkg_mode = true;
+        app->ctx_focus = -1;
+        explorer_apps_begin(app);
+        if (app->ctx_in_files) app->files_dirty = true;
+        return;
+    }
     if (rows[row].verb >= 0) {   /* RV-279: a registry verb, on the files the list was opened for */
         ctx_close(app);
         explorer_verb_run(app, (size_t)rows[row].verb);
@@ -231,6 +260,8 @@ static void draw_ctxmenu_on_in(app_state_t *app, rubraview_renderer_t *r, double
         proven_u8str_view_t text;
         if (rubraview_confirm_armed(&app->ctx_confirm, (int64_t)i, now)) {
             text = proven_u8str_view_eq(item->action, PROVEN_LIT("recent_clear")) ? TU8("Clear?") : TU8("Delete?");
+        } else if (item->verb >= CTX_PKG_BASE || item->verb == CTX_NOTE) {   /* RV-308: an app's words as they are; ours already ours */
+            text = item->caption;
         } else if (item->verb >= 0) {   /* RV-279: Windows' words as they are; Explorer's own standard words translated */
             text = app->shell_verbs[item->verb].standard ? rubraview_tr_u8(item->caption) : item->caption;
         } else {

@@ -3,6 +3,7 @@
 #include "rubraview/shellreq.h"
 #include "rubraview/glob.h"
 #include "rubraview/lang.h"
+#include "rubraview/fileprops.h"   /* RV-308: the child's lines escaped as the Details tab's are */
 
 #define KEY_CAP 600
 #define TEXT_CAP 1100
@@ -443,4 +444,53 @@ size_t rubraview_shellverbs_list(const rubraview_shellreg_t *reg, const char *pa
     for (size_t i = 0; i < keep; ++i) out[i] = sorted[i];
     rubraview_free(sorted);
     return keep;
+}
+
+/* ---- RV-308: the apps' Windows 11 items, as the child sends them ---- */
+
+bool rubraview_pkgcmd_line(const char *key, const char *title, bool enabled, char *out, size_t cap) {
+    if (!key || !title || !out || cap == 0) return false;
+    for (const char *k = key; *k; ++k) if (*k == '\t' || *k == '\n' || *k == '\r') return false;
+    char esc[600];
+    if (!rubraview_props_escape(proven_u8str_view_from_cstr(title), esc, sizeof esc)) return false;
+    int n = rubraview_fmt(out, cap, "A\t{}\t{}\t{}\n", PROVEN_ARG(key), PROVEN_ARG(enabled ? "e" : "d"), PROVEN_ARG(esc));
+    return n > 0 && (size_t)n < cap;
+}
+
+static void pkg_unescape(const proven_byte_t *p, size_t n, char *out, size_t cap) {
+    size_t w = 0;
+    for (size_t i = 0; i < n && w + 1 < cap; ++i) {
+        char c = (char)p[i];
+        if (c == '\\' && i + 1 < n) {
+            char d = (char)p[++i];
+            c = d == 't' ? '\t' : d == 'n' ? '\n' : d;
+        }
+        out[w++] = c;
+    }
+    out[w] = '\0';
+}
+
+size_t rubraview_pkgcmds_read(proven_u8str_view_t text, rubraview_pkgcmd_t *out, size_t cap) {
+    if (!out || !text.ptr) return 0;
+    size_t n = 0, at = 0;
+    while (at < text.size && n < cap) {
+        size_t end = at;
+        while (end < text.size && text.ptr[end] != '\n') end++;
+        /* A<TAB>key<TAB>e|d<TAB>title */
+        size_t f[4] = { at, 0, 0, 0 }, k = 1;
+        for (size_t i = at; i < end && k < 4; ++i) if (text.ptr[i] == '\t') f[k++] = i + 1;
+        if (k == 4 && end > at && text.ptr[at] == 'A' && f[1] == at + 2 && f[2] > f[1] + 1 && f[3] == f[2] + 2) {
+            rubraview_pkgcmd_t *c = &out[n];
+            size_t kl = f[2] - 1 - f[1];
+            if (kl < sizeof c->key) {
+                proven_sys_mem_copy(c->key, text.ptr + f[1], kl);
+                c->key[kl] = '\0';
+                c->enabled = text.ptr[f[2]] == 'e';
+                pkg_unescape(text.ptr + f[3], end - f[3], c->title, sizeof c->title);
+                n++;
+            }
+        }
+        at = end + 1;
+    }
+    return n;
 }

@@ -232,7 +232,7 @@ static void items_free(items_t *it) {
 
 /* ---- Windows 11's package items ---- */
 
-typedef struct package_cmd { IExplorerCommand *cmd; } package_cmd_t;
+typedef struct package_cmd { IExplorerCommand *cmd; CLSID id; } package_cmd_t;
 
 static package_cmd_t g_pkg[PACKAGE_MAX];
 static UINT g_pkg_count;
@@ -264,8 +264,8 @@ static bool type_matches(const char *type, const WCHAR *path, bool folder) {
     return rubraview_cstr_cmp_ci(type, ext8) == 0;
 }
 
-static void add_command(IExplorerCommand *cmd) {
-    if (g_pkg_count < PACKAGE_MAX) g_pkg[g_pkg_count++].cmd = cmd;
+static void add_command(IExplorerCommand *cmd, const CLSID *id) {
+    if (g_pkg_count < PACKAGE_MAX) { g_pkg[g_pkg_count].cmd = cmd; g_pkg[g_pkg_count++].id = *id; }
     else cmd->lpVtbl->Release(cmd);
 }
 
@@ -331,7 +331,7 @@ static void run_jobs(void) {
         hlog("package ms", (long long)j->ms);
         if (FAILED(j->hr)) { hlog("package failed", j->hr); continue; }
         IExplorerCommand *cmd = NULL;
-        if (SUCCEEDED(g_git->lpVtbl->GetInterfaceFromGlobal(g_git, j->cookie, &IID_IExplorerCommand, (void **)&cmd)) && cmd) add_command(cmd);
+        if (SUCCEEDED(g_git->lpVtbl->GetInterfaceFromGlobal(g_git, j->cookie, &IID_IExplorerCommand, (void **)&cmd)) && cmd) add_command(cmd, &j->id);
     }
 }
 
@@ -934,6 +934,128 @@ static int show_windows_box(const WCHAR *kind, WCHAR **paths, size_t count, int3
     return code;
 }
 
+/* ---- RV-308 (owner, 2026-11-19: "시간이 좀 걸리는 COM 호출 컨텍스트 메뉴를 분리하여 다른 항목으로"): the apps' Windows 11
+   items as lines for the viewer's own list, and one of them run ---- */
+
+static bool pkg_title(IExplorerCommand *cmd, IShellItemArray *arr, char *out, size_t cap, bool *enabled) {
+    EXPCMDSTATE state = ECS_ENABLED;
+    HRESULT st = cmd->lpVtbl->GetState(cmd, arr, FALSE, &state);   /* not slow: E_PENDING is shown enabled, as Explorer first draws it */
+    if (st == E_PENDING) state = ECS_ENABLED;
+    else if (FAILED(st) || (state & ECS_HIDDEN)) return false;
+    EXPCMDFLAGS flags = 0;
+    cmd->lpVtbl->GetFlags(cmd, &flags);
+    if (flags & ECF_ISSEPARATOR) return false;
+    LPWSTR title = NULL;
+    if (FAILED(cmd->lpVtbl->GetTitle(cmd, arr, &title)) || !title) return false;
+    bool ok = WideCharToMultiByte(CP_UTF8, 0, title, -1, out, (int)cap, NULL, NULL) > 0;
+    CoTaskMemFree(title);
+    *enabled = !(state & ECS_DISABLED);
+    return ok && out[0];
+}
+
+static IShellItemArray *pkg_items(items_t *it, WCHAR **paths, size_t count) {
+    IShellItemArray *arr = NULL;
+    if (!items_make(it, paths, count)) return NULL;
+    if (FAILED(SHCreateShellItemArrayFromIDLists(it->count, (PCIDLIST_ABSOLUTE_ARRAY)it->abs, &arr))) arr = NULL;
+    return arr;
+}
+
+static int pkg_list(WCHAR **paths, size_t count, const WCHAR *list_file) {
+    items_t it;
+    IShellItemArray *arr = pkg_items(&it, paths, count);
+    answer_t a = {0};
+    answer_add(&a, "", 0);
+    if (arr) {
+        DWORD attrs = GetFileAttributesW(paths[0]);
+        package_commands(paths[0], attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY));
+        hlog("package commands", g_pkg_count);
+        for (UINT i = 0; i < g_pkg_count; ++i) {
+            IExplorerCommand *cmd = g_pkg[i].cmd;
+            WCHAR wid[64];
+            char id[64], title[256], line[700];
+            bool enabled = true;
+            if (!StringFromGUID2(&g_pkg[i].id, wid, 64) || WideCharToMultiByte(CP_UTF8, 0, wid, -1, id, sizeof id, NULL, NULL) <= 0) continue;
+            if (!pkg_title(cmd, arr, title, sizeof title, &enabled)) continue;
+            EXPCMDFLAGS flags = 0;
+            cmd->lpVtbl->GetFlags(cmd, &flags);
+            if (!(flags & ECF_HASSUBCOMMANDS)) {
+                if (rubraview_pkgcmd_line(id, title, enabled, line, sizeof line)) answer_add(&a, line, proven_cstr_len(line));
+                continue;
+            }
+            IEnumExplorerCommand *e = NULL;   /* one level down, "Parent › Child", as the classic menu's cascade */
+            if (FAILED(cmd->lpVtbl->EnumSubCommands(cmd, &e)) || !e) continue;
+            IExplorerCommand *child = NULL;
+            ULONG got = 0;
+            for (int k = 0; e->lpVtbl->Next(e, 1, &child, &got) == S_OK && got == 1 && child; ++k) {
+                char sub[256], both[520], key[96];
+                bool on = true;
+                if (pkg_title(child, arr, sub, sizeof sub, &on) &&
+                    rubraview_fmt(both, sizeof both, "{} \xe2\x80\xba {}", PROVEN_ARG(title), PROVEN_ARG(sub)) > 0 &&
+                    rubraview_fmt(key, sizeof key, "{}/{}", PROVEN_ARG(id), PROVEN_ARG(k)) > 0 &&
+                    rubraview_pkgcmd_line(key, both, on && enabled, line, sizeof line))
+                    answer_add(&a, line, proven_cstr_len(line));
+                child->lpVtbl->Release(child);
+                child = NULL;
+            }
+            e->lpVtbl->Release(e);
+        }
+        for (UINT i = 0; i < g_pkg_count; ++i) g_pkg[i].cmd->lpVtbl->Release(g_pkg[i].cmd);
+        arr->lpVtbl->Release(arr);
+    }
+    items_free(&it);
+    answer_put(list_file, &a);
+    rubraview_free(a.buf);
+    return arr ? 0 : 3;
+}
+
+/* "{CLSID}" or "{CLSID}/k": that class made again (alone), its command or its k-th subcommand invoked on the files. */
+static int pkg_run(const WCHAR *key, WCHAR **paths, size_t count, int32_t x, int32_t y) {
+    WCHAR clsid[64];
+    size_t n = 0;
+    while (key[n] && key[n] != L'/' && n < 63) { clsid[n] = key[n]; n++; }
+    clsid[n] = 0;
+    int sub = key[n] == L'/' ? StrToIntW(key + n + 1) : -1;
+    CLSID id;
+    if (FAILED(CLSIDFromString(clsid, &id))) return 3;
+    items_t it;
+    IShellItemArray *arr = pkg_items(&it, paths, count);
+    if (!arr) { items_free(&it); return 3; }
+    HWND hwnd = make_window(x, y);
+    if (hwnd) SetForegroundWindow(hwnd);
+    queue_command(&id);
+    run_jobs();
+    int code = 9;
+    if (g_pkg_count > 0) {
+        IExplorerCommand *cmd = g_pkg[0].cmd, *pick = NULL;
+        if (sub < 0) { pick = cmd; cmd->lpVtbl->AddRef(cmd); }
+        else {
+            IEnumExplorerCommand *e = NULL;
+            if (SUCCEEDED(cmd->lpVtbl->EnumSubCommands(cmd, &e)) && e) {
+                IExplorerCommand *child = NULL;
+                ULONG got = 0;
+                for (int k = 0; !pick && e->lpVtbl->Next(e, 1, &child, &got) == S_OK && got == 1 && child; ++k) {
+                    if (k == sub) pick = child; else child->lpVtbl->Release(child);
+                    child = NULL;
+                }
+                e->lpVtbl->Release(e);
+            }
+        }
+        if (pick) {
+            hold_process();
+            HRESULT inv = pick->lpVtbl->Invoke(pick, arr, NULL);
+            hlog("Invoke", inv);
+            code = FAILED(inv) ? 8 : 0;
+            pick->lpVtbl->Release(pick);
+            if (hwnd) linger(hwnd);
+        }
+        for (UINT i = 0; i < g_pkg_count; ++i) g_pkg[i].cmd->lpVtbl->Release(g_pkg[i].cmd);
+    }
+    arr->lpVtbl->Release(arr);
+    if (hwnd) DestroyWindow(hwnd);
+    items_free(&it);
+    return code;
+}
+
 int rubraview_pal_shellmenu_host_main(const wchar_t *kind, const wchar_t *list_file, const wchar_t *x, const wchar_t *y) {
     hlog_open();
     if (FAILED(OleInitialize(NULL))) { hlog("OleInitialize failed", 0); return 2; }   /* Copy and Cut put the files on the clipboard through OLE */
@@ -944,6 +1066,8 @@ int rubraview_pal_shellmenu_host_main(const wchar_t *kind, const wchar_t *list_f
     int code = 1;
     if (count > 0) {
         if (rubraview_wcmp_n(kind, L"verb:", 5, false) == 0) code = run_verb(kind + 5, paths, count, px, py);
+        else if (rubraview_wcmp(kind, L"pkg-list") == 0) code = pkg_list(paths, count, list_file);   /* RV-308 */
+        else if (rubraview_wcmp_n(kind, L"pkg-run:", 8, false) == 0) code = pkg_run(kind + 8, paths, count, px, py);
         else if (rubraview_wcmp(kind, L"props-read") == 0) code = props_read(paths[0], list_file);   /* RV-281 */
         else if (rubraview_wcmp(kind, L"props-write") == 0) code = props_write(paths, count, list_file);
         else if (rubraview_wcmp(kind, L"properties") == 0 || rubraview_wcmp(kind, L"openwith") == 0) code = show_windows_box(kind, paths, count, px, py);

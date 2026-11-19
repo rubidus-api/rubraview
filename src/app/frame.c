@@ -110,6 +110,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     handled += clash_pump(app);   /* RV-258 */
     handled += filejob_pump(app);
     arcadd_poll(app);   /* RV-260 */
+    handled += explorer_apps_poll(app);   /* RV-308 */
     view_orientation_follow_edit(app);   /* RV-265 */
     card_watch(app);   /* RV-265 (R296): a card for what the window has left closes */
     handled += mini_pump(app);
