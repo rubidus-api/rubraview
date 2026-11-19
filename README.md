@@ -291,7 +291,6 @@ ships with, so it cannot drift from them.
 | Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |
 | Right click `Move to...`, Right click `Move them to...` | Move what is picked to a folder |
 | Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
-| Right click `Explorer menu` | Explorer's menu of the file (Windows 11's, its packages' items too), from a process of its own |
 | Right click `Classic Explorer menu` | Explorer's classic menu of the file (Show more options: shell extensions, Send to, Open with) |
 | Right click `Make a playlist of them` | Make a playlist of what is picked |
 | Right click `Pick none` | Pick nothing in the open-file screen |

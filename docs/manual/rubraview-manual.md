@@ -438,14 +438,12 @@ and Delete). A row that cannot act now is grey. The arrow keys and
 Under Rubraview's own rows the list has **what Explorer's menu has for the
 file** in the registry — Edit, Print, Set as desktop background, Rotate,
 the items other programs put there — as many as the window has room for,
-in Windows' own words; one runs as Explorer runs it. The last two rows,
-**Explorer menu** and **Classic Explorer menu**, open Windows' own menu
-for the file where you clicked: the classic one is Windows 11's "Show more
-options" (7-Zip, Bandizip, Send to, Open with, Properties...), Explorer
-menu puts the items installed apps add to Windows 11's menu above it.
-They come from a program of their own, so an item of another program's
+in Windows' own words; one runs as Explorer runs it. The last row,
+**Classic Explorer menu**, opens Windows' own menu for the file where you
+clicked: Windows 11's "Show more options" (7-Zip, Bandizip, Send to, Open
+with, Properties...). It comes from a program of its own, so an item of another program's
 that fails cannot take the viewer with it. `Shift` with the right click
-opens the classic menu at once, with the items Explorer shows only with
+opens it at once, with the items Explorer shows only with
 `Shift`. In the open-file screen they act on what is picked, on a page
 inside an archive the archive. Settings › General › Explorer's items in
 the right-click list turns them off.
@@ -1928,7 +1926,9 @@ last; `Enter` opens it and `Backspace` goes up a folder.
 
 Every file in the folder is listed. One Rubraview does not show (a
 document, a PDF, a settings file) opens in the program Windows opens it
-with, as a double click in Explorer does, and a program or a script
+with — Rubraview reads the type's command from the registry and starts it
+itself, as a double click in Explorer does; an app Windows alone can start
+(a Store app) is started by Windows — and a program or a script
 (`.exe`, `.com`, `.bat`, `.cmd`, `.ps1`, an installer's `.msi` or
 `.msix`, a shortcut ...) is run — each as a program of its own, which
 goes on when Rubraview ends. A program from another computer, or one
@@ -2498,7 +2498,6 @@ listed under a later heading only means that while that is on screen.
 | Right click `Copy to...`, Right click `Copy them to...` | Copy what is picked to a folder |
 | Right click `Move to...`, Right click `Move them to...` | Move what is picked to a folder |
 | Right click `To the recycle bin`, Right click `Them to the recycle bin` | Put what is picked in the recycle bin |
-| Right click `Explorer menu` | Explorer's menu of the file (Windows 11's, its packages' items too), from a process of its own |
 | Right click `Classic Explorer menu` | Explorer's classic menu of the file (Show more options: shell extensions, Send to, Open with) |
 | Right click `Make a playlist of them` | Make a playlist of what is picked |
 | Right click `Pick none` | Pick nothing in the open-file screen |

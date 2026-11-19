@@ -19,6 +19,7 @@
 #include "rubraview/pal/pal_time.h"
 #include "rubraview/path.h"
 #include "rubraview/filemanage.h"
+#include "rubraview/pal/pal_shellverbs.h"
 
 #define RUBRAVIEW_WINDOW_CLASS L"Rubraview_MainWindow_Class"
 #define EVENT_QUEUE_CAPACITY 128
@@ -2137,6 +2138,21 @@ bool rubraview_pal_shell_open_file(proven_u8str_view_t path, int kind) {
         /* one that asks to be administrator (ERROR_ELEVATION_REQUIRED): Windows starts it, UAC asking */
     }
     if (kind == RUBRAVIEW_LAUNCH_POWERSHELL && !marked && start_powershell(wide, (size_t)n, sep ? folder : NULL)) return true;
+    /* RV-306 (owner, 2026-11-19: "파일 확장자도 마찬가지로 레지스트리 검색해서 우리가 직접 처리 ... 연결된 프로그램으로 바로
+       열고"): the type's default verb read from the registry (rubraview_shellverbs_list, as the right-click list reads
+       them) and its command line run as a process of its own; a verb only Windows can run (an app's DelegateExecute,
+       no command line), or a file from another computer, goes to ShellExecuteEx below */
+    if (kind == RUBRAVIEW_LAUNCH_SHELL && !marked) {
+        static rubraview_shellverb_t verbs[RUBRAVIEW_SHELLVERBS_MAX];
+        char utf8[MAX_PATH * 4];
+        if (WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8, (int)sizeof utf8, NULL, NULL) > 0) {
+            size_t count = rubraview_pal_shellverbs_list(utf8, false, false, 1, verbs, RUBRAVIEW_SHELLVERBS_MAX);
+            const rubraview_shellverb_t *pick = NULL;
+            for (size_t i = 0; i < count && !pick; ++i) if (verbs[i].is_default) pick = &verbs[i];
+            const char *one[1] = { utf8 };
+            if (pick && !pick->by_shell && rubraview_pal_shellverbs_run(pick, one, 1)) return true;
+        }
+    }
     /* the default verb, as a double click; no association asks "Open with" */
     SHELLEXECUTEINFOW info = { .cbSize = sizeof(info), .fMask = SEE_MASK_INVOKEIDLIST, .lpFile = wide,
                                .lpDirectory = sep ? folder : NULL, .nShow = SW_SHOWNORMAL };

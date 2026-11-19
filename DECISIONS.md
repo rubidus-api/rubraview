@@ -4199,3 +4199,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: since RV-289 / RV-292 the copies, moves, extractions and compressions run in processes that show their own windows, but the main window still drew RV-268's progress card for an extraction or a compression and said a copy's start and end at the top.
 - Decision: `draw_progress_card` skips `PROGRESS_ARCHWORK` (an Explorer request was skipped already); the archive work's end line and the copy job's start and end lines go to the log (`app_log`) unless the job is the file on screen's quiet copy (`viewer_page >= 0`), which has no window and is said as before; Esc still stops the work; the archive written again here (`PROGRESS_ARCEDIT`, a thread of the viewer's) keeps the card; RV-240's what-next card after an extraction stays (a question the job's window does not ask).
 - Consequences: R332; VM T485.
+
+## D-373: The Registry's Default Verb Started By Rubraview; Windows 11's Explorer Menu Out Of The Lists (RV-306)
+
+- Date: 2026-11-19
+- Status: Accepted (owner 2026-11-19, quoted in R333).
+- Context: D-369 opened a document with ShellExecuteEx's default verb; RV-279 (D-345) already reads a file's verbs from the registry for the right-click list and runs their command lines itself. The Explorer menu row (Windows 11's) can only show Windows' items in a Win32 popup, not Windows 11's own menu.
+- Decision: `rubraview_pal_shell_open_file`, for the shell kind and a file with no `Zone.Identifier`, lists the verbs (`rubraview_pal_shellverbs_list`, one file) and runs the default one (`is_default`) when it has a command line (`rubraview_pal_shellverbs_run`); `run_line` now starts it out of Rubraview's job (`CREATE_BREAKAWAY_FROM_JOB`, again without it when refused) in a new process group; otherwise ShellExecuteEx as before (no association: Windows' Open with). The boxes document's ten `explorer_menu` rows are removed; `explorer_menu` stays an action (check-actions' INTERNAL) for keymap.ini and one's own boxes file; `explorer_menu_classic` and Shift's right click stay.
+- Consequences: R333; `test_boxes_doc`; VM T486.

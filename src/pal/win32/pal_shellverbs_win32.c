@@ -283,10 +283,18 @@ static bool run_line(const char *command, const char *path) {
     PROCESS_INFORMATION pi = {0};
     DWORD attrs = GetFileAttributesW(folder);
     bool folder_ok = attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY);
-    if (!CreateProcessW(NULL, line, NULL, NULL, FALSE, 0, NULL, folder_ok ? folder : NULL, &si, &pi)) return false;
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-    return true;
+    /* RV-304, RV-306: a process of its own, out of any job Rubraview is in (one that will not let it go: as it is) */
+    const DWORD flags[2] = { CREATE_BREAKAWAY_FROM_JOB | CREATE_NEW_PROCESS_GROUP | CREATE_DEFAULT_ERROR_MODE,
+                             CREATE_NEW_PROCESS_GROUP | CREATE_DEFAULT_ERROR_MODE };
+    for (int k = 0; k < 2; ++k) {
+        if (CreateProcessW(NULL, line, NULL, NULL, FALSE, flags[k], NULL, folder_ok ? folder : NULL, &si, &pi)) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            return true;
+        }
+        if (GetLastError() != ERROR_ACCESS_DENIED) return false;
+    }
+    return false;
 }
 
 bool rubraview_pal_shellverbs_run(const rubraview_shellverb_t *verb, const char *const *paths, size_t count) {
