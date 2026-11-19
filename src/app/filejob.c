@@ -232,7 +232,8 @@ static bool start_job(app_state_t *app, proven_u8str_view_t dir, const proven_u8
     g_jobs[g_njobs++] = job;
     char said[200];
     int w = rubraview_fmt(said, sizeof said, moving ? T("moving {} into {}") : T("copying {} into {}"), PROVEN_ARG(n), PROVEN_ARG(rubraview_path_basename(dir)));
-    if (w > 0) osd_say(app, cstr(said));
+    if (w > 0 && page >= 0) osd_say(app, cstr(said));   /* RV-305: a job with its own window says it there */
+    else if (w > 0) app_log(app, "file", cstr(said));
     return true;
 }
 
@@ -291,7 +292,11 @@ static void job_ended(app_state_t *app, fj_job_t *job) {
     int w = rubraview_fmt(line, sizeof line, moving ? T("{} moved, {} replaced, {} the same, {} left, {} could not be  (Ctrl+Z takes it back)")
                                                    : T("{} copied, {} replaced, {} the same, {} left, {} could not be  (Ctrl+Z takes it back)"),
                           PROVEN_ARG(done), PROVEN_ARG(replaced), PROVEN_ARG(same), PROVEN_ARG(job->end.skipped), PROVEN_ARG(job->end.failed));
-    if (w > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)w });
+    if (w > 0) {   /* RV-305: said here only for the file on screen, whose job shows no window */
+        proven_u8str_view_t said_line = { .ptr = (const proven_byte_t *)line, .size = (size_t)w < sizeof line ? (size_t)w : sizeof line - 1 };
+        if (job->viewer_page >= 0) osd_say(app, said_line);
+        else app_log(app, "file", said_line);
+    }
     if (job->end.stopped) app_log(app, "file", PROVEN_LIT("the copy or move was stopped; what was not reached is where it was"));
     if (replaced > 0) app_log(app, "file", PROVEN_LIT("replaced files are in the Recycle Bin; Ctrl+Z takes the new ones away, not the old ones back"));
     if (app->picker_open) picker_navigate(app, app->picker_dir);   /* what arrived, listed */

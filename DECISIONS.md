@@ -4191,3 +4191,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: `vendor/proven` held v0.114.0 (D-336). Upstream's latest tag is v0.119.0 (`eb852acf`); between them, in the parts taken (base, platform, crypto): the ChaCha generator's key erasure and fork reseed, `proven_random_fast_bytes`, `proven_random_fork_generation`, the AES-CTR generator, the decimal reader's exponent; the WebSocket change RV-291 named and the DEFLATE / Zstandard / Brotli work are in `net/` and `codec/`, which are not taken.
 - Decision: the copy is replaced as D-336 did: the directory emptied but `VENDORED.md`, `git archive v0.119.0 include src platform crypto LICENSE THIRD_PARTY_NOTICES.md` unpacked, every file checked against the tag (`diff -r`: identical); eleven files changed. No source of Rubraview's or FultaArc's changes: neither seeds a generator nor calls the new functions.
 - Consequences: the gate's host tests (FultaArc's archive tests with this copy) and `make win64` stand for it; VENDORED.md names the snapshot.
+
+## D-372: One Notice A Job: The Job's Window, Not A Card Beside It (RV-305)
+
+- Date: 2026-11-19
+- Status: Accepted (owner 2026-11-19, quoted in R332).
+- Context: since RV-289 / RV-292 the copies, moves, extractions and compressions run in processes that show their own windows, but the main window still drew RV-268's progress card for an extraction or a compression and said a copy's start and end at the top.
+- Decision: `draw_progress_card` skips `PROGRESS_ARCHWORK` (an Explorer request was skipped already); the archive work's end line and the copy job's start and end lines go to the log (`app_log`) unless the job is the file on screen's quiet copy (`viewer_page >= 0`), which has no window and is said as before; Esc still stops the work; the archive written again here (`PROGRESS_ARCEDIT`, a thread of the viewer's) keeps the card; RV-240's what-next card after an extraction stays (a question the job's window does not ask).
+- Consequences: R332; VM T485.

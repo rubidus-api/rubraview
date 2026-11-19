@@ -57,7 +57,10 @@ size_t time_left_text(char *out, size_t cap, double seconds) {
 }
 
 void draw_progress_card(app_state_t *app, double win_w, double win_h, double dpi) {
-    if (app->prog.source == PROGRESS_NONE || app->prog.windowed) return;   /* RV-272: that one is in its own window */
+    /* RV-272: one asked from Explorer is in its own window; RV-305 (owner, 2026-11-19: "외부 창으로 알리도록 했으니 내부
+       위젯은 ... 뜨지 않도록"): an extraction or a compression's process shows its own window too, so only the archive
+       written again here (PROGRESS_ARCEDIT, no process of its own) has the card */
+    if (app->prog.source == PROGRESS_NONE || app->prog.windowed || app->prog.source == PROGRESS_ARCHWORK) return;
     const progress_view_t *v = &app->prog;
     double pad = 20.0 * dpi, line_h = 22.0 * dpi, bar_h = 14.0 * dpi, btn_h = 38.0 * dpi;
     int lines = (v->bytes ? 1 : 0) + (v->files_total > 0 ? 1 : 0) + 1;
