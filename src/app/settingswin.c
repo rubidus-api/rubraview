@@ -930,208 +930,175 @@ static void lang_apply(app_state_t *app) {
 }
 
 void load_keymap(app_state_t *app);
-static void settings_apply_rest(app_state_t *app) {
-    static bool first = true;
-    static double last_fit = -1.0, last_layout = -1.0, last_grid = -1.0, last_color = -1.0,
-                  last_privacy = -1.0, last_keymap = -1.0, last_collapse = -1.0, last_first_alone = -1.0, last_wide_alone = -1.0, last_details = -1.0, last_key_order = -1.0;
+/* ---- RV-311: applying the settings by table ----
+   Most settings are read where they are used and need nothing here. A setting whose change has to do something at
+   once (lay the pages out again, list the folder again, load the keymap ...) is a row: the settings it watches and
+   the function that applies them, called the first time and whenever their values' fingerprint changes
+   (rubraview_settings_print: a key, a click, Revert or another window's file alike). What is copied into the program
+   on every pass (it also follows the screen's scale) is ap_every_pass. */
+
+static void ap_keys_tables(app_state_t *app, bool first) {   /* RV-193, RV-303, RFC-0010 §4.8 */
+    (void)first;
+    if (g_keys_by_key || g_keys_by_row) keymap_table_refresh(app);
+}
+
+static void ap_fit(app_state_t *app, bool first) {
+    static const rubraview_fit_mode_t FIT[] = { RUBRAVIEW_FIT_WINDOW, RUBRAVIEW_FIT_WIDTH, RUBRAVIEW_FIT_HEIGHT,
+                                                RUBRAVIEW_FIT_ACTUAL_SIZE, RUBRAVIEW_FIT_SMART, RUBRAVIEW_FIT_STRETCH };
+    int f = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("fit_mode")));
+    app->fit_mode = FIT[f >= 0 && f < 6 ? f : 0];
+    if (!first) reset_view(app);
+}
+
+static void ap_layout(app_state_t *app, bool first) {
+    /* The one place the layout is set from: the settings window, the toolbox's tile, the menu and the key all write
+       this setting, so they cannot disagree (owner, 2026-10-09). The setting's order is rubraview_layout_choice_t's,
+       and the way the pages run comes with it (owner, 2026-10-11). Comic is one page at a time with a wide scan as its
+       two halves; every other layout shows a wide scan whole. */
+    int l = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("layout")));
+    app->layout_opts.mode = rubraview_layout_choice_mode(l);
+    app->layout_opts.direction = rubraview_layout_choice_direction(l);
+    app->layout_opts.auto_split_wide_spreads = app->layout_opts.mode == RUBRAVIEW_PAGE_LAYOUT_COMIC;
+    app->needs_relayout = true;
+    app->strip_offset = 0.0;
+    app->strip_base_w = 0.0;
+    if (!first) reset_view(app);
+}
+
+static void ap_spreads(app_state_t *app, bool first) {
+    (void)first;
+    rubraview_settings_t *st = &app->settings;
+    app->spread_detect = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("wide_alone")) > 0.5;   /* RV-284 */
+    app->layout_opts.spread_ar_threshold = app->spread_detect ? 1.15 : 1.0e9;
+    app->layout_opts.first_alone = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("first_page_alone")) > 0.5;   /* RV-224 */
+    app->layout_opts.portrait_collapse_ar = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("portrait_collapse")) > 0.5 ? 1.0 : 0.0;
+    app->needs_relayout = true;
+}
+
+static void ap_pixel_grid(app_state_t *app, bool first) {
+    (void)first;
+    app->pixel_grid = rubraview_settings_get(&app->settings, PROVEN_LIT("viewer"), PROVEN_LIT("pixel_grid")) > 0.5;
+}
+
+static void ap_subtitle_face(app_state_t *app, bool first) {
+    (void)app; (void)first;
+    g_subtitle_style++;   /* the subtitles' face drawn again */
+}
+
+static void ap_listing(app_state_t *app, bool first) {   /* RV-106, RV-169: listed again, on the same file */
+    if (!first) folder_relist(app);
+}
+
+static void ap_audio_device(app_state_t *app, bool first) {   /* RV-237: a change moves what plays */
+    (void)first;
+    proven_u8str_view_t dev = rubraview_settings_get_text(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("output_device"));
+    char now[256] = "";
+    if (dev.size < sizeof(now)) { proven_sys_mem_copy(now, dev.ptr, dev.size); now[dev.size] = '\0'; }
+    rubraview_pal_audio_use_device(now);
+}
+
+static void ap_settings_look(app_state_t *app, bool first) {   /* 1.25.0: this window's face, size or line spacing */
+    if (first || !app->settings_open || !app->settings_window) return;
+    settings_measure(app);
+    int32_t cols = 0, rows = 0;
+    settings_grid(app, &cols, &rows);
+    rubraview_settings_view_resize(&app->settings_view, cols, rows);
+    app->settings_dirty = true;
+}
+
+static void ap_text_on(app_state_t *app, bool first) {   /* 1.25.0: text files shown at all */
+    bool on = rubraview_settings_get(&app->settings, PROVEN_LIT("text"), PROVEN_LIT("viewer")) > 0.5;
+    if (on == g_text_on && !first) return;
+    g_text_on = on;
+    if (!first) settings_say(app, on ? T("text files are listed and shown again")
+                                     : T("text files are no longer listed or shown; a text file Windows sends here is not shown either"));
+}
+
+static void ap_color_management(app_state_t *app, bool first) {
+    rubraview_pal_image_set_color_management(rubraview_settings_get(&app->settings, PROVEN_LIT("display"), PROVEN_LIT("color_management")) > 0.5);
+    if (!first) unload_all_pages(app);   /* decoded again, with or without the profile */
+}
+
+static void ap_export(app_state_t *app, bool first) {
+    (void)first;
+    app->export_options.privacy_clean = rubraview_settings_get(&app->settings, PROVEN_LIT("cache"), PROVEN_LIT("privacy_clean")) > 0.5;
+    app->export_options.keep_details = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("cache"), PROVEN_LIT("keep_details")));   /* 1.17.0 */
+}
+
+static void ap_keymap_file(app_state_t *app, bool first) {
+    if (!first) load_keymap(app);
+}
+
+typedef struct apply_row {
+    const char *keys;   /* the settings it watches, "section.key ..." */
+    void (*run)(app_state_t *app, bool first);
+} apply_row_t;
+
+static const apply_row_t APPLY[] = {
+    { "keys.key_order keys.row_screen keys.row_mods keys.row_find", ap_keys_tables },
+    { "viewer.fit_mode", ap_fit },
+    { "viewer.layout", ap_layout },
+    { "viewer.wide_alone viewer.first_page_alone viewer.portrait_collapse", ap_spreads },
+    { "viewer.pixel_grid", ap_pixel_grid },
+    { "video.subtitle_font", ap_subtitle_face },
+    { "files.pattern files.sort_mode files.sort_ascending files.subfolders files.show files.same_kind", ap_listing },
+    { "audio.output_device", ap_audio_device },
+    { "general.font_settings general.size_settings general.settings_spacing", ap_settings_look },
+    { "text.viewer", ap_text_on },
+    { "display.color_management", ap_color_management },
+    { "cache.privacy_clean cache.keep_details", ap_export },
+    { "keys.use_keymap_file", ap_keymap_file },
+};
+
+/* What the program keeps a copy of, every pass (several follow the screen's scale too). */
+static void ap_every_pass(app_state_t *app) {
     rubraview_settings_t *st = &app->settings;
     double dpi = rubraview_pal_window_dpi_scale(app->window);
-
-    /* RV-193: the keys by key in the other order */
-    double key_order = rubraview_settings_get(st, PROVEN_LIT("keys"), PROVEN_LIT("key_order"));
-    if (key_order != last_key_order) {
-        last_key_order = key_order;
-        if (g_keys_by_key) keymap_table_refresh(app);
-    }
-    static double last_row_screen = -1.0;   /* RV-303: the screen the keys by keyboard row are for */
-    double row_screen = rubraview_settings_get(st, PROVEN_LIT("keys"), PROVEN_LIT("row_screen"));
-    if (row_screen != last_row_screen) {
-        last_row_screen = row_screen;
-        if (g_keys_by_row) keymap_table_refresh(app);
-    }
-    static double last_row_mods = -1.0;   /* RFC-0010 §4.8: the filter and the search */
-    static char last_row_find[128];
-    static size_t last_find_len;
-    double row_mods = rubraview_settings_get(st, PROVEN_LIT("keys"), PROVEN_LIT("row_mods"));
-    proven_u8str_view_t row_find = rubraview_settings_get_text(st, PROVEN_LIT("keys"), PROVEN_LIT("row_find"));
-    size_t find_len = row_find.size < sizeof(last_row_find) ? row_find.size : sizeof(last_row_find);
-    proven_u8str_view_t find_now = { .ptr = row_find.ptr, .size = find_len };
-    if (row_mods != last_row_mods || !proven_u8str_view_eq((proven_u8str_view_t){ (const proven_byte_t *)last_row_find, last_find_len }, find_now)) {
-        last_row_mods = row_mods;
-        last_find_len = find_len && proven_mem_copy(last_row_find, sizeof(last_row_find), (proven_mem_view_t){ .ptr = row_find.ptr, .size = find_len }) == PROVEN_OK ? find_len : 0;
-        if (g_keys_by_row) keymap_table_refresh(app);
-    }
-
-    /* General */
     lang_apply(app);
     app->frameless = rubraview_settings_get(st, PROVEN_LIT("general"), PROVEN_LIT("frameless")) > 0.5;
     rubraview_pal_window_set_frameless(app->window, app->frameless);
     app->titlebar.trigger_zone = fmax(36.0, rubraview_settings_get(st, PROVEN_LIT("general"), PROVEN_LIT("titlebar_trigger_px"))) * dpi;   /* never less than the bar (owner, 2026-10-14) */
     app->titlebar.hide_delay = rubraview_settings_get(st, PROVEN_LIT("general"), PROVEN_LIT("titlebar_hide_ms")) / 1000.0;
-
-    /* Viewer */
-    double fit = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("fit_mode"));
-    if (fit != last_fit) {
-        static const rubraview_fit_mode_t FIT[] = { RUBRAVIEW_FIT_WINDOW, RUBRAVIEW_FIT_WIDTH, RUBRAVIEW_FIT_HEIGHT,
-                                                    RUBRAVIEW_FIT_ACTUAL_SIZE, RUBRAVIEW_FIT_SMART, RUBRAVIEW_FIT_STRETCH };
-        int f = (int)lround(fit);
-        app->fit_mode = FIT[f >= 0 && f < 6 ? f : 0];
-        if (!first) reset_view(app);
-        last_fit = fit;
-    }
-    double layout = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("layout"));
-    if (layout != last_layout) {
-        /* The one place the layout is set from: the settings window, the
-           toolbox's tile, the menu and the key all write this setting, so
-           they cannot disagree (owner, 2026-10-09). The setting's order is
-           rubraview_layout_choice_t's, and the way the pages run comes
-           with it (owner, 2026-10-11). */
-        int l = (int)lround(layout);
-        app->layout_opts.mode = rubraview_layout_choice_mode(l);
-        app->layout_opts.direction = rubraview_layout_choice_direction(l);
-        /* Comic is one page at a time with a wide scan as its two halves;
-           every other layout shows a wide scan whole. */
-        app->layout_opts.auto_split_wide_spreads = app->layout_opts.mode == RUBRAVIEW_PAGE_LAYOUT_COMIC;
-        app->needs_relayout = true;
-        app->strip_offset = 0.0;
-        app->strip_base_w = 0.0;
-        if (!first) reset_view(app);
-        last_layout = layout;
-    }
-    /* RV-284: a wide page alone in two pages (the Toolbar's Wide alone), the first page as any other */
-    double wide = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("wide_alone"));
-    if (wide != last_wide_alone) {
-        app->spread_detect = wide > 0.5;
-        app->layout_opts.spread_ar_threshold = app->spread_detect ? 1.15 : 1.0e9;
-        app->needs_relayout = true;
-        last_wide_alone = wide;
-    }
-    /* RV-224 (D-279): two pages with the first page alone, the book that was a layout of its own */
-    double alone = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("first_page_alone"));
-    if (alone != last_first_alone) {
-        app->layout_opts.first_alone = alone > 0.5;
-        app->needs_relayout = true;
-        last_first_alone = alone;
-    }
-    double collapse = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("portrait_collapse"));
-    if (collapse != last_collapse) {
-        app->layout_opts.portrait_collapse_ar = collapse > 0.5 ? 1.0 : 0.0;   /* 0: never collapse */
-        app->needs_relayout = true;
-        last_collapse = collapse;
-    }
     g_gutter = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("gutter_px")) * dpi;
     g_zoom_step = 1.0 + rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("zoom_step_percent")) / 100.0;
     g_whole_zoom = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("whole_zoom")) > 0.5;
-    {
-        static const uint32_t BACK[] = { 0xFF101010u, 0xFF000000u, 0xFF606060u, 0xFFFFFFFFu };
-        int back = (int)lround(rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("background")));
-        g_canvas = BACK[back >= 0 && back < 4 ? back : 0];
-        static const uint32_t INK[] = { 0xFFFFFFFFu, 0xFFFFE94Du, 0xFF66E0FFu, 0xFF7CF08Au, 0xFFFF9AD0u };
-        int ink = (int)lround(rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_color")));
-        g_subtitle_argb = INK[ink >= 0 && ink < 5 ? ink : 0];
-        static uint64_t last_face = 0;
-        proven_u8str_view_t face = rubraview_settings_get_text(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_font"));
-        uint64_t h = 1469598103934665603ull;
-        for (size_t i = 0; i < face.size; ++i) h = (h ^ (uint8_t)face.ptr[i]) * 1099511628211ull;
-        if (h != last_face) { g_subtitle_style++; last_face = h; }
-    }
-    /* RV-176 (D-208): FFmpeg in a process of its own, or inside, before anything asks for it */
+    static const uint32_t BACK[] = { 0xFF101010u, 0xFF000000u, 0xFF606060u, 0xFFFFFFFFu };
+    int back = (int)lround(rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("background")));
+    g_canvas = BACK[back >= 0 && back < 4 ? back : 0];
+    static const uint32_t INK[] = { 0xFFFFFFFFu, 0xFFFFE94Du, 0xFF66E0FFu, 0xFF7CF08Au, 0xFFFF9AD0u };
+    int ink = (int)lround(rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("subtitle_color")));
+    g_subtitle_argb = INK[ink >= 0 && ink < 5 ? ink : 0];
+    /* RV-176 (D-208): FFmpeg in a process of its own, or inside, before anything asks for it; its folder before anything
+       asks for FFmpeg, and again on a change (while it is not loaded, the new folder is tried at the next ask) */
     rubraview_pal_ffmpeg_set_isolated(rubraview_settings_get(st, PROVEN_LIT("video"), PROVEN_LIT("ffmpeg_isolated")) > 0.5);
-    /* Before anything asks for FFmpeg, and again on a change: while it is
-       not loaded, the new folder is tried at the next ask. */
     rubraview_pal_ffmpeg_set_folders(imported_folder(app, "ffmpeg"), rubraview_pal_fs_expand_env(app->arena,
         rubraview_path_typed_folder(rubraview_settings_get_text(st, PROVEN_LIT("video"), PROVEN_LIT("ffmpeg_dir")))));
-    double grid = rubraview_settings_get(st, PROVEN_LIT("viewer"), PROVEN_LIT("pixel_grid"));
-    if (grid != last_grid) { app->pixel_grid = grid > 0.5; last_grid = grid; }
-
-    /* Files */
-    {
-        /* RV-106: what a folder lists, changed while one is open: it is listed again, on the same file. */
-        static uint64_t last_listing = 0;
-        proven_u8str_view_t pattern = rubraview_settings_get_text(st, PROVEN_LIT("files"), PROVEN_LIT("pattern"));
-        uint64_t listing = 1469598103934665603ull;
-        for (size_t i = 0; i < pattern.size; ++i) listing = (listing ^ (uint8_t)pattern.ptr[i]) * 1099511628211ull;
-        static const char *const KEYS[] = { "sort_mode", "sort_ascending", "subfolders", "show", "same_kind" };   /* RV-169 */
-        for (size_t i = 0; i < sizeof(KEYS) / sizeof(KEYS[0]); ++i) {
-            listing = (listing ^ (uint64_t)lround(rubraview_settings_get(st, PROVEN_LIT("files"), cstr(KEYS[i])) + 1.0)) * 1099511628211ull;
-        }
-        if (listing != last_listing && !first) folder_relist(app);
-        last_listing = listing;
-    }
     int cp = (int)lround(rubraview_settings_get(st, PROVEN_LIT("files"), PROVEN_LIT("archive_codepage")));
     app->archive_codepage = cp >= 0 && cp <= (int)RUBRAVIEW_CODEPAGE_WESTERN ? (rubraview_codepage_t)cp : RUBRAVIEW_CODEPAGE_AUTO;
-
-    /* Audio */
-    {   /* RV-237: this app's own output device, applied when it changes (a change moves what plays) */
-        static char applied_device[256] = "\x01";
-        proven_u8str_view_t dev = rubraview_settings_get_text(st, PROVEN_LIT("audio"), PROVEN_LIT("output_device"));
-        char now[256] = "";
-        if (dev.size < sizeof(now)) { proven_sys_mem_copy(now, dev.ptr, dev.size); now[dev.size] = '\0'; }
-        if (!proven_u8str_view_eq(proven_u8str_view_from_cstr(now), proven_u8str_view_from_cstr(applied_device))) {
-            rubraview_pal_audio_use_device(now);
-            proven_sys_mem_copy(applied_device, now, sizeof(now));
-        }
-    }
     rubraview_pal_audio_set_latency_ms((uint32_t)lround(rubraview_settings_get(st, PROVEN_LIT("audio"), PROVEN_LIT("wasapi_latency_ms"))));
-
     picker_columns_read(rubraview_settings_get_text(st, PROVEN_LIT("files"), PROVEN_LIT("picker_columns")));   /* 1.25.0 */
-    {   /* 1.25.0: the settings window's face, size or line spacing changed: laid out again */
-        static uint64_t last_look;
-        proven_u8str_view_t f = rubraview_settings_get_text(st, PROVEN_LIT("general"), PROVEN_LIT("font_settings"));
-        uint64_t look = (uint64_t)lround(rubraview_settings_get(st, PROVEN_LIT("general"), PROVEN_LIT("size_settings"))) * 1000u +
-                        (uint64_t)lround(rubraview_settings_get(st, PROVEN_LIT("general"), PROVEN_LIT("settings_spacing")));
-        for (size_t i = 0; i < f.size; ++i) look = (look ^ (unsigned char)f.ptr[i]) * 1099511628211ull;
-        if (look != last_look) {
-            last_look = look;
-            if (!first && app->settings_open && app->settings_window) {
-                settings_measure(app);
-                int32_t cols = 0, rows = 0;
-                settings_grid(app, &cols, &rows);
-                rubraview_settings_view_resize(&app->settings_view, cols, rows);
-                app->settings_dirty = true;
-            }
-        }
-    }
-
-    /* Text: shown at all (1.25.0) */
-    bool text_on = rubraview_settings_get(st, PROVEN_LIT("text"), PROVEN_LIT("viewer")) > 0.5;
-    if (text_on != g_text_on) {
-        g_text_on = text_on;
-        if (!first) settings_say(app, text_on ? T("text files are listed and shown again")
-                                              : T("text files are no longer listed or shown; a text file Windows sends here is not shown either"));
-    }
-
-    /* Display */
     static const double TILE[] = { 48.0, 64.0, 96.0 };
     int tile = (int)lround(rubraview_settings_get(st, PROVEN_LIT("display"), PROVEN_LIT("tile_base_px")));
     g_tile_base = TILE[tile >= 0 && tile < 3 ? tile : 1];
     g_widget_scale = rubraview_box_widget_size_clamp(rubraview_settings_get(st, PROVEN_LIT("ui"), PROVEN_LIT("widget_size"))) / 100.0;   /* RV-178 */
-    double color = rubraview_settings_get(st, PROVEN_LIT("display"), PROVEN_LIT("color_management"));
-    if (color != last_color) {
-        rubraview_pal_image_set_color_management(color > 0.5);
-        if (!first) unload_all_pages(app);   /* decoded again, with or without the profile */
-        last_color = color;
-    }
     static const uint32_t ACCENT[] = { 0xFFC0304Au, 0xFF3A78D8u, 0xFF2E9E6Au, 0xFFD08A1Eu, 0xFF1E9E9Eu, 0xFF8A4FD0u };
     int accent = (int)lround(rubraview_settings_get(st, PROVEN_LIT("display"), PROVEN_LIT("accent")));
     g_accent = ACCENT[accent >= 0 && accent < 6 ? accent : 0];
-
-    /* Cache */
     app->cache_budget = (size_t)rubraview_settings_get(st, PROVEN_LIT("cache"), PROVEN_LIT("memory_cap_mb")) * 1024u * 1024u;
     app->precache.want_ahead = app->precache.lookahead = (size_t)lround(rubraview_settings_get(st, PROVEN_LIT("cache"), PROVEN_LIT("lookahead")));
     app->precache.want_behind = app->precache.lookbehind = (size_t)lround(rubraview_settings_get(st, PROVEN_LIT("cache"), PROVEN_LIT("lookbehind")));
-    double privacy = rubraview_settings_get(st, PROVEN_LIT("cache"), PROVEN_LIT("privacy_clean"));
-    if (privacy != last_privacy) { app->export_options.privacy_clean = privacy > 0.5; last_privacy = privacy; }
-    double details = rubraview_settings_get(st, PROVEN_LIT("cache"), PROVEN_LIT("keep_details"));   /* 1.17.0 */
-    if (details != last_details) { app->export_options.keep_details = (int32_t)lround(details); last_details = details; }
-
     filmcache_for(app, (proven_u8str_view_t){ 0 });   /* RV-216: the cache's settings, till a film is opened */
+}
 
-    /* Keys */
-    double keymap = rubraview_settings_get(st, PROVEN_LIT("keys"), PROVEN_LIT("use_keymap_file"));
-    if (keymap != last_keymap) {
-        if (!first) load_keymap(app);
-        last_keymap = keymap;
+static void settings_apply_rest(app_state_t *app) {
+    static bool first = true;
+    static uint64_t seen[sizeof APPLY / sizeof APPLY[0]];
+    ap_every_pass(app);
+    for (size_t i = 0; i < sizeof APPLY / sizeof APPLY[0]; ++i) {
+        uint64_t now = rubraview_settings_print(&app->settings, APPLY[i].keys);
+        if (!first && now == seen[i]) continue;
+        seen[i] = now;
+        APPLY[i].run(app, first);
     }
     first = false;
 }
@@ -1915,18 +1882,20 @@ static void settings_path_end(app_state_t *app) {
 
 static void settings_path_commit(app_state_t *app) {
     proven_u8str_view_t text = rubraview_textedit_text(&app->spath_ec.te);
-    if (app->spath_number) {   /* 1.24.0 */
-        char buf[48];
-        size_t n = text.size < sizeof(buf) - 1 ? text.size : sizeof(buf) - 1;
-        proven_sys_mem_copy(buf, text.ptr, n);
-        buf[n] = '\0';
-        for (size_t i = 0; i < n; ++i) if (buf[i] == ',') buf[i] = '.';
-        char *end = NULL;
-        double v = proven_strtod(buf, &end);
-        if (!end || end == buf) { settings_say(app, T("that is not a number - put it right, or Esc")); return; }
-        rubraview_settings_set(&app->settings, app->spath_section, app->spath_key, v);   /* kept inside its range */
+    if (app->spath_number) {   /* 1.24.0; RV-311: an int's and a float's typed number read one way (core) */
+        const rubraview_setting_def_t *def = rubraview_settings_find(app->spath_section, app->spath_key);
+        double v = 0.0;
+        rubraview_number_typed_t got = rubraview_setting_number_typed(def, text, &v);
+        if (got == RUBRAVIEW_NUMBER_NOT) { settings_say(app, T("that is not a number - put it right, or Esc")); return; }
+        rubraview_settings_set(&app->settings, app->spath_section, app->spath_key, v);
         settings_path_end(app);
         settings_event(app, RUBRAVIEW_SEVENT_CHANGED);
+        if (got == RUBRAVIEW_NUMBER_CLAMPED) {   /* said, not cut without a word */
+            char line[160];
+            (void)rubraview_fmt(line, sizeof line, T("kept as {}: it goes from {} to {}"), PROVEN_ARG(rubraview_g_text((char[32]){0}, v, 6)),
+                                PROVEN_ARG(rubraview_g_text((char[32]){0}, def->min_value, 6)), PROVEN_ARG(rubraview_g_text((char[32]){0}, def->max_value, 6)));
+            settings_say(app, line);
+        }
         return;
     }
     /* RV-311: what is typed is checked as its kind says (a folder list's row is a folder) */

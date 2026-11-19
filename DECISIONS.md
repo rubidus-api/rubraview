@@ -4239,3 +4239,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: `path` stood for folders, free text, a pattern, fonts and a search; the window told them apart by section and key names in six places, and missed some: the places' faces (Title bar's name, menus, names, lists, buttons, this window) were checked as folders, and G'MIC's "gmic.exe or its folder" as a folder only.
 - Decision: the document's six words; `TEXT_WAYS` (browse, must be there, folder only, the five sentences) the only place a kind's behaviour is written; every `font` opens the picker; a `file` is browsed as a file and kept when a file or a folder is there; quotes and outer spaces are trimmed from what must be on the disk only (a command or a colour keeps them); `search` applies as typed. `check-settings` and `check-lang` know the words.
 - Consequences: R335; `test_settings_doc`; VM T490. Next in the plan: applying by table, the files apart (RV-310).
+
+## D-378: Typed Numbers By One Function, The Settings Applied By Table (RV-311)
+
+- Date: 2026-11-19
+- Status: Accepted (owner 2026-11-19, the RV-311 plan; "정수값과 실수값 같은 것도"; quoted in R336).
+- Context: a typed number was read in the window (a comma, `strtod`) and cut to its range without a word; an int took a fraction. `settings_apply_rest` held about 200 lines, each change found by a `static last_` value of its own, written one way here and another there.
+- Decision: core `rubraview_setting_number_typed` (`RUBRAVIEW_NUMBER_OK`, `_CLAMPED`, `_NOT`) and `rubraview_settings_print` (a fingerprint of the values of the settings named, "section.key ..."); the window's typed number uses the first and says a clamp. `settings_apply_rest` is `ap_every_pass` (copied every pass) and the table `APPLY` of thirteen rows (`ap_fit`, `ap_layout`, `ap_spreads`, `ap_listing`, ...), each called the first time and when its fingerprint changes. A fingerprint, not the per-value revisions: Revert and another window's file change values without them. `check-settings` checks the table's names.
+- Consequences: R336; `test_settings` (T492); VM T491. Adding a setting that acts on a change is a function and a row.

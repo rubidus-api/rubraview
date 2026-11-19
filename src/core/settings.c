@@ -367,3 +367,54 @@ void rubraview_settings_reset_one(rubraview_settings_t *settings, proven_u8str_v
     const rubraview_setting_def_t *d = rubraview_settings_find(section, key);
     if (d) reset_where(settings, -1, d);
 }
+
+rubraview_number_typed_t rubraview_setting_number_typed(const rubraview_setting_def_t *def, proven_u8str_view_t text, double *out) {
+    if (!def || !out || (def->type != RUBRAVIEW_SETTING_INT && def->type != RUBRAVIEW_SETTING_FLOAT) || !text.ptr) return RUBRAVIEW_NUMBER_NOT;
+    size_t a = 0, b = text.size;
+    while (a < b && (text.ptr[a] == ' ' || text.ptr[a] == '\t')) a++;
+    while (b > a && (text.ptr[b - 1] == ' ' || text.ptr[b - 1] == '\t')) b--;
+    if (def->unit.size > 0 && b - a > def->unit.size && proven_sys_mem_cmp(text.ptr + b - def->unit.size, def->unit.ptr, def->unit.size) == 0) {
+        b -= def->unit.size;   /* "130 %", "36px" for its own unit */
+        while (b > a && (text.ptr[b - 1] == ' ' || text.ptr[b - 1] == '\t')) b--;
+    }
+    char buf[48];
+    if (b <= a || b - a >= sizeof buf) return RUBRAVIEW_NUMBER_NOT;
+    for (size_t i = a; i < b; ++i) buf[i - a] = text.ptr[i] == ',' ? '.' : (char)text.ptr[i];
+    buf[b - a] = '\0';
+    char *end = NULL;
+    double v = proven_strtod(buf, &end);
+    if (!end || end == buf || *end != '\0' || !isfinite(v)) return RUBRAVIEW_NUMBER_NOT;
+    if (def->type == RUBRAVIEW_SETTING_INT) v = round(v);
+    rubraview_number_typed_t said = RUBRAVIEW_NUMBER_OK;
+    if (v < def->min_value) { v = def->min_value; said = RUBRAVIEW_NUMBER_CLAMPED; }
+    if (v > def->max_value) { v = def->max_value; said = RUBRAVIEW_NUMBER_CLAMPED; }
+    *out = v;
+    return said;
+}
+
+uint64_t rubraview_settings_print(const rubraview_settings_t *settings, const char *keys) {
+    uint64_t h = 1469598103934665603ull;
+    if (!settings || !keys) return h;
+    size_t count = 0;
+    const rubraview_setting_def_t *schema = rubraview_settings_schema(&count);
+    for (const char *p = keys; *p;) {
+        while (*p == ' ') p++;
+        const char *dot = NULL, *end = p;
+        while (*end && *end != ' ') { if (*end == '.' && !dot) dot = end; end++; }
+        if (dot && end > dot + 1) {
+            proven_u8str_view_t section = { (const proven_byte_t *)p, (size_t)(dot - p) }, key = { (const proven_byte_t *)dot + 1, (size_t)(end - dot - 1) };
+            const rubraview_setting_def_t *def = rubraview_settings_find(section, key);
+            if (def) {
+                size_t i = (size_t)(def - schema);
+                uint64_t bits = 0;
+                proven_sys_mem_copy(&bits, &settings->values[i], sizeof bits);
+                for (int k = 0; k < 8; ++k) h = (h ^ ((bits >> (8 * k)) & 0xFFu)) * 1099511628211ull;
+                proven_u8str_view_t t = settings->texts[i];
+                for (size_t k = 0; k < t.size; ++k) h = (h ^ t.ptr[k]) * 1099511628211ull;
+                h = (h ^ 0xFFu) * 1099511628211ull;   /* where one ends */
+            }
+        }
+        p = end;
+    }
+    return h;
+}

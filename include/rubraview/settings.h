@@ -153,6 +153,20 @@ proven_u8str_view_t rubraview_settings_get_text(const rubraview_settings_t *sett
 
 /** Set a value, clamped and stepped to the schema's range. */
 void rubraview_settings_set(rubraview_settings_t *settings, proven_u8str_view_t section, proven_u8str_view_t key, double value);
+
+/* RV-311 (owner, 2026-11-19: "종류 표준화에서, 정수값과 실수값 같은 것도"): a number typed for an int or a float setting,
+   one way for all: spaces and the setting's own unit at the end taken off, a comma read as the point, an int rounded,
+   a value past the range kept at its end and said so. */
+typedef enum rubraview_number_typed {
+    RUBRAVIEW_NUMBER_OK = 0,
+    RUBRAVIEW_NUMBER_CLAMPED,   /* `*out` is the end of the range it went past */
+    RUBRAVIEW_NUMBER_NOT,       /* not a number (or not one this setting takes) */
+} rubraview_number_typed_t;
+/* RV-311: one number for the values of the settings `keys` names ("section.key section.key", spaces between), to see
+   that one of them changed whatever changed it (a key, a click, Revert, another window's file). */
+uint64_t rubraview_settings_print(const rubraview_settings_t *settings, const char *keys);
+
+rubraview_number_typed_t rubraview_setting_number_typed(const rubraview_setting_def_t *def, proven_u8str_view_t text, double *out);
 /**
  * D-99: several viewers may be open at once. What this one writes is the
  * file as it is now with only the settings this one changed since
