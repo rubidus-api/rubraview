@@ -269,3 +269,51 @@ size_t rubraview_keymap_rows(const rubraview_keymap_t *keymap, rubraview_key_mod
 #undef ROWS_PUSH
     return n;
 }
+
+/* ---- RFC-0010 §4.8: the modifier filter and the search ---- */
+
+bool rubraview_keymods_pass(uint32_t modifiers, int filter) {
+    uint32_t m = modifiers & (RUBRAVIEW_MOD_SHIFT | RUBRAVIEW_MOD_CTRL | RUBRAVIEW_MOD_ALT);
+    switch (filter) {
+        case RUBRAVIEW_KEYMODS_ALONE: return m == 0;
+        case RUBRAVIEW_KEYMODS_SHIFT: return m == RUBRAVIEW_MOD_SHIFT;
+        case RUBRAVIEW_KEYMODS_CTRL:  return m == RUBRAVIEW_MOD_CTRL;
+        case RUBRAVIEW_KEYMODS_ALT:   return m == RUBRAVIEW_MOD_ALT;
+        case RUBRAVIEW_KEYMODS_OTHER: return m != 0 && (m & (m - 1)) != 0;
+        default:                      return true;
+    }
+}
+
+static proven_byte_t fold(proven_byte_t c) { return c >= 'A' && c <= 'Z' ? (proven_byte_t)(c + 32) : c; }
+
+bool rubraview_text_has(proven_u8str_view_t hay, proven_u8str_view_t needle) {
+    if (needle.size == 0) return true;
+    if (!hay.ptr || !needle.ptr || needle.size > hay.size) return false;
+    for (size_t i = 0; i + needle.size <= hay.size; ++i) {
+        size_t j = 0;
+        while (j < needle.size && fold(hay.ptr[i + j]) == fold(needle.ptr[j])) ++j;
+        if (j == needle.size) return true;
+    }
+    return false;
+}
+
+size_t rubraview_keyrows_filter(rubraview_keyrow_entry_t *rows, size_t n, int mods, rubraview_keyrow_keep_fn keep, void *ctx) {
+    if (!rows) return 0;
+    size_t w = 0, head = SIZE_MAX, found = 0;
+    for (size_t r = 0; r < n; ++r) {
+        rubraview_keyrow_entry_t e = rows[r];
+        if (e.heading) {
+            if (head != SIZE_MAX && keep && found == 0) w = head;   /* a search found nothing in the row before */
+            e.left_out = 0;
+            head = w;
+            found = 0;
+            rows[w++] = e;
+            continue;
+        }
+        bool stays = rubraview_keymods_pass(e.combo.modifiers, mods) && (!keep || keep(&e, ctx));
+        if (stays) { rows[w++] = e; found++; }
+        else if (e.binding >= 0 && head != SIZE_MAX) rows[head].left_out++;
+    }
+    if (head != SIZE_MAX && keep && found == 0) w = head;
+    return w;
+}

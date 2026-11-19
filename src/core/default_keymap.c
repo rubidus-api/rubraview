@@ -172,6 +172,8 @@ static const char *const KEYMAP_PARTS[] = {
     /* RV-297 (owner, 2026-11-16: "그 이전 g의 기본 동작은 j로"): the pixel grid on J (G until 1.45, Shift+G in 1.46) */
     "toggle_pixel_grid = \"J\"\n"
     "toggle_layout = \"N\"\n"
+    /* RV-290: a picture has no end to cycle; its Ctrl+R turns the shuffle (a film's and a song's [playback] come first) */
+    "toggle_shuffle = \"Ctrl+R\"\n"
     "toggle_first_page_alone = \"Shift+N\"\n"
     "toggle_spread_detect = \"\"\n"
     "\n"

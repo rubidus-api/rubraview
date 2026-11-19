@@ -165,6 +165,7 @@ ships with, so it cannot drift from them.
 | `Shift+J` | Crisp scaling for pixel art |
 | `J` | Pixel grid past 400% |
 | `N` | Layout: one page, two pages, webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
+| `Ctrl+R` | Shuffle on or off: Next picks at random among pictures, films and songs, Previous goes back the way it came |
 | `Shift+N` | Two pages: the first page alone, as a book's cover |
 
 **Pages inside one file (a TIFF or an ICO of several pages)**
@@ -302,7 +303,6 @@ ships with, so it cannot drift from them.
 | Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
 | Right click `Favourites...` | The favourites, files and folders, in a list widget: open, reorder, remove |
 | Right click `Add to favourites` | Make the file on screen a favourite, or no longer one |
-| Right click `Shuffle` | Shuffle on or off: Next picks at random among pictures, films and songs, Previous goes back the way it came |
 | Right click `One page` | Layout: one page at a time |
 | Right click `Two pages` | Layout: two pages side by side |
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |

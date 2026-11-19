@@ -1113,7 +1113,8 @@ While it does:
   random order, each once before any comes again, and never the same one
   twice in a row. Pictures between them are passed over. `Next` is where it
   starts.
-- With **Shuffle** on (a picture's right click has it too), the next page
+- With **Shuffle** on (a picture's right click has it too, and `Ctrl+R`
+  on a picture turns it on or off), the next page
   or file — `PgDn`, a side's click, the buttons, the end of a film or a
   song, the slide show — is picked at random among the pictures, films and
   songs, and the way taken is remembered: the previous one goes back along
@@ -2189,7 +2190,13 @@ combinations on its own line (`R`, `Shift+R`, `Ctrl+R`), a key with
 nothing on it *not set*, a common key marked *[everywhere]*, and a key
 that an earlier one hides named after it (*hides: ...*). There `Enter`
 on a key and then another key gives the action that key instead;
-`Delete` takes the key off. The help (`?` or `H`) ends with a list by key too.
+`Delete` takes the key off. **By keyboard row, show** keeps the
+combinations of one kind — a key alone, with `Shift`, with `Ctrl` or with
+`Alt` alone, or combined (two or more of them) — every row staying and
+saying how many it leaves out; **By keyboard row, find** keeps only the
+keys whose name or action has the letters typed (`Shift+R`, *zoom*), the
+rows with none going away (empty: every key). The help (`?` or `H`) ends
+with a list by key too.
 
 **The left hand's keys (RFC-0010).** `W` `A` `S` `D` do what the arrows do
 where the arrows mean the same: `A` / `D` the page before and after on a
@@ -2350,6 +2357,7 @@ listed under a later heading only means that while that is on screen.
 | `Shift+J` | Crisp scaling for pixel art |
 | `J` | Pixel grid past 400% |
 | `N` | Layout: one page, two pages, webtoon (one long strip), comic (wide scans in halves) — the next of them; two pages and comic are each followed by the same read right to left; a tap on its button lists them to choose from |
+| `Ctrl+R` | Shuffle on or off: Next picks at random among pictures, films and songs, Previous goes back the way it came |
 | `Shift+N` | Two pages: the first page alone, as a book's cover |
 
 **Pages inside one file (a TIFF or an ICO of several pages)**
@@ -2487,7 +2495,6 @@ listed under a later heading only means that while that is on screen.
 | Right click `Delete the file...` | A file of a list, right-clicked: to the recycle bin, after a warning and a yes |
 | Right click `Favourites...` | The favourites, files and folders, in a list widget: open, reorder, remove |
 | Right click `Add to favourites` | Make the file on screen a favourite, or no longer one |
-| Right click `Shuffle` | Shuffle on or off: Next picks at random among pictures, films and songs, Previous goes back the way it came |
 | Right click `One page` | Layout: one page at a time |
 | Right click `Two pages` | Layout: two pages side by side |
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |

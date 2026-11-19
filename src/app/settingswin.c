@@ -380,6 +380,9 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
         int n = 0;
         if (index == 0) {
             n = rubraview_fmt(buffer, capacity, T("on {}: what each key does  (Enter: another key for it, Delete: take it off)"), PROVEN_ARG(keys_row_screen_words(app)));
+            proven_u8str_view_t find = rubraview_settings_get_text(&app->settings, PROVEN_LIT("keys"), PROVEN_LIT("row_find"));
+            if (n > 0 && find.size > 0 && (size_t)n < capacity)   /* RFC-0010 §4.8: a search kept in the settings is said */
+                n += rubraview_fmt(buffer + n, capacity - (size_t)n, T("  finding: {}"), PROVEN_ARG(find));
         } else if (index <= g_key_row_count) {
             const rubraview_keyrow_entry_t *e = &g_key_rows[index - 1];
             if (e->heading) {
@@ -393,6 +396,8 @@ static size_t settings_table_row(void *user, proven_u8str_view_t source, size_t 
                     first = false;
                 }
                 if (n > 0 && (size_t)n + 4 < capacity) n += rubraview_fmt(buffer + n, capacity - (size_t)n, " --");
+                if (n > 0 && e->left_out > 0 && (size_t)n + 4 < capacity)   /* RFC-0010 §4.8: what the filter took away */
+                    n += rubraview_fmt(buffer + n, capacity - (size_t)n, T("  ({} more not shown)"), PROVEN_ARG((int64_t)e->left_out));
             } else {
                 char one[64];
                 proven_u8str_view_t named = rubraview_key_combo_format(one, sizeof(one), e->combo);
@@ -515,10 +520,28 @@ static int key_row_compare(const void *pa, const void *pb) {
     return a->binding < b->binding ? -1 : a->binding > b->binding ? 1 : 0;
 }
 
+/* RFC-0010 §4.8: a key's line found by its name, or its action's words in the reader's language or in English */
+static bool keys_row_found(const rubraview_keyrow_entry_t *e, void *ctx) {
+    app_state_t *app = ctx;
+    proven_u8str_view_t find = rubraview_settings_get_text(&app->settings, PROVEN_LIT("keys"), PROVEN_LIT("row_find"));
+    char one[64];
+    if (rubraview_text_has(rubraview_key_combo_format(one, sizeof(one), e->combo), find)) return true;
+    if (e->binding < 0) return false;
+    const rubraview_key_binding_t *b = &app->keymap.bindings[e->binding];
+    const char *words = rubraview_action_words(b->action);
+    if (words && (rubraview_text_has(proven_u8str_view_from_cstr(words), find) ||
+                  rubraview_text_has(proven_u8str_view_from_cstr(rubraview_tr(words)), find))) return true;
+    return rubraview_text_has(b->action, find);
+}
+
 void keymap_table_refresh(app_state_t *app) {
     g_key_row_count = 0;
     if (g_keys_by_row) {   /* RV-303 */
         g_key_row_count = rubraview_keymap_rows(&app->keymap, keys_row_mode(app), g_key_rows, KEY_ROWS_MAX);
+        /* RFC-0010 §4.8: which combinations, and the letters looked for */
+        int mods = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("keys"), PROVEN_LIT("row_mods")));
+        proven_u8str_view_t find = rubraview_settings_get_text(&app->settings, PROVEN_LIT("keys"), PROVEN_LIT("row_find"));
+        g_key_row_count = rubraview_keyrows_filter(g_key_rows, g_key_row_count, mods, find.size > 0 ? keys_row_found : NULL, app);
         rubraview_settings_view_set_table_rows(&app->settings_view, (int32_t)g_key_row_count + 1);
         return;
     }
@@ -895,6 +918,18 @@ static void settings_apply_rest(app_state_t *app) {
     double row_screen = rubraview_settings_get(st, PROVEN_LIT("keys"), PROVEN_LIT("row_screen"));
     if (row_screen != last_row_screen) {
         last_row_screen = row_screen;
+        if (g_keys_by_row) keymap_table_refresh(app);
+    }
+    static double last_row_mods = -1.0;   /* RFC-0010 §4.8: the filter and the search */
+    static char last_row_find[128];
+    static size_t last_find_len;
+    double row_mods = rubraview_settings_get(st, PROVEN_LIT("keys"), PROVEN_LIT("row_mods"));
+    proven_u8str_view_t row_find = rubraview_settings_get_text(st, PROVEN_LIT("keys"), PROVEN_LIT("row_find"));
+    size_t find_len = row_find.size < sizeof(last_row_find) ? row_find.size : sizeof(last_row_find);
+    proven_u8str_view_t find_now = { .ptr = row_find.ptr, .size = find_len };
+    if (row_mods != last_row_mods || !proven_u8str_view_eq((proven_u8str_view_t){ (const proven_byte_t *)last_row_find, last_find_len }, find_now)) {
+        last_row_mods = row_mods;
+        last_find_len = find_len && proven_mem_copy(last_row_find, sizeof(last_row_find), (proven_mem_view_t){ .ptr = row_find.ptr, .size = find_len }) == PROVEN_OK ? find_len : 0;
         if (g_keys_by_row) keymap_table_refresh(app);
     }
 
@@ -1799,6 +1834,11 @@ static void settings_capture_key(app_state_t *app, rubraview_key_combo_t combo) 
    "경로 직접 입력 가능하게. 반대로 현재 경로를 편집 가능한 에디트 컨트롤에
    넣어서 복사해갈 수도 있게") ---- */
 
+/* RFC-0010 §4.8: the keys' search is letters, no folder: no Browse, nothing looked for on the disk */
+static bool spath_is_search(const app_state_t *app) {
+    return proven_u8str_view_eq(app->spath_section, PROVEN_LIT("keys")) && proven_u8str_view_eq(app->spath_key, PROVEN_LIT("row_find"));
+}
+
 void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def) {
     editbox_begin(&app->spath_ec, app->spath_buffer, sizeof(app->spath_buffer), false);
     proven_u8str_view_t now = rubraview_settings_get_text(&app->settings, def->section, def->key);
@@ -1810,7 +1850,8 @@ void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def) {
     app->spath_composing_length = 0;
     app->spath_active = true;
     rubraview_pal_window_text_input(app->settings_window, true);
-    settings_say(app, T("type or paste a folder; Enter keeps it, Esc leaves it, Ctrl+O browses, Ctrl+C copies"));
+    settings_say(app, spath_is_search(app) ? T("type the letters to find; Enter keeps them, Esc leaves it as it was")
+                                           : T("type or paste a folder; Enter keeps it, Esc leaves it, Ctrl+O browses, Ctrl+C copies"));
 }
 
 /* 1.24.0 (owner, 2026-10-19: "모든 슬라이드 컨트롤은 텍스트로 직접 입력"): a slider's number typed in the same box. */
@@ -1865,7 +1906,7 @@ static void settings_path_commit(app_state_t *app) {
     while (text.size > 0 && (text.ptr[0] == ' ' || text.ptr[0] == '"')) { text.ptr++; text.size--; }
     while (text.size > 0 && (text.ptr[text.size - 1] == ' ' || text.ptr[text.size - 1] == '"')) text.size--;
     /* RV-106: "Only names like" is typed like a folder and is not one. */
-    bool is_folder = !proven_u8str_view_eq(app->spath_section, PROVEN_LIT("text")) &&   /* 1.25.0: an editor, colours */
+    bool is_folder = !spath_is_search(app) && !proven_u8str_view_eq(app->spath_section, PROVEN_LIT("text")) &&   /* 1.25.0: an editor, colours */
                      !(proven_u8str_view_eq(app->spath_section, PROVEN_LIT("files")) && proven_u8str_view_eq(app->spath_key, PROVEN_LIT("pattern"))) &&
                      (!proven_u8str_view_eq(app->spath_section, PROVEN_LIT("video")) ||   /* RV-107: a font's name, a language */
                       proven_u8str_view_eq(app->spath_key, PROVEN_LIT("ffmpeg_dir")));
@@ -1947,7 +1988,7 @@ static bool settings_path_key(app_state_t *app, rubraview_key_combo_t combo) {
     } else if (key_is(combo, "Escape")) {
         settings_path_end(app);
         settings_say(app, T("folder left as it was"));
-    } else if (ctrl && key_is(combo, "O")) {
+    } else if (ctrl && key_is(combo, "O") && !spath_is_search(app)) {
         settings_path_browse(app);
     } else {
         (void)editbox_key(app->settings_window, &app->spath_ec, combo, false);   /* RV-293 */
@@ -2079,7 +2120,7 @@ static void settings_path_draw(app_state_t *app) {
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cx, y + 2.0, 1.5, ch - 4.0 }, SETTINGS_TEXT, 0.0);
     /* 1.24.0: its buttons on the row under it — OK, Cancel, and Browse... for a folder */
     const char *words[3] = { T("OK"), T("Cancel"), T("Browse...") };
-    int32_t n = app->spath_number || (proven_u8str_view_eq(app->spath_section, PROVEN_LIT("files")) && proven_u8str_view_eq(app->spath_key, PROVEN_LIT("pattern"))) ? 2 : 3;
+    int32_t n = app->spath_number || spath_is_search(app) || (proven_u8str_view_eq(app->spath_section, PROVEN_LIT("files")) && proven_u8str_view_eq(app->spath_key, PROVEN_LIT("pattern"))) ? 2 : 3;
     double bx = box.x, by = box.y + box.height + pad, bh = ch + 2.0 * pad;
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ box.x, box.y + box.height, box.width, bh + 2.0 * pad }, SETTINGS_BACKGROUND, 0.0);   /* the rows under it covered */
     app->spath_btn_n = n;
