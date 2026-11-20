@@ -1060,13 +1060,22 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
             if (n > 0) list_add_paths(app, plain, n, false);
             break;
         }
-        case RUBRAVIEW_SHELL_VERB_BROWSE:
+        case RUBRAVIEW_SHELL_VERB_BROWSE: {
+            rubraview_fs_entry_t is;   /* RV-312: a folder (a job window's Open it here): the open-file screen there */
+            if (rubraview_pal_fs_stat(app->arena, paths[0], &is) && is.is_directory) {
+                if (picker_in_archive(app)) picker_leave_archive(app);
+                if (!app->picker_open) handle_action(app, PROVEN_LIT("open_picker"));
+                picker_navigate(app, paths[0]);
+                app->picker.focus = 0;
+                break;
+            }
             open_path(app, paths[0]);
             if (app->source.archive_path.size > 0 && rubraview_path_same(app->source.archive_path, paths[0])) {
                 app->picker_dir = PROVEN_LIT("");
                 picker_open(app);
             }
             break;
+        }
         case RUBRAVIEW_SHELL_VERB_CONVERT: {
             proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count, sizeof(proven_u8str_view_t));
             if (!proven_is_ok(res.err)) break;

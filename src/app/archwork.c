@@ -627,6 +627,14 @@ void archwork_poll(app_state_t *app, bool quitting) {
             extractwin_ask_password(app, proven_u8str_view_from_cstr(w->archives[w->at]), r == RUBRAVIEW_ARCHIVE_PASSWORD_WRONG);
             return;
         }
+        /* RV-312: the job's own window asked it and was left without one: nothing is asked in the main window */
+        g_waiting = NULL;
+        proven_u8str_view_t locked = rubraview_path_basename(proven_u8str_view_from_cstr(w->archives[w->at]));
+        rubraview_fmt(line, sizeof line, T("{} is locked: not extracted"), PROVEN_ARG(rubraview_bytes_view((const char *)locked.ptr, (int)locked.size)));
+        app_log(app, "archive", cstr(line));
+        if (app->picker_open) picker_navigate(app, app->picker_dir);
+        work_free(w);
+        return;
         if (app->rename_active) rename_end(app);
         rename_field_begin(app);
         app->rename_active = true;
@@ -660,11 +668,7 @@ void archwork_poll(app_state_t *app, bool quitting) {
             work_free(w);
             return;
         }
-        if (w->written > 0 && w->last_root[0]) {   /* RV-240: what next, asked */
-            rubraview_fmt(app->extract_done_line, sizeof app->extract_done_line, "{}", PROVEN_ARG(line));
-            rubraview_fmt(app->extract_done_path, sizeof app->extract_done_path, "{}", PROVEN_ARG(w->last_root));
-            app->extract_done = true;
-        }
+        /* RV-312: what next (Open it here, Show in Explorer) is the job's own window's, not a card here (RV-240's) */
     } else {
         rubraview_fmt(line, sizeof line, "{}{}{}", PROVEN_ARG(rubraview_archive_result_text(r)), PROVEN_ARG(w->ex.why[0] ? "  -  " : ""), PROVEN_ARG(w->ex.why));
         if (w->windowed) { extractwin_finished(app, false, false, cstr(line), cstr(w->last_root)); work_free(w); return; }   /* RV-272 */

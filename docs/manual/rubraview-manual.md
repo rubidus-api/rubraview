@@ -2009,8 +2009,10 @@ compress again. Maximum and Ultra with LZMA or LZMA2 pack as 7-Zip does: a large
 file may take about 1.5 GB or 3 GB of memory, and the window says so. The bar at the foot has **Extract** and
 **Compress**, when they fit what is picked. **Extract** (and Extract to...) first asks into which folder, the
 archive's own offered (**Browse...** or `Ctrl+O` picks another; one not there is made), and puts a folder of
-the archive's name in it as Settings › Files › Extracting says; when it is done a card offers **Open it here**
-(`Enter`), **Show in Explorer** and **Close** (`Esc`). Names an archive stores in the computer's own code page
+the archive's name in it as Settings › Files › Extracting says. The work runs in a window of its own, beside
+Rubraview's, which goes on as before: a locked archive asks its password there, and when it is done that window
+offers **Open it here** (the folder in this open-file screen), **Show in Explorer** and **Close**; a compression's
+and a copy's or move's window do the same for where they put things. Names an archive stores in the computer's own code page
 (a Korean Windows' CP949, without the Unicode flag) are read in that code page, in the list, in a book and in
 what is extracted. **Look inside
 (an archive)** (or `Shift+Enter`) lists all of an archive's folders and

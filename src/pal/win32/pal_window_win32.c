@@ -679,6 +679,18 @@ static void keep_on_screen(HWND hwnd, int x, int y, int ww, int wh) {
     SetWindowPos(hwnd, NULL, x, y, ww, wh, SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
+/* RV-312: a job's process (or another helper) shows windows of the viewer's class; a request handed over from another
+   launch must reach a viewer, not them (VM T494: a job window on top took the --browse of its own Open it here). */
+static bool g_helper_process;
+#define HELPER_PROP L"RubraviewHelperWindow"
+void rubraview_pal_window_helper_process(void) { g_helper_process = true; }
+
+static HWND viewer_window(void) {
+    for (HWND h = FindWindowExW(NULL, NULL, RUBRAVIEW_WINDOW_CLASS, NULL); h; h = FindWindowExW(NULL, h, RUBRAVIEW_WINDOW_CLASS, NULL))
+        if (!GetPropW(h, HELPER_PROP)) return h;
+    return NULL;
+}
+
 rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rubraview_window_config_t *config) {
     if (!arena || !config) return NULL;
 
@@ -744,6 +756,7 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
                                 CW_USEDEFAULT, CW_USEDEFAULT, width, height,
                                 owner_hwnd, NULL, instance, w);
     if (!hwnd) return NULL;
+    if (g_helper_process) SetPropW(hwnd, HELPER_PROP, (HANDLE)1);   /* RV-312: no viewer's window: a hand-over passes it by */
 
     w->hwnd = hwnd;
     update_dpi_scale(w);
@@ -1544,7 +1557,7 @@ bool rubraview_pal_instance_claim(void) {
 }
 
 bool rubraview_pal_instance_hand_over(proven_u8str_view_t path) {
-    HWND target = FindWindowW(RUBRAVIEW_WINDOW_CLASS, NULL);
+    HWND target = viewer_window();
     if (!target) return false;
 
     if (IsIconic(target)) ShowWindow(target, SW_RESTORE);
@@ -1594,7 +1607,7 @@ bool rubraview_pal_instance_send_request(proven_u8str_view_t blob_view, uint32_t
     if (!blob || len == 0 || len > 0x7FFFFFFFu) return false;
     HWND target = NULL;
     for (uint32_t waited = 0;; waited += 100) {
-        target = FindWindowW(RUBRAVIEW_WINDOW_CLASS, NULL);
+        target = viewer_window();
         if (target || waited >= wait_ms) break;
         Sleep(100);   /* the first of several launches is still making its window */
     }

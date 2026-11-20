@@ -243,6 +243,18 @@ typedef struct jp_win {
     const char *yes;                   /* RV-294: a question with the summary (an older split's parts): its button */
     rubraview_pal_rect_t yes_btn;
     bool   yes_pressed;
+    /* RV-312 (owner, 2026-11-20: "압축을 풀고 나서, 혹은 파일 이동이나 복사를 끝마치고 나서 ... 메인창 내에 위젯이 떠서 안내하는데,
+       이건 창 외부의 별개 프로세스 창에서 처리해야 할 일 ... 해당 위치를 열기 같은 것도 역시 외부 창에서"): where the work went,
+       opened from here when it has ended — in Rubraview's open-file screen or in Explorer — and a locked archive's password
+       asked here, so the main window keeps its own work */
+    char   dest[1100];                 /* the folder ("" none) */
+    char   dest_file[1100];            /* a file made there (a new archive), shown selected in Explorer */
+    rubraview_pal_rect_t here_btn, explorer_btn;
+    bool   here_pressed, explorer_pressed;
+    bool   asking_pw;                  /* the archive is locked: the field and its button (`yes`) are up */
+    rubraview_editctl_t pw_ec;
+    char   pw_buf[256], pw_comp[64];
+    editbox_view_t pw_view;
 } jp_win_t;
 
 static bool pw_show(jp_win_t *w, proven_arena_t *arena, proven_u8str_view_t ui_font, double now) {
@@ -325,6 +337,31 @@ static void pw_draw(jp_win_t *w, const rubraview_jobwire_progress_t *p, bool end
         rubraview_pal_render_stroke_rect(r, w->button, 0xFF4A525Cu, 1.0, 4.0 * dpi);
         rubraview_pal_render_draw_text(r, cstr(word), w->button, 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
+    if (ended && w->asking_pw) {   /* RV-312: the password, typed here (hidden) */
+        rubraview_pal_rect_t box = { pad, y + 30.0 * dpi, width, 28.0 * dpi };
+        rubraview_pal_render_fill_rect(r, box, 0xFF101215u, 3.0 * dpi);
+        rubraview_pal_render_stroke_rect(r, box, PW_ON, 1.0, 3.0 * dpi);
+        w->pw_view.box = (rubraview_pal_rect_t){ box.x + 6.0 * dpi, box.y + 4.0 * dpi, box.width - 12.0 * dpi, box.height - 8.0 * dpi };
+        w->pw_view.size = 14.0 * dpi;
+        w->pw_view.secret = true;
+        editbox_draw(r, &w->pw_ec, &w->pw_view, proven_u8str_view_from_cstr(w->pw_comp), true, PW_TEXT, dpi);
+    }
+    w->here_btn = w->explorer_btn = (rubraview_pal_rect_t){0};
+    if (ended && !w->yes && !w->asking_pw && w->dest[0]) {   /* RV-312: where it went, left of Close */
+        const char *words[2] = { T("Show in Explorer"), T("Open it here") };
+        rubraview_pal_rect_t *rects[2] = { &w->explorer_btn, &w->here_btn };
+        double right = w->button.x - 8.0 * dpi;
+        for (int i = 0; i < 2; ++i) {
+            double bw = 0.0;
+            (void)rubraview_pal_render_measure_text(r, cstr(words[i]), 13.0 * dpi, &bw);
+            *rects[i] = (rubraview_pal_rect_t){ right - bw - 32.0 * dpi, w->button.y, bw + 32.0 * dpi, w->button.height };
+            right = rects[i]->x - 8.0 * dpi;
+            bool on = pal_rect_has(*rects[i], w->px, w->py);
+            rubraview_pal_render_fill_rect(r, *rects[i], i == 1 ? (on ? 0xFF4F9CF7u : PW_ON) : (on ? 0x50FFFFFFu : 0xFF2A2F36u), 4.0 * dpi);
+            if (i == 0) rubraview_pal_render_stroke_rect(r, *rects[i], 0xFF4A525Cu, 1.0, 4.0 * dpi);
+            rubraview_pal_render_draw_text(r, cstr(words[i]), *rects[i], 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
+    }
     w->yes_btn = (rubraview_pal_rect_t){0};
     if (ended && w->yes) {   /* RV-294: the question's own button, left of Close */
         double yw = 0.0;
@@ -335,6 +372,23 @@ static void pw_draw(jp_win_t *w, const rubraview_jobwire_progress_t *p, bool end
         rubraview_pal_render_draw_text(r, cstr(w->yes), w->yes_btn, 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
     if (!rubraview_pal_render_end(r)) w->dirty = true;
+}
+
+/* RV-312: Open it here — the folder in the open-file screen of the viewer that is open (`--browse`, handed over as
+   Explorer's verbs are); Show in Explorer — Windows' own, a new archive selected. */
+static void pw_where_went(jp_win_t *w, proven_arena_t *arena) {
+    if (w->here_pressed) {
+        w->here_pressed = false;
+        proven_u8str_view_t exe = rubraview_pal_process_executable(arena);
+        char line[2400];
+        int n = rubraview_fmt(line, sizeof line, "\"{}\" --browse \"{}\"", PROVEN_ARG(exe), PROVEN_ARG(w->dest));
+        if (n > 0 && (size_t)n < sizeof line) (void)rubraview_pal_process_start_apart(proven_u8str_view_from_cstr(line));
+    }
+    if (w->explorer_pressed) {
+        w->explorer_pressed = false;
+        if (w->dest_file[0]) (void)rubraview_pal_shell_reveal(cstr(w->dest_file));
+        else (void)rubraview_pal_shell_open_folder(cstr(w->dest), false);
+    }
 }
 
 /* Its messages: true when it was closed (X, Esc, its button). */
@@ -350,8 +404,29 @@ static bool pw_pump(jp_win_t *w) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
                 if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && pal_rect_has(w->button, event.mouse.x, event.mouse.y)) closed = true;
                 if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && w->yes && pal_rect_has(w->yes_btn, event.mouse.x, event.mouse.y)) w->yes_pressed = true;
+                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && w->here_btn.width > 0 && pal_rect_has(w->here_btn, event.mouse.x, event.mouse.y)) w->here_pressed = true;
+                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && w->explorer_btn.width > 0 && pal_rect_has(w->explorer_btn, event.mouse.x, event.mouse.y)) w->explorer_pressed = true;
+                if (w->asking_pw && event.mouse.button == RUBRAVIEW_MOUSE_LEFT)
+                    (void)editbox_pointer_down(w->renderer, &w->pw_ec, &w->pw_view, event.mouse.x, event.mouse.y, false);
+                w->dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_TEXT:
+            case RUBRAVIEW_WINDOW_EVENT_COMPOSITION:
+                if (w->asking_pw) {
+                    proven_u8str_view_t typed = { .ptr = (const proven_byte_t *)event.text.utf8, .size = event.text.length };
+                    if (event.kind == RUBRAVIEW_WINDOW_EVENT_TEXT) { editbox_text(&w->pw_ec, typed, true); w->pw_comp[0] = '\0'; }
+                    else (void)rubraview_fmt(w->pw_comp, sizeof w->pw_comp, "{}", PROVEN_ARG(typed));
+                    w->dirty = true;
+                }
                 break;
             case RUBRAVIEW_WINDOW_EVENT_KEY_DOWN:
+                if (w->asking_pw) {   /* RV-312: Enter extracts with it, Esc leaves the archive locked */
+                    if (key_is(event.key.combo, "Enter")) w->yes_pressed = true;
+                    else if (key_is(event.key.combo, "Escape")) closed = true;
+                    else (void)editbox_key(w->window, &w->pw_ec, event.key.combo, true);
+                    w->dirty = true;
+                    break;
+                }
                 if (key_is(event.key.combo, "Escape") || key_is(event.key.combo, "Enter")) closed = true;
                 break;
             default: break;
@@ -700,7 +775,21 @@ static void archive_send_done(void) {
     SetEvent(P.wake);
 }
 
+/* RV-312: the folder a finished archive's work went to, for its window's Open it here and Show in Explorer */
+static void archive_dest(jp_win_t *pw) {
+    pw->dest[0] = pw->dest_file[0] = '\0';
+    const char *file = A.kind == RUBRAVIEW_JOBWIRE_ADD ? (A.add_result == RUBRAVIEW_ARCEDIT_OK ? A.made : "")
+                     : A.kind == RUBRAVIEW_JOBWIRE_COMPRESS ? (A.pk.result == RUBRAVIEW_ARCHIVE_DONE ? A.pk.written : "") : "";
+    if (file[0]) {
+        (void)rubraview_fmt(pw->dest_file, sizeof pw->dest_file, "{}", PROVEN_ARG(file));
+        (void)rubraview_fmt(pw->dest, sizeof pw->dest, "{}", PROVEN_ARG(rubraview_path_dirname(cstr(file))));
+    } else if (A.kind == RUBRAVIEW_JOBWIRE_EXTRACT && A.written > 0 && A.last_root[0]) {
+        (void)rubraview_fmt(pw->dest, sizeof pw->dest, "{}", PROVEN_ARG(A.last_root));
+    }
+}
+
 static void archive_summary(jp_win_t *pw) {
+    archive_dest(pw);
     if (A.kind == RUBRAVIEW_JOBWIRE_ADD) {
         if (A.add_result == RUBRAVIEW_ARCEDIT_OK)
             (void)rubraview_fmt(pw->summary, sizeof pw->summary, T("{} files put into {}"), PROVEN_ARG(A.n / 2), PROVEN_ARG(rubraview_path_basename(cstr(A.made))));
@@ -745,6 +834,7 @@ static bool start_job(proven_arena_t *arena, rubraview_jobwire_msg_t *m, clashui
     *temp_dir = st.temp_dir.size ? rubraview_strndup_view(st.temp_dir) : NULL;
     char *d = rubraview_strndup_view(st.dir);
     if (!d) return false;
+    (void)rubraview_fmt(pw->dest, sizeof pw->dest, "{}", PROVEN_ARG(st.dir));   /* RV-312: where they went */
     rubraview_fileop_init(&J.op, st.moving ? RUBRAVIEW_FILEOP_MOVE : RUBRAVIEW_FILEOP_COPY, rubraview_pal_fileop_fs(), d);
     J.op.fs.ctx = (void *)&J.copied;   /* RV-269: the copy says how far it is in the file in hand */
     rubraview_free(d);
@@ -764,6 +854,7 @@ static bool start_job(proven_arena_t *arena, rubraview_jobwire_msg_t *m, clashui
 }
 
 int jobproc_main(const wchar_t *pipe_name) {
+    rubraview_pal_window_helper_process();   /* RV-312: its windows never take another launch's request */
     SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS);
     if (FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) return 1;
     static rubraview_mem_t mem;
@@ -861,7 +952,24 @@ int jobproc_main(const wchar_t *pipe_name) {
                 ended = true;
                 g_ended_at = t;
                 WaitForSingleObject(A.thread, 5000);
-                if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS && A.pk.older_parts && A.pk.set_name[0] && pw.open) {
+                if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS && A.pk.older_parts && A.pk.set_name[0] && !pw.open && !A.quiet)
+                    (void)pw_show(&pw, arena, ui.ui_font, t);   /* RV-312: asked here, never in the main window */
+                bool locked = A.kind == RUBRAVIEW_JOBWIRE_EXTRACT && !A.quiet &&
+                              (A.ex.result == RUBRAVIEW_ARCHIVE_PASSWORD_NEEDED || A.ex.result == RUBRAVIEW_ARCHIVE_PASSWORD_WRONG);
+                if (locked && !pw.open) (void)pw_show(&pw, arena, ui.ui_font, t);
+                if (locked && pw.open) {   /* RV-312: the password asked here, the main window left alone */
+                    (void)rubraview_fmt(pw.summary, sizeof pw.summary,
+                                        A.ex.result == RUBRAVIEW_ARCHIVE_PASSWORD_WRONG ? T("wrong password for {}: type it again, then Enter")
+                                                                                         : T("{} is locked: type its password, then Enter"),
+                                        PROVEN_ARG(rubraview_path_basename(cstr(A.names[A.at < A.n ? A.at : A.n - 1]))));
+                    editbox_begin(&pw.pw_ec, pw.pw_buf, sizeof pw.pw_buf, false);
+                    pw.pw_comp[0] = '\0';
+                    pw.asking_pw = true;
+                    pw.yes = T("Extract");
+                    rubraview_pal_window_text_input(pw.window, true);
+                    rubraview_pal_window_text_ime(pw.window, false);
+                    pw.dirty = true;
+                } else if (A.kind == RUBRAVIEW_JOBWIRE_COMPRESS && A.pk.older_parts && A.pk.set_name[0] && pw.open) {
                     /* D-267, RV-294: asked here, where the password is: the older set's parts to the Recycle Bin and again */
                     char parts[64][RUBRAVIEW_PACK_PART_PATH];
                     size_t np = rubraview_pack_set_parts(A.pk.format, A.pk.set_name, parts, 64);
@@ -877,7 +985,25 @@ int jobproc_main(const wchar_t *pipe_name) {
                         pw_close(&pw);   /* RV-295: the next step's window says the rest */
                 }
             }
-            if (ended && pw.yes && pw.yes_pressed) {
+            if (ended && pw.asking_pw && pw.yes_pressed) {   /* RV-312: on with the password, from the archive it stopped at */
+                pw.yes_pressed = false;
+                proven_u8str_view_t typed = rubraview_textedit_text(&pw.pw_ec.te);
+                if (typed.size > 0) {
+                    if (A.password) { secure_wipe(rubraview_mem_mut(A.password, proven_cstr_len(A.password))); rubraview_free(A.password); }
+                    A.password = rubraview_strndup_view(typed);
+                    secure_wipe(rubraview_mem_mut(pw.pw_buf, sizeof pw.pw_buf));
+                    pw.asking_pw = false;
+                    pw.yes = NULL;
+                    rubraview_pal_window_text_input(pw.window, false);
+                    InterlockedExchange(&A.done, 0);
+                    CloseHandle(A.thread);
+                    A.thread = CreateThread(NULL, 0, archive_worker, NULL, 0, NULL);
+                    ended = false;
+                    pw.dirty = true;
+                }
+            }
+            if (ended) pw_where_went(&pw, arena);
+            if (ended && pw.yes && !pw.asking_pw && pw.yes_pressed) {
                 char parts[64][RUBRAVIEW_PACK_PART_PATH];
                 size_t np = rubraview_pack_set_parts(A.pk.format, A.pk.set_name, parts, 64), gone = 0;
                 for (size_t i = 0; i < np; ++i) gone += rubraview_pal_fs_recycle(cstr(parts[i])) ? 1u : 0u;
@@ -904,6 +1030,7 @@ int jobproc_main(const wchar_t *pipe_name) {
             if (ended && pw.open && !pw.yes && g_close_after > 0 && t - g_ended_at >= (double)g_close_after) pw_close(&pw);   /* RV-299 */
             if (pw_pump(&pw)) {
                 if (!ended) { InterlockedExchange(&A.stop, 1); atomic_store(&A.ex.cancel, true); atomic_store(&A.pk.cancel, true); }
+                else if (pw.asking_pw) { pw.asking_pw = false; pw.yes = NULL; archive_send_done(); note_end(); }   /* RV-312: left locked */
                 else if (pw.yes) { pw.yes = NULL; A.pk.older_parts = false; archive_send_done(); note_end(); }   /* the question left: not compressed */
                 pw_close(&pw);
             }
@@ -973,6 +1100,7 @@ int jobproc_main(const wchar_t *pipe_name) {
         clashui_tick(&ui);
         clashui_draw(&ui);
         if (ended && pw.open && g_close_after > 0 && t - g_ended_at >= (double)g_close_after) pw_close(&pw);   /* RV-299 */
+        if (ended) pw_where_went(&pw, arena);   /* RV-312 */
         if (pw_pump(&pw)) {   /* closed: while it works, the job stops after the file in hand */
             if (!ended) { InterlockedExchange(&J.stop, 1); SetEvent(J.wake); }
             pw_close(&pw);

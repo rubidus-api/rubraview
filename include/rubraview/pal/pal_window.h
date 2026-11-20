@@ -139,6 +139,8 @@ typedef struct rubraview_window_config {
  * process is what makes the answer true for anyone who asks later.
  */
 bool rubraview_pal_instance_claim(void);
+/** RV-312: this process is a helper (a job's): its windows are passed by when a request is handed over. */
+void rubraview_pal_window_helper_process(void);
 
 /**
  * Hand a path to the running instance and bring its window forward.
