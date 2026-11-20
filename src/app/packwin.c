@@ -232,7 +232,12 @@ void packwin_draw(packwin_t *p) {
     rubraview_renderer_t *r = p->renderer;
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(p->window, &w, &h);
-    double dpi = rubraview_pal_window_dpi_scale(p->window), pad = 12.0 * dpi, foot = 56.0 * dpi + (p->note[0] ? 20.0 * dpi : 0.0);
+    double dpi = rubraview_pal_window_dpi_scale(p->window), pad = 12.0 * dpi;
+    /* RV-315: the buttons in rows that wrap when the window is narrow; the foot as tall as they make it */
+    const char *bw[2] = { T("Compress"), T("Cancel") };
+    double bh = 34.0 * dpi;
+    double block = dlgpage_buttons(r, bw, 2, pad, (double)w - pad, 0.0, 14.0 * dpi, 18.0 * dpi, 72.0 * dpi, bh, 8.0 * dpi, p->button);
+    double foot = block + 2.0 * pad + (p->note[0] ? 20.0 * dpi : 0.0);
     double head = 30.0 * dpi, view_h = (double)h - head - foot;
     rubraview_pal_render_begin(r, 0xFF1B1E23u);
     /* measured, the scroll kept within it, then drawn from where it is */
@@ -276,14 +281,10 @@ void packwin_draw(packwin_t *p) {
     }
     if (p->note[0]) rubraview_pal_render_draw_text(r, cstr(p->note), (rubraview_pal_rect_t){ pad, (double)h - foot + 4.0 * dpi, (double)w - 2.0 * pad, 18.0 * dpi },
                                                    12.0 * dpi, 0xFFE8C46Fu, RUBRAVIEW_TEXT_LEFT);
-    const char *bw[2] = { T("Compress"), T("Cancel") };
-    double bx = (double)w - pad, bh = 34.0 * dpi, by = (double)h - pad - bh;
-    for (int i = 1; i >= 0; --i) {
-        double tw = 0.0;
-        (void)rubraview_pal_render_measure_text(r, cstr(bw[i]), 14.0 * dpi, &tw);
-        rubraview_pal_rect_t b = { bx - tw - 36.0 * dpi, by, tw + 36.0 * dpi, bh };
-        bx = b.x - 8.0 * dpi;
-        p->button[i] = b;
+    double by = (double)h - pad - block, bx = p->button[0].y == p->button[1].y ? p->button[0].x - 8.0 * dpi : pad;   /* the guide beside one row */
+    for (int i = 0; i < 2; ++i) {
+        p->button[i].y += by;
+        rubraview_pal_rect_t b = p->button[i];
         bool over = pal_rect_has(b, p->px, p->py);
         rubraview_pal_render_fill_rect(r, b, i == 0 ? (over ? 0xFF4F9CF7u : PW_ON) : over ? 0x50FFFFFFu : 0xFF2A2F36u, 4.0 * dpi);
         rubraview_pal_render_draw_text(r, cstr(bw[i]), b, 14.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_CENTER);

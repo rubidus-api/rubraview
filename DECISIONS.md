@@ -4303,3 +4303,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: D-384 already left the asker modeless and put the answer into its box; a choice for an asker that had closed was sent into nothing and the chooser closed.
 - Decision: before a choice is sent, `rubraview_pal_window_alive` (the window there, and answering WM_NULL within 2 s); not alive, or the send failing, the chooser stays and says so (Cancel closes); a cancel is sent as before.
 - Consequences: R339 amended; VM T498.
+
+## D-386: Windows At The Screen's Scale; A Page That Scrolls And Buttons That Wrap (RV-315)
+
+- Date: 2026-11-20
+- Status: Accepted (owner 2026-11-20, quoted in R340).
+- Context: windows were created at their pixel size whatever the screen's scale (a 600 x 230 job window at 150% held text 1.5 times as large, so it overlapped); the job and extraction windows put their buttons at fixed places from the bottom.
+- Decision: `rubraview_pal_window_create` resizes a new window (not a tool window) by GetDpiForWindow / 96, within the monitor's work area. `dlgpage.c` gives small windows a page: `dlgpage_width` (less the bar), `dlgpage_end` (the content's height: a bar drawn as the clash window's, the scroll kept within), wheel, press, held and release on the core scrollbar; `dlgpage_buttons` lays buttons by the core `rubraview_flow_inline` (RV-248) with each row moved against the right. The job window (jobproc), the extraction window (extractwin: "Close when done" on its own row above the buttons) lay out from the top with the foot at the window's foot when there is room, else after the rest; the Compress window's foot grows with its rows; the clash window's foot from the rows its answers make.
+- Consequences: R340; VM T500. The other windows (settings, properties, information, log, Batch, Edit, lists, subtitles) get the scale at creation; their own narrow layouts are left to RV-316.

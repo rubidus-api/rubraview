@@ -770,6 +770,19 @@ rubraview_window_t *rubraview_pal_window_create(proven_arena_t *arena, const rub
                                 owner_hwnd, NULL, instance, w);
     if (!hwnd) return NULL;
     if (g_helper_process) SetPropW(hwnd, HELPER_PROP, (HANDLE)1);   /* RV-312: no viewer's window: a hand-over passes it by */
+    if (!w->tool) {   /* RV-315: the size asked is at 100%: as large on a screen scaled up (it was not: text grew, windows did not) */
+        UINT dpi = GetDpiForWindow(hwnd);
+        if (dpi > 96) {
+            int sw = MulDiv(width, (int)dpi, 96), sh = MulDiv(height, (int)dpi, 96);
+            MONITORINFO mi = { .cbSize = sizeof mi };
+            if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+                int mw = mi.rcWork.right - mi.rcWork.left, mh = mi.rcWork.bottom - mi.rcWork.top;
+                if (sw > mw) sw = mw;
+                if (sh > mh) sh = mh;
+            }
+            SetWindowPos(hwnd, NULL, 0, 0, sw, sh, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
 
     w->hwnd = hwnd;
     update_dpi_scale(w);

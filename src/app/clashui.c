@@ -182,7 +182,23 @@ void clashui_draw(clashui_t *ui) {
         cw_head[c] = b;
     }
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ pad * 0.5, top + 45.0 * dpi, (double)w - pad, 1.0 }, CW_LINE, 0.0);
-    double y = top + 46.0 * dpi, foot = (double)h - 138.0 * dpi;   /* RV-313: the foot holds two rows of answers */
+    const char *words[CW_BTNS] = { T("Apply the ticks"), T("Overwrite all"), T("Keep both, all"), T("Skip all"), T("Only the same ones"),
+                                   ui->same_recycles_copy ? T("A copy's same file: its source to the Recycle Bin") : T("A copy's same file: its source left"),
+                                   ui->for_good ? T("What is removed: deleted for good") : T("What is removed: to the Recycle Bin") };
+    /* RV-315: the answers in rows that wrap; the foot as tall as they make it (RV-313 had two rows fixed) */
+    double bw_of[CW_BTNS] = { 0 }, bx_of[CW_BTNS] = { 0 }, bh = 36.0 * dpi;
+    uint32_t brow[CW_BTNS] = { 0 };
+    int shown_b[CW_BTNS], nb = 0;
+    for (int i = 0; i < CW_BTNS; ++i) {
+        if ((i == CW_BTN_RECYCLE && !ui->recycle_set) || (i == CW_BTN_FOR_GOOD && !ui->for_good_set)) { cw_btn[i] = (rubraview_pal_rect_t){ 0 }; continue; }
+        double tw = 0.0;
+        (void)rubraview_pal_render_measure_text(r, cstr(words[i]), 13.0 * dpi, &tw);
+        bw_of[nb] = fmin(tw + 22.0 * dpi, (double)w - 2.0 * pad);
+        shown_b[nb++] = i;
+    }
+    size_t brows = rubraview_flow_inline(bw_of, (size_t)nb, 8.0 * dpi, (double)w - 2.0 * pad, brow, bx_of);
+    double block = brows ? (double)brows * bh + (double)(brows - 1) * 6.0 * dpi : 0.0;
+    double y = top + 46.0 * dpi, foot = (double)h - pad - block - 32.0 * dpi;
     int32_t rows = (int32_t)((foot - y) / row_h);
     if (rows < 1) rows = 1;
     if (ui->scroll > (int32_t)ui->nrows - rows) ui->scroll = (int32_t)ui->nrows - rows;
@@ -259,16 +275,9 @@ void clashui_draw(clashui_t *ui) {
     rubraview_pal_render_draw_text(r, ui->for_good ? TU8("Both ticked: both kept (the one coming as \"name (2)\"). Only the one coming: it replaces the one there (that one deleted for good). Otherwise: left as it is.")
                                                    : TU8("Both ticked: both kept (the one coming as \"name (2)\"). Only the one coming: it replaces the one there (that one to the Recycle Bin). Otherwise: left as it is."),
                                    (rubraview_pal_rect_t){ pad, foot + 4.0 * dpi, (double)w - 2 * pad, 20.0 * dpi }, 12.0 * dpi, CW_DIM, RUBRAVIEW_TEXT_LEFT);
-    const char *words[CW_BTNS] = { T("Apply the ticks"), T("Overwrite all"), T("Keep both, all"), T("Skip all"), T("Only the same ones"),
-                                   ui->same_recycles_copy ? T("A copy's same file: its source to the Recycle Bin") : T("A copy's same file: its source left"),
-                                   ui->for_good ? T("What is removed: deleted for good") : T("What is removed: to the Recycle Bin") };
-    double bx = pad, by = foot + 32.0 * dpi, bh = 36.0 * dpi;
-    for (int i = 0; i < CW_BTNS; ++i) {
-        if ((i == CW_BTN_RECYCLE && !ui->recycle_set) || (i == CW_BTN_FOR_GOOD && !ui->for_good_set)) { cw_btn[i] = (rubraview_pal_rect_t){ 0 }; continue; }
-        double tw = 0.0;
-        (void)rubraview_pal_render_measure_text(r, cstr(words[i]), 13.0 * dpi, &tw);
-        rubraview_pal_rect_t b = { bx, by, tw + 22.0 * dpi, bh };
-        if (bx + b.width > (double)w - pad && bx > pad) { b.x = bx = pad; b.y = by += bh + 6.0 * dpi; }   /* the next row, below */
+    for (int k = 0; k < nb; ++k) {
+        int i = shown_b[k];
+        rubraview_pal_rect_t b = { pad + bx_of[k], foot + 32.0 * dpi + (double)brow[k] * (bh + 6.0 * dpi), bw_of[k], bh };
         cw_btn[i] = b;
         bool over = pal_rect_has(b, ui->px, ui->py);
         uint32_t fill = i == 0 ? (over ? 0xFF4F9CF7u : CW_ON) : over ? 0x50FFFFFFu : 0xFF2A2F36u;
@@ -276,7 +285,6 @@ void clashui_draw(clashui_t *ui) {
         rubraview_pal_render_fill_rect(r, b, fill, 4.0 * dpi);
         rubraview_pal_render_stroke_rect(r, b, 0xFF4A525Cu, 1.0, 4.0 * dpi);
         rubraview_pal_render_draw_text(r, cstr(words[i]), b, 13.0 * dpi, CW_TEXT, RUBRAVIEW_TEXT_CENTER);
-        bx += b.width + 8.0 * dpi;
     }
     if (!rubraview_pal_render_end(r)) ui->dirty = true;
 }

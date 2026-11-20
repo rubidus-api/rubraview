@@ -91,6 +91,15 @@
 #include "rubraview/jobwire.h"
 #include "rubraview/pal/pal_render.h"
 typedef struct editbox_clicks { double at, x, y; int count; } editbox_clicks_t;   /* RV-293 */
+/* RV-315: a small window's page (dlgpage.c) */
+#define DLGPAGE_BAR 14.0
+typedef struct dlgpage {
+    double scroll;
+    bool   bar;                          /* the last pass needed a bar */
+    rubraview_scrollbar_t sb;
+    rubraview_scrollbar_hold_t hold;
+} dlgpage_t;
+
 typedef struct editbox_view {   /* RV-293 E2: a field as drawn: its box, the size of its words, how far scrolled, from where */
     rubraview_pal_rect_t box;
     double size, scroll, x0;
@@ -1562,6 +1571,7 @@ typedef struct app_state {
     char                   xw_line[512];
     char                   xw_path[RUBRAVIEW_ARCHIVE_PATH];
     rubraview_pal_rect_t   xw_box, xw_stop, xw_eye, xw_btn[3];
+    dlgpage_t              xw_page;   /* RV-315: it scrolls when shorter than it holds */
     int32_t                xw_btn_n;
     char                   xw_pw[256];           /* a password typed in it (wiped when used) */
     size_t                 xw_pw_len;
@@ -2921,6 +2931,19 @@ void takeout_step(app_state_t *app);
 void target_begin(app_state_t *app, bool moving, bool from_picker);
 void target_browse(app_state_t *app);
 const char *browse_start_dir(app_state_t *app, bool from_picker);   /* RV-313 */
+
+/* RV-315: a small window's page that scrolls when the window is shorter than it, and its buttons in wrapping rows (dlgpage.c) */
+/* The width the content has: the window's, less the bar when one is shown. */
+double dlgpage_width(const dlgpage_t *p, double w, double dpi);
+/* After the content (drawn at y - scroll): how tall it came out; the bar drawn when needed. True: draw again (the bar came or went). */
+bool dlgpage_end(dlgpage_t *p, rubraview_renderer_t *r, double w, double h, double content, double px, double py, double dpi);
+bool dlgpage_wheel(dlgpage_t *p, double delta, double dpi);
+bool dlgpage_press(dlgpage_t *p, double x, double y);
+bool dlgpage_held(dlgpage_t *p, double x, double y);
+bool dlgpage_release(dlgpage_t *p);
+/* Buttons sized to their words, in rows that wrap, against `right` from `y`; their rectangles to `out`; returns how tall. */
+double dlgpage_buttons(rubraview_renderer_t *r, const char *const *words, size_t n, double left, double right, double y, double size,
+                       double pad_x, double min_w, double bh, double gap, rubraview_pal_rect_t *out);
 
 /* RV-314: Rubraview's own window for choosing a folder, files or where to save (choose.c, D-384) */
 typedef void (*choose_done_fn)(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter);

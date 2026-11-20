@@ -275,26 +275,10 @@ static void draw_button(app_state_t *app, rubraview_pal_rect_t b, const char *wo
     rubraview_pal_render_draw_text(app->renderer, cstr(word), b, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
 }
 
-/* Buttons right-aligned on the foot; their rectangles to `out`. */
-static void draw_buttons(app_state_t *app, double w, double h, const char *const *words, int n, rubraview_pal_rect_t *out, double dpi) {
-    double pad = 20.0 * dpi, bh = 38.0 * dpi, gap = 10.0 * dpi, bw[3], total = 0.0;
-    for (int i = 0; i < n; ++i) {
-        double tw = 0.0;
-        (void)rubraview_pal_render_measure_text(app->renderer, cstr(words[i]), 14.0 * dpi, &tw);
-        bw[i] = fmax(96.0 * dpi, tw + 32.0 * dpi);
-        total += bw[i] + (i ? gap : 0.0);
-    }
-    double x = w - pad - total, y = h - pad - bh;
-    for (int i = 0; i < n; ++i) {
-        out[i] = (rubraview_pal_rect_t){ x, y, bw[i], bh };
-        draw_button(app, out[i], words[i], i == 0, dpi);
-        x += bw[i] + gap;
-    }
-}
-
-/* The box at the foot's left, or, `above` the buttons, on the row over them. */
-static void draw_done_box(app_state_t *app, double h, double dpi, bool above) {
-    double pad = 20.0 * dpi, side = 18.0 * dpi, y = h - pad - 38.0 * dpi + (38.0 * dpi - side) * 0.5 - (above ? 44.0 * dpi : 0.0);
+/* "Close when done", its row's top at `y`. */
+static void draw_done_box(app_state_t *app, double y, double dpi) {
+    double pad = 20.0 * dpi, side = 18.0 * dpi;
+    y += 4.0 * dpi;
     const char *word = T("Close when done");
     double tw = 0.0;
     (void)rubraview_pal_render_measure_text(app->renderer, cstr(word), 14.0 * dpi, &tw);
@@ -308,6 +292,23 @@ static void draw_done_box(app_state_t *app, double h, double dpi, bool above) {
                                    14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
 }
 
+/* RV-315: the foot after what is above it (`above`, on the page; at the window's foot when there is room): "Close when
+   done" on a row of its own, then the buttons in rows that wrap, against the right; their rectangles to `out`. Returns
+   the page's height. */
+static double draw_foot(app_state_t *app, double cw, double h, double above, double sy, const char *const *words, int n,
+                        rubraview_pal_rect_t *out, bool box, double dpi) {
+    double pad = 20.0 * dpi, bh = 38.0 * dpi, gap = 10.0 * dpi, box_h = box ? 34.0 * dpi : 0.0;
+    rubraview_pal_rect_t r[3] = { 0 };
+    double block = n > 0 ? dlgpage_buttons(app->renderer, words, (size_t)n, pad, cw - pad, 0.0, 14.0 * dpi, 16.0 * dpi, 96.0 * dpi, bh, gap, r) : 0.0;
+    double foot = fmax(above + 16.0 * dpi, h - pad - block - box_h);
+    if (box) draw_done_box(app, foot - sy, dpi);
+    for (int i = 0; i < n; ++i) {
+        out[i] = (rubraview_pal_rect_t){ r[i].x, r[i].y + foot + box_h - sy, r[i].width, r[i].height };
+        draw_button(app, out[i], words[i], i == 0, dpi);
+    }
+    return foot + box_h + block + pad;
+}
+
 void draw_extract_window(app_state_t *app) {
     if (!app->xw_open) return;
     double now = rubraview_pal_time_now_seconds();
@@ -318,25 +319,28 @@ void draw_extract_window(app_state_t *app) {
     int32_t iw = 0, ih = 0;
     rubraview_pal_window_get_size(app->xw_window, &iw, &ih);
     double w = (double)iw, h = (double)ih, dpi = rubraview_pal_window_dpi_scale(app->xw_window), pad = 20.0 * dpi;
+    double cw = dlgpage_width(&app->xw_page, w, dpi), sy = app->xw_page.scroll;   /* RV-315 */
     rubraview_renderer_t *main_renderer = app->renderer;
     app->renderer = app->xw_renderer;   /* the cards' drawing helpers draw with app->renderer */
     rubraview_pal_render_begin(app->renderer, 0xFF242424u);
-    rubraview_pal_rect_t c = { 0.0, 0.0, w, h };
-    rubraview_pal_rect_t tr = { pad, pad - 4.0 * dpi, w - 2.0 * pad, 30.0 * dpi };
+    rubraview_pal_rect_t c = { 0.0, -sy, cw, h };
+    rubraview_pal_rect_t tr = { pad, pad - 4.0 * dpi - sy, cw - 2.0 * pad, 30.0 * dpi };
     bool working = app->xw_state == XW_WORKING && app->prog.source == PROGRESS_ARCHWORK && app->prog.windowed;
     const char *title = working ? app->prog.title : app->xw_title;
     rubraview_pal_render_draw_text(app->renderer, cstr(title), tr, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     rubraview_pal_render_draw_text(app->renderer, cstr(title), (rubraview_pal_rect_t){ tr.x + 0.6 * dpi, tr.y, tr.width, tr.height }, 18.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-    double y = tr.y + 34.0 * dpi;
+    double y = tr.y + 34.0 * dpi;   /* on screen; y + sy on the page */
+    double page = 0.0;
     app->xw_btn_n = 0;
     app->xw_stop = app->xw_eye = app->xw_box = (rubraview_pal_rect_t){0};   /* only what is drawn now answers */
+    for (int i = 0; i < 3; ++i) app->xw_btn[i] = (rubraview_pal_rect_t){0};
     if (app->xw_state == XW_PASSWORD) {
         const char *hint = app->xw_pw_shown ? T("Type its password, then Enter (shown: any letter)")
                                             : T("Type its password, then Enter (English letters, digits and symbols)");
-        rubraview_pal_render_draw_text(app->renderer, cstr(hint), (rubraview_pal_rect_t){ pad, y, w - 2.0 * pad, 22.0 * dpi }, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+        rubraview_pal_render_draw_text(app->renderer, cstr(hint), (rubraview_pal_rect_t){ pad, y, cw - 2.0 * pad, 22.0 * dpi }, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
         y += 30.0 * dpi;
         double eye_w = 64.0 * dpi;
-        rubraview_pal_rect_t field = { pad, y, w - 2.0 * pad - eye_w - 8.0 * dpi, 36.0 * dpi };
+        rubraview_pal_rect_t field = { pad, y, fmax(40.0 * dpi, cw - 2.0 * pad - eye_w - 8.0 * dpi), 36.0 * dpi };
         rubraview_pal_render_fill_rect(app->renderer, field, 0xFF141414u, 4.0 * dpi);
         rubraview_pal_render_stroke_rect(app->renderer, field, COLOR_TILE_CURRENT, 1.5 * dpi, 4.0 * dpi);
         char shown[600];
@@ -354,36 +358,36 @@ void draw_extract_window(app_state_t *app) {
         app->xw_eye = (rubraview_pal_rect_t){ field.x + field.width + 8.0 * dpi, y, eye_w, field.height };
         draw_button(app, app->xw_eye, app->xw_pw_shown ? T("Hide") : T("Show"), false, dpi);
         const char *words[2] = { T("OK"), T("Cancel") };
-        draw_buttons(app, w, h, words, 2, app->xw_btn, dpi);
+        page = draw_foot(app, cw, h, y + field.height + sy, sy, words, 2, app->xw_btn, false, dpi);
         app->xw_btn_n = 2;
     } else if (working) {
         const char *note = app->prog.stopping ? T("stopping...") : T("Esc or Stop stops it");
-        rubraview_pal_render_draw_text(app->renderer, cstr(note), (rubraview_pal_rect_t){ pad, y - 4.0 * dpi, w - 2.0 * pad, 22.0 * dpi }, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+        rubraview_pal_render_draw_text(app->renderer, cstr(note), (rubraview_pal_rect_t){ pad, y - 4.0 * dpi, cw - 2.0 * pad, 22.0 * dpi }, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
         progress_rows(app, c, y + 22.0 * dpi, dpi);
-        if (!app->prog.stopping) {
-            const char *words[1] = { T("Stop") };
-            draw_buttons(app, w, h, words, 1, &app->xw_stop, dpi);
-        }
-        draw_done_box(app, h, dpi, false);
+        double below = y + 22.0 * dpi + 24.0 * dpi + 3.0 * 22.0 * dpi + sy;   /* the bar and its three rows */
+        const char *words[1] = { T("Stop") };
+        page = draw_foot(app, cw, h, below, sy, words, app->prog.stopping ? 0 : 1, &app->xw_stop, true, dpi);
     } else if (app->xw_state == XW_WORKING) {
-        rubraview_pal_render_draw_text(app->renderer, cstr(T("Starting...")), (rubraview_pal_rect_t){ pad, y, w - 2.0 * pad, 22.0 * dpi }, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-        draw_done_box(app, h, dpi, false);
+        rubraview_pal_render_draw_text(app->renderer, cstr(T("Starting...")), (rubraview_pal_rect_t){ pad, y, cw - 2.0 * pad, 22.0 * dpi }, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        page = draw_foot(app, cw, h, y + 22.0 * dpi + sy, sy, NULL, 0, app->xw_btn, true, dpi);
     } else {   /* done */
-        rubraview_pal_render_draw_text(app->renderer, cstr(app->xw_line), (rubraview_pal_rect_t){ pad, y, w - 2.0 * pad, 44.0 * dpi }, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        rubraview_pal_render_draw_text(app->renderer, cstr(app->xw_line), (rubraview_pal_rect_t){ pad, y, cw - 2.0 * pad, 44.0 * dpi }, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        double below = y + 44.0 * dpi + sy;
         if (app->xw_path[0]) {
             char fit[1200];
-            proven_u8str_view_t path = files_fit_text(fit, sizeof fit, cstr(app->xw_path), w - 2.0 * pad, 13.0 * dpi);
-            rubraview_pal_render_draw_text(app->renderer, path, (rubraview_pal_rect_t){ pad, y + 48.0 * dpi, w - 2.0 * pad, 22.0 * dpi }, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+            proven_u8str_view_t path = files_fit_text(fit, sizeof fit, cstr(app->xw_path), cw - 2.0 * pad, 13.0 * dpi);
+            rubraview_pal_render_draw_text(app->renderer, path, (rubraview_pal_rect_t){ pad, y + 48.0 * dpi, cw - 2.0 * pad, 22.0 * dpi }, 13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+            below = y + 70.0 * dpi + sy;
             const char *words[3] = { T("Open it here"), T("Show in Explorer"), T("Close") };
-            draw_buttons(app, w, h, words, 3, app->xw_btn, dpi);
+            page = draw_foot(app, cw, h, below, sy, words, 3, app->xw_btn, true, dpi);
             app->xw_btn_n = 3;
         } else {
             const char *words[1] = { T("Close") };
-            draw_buttons(app, w, h, words, 1, app->xw_btn, dpi);
+            page = draw_foot(app, cw, h, below, sy, words, 1, app->xw_btn, true, dpi);
             app->xw_btn_n = 1;
         }
-        draw_done_box(app, h, dpi, app->xw_btn_n == 3);   /* over three buttons, beside one */
     }
+    if (dlgpage_end(&app->xw_page, app->renderer, w, h, page, app->xw_px, app->xw_py, dpi)) app->xw_dirty = true;
     if (!rubraview_pal_render_end(app->renderer)) app->xw_dirty = true;
     app->renderer = main_renderer;
 }
@@ -454,12 +458,20 @@ size_t extractwin_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
                 app->xw_px = event.mouse.x;
                 app->xw_py = event.mouse.y;
+                (void)dlgpage_held(&app->xw_page, app->xw_px, app->xw_py);   /* RV-315 */
                 app->xw_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
+                if (dlgpage_wheel(&app->xw_page, event.mouse.wheel_delta, rubraview_pal_window_dpi_scale(app->xw_window))) app->xw_dirty = true;
+                break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
+                if (dlgpage_release(&app->xw_page)) app->xw_dirty = true;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
                 double x = event.mouse.x, y = event.mouse.y;
                 app->xw_dirty = true;
+                if (dlgpage_press(&app->xw_page, x, y)) break;   /* RV-315: its bar */
                 if (app->xw_state == XW_PASSWORD) {
                     if (pal_rect_has(app->xw_eye, x, y)) {
                         app->xw_pw_shown = !app->xw_pw_shown;

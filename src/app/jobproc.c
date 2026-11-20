@@ -259,6 +259,7 @@ typedef struct jp_win {
     char   dest_file[1100];            /* a file made there (a new archive), shown selected in Explorer */
     rubraview_pal_rect_t here_btn, explorer_btn;
     bool   here_pressed, explorer_pressed;
+    dlgpage_t page;   /* RV-315: scrolls when the window is shorter than what it holds */
     bool   asking_pw;                  /* the archive is locked: the field and its button (`yes`) are up */
     rubraview_editctl_t pw_ec;
     char   pw_buf[256], pw_comp[64];
@@ -300,9 +301,11 @@ static void pw_draw(jp_win_t *w, const rubraview_jobwire_progress_t *p, bool end
     rubraview_renderer_t *r = w->renderer;
     int32_t ww = 0, hh = 0;
     rubraview_pal_window_get_size(w->window, &ww, &hh);
-    double dpi = rubraview_pal_window_dpi_scale(w->window), pad = 18.0 * dpi, width = (double)ww - 2.0 * pad;
+    /* RV-315: laid out from the top; the buttons wrap; the whole scrolls when the window is shorter than it */
+    double dpi = rubraview_pal_window_dpi_scale(w->window), pad = 18.0 * dpi;
+    double cw = dlgpage_width(&w->page, (double)ww, dpi), width = cw - 2.0 * pad, sy = w->page.scroll;
     rubraview_pal_render_begin(r, PW_BACK);
-    double y = pad * 0.7;
+    double y = pad * 0.7 - sy;
     pw_line(r, w->head, (int)proven_cstr_len(w->head), (rubraview_pal_rect_t){ pad, y, width, 26.0 * dpi }, 15.0 * dpi, PW_TEXT);
     y += 34.0 * dpi;
     bool bytes = p->bytes_total > 0;
@@ -335,50 +338,41 @@ static void pw_draw(jp_win_t *w, const rubraview_jobwire_progress_t *p, bool end
             pw_line(r, line, n, (rubraview_pal_rect_t){ pad, y, width, 22.0 * dpi }, 13.0 * dpi, PW_DIM);
         }
     }
-    const char *word = ended ? T("Close") : T("Stop");
-    double tw = 0.0;
-    (void)rubraview_pal_render_measure_text(r, cstr(word), 13.0 * dpi, &tw);
-    w->button = (rubraview_pal_rect_t){ (double)ww - pad - tw - 40.0 * dpi, (double)hh - pad - 36.0 * dpi, tw + 40.0 * dpi, 36.0 * dpi };
-    bool over = pal_rect_has(w->button, w->px, w->py);
-    if (!stopping || ended) {
-        rubraview_pal_render_fill_rect(r, w->button, over ? 0x50FFFFFFu : 0xFF2A2F36u, 4.0 * dpi);
-        rubraview_pal_render_stroke_rect(r, w->button, 0xFF4A525Cu, 1.0, 4.0 * dpi);
-        rubraview_pal_render_draw_text(r, cstr(word), w->button, 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_CENTER);
-    }
+    y += 24.0 * dpi;
     if (ended && w->asking_pw) {   /* RV-312: the password, typed here (hidden) */
-        rubraview_pal_rect_t box = { pad, y + 30.0 * dpi, width, 28.0 * dpi };
+        rubraview_pal_rect_t box = { pad, y + 6.0 * dpi, width, 28.0 * dpi };
         rubraview_pal_render_fill_rect(r, box, 0xFF101215u, 3.0 * dpi);
         rubraview_pal_render_stroke_rect(r, box, PW_ON, 1.0, 3.0 * dpi);
         w->pw_view.box = (rubraview_pal_rect_t){ box.x + 6.0 * dpi, box.y + 4.0 * dpi, box.width - 12.0 * dpi, box.height - 8.0 * dpi };
         w->pw_view.size = 14.0 * dpi;
         w->pw_view.secret = true;
         editbox_draw(r, &w->pw_ec, &w->pw_view, proven_u8str_view_from_cstr(w->pw_comp), true, PW_TEXT, dpi);
+        y = box.y + box.height;
     }
-    w->here_btn = w->explorer_btn = (rubraview_pal_rect_t){0};
-    if (ended && !w->yes && !w->asking_pw && w->dest[0]) {   /* RV-312: where it went, left of Close */
-        const char *words[2] = { T("Show in Explorer"), T("Open it here") };
-        rubraview_pal_rect_t *rects[2] = { &w->explorer_btn, &w->here_btn };
-        double right = w->button.x - 8.0 * dpi;
-        for (int i = 0; i < 2; ++i) {
-            double bw = 0.0;
-            (void)rubraview_pal_render_measure_text(r, cstr(words[i]), 13.0 * dpi, &bw);
-            *rects[i] = (rubraview_pal_rect_t){ right - bw - 32.0 * dpi, w->button.y, bw + 32.0 * dpi, w->button.height };
-            right = rects[i]->x - 8.0 * dpi;
-            bool on = pal_rect_has(*rects[i], w->px, w->py);
-            rubraview_pal_render_fill_rect(r, *rects[i], i == 1 ? (on ? 0xFF4F9CF7u : PW_ON) : (on ? 0x50FFFFFFu : 0xFF2A2F36u), 4.0 * dpi);
-            if (i == 0) rubraview_pal_render_stroke_rect(r, *rects[i], 0xFF4A525Cu, 1.0, 4.0 * dpi);
-            rubraview_pal_render_draw_text(r, cstr(words[i]), *rects[i], 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_CENTER);
-        }
+    /* the buttons, left to right as read: what the end offers, then Close (Stop while it works) */
+    const char *words[4];
+    rubraview_pal_rect_t *rects[4], rect[4];
+    int kinds[4];   /* 0 plain, 1 the blue one */
+    size_t nb = 0;
+    w->here_btn = w->explorer_btn = w->yes_btn = w->button = (rubraview_pal_rect_t){0};
+    if (ended && w->yes) { words[nb] = w->yes; rects[nb] = &w->yes_btn; kinds[nb++] = 1; }   /* RV-294: the question's own button */
+    else if (ended && !w->asking_pw && w->dest[0]) {   /* RV-312: where it went */
+        words[nb] = T("Show in Explorer"); rects[nb] = &w->explorer_btn; kinds[nb++] = 0;
+        words[nb] = T("Open it here"); rects[nb] = &w->here_btn; kinds[nb++] = 1;
     }
-    w->yes_btn = (rubraview_pal_rect_t){0};
-    if (ended && w->yes) {   /* RV-294: the question's own button, left of Close */
-        double yw = 0.0;
-        (void)rubraview_pal_render_measure_text(r, cstr(w->yes), 13.0 * dpi, &yw);
-        w->yes_btn = (rubraview_pal_rect_t){ w->button.x - yw - 48.0 * dpi, w->button.y, yw + 40.0 * dpi, w->button.height };
-        bool on = pal_rect_has(w->yes_btn, w->px, w->py);
-        rubraview_pal_render_fill_rect(r, w->yes_btn, on ? 0xFF4F9CF7u : PW_ON, 4.0 * dpi);
-        rubraview_pal_render_draw_text(r, cstr(w->yes), w->yes_btn, 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_CENTER);
+    if (!stopping || ended) { words[nb] = ended ? T("Close") : T("Stop"); rects[nb] = &w->button; kinds[nb++] = 0; }
+    double bh = 36.0 * dpi, gap = 8.0 * dpi;
+    double block = dlgpage_buttons(r, words, nb, pad, cw - pad, 0.0, 13.0 * dpi, 20.0 * dpi, 72.0 * dpi, bh, gap, rect);
+    double foot = fmax(y + sy + 14.0 * dpi, (double)hh - pad - block);   /* at the foot when there is room, else after the rest */
+    for (size_t i = 0; i < nb; ++i) {
+        rubraview_pal_rect_t bt = { rect[i].x, rect[i].y + foot - sy, rect[i].width, rect[i].height };
+        *rects[i] = bt;
+        bool on = pal_rect_has(bt, w->px, w->py);
+        rubraview_pal_render_fill_rect(r, bt, kinds[i] ? (on ? 0xFF4F9CF7u : PW_ON) : (on ? 0x50FFFFFFu : 0xFF2A2F36u), 4.0 * dpi);
+        if (!kinds[i]) rubraview_pal_render_stroke_rect(r, bt, 0xFF4A525Cu, 1.0, 4.0 * dpi);
+        rubraview_pal_render_draw_text(r, cstr(words[i]), bt, 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
+    if (dlgpage_end(&w->page, r, (double)ww, (double)hh, foot + block + pad, w->px, w->py, dpi)) w->dirty = true;
     if (!rubraview_pal_render_end(r)) w->dirty = true;
 }
 
@@ -408,9 +402,12 @@ static bool pw_pump(jp_win_t *w) {
             case RUBRAVIEW_WINDOW_EVENT_CLOSE: closed = true; break;
             case RUBRAVIEW_WINDOW_EVENT_RESIZE: rubraview_pal_render_resize(w->renderer, event.resize.width, event.resize.height); w->dirty = true; break;
             case RUBRAVIEW_WINDOW_EVENT_PAINT: w->dirty = true; break;
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: w->px = event.mouse.x; w->py = event.mouse.y; w->dirty = true; break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: w->px = event.mouse.x; w->py = event.mouse.y; (void)dlgpage_held(&w->page, w->px, w->py); w->dirty = true; break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL: if (dlgpage_wheel(&w->page, event.mouse.wheel_delta, rubraview_pal_window_dpi_scale(w->window))) w->dirty = true; break;
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP: if (dlgpage_release(&w->page)) w->dirty = true; break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
-                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && pal_rect_has(w->button, event.mouse.x, event.mouse.y)) closed = true;
+                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && dlgpage_press(&w->page, event.mouse.x, event.mouse.y)) { w->dirty = true; break; }   /* RV-315 */
+                if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && w->button.width > 0 && pal_rect_has(w->button, event.mouse.x, event.mouse.y)) closed = true;
                 if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && w->yes && pal_rect_has(w->yes_btn, event.mouse.x, event.mouse.y)) w->yes_pressed = true;
                 if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && w->here_btn.width > 0 && pal_rect_has(w->here_btn, event.mouse.x, event.mouse.y)) w->here_pressed = true;
                 if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && w->explorer_btn.width > 0 && pal_rect_has(w->explorer_btn, event.mouse.x, event.mouse.y)) w->explorer_pressed = true;
