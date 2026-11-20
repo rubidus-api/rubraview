@@ -4263,3 +4263,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: `settingswin.c` held about 4,060 lines: the window, the font picker, the one-of-many list used far beyond Settings with the lists' sorting, and Settings › Keys (its tables, the keys by row, the keyboard picture).
 - Decision: moved as they were, nothing else changed: `fontpick.c` (417 lines), `chooser.c` (845; `settings_event` no longer static, declared in app.h), `settings_keys.c` (386; its table text as `keys_table_row`, what the window uses of it in `settings_keys.h`: the four view flags, the rows, `keymap_row_binding`, the keyboard's click, dot and drawing), `settingslook.h` (the window's colours); `settingswin.c` is 2,428 lines. Checked by the old file's lines sorted against the new files' (only the dropped `static`s, the headers and `keys_table_row`'s head differ), the gate and the VM (T493). The gate on the day also asked for Rubrapack 0.60.0 (R314): its vendored files are unchanged since 0.59.0; VENDORED.md, THIRD_PARTY_NOTICES and the built-in notices name it.
 - Consequences: RV-310 done; RV-311's plan done (the kinds, the numbers, applying by table, the files).
+
+## D-381: proven_c_lib v0.119.1 Vendored
+
+- Date: 2026-11-20
+- Status: Accepted (owner 2026-11-20: "proven c lib 벤더링하고, 릴리즈 부탁드립니다.").
+- Context: `vendor/proven` held v0.119.0 (D-371); upstream's newest release is v0.119.1 (`bbabaf2a`), the one Rubrapack 0.60.0 takes: two fixes found by Rubrapack's review (the ChaCha counter at the wrap with the reseed every MiB on AVX2, the `%e`/`%g` digits' room check) and the vector keystream wiped with a barrier.
+- Decision: replaced as D-336 did (the directory emptied but VENDORED.md, `git archive v0.119.1 ...` unpacked, `diff -r` against the tag: identical); five files changed; nothing of Rubraview's or FultaArc's changes.
+- Consequences: the gate's host tests, `make win64`; released in 1.51.0.
