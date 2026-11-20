@@ -105,13 +105,17 @@ static void edit_keep(app_state_t *app) {
     row_set(app, row, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)typed, .size = n });
 }
 
+static void folder_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    (void)filter;
+    if (accepted && count > 0 && F.open) row_set(app, (int)(intptr_t)ctx, paths[0]);   /* the card still open for it */
+}
+
 static void browse(app_state_t *app, int row) {
     edit_end(app);
     F.sel = row;
-    rubraview_file_dialog_opts_t opts = { .title = row == 0 ? T("The default folder") : T("A folder for its number"), .folder_mode = true,
-                                          .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
-    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
-    if (picked.accepted && picked.count > 0) row_set(app, row, picked.paths[0]);
+    choose_opts_t o = { .mode = RUBRAVIEW_CHOOSE_FOLDER, .title = row == 0 ? T("The default folder") : T("A folder for its number"),   /* RV-314 */
+                        .start_dir = proven_u8str_view_from_cstr(browse_start_dir(app, app->picker_open)) };
+    (void)choose_ask(app, &o, folder_chosen, (void *)(intptr_t)row);
 }
 
 /* The file on screen to row `row`'s folder; a folder not set yet is edited first. */

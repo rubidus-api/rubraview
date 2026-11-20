@@ -464,6 +464,7 @@ static void settings_half_swap(app_state_t *app, proven_arena_t *half) {
    window closes (1a), before it opens again, and as the viewer quits —
    the volume and the boxes' opacity change outside the window (D-15). */
 void settings_write_if_changed(app_state_t *app, bool say) {
+    if (choose_mode_on()) return;   /* RV-314: a choosing window writes none of the viewer's files */
     if (!rubraview_settings_differs(&app->settings, &app->settings_saved)) return;
     /* D-99: with several viewers open, only what this one changed goes over
        the file as it is now; what another changed meanwhile stays in it. */
@@ -902,24 +903,18 @@ void settings_took_effect(app_state_t *app) {
    is imported replaces the keys shown on the Keys page only — Revert still
    goes back to keymap.ini, and keymap.ini is written as the window closes,
    like a key changed by hand. */
-static void keys_export_or_import(app_state_t *app, bool writing) {
-    const rubraview_file_filter_t FILTERS[] = { { "Keymap (*.ini)", "*.ini" }, { T("All files"), "*.*" } };
-    rubraview_file_dialog_opts_t opts = {
-        .title = writing ? T("Export keys") : T("Import keys"),
-        .filters = FILTERS, .filter_count = 2,
-        .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
-    };
-    app->key_capture = 0;
+static void keys_file_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    bool writing = ctx != NULL;
+    rubraview_file_dialog_result_t picked = { .paths = (proven_u8str_view_t *)paths, .count = count, .accepted = accepted };
+    (void)filter;
+    if (!picked.accepted || picked.count == 0) return;
+    if (!app->settings_open) return;   /* the window closed meanwhile */
     if (writing) {
-        rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_save(app->arena, &opts);
-        if (!picked.accepted || picked.count == 0) return;
         proven_u8str_view_t text = rubraview_keymap_serialize(app->arena, &app->keymap);
         settings_say(app, text.size > 0 && rubraview_pal_fs_write_file(picked.paths[0], text)
                               ? T("keys exported") : T("could not write that file"));
         return;
     }
-    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
-    if (!picked.accepted || picked.count == 0) return;
     proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, picked.paths[0], KEYMAP_MAX_BYTES);
     rubraview_keymap_t keymap = text.size > 0 ? rubraview_keymap_parse(app->arena, text) : (rubraview_keymap_t){0};
     if (keymap.count == 0) {
@@ -930,6 +925,16 @@ static void keys_export_or_import(app_state_t *app, bool writing) {
     keymap_table_refresh(app);
     skip_dirs_table_rows(app);
     settings_say(app, T("keys imported (Revert undoes this)"));
+}
+
+static void keys_export_or_import(app_state_t *app, bool writing) {   /* RV-314: the file chosen in Rubraview's own window */
+    static const rubraview_file_filter_t FILTERS[] = { { "Keymap (*.ini)", "*.ini" }, { N_("All files"), "*.*" } };
+    rubraview_file_filter_t f[2] = { FILTERS[0], { T("All files"), "*.*" } };
+    app->key_capture = 0;
+    choose_opts_t o = { .mode = writing ? RUBRAVIEW_CHOOSE_SAVE : RUBRAVIEW_CHOOSE_FILE, .title = writing ? T("Export keys") : T("Import keys"),
+                        .filters = f, .filter_count = 2, .name = writing ? PROVEN_LIT("keymap") : PROVEN_LIT(""),
+                        .over = rubraview_pal_window_native_handle(app->settings_window) };
+    (void)choose_ask(app, &o, keys_file_chosen, writing ? (void *)1 : NULL);
 }
 
 /* Import (owner, 2026-10-17): the files copied where the program reads
@@ -964,14 +969,12 @@ static int import_files(app_state_t *app, const proven_u8str_view_t *from, const
     return import_into(app, imported_folder(app, sub), from, names, count) ? 2 : 0;
 }
 
-static void lang_import(app_state_t *app) {
-    const rubraview_file_filter_t FILTERS[] = { { T("Language pack (*.txt)"), "*.txt" } };
-    rubraview_file_dialog_opts_t opts = {
-        .title = T("Import language packs"), .filters = FILTERS, .filter_count = 1, .allow_multi = true,
-        .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
-    };
-    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
+static void lang_import_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t n_paths, uint32_t filter) {
+    (void)ctx;
+    rubraview_file_dialog_result_t picked = { .paths = (proven_u8str_view_t *)paths, .count = n_paths, .accepted = accepted };
+    (void)filter;
     if (!picked.accepted || picked.count == 0) return;
+    if (!app->settings_open) return;
     proven_u8str_view_t from[16], names[16];
     size_t count = 0;
     for (size_t i = 0; i < picked.count && count < 16; i++) {
@@ -1017,6 +1020,13 @@ static void lang_import(app_state_t *app) {
                       : count < picked.count ? T("language packs imported; files that are not one were left out")
                       : T("language packs imported"));
     app->settings_dirty = true;
+}
+
+static void lang_import(app_state_t *app) {   /* RV-314: the packs chosen in Rubraview's own window */
+    const rubraview_file_filter_t FILTERS[] = { { T("Language pack (*.txt)"), "*.txt" } };
+    choose_opts_t o = { .mode = RUBRAVIEW_CHOOSE_FILES, .title = T("Import language packs"), .filters = FILTERS, .filter_count = 1,
+                        .over = rubraview_pal_window_native_handle(app->settings_window) };
+    (void)choose_ask(app, &o, lang_import_chosen, NULL);
 }
 
 void settings_say(app_state_t *app, const char *text) {
@@ -1696,17 +1706,26 @@ static void settings_path_commit(app_state_t *app) {
     settings_say(app, rubraview_tr(way->kept));
 }
 
+static char g_spath_for[160];   /* RV-314: the setting whose box asked, so a late answer finds the right one */
+
+static void settings_path_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    (void)ctx; (void)filter;
+    char now[160];
+    (void)rubraview_fmt(now, sizeof now, "{}.{}", PROVEN_ARG(app->spath_section), PROVEN_ARG(app->spath_key));
+    if (!accepted || count == 0 || !app->spath_active || rubraview_cstr_cmp(now, g_spath_for) != 0 || paths[0].size >= sizeof(app->spath_buffer)) return;
+    rubraview_textedit_set(&app->spath_ec.te, paths[0]);   /* in the box, for Enter to keep */
+    app->settings_dirty = true;
+}
+
 static void settings_path_browse(app_state_t *app) {
     bool folder = spath_way(app)->folder_only;   /* RV-311: a file's kind picks a file */
-    rubraview_file_dialog_opts_t opts = {
-        .title = folder ? T("Choose a folder") : T("Choose a file"), .folder_mode = folder,
-        .parent_window_handle = rubraview_pal_window_native_handle(app->settings_window),
-    };
-    rubraview_file_dialog_result_t picked = folder ? rubraview_pal_file_dialog_pick_folder(app->arena, &opts)
-                                                   : rubraview_pal_file_dialog_open(app->arena, &opts);
-    if (picked.accepted && picked.count > 0 && picked.paths[0].size < sizeof(app->spath_buffer)) {
-        rubraview_textedit_set(&app->spath_ec.te, picked.paths[0]);   /* in the box, for Enter to keep */
-    }
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->spath_ec.te);
+    rubraview_fs_entry_t st;
+    proven_u8str_view_t start = typed.size && rubraview_pal_fs_stat(app->arena, typed, &st) ? (st.is_directory ? typed : rubraview_path_dirname(typed)) : PROVEN_LIT("");
+    (void)rubraview_fmt(g_spath_for, sizeof g_spath_for, "{}.{}", PROVEN_ARG(app->spath_section), PROVEN_ARG(app->spath_key));
+    choose_opts_t o = { .mode = folder ? RUBRAVIEW_CHOOSE_FOLDER : RUBRAVIEW_CHOOSE_FILE, .title = folder ? T("Choose a folder") : T("Choose a file"),
+                        .start_dir = start, .over = rubraview_pal_window_native_handle(app->settings_window) };   /* RV-314 */
+    (void)choose_ask(app, &o, settings_path_chosen, NULL);
 }
 
 /* Keys while the box is open: true when it took the key. */

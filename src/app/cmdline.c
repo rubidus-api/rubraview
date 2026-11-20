@@ -7,6 +7,7 @@
 #include "app.h"
 
 bool run_command_line(proven_arena_t *arena, int *exit_code) {
+    if (choose_mode_on()) return false;   /* RV-314: a choosing window: no launch, no hand-over */
     int argc = 0;
     LPWSTR *wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (wargv) {

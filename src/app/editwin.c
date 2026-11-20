@@ -3551,26 +3551,19 @@ void edit_steps_say_programs(app_state_t *app, const rubraview_edit_steps_t *ste
     osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = at < sizeof(line) ? at : sizeof(line) - 1 });
 }
 
-void edit_steps_save_or_load(app_state_t *app, bool saving) {
-    static const rubraview_file_filter_t FILTERS[] = { { "Edit's steps (*.rvsteps)", "*.rvsteps" } };
-    rubraview_file_dialog_opts_t opts = {
-        .title = saving ? T("Save Edit's steps") : T("Load Edit's steps"),
-        .filters = FILTERS, .filter_count = 1,
-        .parent_window_handle = rubraview_pal_window_native_handle(app->edit_window ? app->edit_window : app->window),
-    };
+/* RV-314: saved to or loaded from a file chosen in Rubraview's own window, when it answers */
+static void edit_steps_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    bool saving = ctx != NULL;
+    rubraview_file_dialog_result_t picked = { .paths = (proven_u8str_view_t *)paths, .count = count, .accepted = accepted };
+    (void)filter;
+    if (!picked.accepted || picked.count == 0) return;
     if (saving) {
-        (void)edit_apply_pending(app, false);
-        if (app->edit_steps.cursor == 0) { osd_say(app, TU8("no steps yet: make a change first")); return; }
-        rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_save(app->arena, &opts);
-        if (!picked.accepted || picked.count == 0) return;
         proven_u8str_view_t text = rubraview_edit_steps_serialize(app->arena, &app->edit_steps);
         proven_u8str_view_t path = picked.paths[0];
         osd_say(app, text.size > 0 && rubraview_pal_fs_write_file(path, text)
                          ? TU8("the steps saved: Batch › Edit's steps › a file runs them on many pictures") : TU8("could not write that file"));
         return;
     }
-    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
-    if (!picked.accepted || picked.count == 0) return;
     proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, picked.paths[0], 4u << 20);
     static rubraview_edit_steps_t loaded;
     const char *why = NULL;
@@ -3587,4 +3580,18 @@ void edit_steps_save_or_load(app_state_t *app, bool saving) {
     rubraview_edit_steps_rebase(&app->edit_steps, w, h);   /* onto this picture: ratios its parts, pixels kept */
     edit_steps_changed(app);
     edit_steps_say_programs(app, &loaded);
+}
+
+void edit_steps_save_or_load(app_state_t *app, bool saving) {
+    static const rubraview_file_filter_t FILTERS[] = { { "Edit's steps (*.rvsteps)", "*.rvsteps" } };
+    if (saving) {
+        (void)edit_apply_pending(app, false);
+        if (app->edit_steps.cursor == 0) { osd_say(app, TU8("no steps yet: make a change first")); return; }
+    }
+    proven_u8str_view_t here = current_file_path(app);
+    choose_opts_t o = { .mode = saving ? RUBRAVIEW_CHOOSE_SAVE : RUBRAVIEW_CHOOSE_FILE, .title = saving ? T("Save Edit's steps") : T("Load Edit's steps"),
+                        .filters = FILTERS, .filter_count = 1, .name = saving ? PROVEN_LIT("steps") : PROVEN_LIT(""),
+                        .start_dir = here.size ? rubraview_path_dirname(here) : PROVEN_LIT(""),
+                        .over = rubraview_pal_window_native_handle(app->edit_window ? app->edit_window : app->window) };
+    (void)choose_ask(app, &o, edit_steps_chosen, saving ? (void *)1 : NULL);
 }

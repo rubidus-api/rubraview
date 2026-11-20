@@ -290,6 +290,33 @@ void panel_apply_row(app_state_t *app, int32_t index) {
     }
 }
 
+
+/* RV-314: Edit's steps file and the picture to lay over, chosen in Rubraview's own window; the panel shown again with it */
+static void steps_file_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    (void)ctx; (void)filter;
+    if (!accepted || count == 0) return;
+    rubraview_file_dialog_result_t picked = { .paths = (proven_u8str_view_t *)paths, .count = count, .accepted = true };
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, picked.paths[0], 4u << 20);
+    static rubraview_edit_steps_t probe;
+    const char *why = NULL;
+    if (text.size == 0 || !rubraview_edit_steps_parse(app->arena, text, &probe, &why)) {
+        char line[300];
+        rubraview_fmt(line, sizeof(line), T("not used: {}"), PROVEN_ARG(why ? rubraview_tr(why) : T("the file could not be read")));
+        osd_say(app, cstr(line));
+    } else {
+        rubraview_fmt(app->batch.steps_file, sizeof(app->batch.steps_file), "{}", PROVEN_ARG(rubraview_bytes_view(picked.paths[0].ptr, (int)picked.paths[0].size)));
+        edit_steps_say_programs(app, &probe);
+    }
+    if (app->panel.open) panel_open_batch(app);
+}
+
+static void mark_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    (void)ctx; (void)filter;
+    if (!accepted || count == 0) return;
+    rubraview_fmt(app->batch.mark, sizeof(app->batch.mark), "{}", PROVEN_ARG(rubraview_bytes_view(paths[0].ptr, (int)paths[0].size)));
+    if (app->panel.open) panel_open_batch(app);
+}
+
 void panel_button(app_state_t *app, int32_t index) {
     if (index < 0 || (size_t)index >= app->panel.row_count) return;
     if (app->panel.rows[index].id >= PANEL_GMIC_P0 && app->panel.rows[index].id < PANEL_GMIC_P0 + PANEL_GMIC_ROWS &&
@@ -396,25 +423,10 @@ void panel_button(app_state_t *app, int32_t index) {
             panel_open_batch(app);
             osd_say(app, TU8("the saved crop and effect dropped: Edit's steps do these"));
             break;
-        case PANEL_BATCH_STEPS_FILE: {   /* RV-187: a .rvsteps file */
+        case PANEL_BATCH_STEPS_FILE: {   /* RV-187: a .rvsteps file; RV-314: chosen in Rubraview's own window */
             static const rubraview_file_filter_t FILTERS[] = { { "Edit's steps (*.rvsteps)", "*.rvsteps" } };
-            rubraview_file_dialog_opts_t opts = { .title = T("Edit's steps to run on each picture"), .filters = FILTERS, .filter_count = 1,
-                                                  .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
-            rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
-            if (picked.accepted && picked.count > 0) {
-                proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, picked.paths[0], 4u << 20);
-                static rubraview_edit_steps_t probe;
-                const char *why = NULL;
-                if (text.size == 0 || !rubraview_edit_steps_parse(app->arena, text, &probe, &why)) {
-                    char line[300];
-                    rubraview_fmt(line, sizeof(line), T("not used: {}"), PROVEN_ARG(why ? rubraview_tr(why) : T("the file could not be read")));
-                    osd_say(app, cstr(line));
-                } else {
-                    rubraview_fmt(app->batch.steps_file, sizeof(app->batch.steps_file), "{}", PROVEN_ARG(rubraview_bytes_view(picked.paths[0].ptr, (int)picked.paths[0].size)));
-                    edit_steps_say_programs(app, &probe);
-                }
-            }
-            panel_open_batch(app);
+            choose_opts_t o = { .mode = RUBRAVIEW_CHOOSE_FILE, .title = T("Edit's steps to run on each picture"), .filters = FILTERS, .filter_count = 1 };
+            (void)choose_ask(app, &o, steps_file_chosen, NULL);
             break;
         }
         case PANEL_BATCH_CANVAS: case PANEL_BATCH_NAME: case PANEL_BATCH_REPLACE: case PANEL_BATCH_OUT: case PANEL_BATCH_TEXT:
@@ -443,12 +455,8 @@ void panel_button(app_state_t *app, int32_t index) {
             if (app->batch.mark[0]) { app->batch.mark[0] = '\0'; panel_open_batch(app); break; }   /* pressed again: none */
             {
                 static const rubraview_file_filter_t FILTERS[] = { { "Pictures (*.png;*.webp;*.gif;*.jpg)", "*.png;*.webp;*.gif;*.jpg;*.jpeg;*.bmp;*.tif;*.tiff" } };
-                rubraview_file_dialog_opts_t opts = { .title = T("A picture to lay over each one"), .filters = FILTERS, .filter_count = 1,
-                                                      .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
-                rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
-                if (picked.accepted && picked.count > 0)
-                    rubraview_fmt(app->batch.mark, sizeof(app->batch.mark), "{}", PROVEN_ARG(rubraview_bytes_view(picked.paths[0].ptr, (int)picked.paths[0].size)));
-                panel_open_batch(app);
+                choose_opts_t o = { .mode = RUBRAVIEW_CHOOSE_FILE, .title = T("A picture to lay over each one"), .filters = FILTERS, .filter_count = 1 };   /* RV-314 */
+                (void)choose_ask(app, &o, mark_chosen, NULL);
             }
             break;
         case PANEL_BATCH_RUN:

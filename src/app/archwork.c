@@ -204,17 +204,21 @@ void archwork_extract_dest_dropped(app_state_t *app) {
     if (g_dest_wait) { work_free(g_dest_wait); g_dest_wait = NULL; osd_say(app, TU8("not extracted")); }
 }
 
+static void extract_dest_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    (void)ctx; (void)filter;
+    if (!accepted || count == 0 || !app->rename_active || !app->rename_is_extract || paths[0].size >= sizeof(app->rename_buffer)) return;
+    rubraview_textedit_set(&app->rename_ec.te, paths[0]);   /* in the box, for Enter */
+}
+
 void archwork_extract_dest_browse(app_state_t *app) {
     char typed[1100];   /* RV-313: from the folder in the box (the archive's own, offered), as a copy's starts where it is */
     proven_u8str_view_t t = rubraview_textedit_text(&app->rename_ec.te);
     rubraview_fs_entry_t st;
     bool there = t.size > 0 && t.size < sizeof typed && rubraview_pal_fs_stat(app->arena, t, &st) && st.is_directory;
     if (there) { proven_sys_mem_copy(typed, t.ptr, t.size); typed[t.size] = '\0'; }
-    rubraview_file_dialog_opts_t opts = { .title = T("Extract into which folder"), .folder_mode = true, .default_dir = there ? typed : browse_start_dir(app, app->picker_open),
-                                          .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
-    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
-    if (picked.accepted && picked.count > 0 && picked.paths[0].size < sizeof(app->rename_buffer))
-        rubraview_textedit_set(&app->rename_ec.te, picked.paths[0]);   /* in the box, for Enter */
+    choose_opts_t o = { .mode = RUBRAVIEW_CHOOSE_FOLDER, .title = T("Extract into which folder"),   /* RV-314: Rubraview's own window */
+                        .start_dir = proven_u8str_view_from_cstr(there ? typed : browse_start_dir(app, app->picker_open)) };
+    (void)choose_ask(app, &o, extract_dest_chosen, NULL);
 }
 
 static void extract_go(app_state_t *app, archwork_t *w) {

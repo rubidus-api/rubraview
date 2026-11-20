@@ -79,6 +79,20 @@ bool propsver_press(app_state_t *app, double x, double y) {
     return false;
 }
 
+static char g_version_from[1200];   /* RV-314: the version whose folder is being chosen */
+
+static void version_dir_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    (void)ctx; (void)filter;
+    if (!accepted || count == 0 || !g_version_from[0]) return;
+    proven_u8str_view_t from = proven_u8str_view_from_cstr(g_version_from);
+    bool started = filejob_start(app, paths[0], &from, 1, false, -1, false);
+    if (app->props_open) {
+        pw_say(V(app), started ? T("copying the version: its window shows how it goes") : T("the copy could not be started"));
+        app->props_dirty = true;
+    }
+    g_version_from[0] = '\0';
+}
+
 bool propsver_button(app_state_t *app, int which) {
     props_view_t *v = V(app);
     if (v->version_sel < 0 || (size_t)v->version_sel >= v->version_count) return true;
@@ -106,12 +120,13 @@ bool propsver_button(app_state_t *app, int which) {
         return true;
     }
     proven_u8str_view_t dir;
-    if (which == PB_VER_COPY) {
-        rubraview_file_dialog_opts_t opts = { .title = T("Copy the version to"), .folder_mode = true,
-                                              .parent_window_handle = rubraview_pal_window_native_handle(app->props_window) };
-        rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
-        if (!picked.accepted || picked.count == 0) return true;
-        dir = picked.paths[0];
+    if (which == PB_VER_COPY) {   /* RV-314: Rubraview's own folder window; the copy starts when it answers */
+        (void)rubraview_fmt(g_version_from, sizeof g_version_from, "{}", PROVEN_ARG(from));
+        choose_opts_t o = { .mode = RUBRAVIEW_CHOOSE_FOLDER, .title = T("Copy the version to"),
+                            .start_dir = rubraview_path_dirname(proven_u8str_view_from_cstr(v->paths[0])),
+                            .over = rubraview_pal_window_native_handle(app->props_window) };
+        (void)choose_ask(app, &o, version_dir_chosen, NULL);
+        return true;
     } else {
         dir = rubraview_path_dirname(proven_u8str_view_from_cstr(v->paths[0]));   /* over the file: the job asks first */
     }

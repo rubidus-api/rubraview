@@ -109,6 +109,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     handled += extractwin_pump(app);   /* RV-272 */
     handled += clash_pump(app);   /* RV-258 */
     handled += filejob_pump(app);
+    handled += choose_pump(app);   /* RV-314: the choosing windows' answers */
     arcadd_poll(app);   /* RV-260 */
     handled += explorer_apps_poll(app);   /* RV-308 */
     view_orientation_follow_edit(app);   /* RV-265 */

@@ -887,7 +887,7 @@ so on. `Ctrl+Z` takes a copy away again or brings a moved file back.
 To send it somewhere else, `Alt+C` (copy) and `Alt+M` (move) — also
 Copy to another folder... / Move to another folder... in the right click, and `Ctrl+Shift+C` / `Ctrl+Shift+M` themselves while no folder is set for them —
 open a box in the middle of the window holding the last folder you used.
-Type or paste a folder, or press `Ctrl+O` to browse to one (the folder window opens at the folder you are in), and press
+Type or paste a folder, or press `Ctrl+O` to browse to one (the choosing window opens at the folder you are in), and press
 `Enter`. A folder that is not there yet is not made by accident: the
 first `Enter` says it is new, a second `Enter` makes it and puts the file
 in it; `Esc` leaves everything as it was.
@@ -1584,6 +1584,19 @@ as below. A cut (`Ctrl+X`) moves them in, a copy and a drop copy them.
 `Ctrl+Z` brings the archive back as it was before the last writing. A
 RAR, ALZ or EGG cannot be written as it is: it asks to become a ZIP or a
 7z of its name (the old one goes to the Recycle Bin).
+
+**Choosing a folder or a file.** Wherever Rubraview asks for a folder, a file or a name to save as — Copy or
+Move to another folder, Extract into, Settings' folders and files, a list opened or saved, the log saved, Edit's
+steps, Batch's choices, keys exported or imported, language packs, a previous version copied out — it opens its
+own open-file screen in a window of its own, **Rubraview - choose**, over the window that asked; that window
+and the main window go on meanwhile. It lists folders and the files of the kind asked (the kind's button at the
+bottom left switches it when there are several), with everything the open-file screen has: the places, the
+favourites, typing a path (`Ctrl+L`), the filter, the tiles or details. **Choose this folder** takes the folder
+shown (or a folder ticked), **Open** the file ticked or focused (a double tap opens it at once), **Save** the
+name typed at the bottom (its kind's extension added; a name already there asks once, a second Save replaces
+it; `Tab` goes between the name and the list). **Cancel**, `Esc` or the window's X leave it unanswered.
+**Windows' window** asks Windows' own dialog instead and gives its answer. (Settings › General's Windows'
+dialog for opening still opens Windows' own Open.)
 
 **Names already there.** Paste, Move to, Copy to and a basket's Copy or
 Move here first check every name in the folder. What clashes with nothing

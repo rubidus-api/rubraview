@@ -119,6 +119,7 @@ enum { CARD_HOST_NONE = 0, CARD_HOST_MAIN, CARD_HOST_EDIT, CARD_HOST_BATCH, CARD
 #include "rubraview/lyrics.h"
 #include "rubraview/filmstrip.h"
 #include "rubraview/picker.h"
+#include "rubraview/choose.h"
 #include "rubraview/favorites.h"
 #include "rubraview/fileinfo.h"
 #include "rubraview/notices.h"
@@ -1810,13 +1811,14 @@ typedef enum picker_button {
     PICKER_BTN_CANCEL,       /* 1.25.0: back to what was on screen before */
     PICKER_BTN_EXTRACT,      /* RV-207: the picked archives, or what is picked inside one, the way Settings says */
     PICKER_BTN_COMPRESS,     /* RV-207: the picked files and folders, through the Compress box */
+    PICKER_BTN_WINDOWS,      /* RV-314: choosing: Windows' own window instead */
     PICKER_BTN_COUNT,
 } picker_button_t;
 
 static const char *const PICKER_BUTTON_LABEL[PICKER_BTN_COUNT] = {
     N_("Open"), N_("Individual"), N_("Range"), N_("Same type"), N_("Media"), N_("Change ext"),
     N_("Playlist"), N_("Recycle"), N_("Move to"), N_("Copy to"), N_("Deselect all"), N_("Details"), N_("Cancel"),
-    N_("Extract"), N_("Compress"),
+    N_("Extract"), N_("Compress"), N_("Windows' window"),
 };
 /* RV-207 (owner: "파일 관리자를 더 중심적인 기능으로"): the list, the archiver, the file moves, then Cancel and Open */
 static const picker_button_t PICKER_BOTTOM[] = { PICKER_BTN_PLAYLIST, PICKER_BTN_EXTRACT, PICKER_BTN_COMPRESS, PICKER_BTN_RECYCLE,
@@ -2919,6 +2921,33 @@ void takeout_step(app_state_t *app);
 void target_begin(app_state_t *app, bool moving, bool from_picker);
 void target_browse(app_state_t *app);
 const char *browse_start_dir(app_state_t *app, bool from_picker);   /* RV-313 */
+
+/* RV-314: Rubraview's own window for choosing a folder, files or where to save (choose.c, D-384) */
+typedef void (*choose_done_fn)(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter);
+typedef struct choose_opts {
+    int mode;                               /* a rubraview_choose_mode_t */
+    const char *title;
+    proven_u8str_view_t start_dir, name;    /* where it opens ("" where it was left), the name offered (saving) */
+    const rubraview_file_filter_t *filters;
+    size_t filter_count;
+    uint32_t filter;
+    void *over;                             /* the asking window's native handle (NULL: the main window) */
+} choose_opts_t;
+bool choose_ask(app_state_t *app, const choose_opts_t *o, choose_done_fn done, void *ctx);
+size_t choose_pump(app_state_t *app);
+bool choose_mode_take(const wchar_t *hex);
+bool choose_mode_on(void);
+bool choose_lists(proven_u8str_view_t name, bool is_directory);
+void choose_begin(app_state_t *app);
+void choose_end(app_state_t *app);
+bool choose_title(app_state_t *app);
+bool choose_button(app_state_t *app, picker_button_t button);
+bool choose_activate(app_state_t *app, const rubraview_fs_entry_t *entry);
+const char *choose_open_word(void);
+int32_t choose_bottom_list(picker_button_t *out);
+void choose_draw_foot(app_state_t *app, double win_w, double win_h, double dpi);
+bool choose_event(app_state_t *app, const rubraview_window_event_t *event);
+size_t choose_watch(app_state_t *app);
 void target_commit(app_state_t *app);
 bool text_action(app_state_t *app, proven_u8str_view_t action);
 bool text_active(const app_state_t *app);

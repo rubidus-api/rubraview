@@ -427,17 +427,18 @@ const char *browse_start_dir(app_state_t *app, bool from_picker) {
     return s;
 }
 
+/* RV-314: the folder chosen in Rubraview's own window, put in the box (still open for it) for Enter */
+static void target_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    (void)ctx; (void)filter;
+    if (!accepted || count == 0 || !app->rename_active || !app->rename_is_target || paths[0].size >= sizeof(app->rename_buffer)) return;
+    rubraview_textedit_set(&app->rename_ec.te, paths[0]);
+    app->target_offered_len = 0;
+}
+
 void target_browse(app_state_t *app) {
-    rubraview_file_dialog_opts_t opts = {
-        .title = app->target_moving ? T("Move to which folder") : T("Copy to which folder"), .folder_mode = true,
-        .default_dir = browse_start_dir(app, app->target_from_picker),
-        .parent_window_handle = rubraview_pal_window_native_handle(app->window),
-    };
-    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
-    if (picked.accepted && picked.count > 0 && picked.paths[0].size < sizeof(app->rename_buffer)) {
-        rubraview_textedit_set(&app->rename_ec.te, picked.paths[0]);   /* in the box, for Enter */
-        app->target_offered_len = 0;
-    }
+    choose_opts_t o = { .mode = RUBRAVIEW_CHOOSE_FOLDER, .title = app->target_moving ? T("Move to which folder") : T("Copy to which folder"),
+                        .start_dir = proven_u8str_view_from_cstr(browse_start_dir(app, app->target_from_picker)) };
+    (void)choose_ask(app, &o, target_chosen, NULL);
 }
 
 /* Enter in the folder box: a folder there takes the files; one not there

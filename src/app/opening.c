@@ -191,7 +191,7 @@ static proven_u8str_view_t picker_folder_to_keep(app_state_t *app) {
 }
 
 void layout_save(app_state_t *app) {
-    if (app->layout_path.size == 0) return;
+    if (app->layout_path.size == 0 || choose_mode_on()) return;   /* RV-314 */
     /* Through the configuration writer, so the file is in the INI and
        TOML subset (D-13). */
     rubraview_ini_doc_t doc = {0};
@@ -330,6 +330,7 @@ void recent_note_shown(app_state_t *app) {
 }
 
 void history_remember(app_state_t *app) {
+    if (choose_mode_on()) return;   /* RV-314 */
     if (app->source_dir.size == 0 || page_count(app) == 0) return;
     /* Settings › Files › Remember the page: off, nothing is written down. */
     if (rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("reading_history")) < 0.5) return;

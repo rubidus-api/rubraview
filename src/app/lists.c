@@ -372,7 +372,7 @@ static const char *list_save_dir(app_state_t *app, char *buf, size_t cap) {
     return buf;
 }
 
-static void list_save(app_state_t *app) {
+static void list_save_to(app_state_t *app, proven_u8str_view_t target) {
     /* RV-276: in a book of the list, the list it came from (its rows, the book's own path among them) */
     bool outer = app->book_active && app->book_list;
     size_t count = outer ? app->book_list_n : page_count(app);
@@ -385,15 +385,6 @@ static void list_save(app_state_t *app) {
         for (size_t i = 0; i < count; ++i)
             rows[i] = outer ? app->book_list[i] : (rubraview_fs_entry_t){ .name = app->source.pages[i].name, .path = app->source.pages[i].path };
     }
-    char start_dir[1024];
-    rubraview_file_dialog_opts_t opts = {
-        .title = T("Save the list"), .default_dir = list_save_dir(app, start_dir, sizeof start_dir),
-        .filters = LIST_FILTERS, .filter_count = 2,
-        .parent_window_handle = rubraview_pal_window_native_handle(app->window),
-    };
-    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_save(app->arena, &opts);
-    if (!picked.accepted || picked.count == 0) return;
-    proven_u8str_view_t target = picked.paths[0];
     if (!path_is_playlist(target)) target = rubraview_path_with_ext(app->arena, target, ".m3u8");
     target = rubraview_pal_fs_absolute(app->arena, target);
     proven_u8str_view_t dir = rubraview_path_dirname(target);
@@ -428,15 +419,33 @@ static void list_save(app_state_t *app) {
     osd_say(app, cstr(line));
 }
 
+/* RV-314: where to save it, chosen in Rubraview's own window; written when it answers */
+static void list_save_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    (void)ctx; (void)filter;
+    if (accepted && count > 0) list_save_to(app, paths[0]);
+}
+
+static void list_save(app_state_t *app) {
+    bool outer = app->book_active && app->book_list;
+    if ((outer ? app->book_list_n : page_count(app)) == 0) return;
+    char start_dir[1024];
+    choose_opts_t o = { .mode = RUBRAVIEW_CHOOSE_SAVE, .title = T("Save the list"),
+                        .start_dir = proven_u8str_view_from_cstr(list_save_dir(app, start_dir, sizeof start_dir)),
+                        .name = PROVEN_LIT("list"), .filters = LIST_FILTERS, .filter_count = 2 };
+    (void)choose_ask(app, &o, list_save_chosen, NULL);
+}
+
+static void list_load_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    (void)ctx; (void)filter;
+    if (accepted && count > 0) open_playlist(app, paths[0]);
+}
+
 static void list_load(app_state_t *app) {
     static const rubraview_file_filter_t FILTERS[] = { { "Lists (*.m3u8;*.m3u;*.pls;*.asx;*.rvlist)", LIST_FILTER } };
-    rubraview_file_dialog_opts_t opts = {
-        .title = T("Open a list"), .filters = FILTERS, .filter_count = 1,
-        .parent_window_handle = rubraview_pal_window_native_handle(app->window),
-    };
-    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_open(app->arena, &opts);
-    if (!picked.accepted || picked.count == 0) return;
-    open_playlist(app, picked.paths[0]);
+    proven_u8str_view_t here = current_file_path(app);
+    choose_opts_t o = { .mode = RUBRAVIEW_CHOOSE_FILE, .title = T("Open a list"), .filters = FILTERS, .filter_count = 1,   /* RV-314 */
+                        .start_dir = here.size ? rubraview_path_dirname(here) : PROVEN_LIT("") };
+    (void)choose_ask(app, &o, list_load_chosen, NULL);
 }
 
 void list_row_menu(app_state_t *app, size_t row, double x, double y, bool in_files);

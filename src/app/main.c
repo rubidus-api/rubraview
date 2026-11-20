@@ -284,6 +284,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
             LocalFree(wargv);
             return code;
         }
+        if (wargv && argc == 3 && rubraview_wcmp(wargv[1], L"--choose") == 0 && !choose_mode_take(wargv[2])) {   /* RV-314 */
+            LocalFree(wargv);
+            return 2;
+        }
         if (wargv && argc == 3 && rubraview_wcmp(wargv[1], L"--file-job") == 0) {   /* RV-289: a copy or a move in a process of its own */
             int code = jobproc_main(wargv[2]);
             LocalFree(wargv);
@@ -348,12 +352,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         frame_fit_boxes(&app);
         while (rubraview_pal_window_poll_event(app.window, &event)) {
             handled++;
+            if (choose_event(&app, &event)) continue;   /* RV-314: the choosing window's own parts first */
             frame_event(&app, &event);
         }
 
         frame_tick(&app, &frame_clock, handled);
     }
 
+    choose_end(&app);   /* RV-314: a choosing window closed without an answer says so */
     app_end(&app);
     rubraview_mem_release(&mem);
     CoUninitialize();

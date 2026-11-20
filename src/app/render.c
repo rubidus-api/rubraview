@@ -1138,10 +1138,12 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_render_fill_rect(app->renderer, rect, b == PICKER_BTN_OPEN ? COLOR_TILE_CURRENT : over ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, rect, COLOR_BOX_BORDER, 1.0, 3.0);
         const char *label = b == PICKER_BTN_PLAYLIST ? T("Add to the list") : b == PICKER_BTN_OPEN && app->picker_add_mode ? T("OK")
+                          : b == PICKER_BTN_OPEN && choose_mode_on() ? choose_open_word()
                           : rubraview_tr(PICKER_BUTTON_LABEL[b]);
         rubraview_pal_render_draw_text(app->renderer, cstr(label), rect,
                                        rect.height * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
+    choose_draw_foot(app, win_w, win_h, dpi);   /* RV-314: the kind, the name */
     bar.y += PICKER_BUTTON_ROW * dpi;
     bar.height -= PICKER_BUTTON_ROW * dpi;
 

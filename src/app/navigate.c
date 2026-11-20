@@ -269,6 +269,7 @@ void zoom_cycle(app_state_t *app) {
    or archive, so the taskbar, Alt+Tab and a test script can all tell
    which page is showing. */
 void update_window_title(app_state_t *app) {
+    if (choose_title(app)) return;   /* RV-314: the asker's words */
     char title[768];
     size_t used = 0;
     if (app->picker_open) {   /* 1.24.0 (owner, 2026-10-19): "Rubraview - <the folder>" */

@@ -193,11 +193,12 @@ void draw_log_window(app_state_t *app) {
 
 static const rubraview_file_filter_t LOG_FILTERS[] = { { "Text (*.txt)", "*.txt" } };
 
-static void log_save(app_state_t *app) {
-    rubraview_file_dialog_opts_t opts = { .title = T("Save the log"), .filters = LOG_FILTERS, .filter_count = 1,
-                                          .parent_window_handle = rubraview_pal_window_native_handle(app->log_window) };
-    rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_save(app->arena, &opts);
+static void log_save_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    (void)ctx;
+    rubraview_file_dialog_result_t picked = { .paths = (proven_u8str_view_t *)paths, .count = count, .accepted = accepted };
+    (void)filter;
     if (!picked.accepted || picked.count == 0) return;
+
     proven_u8str_view_t target = picked.paths[0];
     if (!rubraview_glob_match_list(rubraview_path_basename(target), PROVEN_LIT("*.txt;*.log"))) target = rubraview_path_with_ext(app->arena, target, ".txt");
     size_t n = rubraview_log_copy(&app->log, NULL, 0);
@@ -209,6 +210,12 @@ static void log_save(app_state_t *app) {
     rubraview_fmt(app->log_message, sizeof app->log_message, "{}", PROVEN_ARG(ok ? T("saved") : T("could not be saved")));
     app_log(app, "log", ok ? target : TU8("could not be saved"));
     app->log_dirty = true;
+}
+
+static void log_save(app_state_t *app) {   /* RV-314: where, chosen in Rubraview's own window */
+    choose_opts_t o = { .mode = RUBRAVIEW_CHOOSE_SAVE, .title = T("Save the log"), .filters = LOG_FILTERS, .filter_count = 1,
+                        .name = PROVEN_LIT("rubraview-log"), .over = rubraview_pal_window_native_handle(app->log_window) };
+    (void)choose_ask(app, &o, log_save_chosen, NULL);
 }
 
 /* RV-264: Ctrl+C copies what is marked, as the information window does; everything when nothing is. */

@@ -400,7 +400,12 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
         book_listing_whole(app, pa, &level, inner, dir);
         listing = level.listing;
     }
-    if (!picker_every_file(app) && !in_book && !in_arc && !places && !recent) {
+    if (choose_mode_on() && !in_book && !in_arc && !places && !recent) {   /* RV-314: folders, and the files of the kind asked */
+        size_t kept = 0;
+        for (size_t i = 0; i < listing.count; ++i)
+            if (choose_lists(listing.entries[i].name, listing.entries[i].is_directory)) listing.entries[kept++] = listing.entries[i];
+        listing.count = kept;
+    } else if (!picker_every_file(app) && !in_book && !in_arc && !places && !recent) {
         /* Viewer's files: folders and what the viewer opens, a RAR set by its first volume (owner, 2026-09-21, 2026-10-01) */
         size_t kept = 0;
         for (size_t i = 0; i < listing.count; ++i) {

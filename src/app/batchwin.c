@@ -566,13 +566,20 @@ proven_u8str_view_t batch_preview_name(app_state_t *app, size_t i, proven_arena_
     return rubraview_batch_output_name(arena, &r.job, &in, i, ext);
 }
 
-void batch_save_or_load(app_state_t *app, bool saving) {
-    static const rubraview_file_filter_t FILTERS[] = { { "Batch choices (*.rvbatch)", "*.rvbatch" } };
-    rubraview_file_dialog_opts_t opts = {
-        .title = saving ? T("Save the batch choices") : T("Load batch choices"), .filters = FILTERS, .filter_count = 1,
-        .parent_window_handle = rubraview_pal_window_native_handle(app->window),
-    };
-    rubraview_file_dialog_result_t picked = saving ? rubraview_pal_file_dialog_save(app->arena, &opts) : rubraview_pal_file_dialog_open(app->arena, &opts);
+static const rubraview_file_filter_t BATCH_FILTERS[] = { { "Batch choices (*.rvbatch)", "*.rvbatch" } };
+
+static void batch_file_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter);
+
+void batch_save_or_load(app_state_t *app, bool saving) {   /* RV-314: the file chosen in Rubraview's own window */
+    choose_opts_t o = { .mode = saving ? RUBRAVIEW_CHOOSE_SAVE : RUBRAVIEW_CHOOSE_FILE, .title = saving ? T("Save the batch choices") : T("Load batch choices"),
+                        .filters = BATCH_FILTERS, .filter_count = 1, .name = saving ? PROVEN_LIT("batch") : PROVEN_LIT("") };
+    (void)choose_ask(app, &o, batch_file_chosen, saving ? (void *)1 : NULL);
+}
+
+static void batch_file_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *paths, size_t count, uint32_t filter) {
+    bool saving = ctx != NULL;
+    rubraview_file_dialog_result_t picked = { .paths = (proven_u8str_view_t *)paths, .count = count, .accepted = accepted };
+    (void)filter;
     if (!picked.accepted || picked.count == 0) return;
     proven_u8str_view_t path = picked.paths[0];
     if (saving) {
@@ -589,7 +596,7 @@ void batch_save_or_load(app_state_t *app, bool saving) {
     if (text.size == 0 || !batch_from_text(app, &b, text)) { osd_say(app, TU8("that file holds no batch choices this version takes")); return; }
     app->batch = b;
     osd_say(app, TU8("the choices were loaded"));
-    panel_open_batch(app);
+    if (app->panel.open) panel_open_batch(app);
 }
 
 /* ---- RV-187 (D-220): the steps in Edit, where Batch reads them ---- */

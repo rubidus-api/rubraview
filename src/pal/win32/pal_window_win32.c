@@ -41,6 +41,10 @@ typedef UINT (WINAPI *get_dpi_for_window_fn)(HWND);
    the main thread writes and reads it. */
 #define IPC_REQUEST 2u
 #define IPC_REQUEST_MAX 1024
+#define IPC_CHOOSE 3u   /* RV-314: a choosing process's answer */
+#define IPC_CHOOSE_MAX 16
+static char  *g_chosen[IPC_CHOOSE_MAX];
+static size_t g_chosen_sizes[IPC_CHOOSE_MAX], g_chosen_count;
 static char  *g_requests[IPC_REQUEST_MAX];
 static size_t g_request_sizes[IPC_REQUEST_MAX];
 static size_t g_request_count;
@@ -259,6 +263,15 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
             COPYDATASTRUCT *data = (COPYDATASTRUCT*)lparam;
             if (!data || !data->lpData || data->cbData == 0) return TRUE;
 
+            if (data->dwData == IPC_CHOOSE) {   /* RV-314: kept until the viewer's pump takes it */
+                char *copy = g_chosen_count < IPC_CHOOSE_MAX ? (char*)rubraview_alloc(data->cbData) : NULL;
+                if (copy) {
+                    proven_sys_mem_copy(copy, data->lpData, data->cbData);
+                    g_chosen[g_chosen_count] = copy;
+                    g_chosen_sizes[g_chosen_count++] = data->cbData;
+                }
+                return TRUE;
+            }
             if (data->dwData == IPC_REQUEST) {
                 /* D-86: a verb and its files, kept until the viewer asks. */
                 char *copy = g_request_count < IPC_REQUEST_MAX ? (char*)rubraview_alloc(data->cbData) : NULL;
@@ -1622,6 +1635,49 @@ bool rubraview_pal_instance_send_request(proven_u8str_view_t blob_view, uint32_t
     if (IsIconic(front)) ShowWindow(front, SW_RESTORE);
     SetForegroundWindow(target);
     return true;
+}
+
+bool rubraview_pal_choose_take(char **out_blob, size_t *out_len) {
+    if (!out_blob || !out_len || g_chosen_count == 0) return false;
+    *out_blob = g_chosen[0];
+    *out_len = g_chosen_sizes[0];
+    g_chosen_count--;
+    proven_sys_mem_move(g_chosen, g_chosen + 1, g_chosen_count * sizeof(g_chosen[0]));
+    proven_sys_mem_move(g_chosen_sizes, g_chosen_sizes + 1, g_chosen_count * sizeof(g_chosen_sizes[0]));
+    return true;
+}
+
+bool rubraview_pal_choose_send(uint64_t to, proven_u8str_view_t blob) {
+    HWND target = (HWND)(uintptr_t)to;
+    if (!target || !IsWindow(target) || blob.size == 0 || blob.size > 0x7FFFFFFFu) return false;
+    COPYDATASTRUCT data = { .dwData = IPC_CHOOSE, .cbData = (DWORD)blob.size, .lpData = (void*)blob.ptr };
+    DWORD_PTR answer = 0;
+    return SendMessageTimeoutW(target, WM_COPYDATA, 0, (LPARAM)&data, SMTO_ABORTIFHUNG, 5000, &answer) != 0;
+}
+
+void rubraview_pal_window_place_over(rubraview_window_t *window, uint64_t over, int32_t width, int32_t height) {
+    if (!window || !window->hwnd) return;
+    HWND other = (HWND)(uintptr_t)over;
+    RECT o;
+    UINT dpi = GetDpiForWindow(window->hwnd);
+    int w = MulDiv(width, (int)(dpi ? dpi : 96), 96), h = MulDiv(height, (int)(dpi ? dpi : 96), 96);
+    if (other && IsWindow(other) && GetWindowRect(other, &o)) {
+        HMONITOR mon = MonitorFromWindow(other, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO mi = { .cbSize = sizeof mi };
+        int x = (o.left + o.right - w) / 2, y = (o.top + o.bottom - h) / 2;
+        if (GetMonitorInfoW(mon, &mi)) {   /* kept on the asker's screen */
+            if (w > mi.rcWork.right - mi.rcWork.left) w = mi.rcWork.right - mi.rcWork.left;
+            if (h > mi.rcWork.bottom - mi.rcWork.top) h = mi.rcWork.bottom - mi.rcWork.top;
+            if (x + w > mi.rcWork.right) x = mi.rcWork.right - w;
+            if (y + h > mi.rcWork.bottom) y = mi.rcWork.bottom - h;
+            if (x < mi.rcWork.left) x = mi.rcWork.left;
+            if (y < mi.rcWork.top) y = mi.rcWork.top;
+        }
+        SetWindowPos(window->hwnd, NULL, x, y, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    } else {
+        SetWindowPos(window->hwnd, NULL, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    SetForegroundWindow(window->hwnd);
 }
 
 bool rubraview_pal_instance_take_request(char **out_blob, size_t *out_len) {

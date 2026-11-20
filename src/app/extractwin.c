@@ -105,6 +105,22 @@ static void free_req(xw_req_t *r) {
     r->count = 0;
 }
 
+static xw_req_t g_to;   /* RV-314: Extract to...'s archives while its folder is chosen */
+
+static void extract_to_chosen(app_state_t *app, void *ctx, bool accepted, const proven_u8str_view_t *dirs, size_t n, uint32_t filter) {
+    (void)ctx; (void)filter;
+    if (!accepted || n == 0 || g_to.count == 0) {
+        free_req(&g_to);
+        extractwin_finished(app, false, false, TU8("no folder was chosen"), PROVEN_LIT(""));
+        return;
+    }
+    proven_u8str_view_t *views = (proven_u8str_view_t *)rubraview_malloc_product(g_to.count, sizeof *views, 1);
+    for (size_t i = 0; views && i < g_to.count; ++i) views[i] = proven_u8str_view_from_cstr(g_to.paths[i]);
+    if (views) archwork_extract_windowed(app, views, g_to.count, rubraview_shell_extract_mode(g_to.verb), dirs[0]);
+    rubraview_free(views);
+    free_req(&g_to);
+}
+
 static void start(app_state_t *app, rubraview_shell_verb_t verb, const proven_u8str_view_t *paths, size_t count) {
     if (!xw_make(app)) {   /* no window of its own: the viewer's card, as before */
         main_window_show(app);
@@ -116,18 +132,21 @@ static void start(app_state_t *app, rubraview_shell_verb_t verb, const proven_u8
     app->xw_line[0] = app->xw_path[0] = '\0';
     rubraview_fmt(app->xw_title, sizeof app->xw_title, "{}", PROVEN_ARG(T("Extracting")));
     app->xw_dirty = true;
-    proven_u8str_view_t dest = PROVEN_LIT("");
-    if (verb == RUBRAVIEW_SHELL_VERB_EXTRACT_TO) {   /* Windows' own folder picker, over this window */
-        rubraview_file_dialog_opts_t opts = { .title = T("Extract into which folder"), .folder_mode = true,
-                                              .parent_window_handle = rubraview_pal_window_native_handle(app->xw_window) };
-        rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
-        if (!picked.accepted || picked.count == 0) {
+    if (verb == RUBRAVIEW_SHELL_VERB_EXTRACT_TO) {   /* RV-314: Rubraview's own folder window, over this one; the archives kept till it answers */
+        free_req(&g_to);
+        g_to.paths = (char **)rubraview_malloc_product(count ? count : 1, sizeof(char *), 1);
+        for (size_t i = 0; g_to.paths && i < count; ++i) if ((g_to.paths[g_to.count] = rubraview_strndup_view(paths[i]))) g_to.count++;
+        g_to.verb = verb;
+        proven_u8str_view_t first = count ? rubraview_path_dirname(paths[0]) : PROVEN_LIT("");
+        choose_opts_t o = { .mode = RUBRAVIEW_CHOOSE_FOLDER, .title = T("Extract into which folder"), .start_dir = first,
+                            .over = rubraview_pal_window_native_handle(app->xw_window) };
+        if (!g_to.paths || !choose_ask(app, &o, extract_to_chosen, NULL)) {
+            free_req(&g_to);
             extractwin_finished(app, false, false, TU8("no folder was chosen"), PROVEN_LIT(""));
-            return;
         }
-        dest = picked.paths[0];
+        return;
     }
-    archwork_extract_windowed(app, paths, count, rubraview_shell_extract_mode(verb), dest);
+    archwork_extract_windowed(app, paths, count, rubraview_shell_extract_mode(verb), PROVEN_LIT(""));
 }
 
 /* Explorer's Extract: now, or after the one under way (in the order asked). */

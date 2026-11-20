@@ -277,6 +277,7 @@ rubraview_pal_rect_t picker_button_rect(double win_w, double win_h, double dpi, 
 /* D-260 (owner, 2026-11-02: "하단에 압축하기와 압축풀기 등의 버튼들을 상황에 맞게"): the bottom shows what fits the place
    and what is picked (rubraview_picker_bottom_shows), in PICKER_BOTTOM's order; Cancel and Open always. */
 int32_t picker_bottom_list(const app_state_t *app, picker_button_t *out) {
+    if (choose_mode_on()) return choose_bottom_list(out);   /* RV-314 */
     rubraview_picker_place_t place = { .in_book = app->picker_in_book, .in_archive = picker_in_archive(app), .add_mode = app->picker_add_mode };
     for (size_t i = 0; app->picker_selected && !place.in_archive && i < app->picker_listing.count; ++i) {
         if (!app->picker_selected[i] || picker_is_up(app, i)) continue;
@@ -300,6 +301,7 @@ int32_t picker_bottom_list(const app_state_t *app, picker_button_t *out) {
 
 /* The slots keep their width; what acts fills from the left, Cancel and Open stay at the right. */
 int32_t picker_bottom_slot(int32_t index, int32_t shown) {
+    if (choose_mode_on()) return PICKER_BOTTOM_COUNT - shown + index;   /* RV-314: all three at the right */
     return index >= shown - 2 ? PICKER_BOTTOM_COUNT - (shown - index) : index;
 }
 
@@ -808,6 +810,7 @@ static void picker_open_picked(app_state_t *app) {
 
 void picker_button(app_state_t *app, picker_button_t button) {
     char line[128];
+    if (choose_button(app, button)) return;   /* RV-314 */
     /* A page inside a book is not a file: nothing here can pick, move,
        copy or recycle it. */
     if (button == PICKER_BTN_CANCEL) {   /* 1.25.0: what was on screen before, a picture or nothing */
@@ -1054,6 +1057,7 @@ void picker_activate(app_state_t *app, size_t index) {
         return;
     }
 
+    if (choose_activate(app, entry)) return;   /* RV-314: chosen, not opened */
     if (picker_in_archive(app)) { archive_open_entry(app, entry); return; }   /* RV-207 */
     if (open_archive_tree(app, entry->path)) return;   /* D-256 */
     /* D-254: a comic holding nothing the viewer shows, its tree too */

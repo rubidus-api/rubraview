@@ -59,7 +59,7 @@ bool app_start(app_state_t *app, rubraview_mem_t *mem) {
     app->media_preferred = preferred_backend(arena);
     history_load(app);
     app_log_start(app);   /* RV-256: this window's log, its cap from the settings just read */
-    jobnotes_check(app);   /* RV-292: a job left unfinished since the last time */
+    if (!choose_mode_on()) jobnotes_check(app);   /* RV-292: a job left unfinished since the last time (the viewer's to say) */
     app_log(app, "start", cstr(RUBRAVIEW_VERSION_STRING));
     load_keymap(app);   /* after history_load: it settles portable or AppData, and so where keymap.ini is */
     /* history_load read settings.ini from wherever it lives (beside the
@@ -119,6 +119,7 @@ bool app_start(app_state_t *app, rubraview_mem_t *mem) {
        menu asked is gathered with what the other launches of the same
        selection hand over (D-86). */
     app->launch_page = g_launch_page;
+    if (choose_mode_on()) { choose_begin(app); return true; }   /* RV-314 */
     if (g_launch_count > 0) {
         shell_request_take(app, g_launch_verb, g_launch_whole || g_launch_verb == RUBRAVIEW_SHELL_VERB_NONE,
                            g_launch_paths, g_launch_count);
