@@ -2713,6 +2713,7 @@ size_t settings_pump(app_state_t *app);
 void settings_read_file(app_state_t *app);
 bool settings_row_is_text(const app_state_t *app, int32_t row);
 void settings_say(app_state_t *app, const char *text);
+void settings_event(app_state_t *app, rubraview_settings_event_t event);   /* RV-310: chooser.c answers a setting's list */
 bool settings_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);
 void settings_sb_to(app_state_t *app, size_t first);
 /* RV-170: the lists' scroll bars (scrollbars.c) and what each list says of its own */

@@ -4255,3 +4255,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: every float was shown with one decimal whatever its step: the film adjustment's exposure (step 0.05) and gamma (step 0.01) were shown cut ("1.07" as "1.1"), the step-1 floats as "3.0"; a typed or stepped float could be kept as 0.30000000000000004; the number box typed two decimals for all.
 - Decision: `rubraview_setting_decimals` (an int 0, a float the decimals of its step: 0.01 → 2, 0.05 → 2, 0.1 and 0.5 → 1, 1 and 5 → 0); `clamp_to` keeps a float rounded to them after its step (every set and every read from the file); `rubraview_setting_number_text` writes a value with them, and the slider's value, its room, the number box and the range said use it.
 - Consequences: R336's numbers; `test_settings` (T492).
+
+## D-380: settingswin.c Taken Apart; Rubrapack 0.60.0 (RV-310, RV-311)
+
+- Date: 2026-11-20
+- Status: Accepted (owner 2026-11-20: "남은 단계를 처리 바랍니다. 각 파일들을 분리해 주세요."; RV-311's plan, step "files apart"; an outside review's RV-310).
+- Context: `settingswin.c` held about 4,060 lines: the window, the font picker, the one-of-many list used far beyond Settings with the lists' sorting, and Settings › Keys (its tables, the keys by row, the keyboard picture).
+- Decision: moved as they were, nothing else changed: `fontpick.c` (417 lines), `chooser.c` (845; `settings_event` no longer static, declared in app.h), `settings_keys.c` (386; its table text as `keys_table_row`, what the window uses of it in `settings_keys.h`: the four view flags, the rows, `keymap_row_binding`, the keyboard's click, dot and drawing), `settingslook.h` (the window's colours); `settingswin.c` is 2,428 lines. Checked by the old file's lines sorted against the new files' (only the dropped `static`s, the headers and `keys_table_row`'s head differ), the gate and the VM (T493). The gate on the day also asked for Rubrapack 0.60.0 (R314): its vendored files are unchanged since 0.59.0; VENDORED.md, THIRD_PARTY_NOTICES and the built-in notices name it.
+- Consequences: RV-310 done; RV-311's plan done (the kinds, the numbers, applying by table, the files).
