@@ -138,9 +138,55 @@ rubraview_pal_rect_t picker_favwin_chip(const app_state_t *app, double dpi, doub
     return (rubraview_pal_rect_t){ picker_right_edge(app, dpi, win_w) - w - 8.0 * dpi, picker_top(app) + PICKER_CRUMB_HEIGHT * dpi + 2.0 * dpi, w, PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi };
 }
 
+/* RV-313 (owner, 2026-11-20: "상단의 즐겨찾기나 .ext 가 있는 줄은, 가로로 드래그해서 가로 스크롤 가능하게"): what the row
+   holds, from its left, and where it must stop; slid by at most the difference. */
+static rubraview_pal_rect_t tool_rect_at(const app_state_t *app, double dpi, int which, double slid);
+static void strip_extent(const app_state_t *app, int which, double dpi, double win_w, double *content, double *view) {
+    if (which == 1) {
+        double x = 8.0 * dpi, end = 0.0;
+        picker_bar_item_t item;
+        for (size_t i = 0; picker_bar_item(app, i, &item); ++i) {
+            double w = picker_chip_width(item.label, dpi);
+            if (!item.favorite && i == app->favorites.count && i > 0) x += 10.0 * dpi;
+            end = x + w;
+            x += w + 4.0 * dpi;
+        }
+        *content = end;
+        *view = picker_favwin_chip(app, dpi, win_w).x - 6.0 * dpi;
+    } else {
+        rubraview_pal_rect_t last = tool_rect_at(app, dpi, PICKER_TOOL_COUNT - 1, 0.0);
+        *content = last.x + last.width;
+        *view = picker_tools_end(app, dpi, win_w);
+    }
+}
+
+double picker_strip_scroll(const app_state_t *app, int which, double dpi, double win_w) {
+    double content = 0.0, view = 0.0;
+    strip_extent(app, which, dpi, win_w, &content, &view);
+    rubraview_scrollbar_t sb = { .total = content, .shown = view };
+    return rubraview_scrollbar_clamp(&sb, which == 1 ? app->picker_places_scroll : app->picker_tools_scroll);
+}
+
+void picker_strip_slide(app_state_t *app, int which, double to, double dpi, double win_w) {
+    double content = 0.0, view = 0.0;
+    strip_extent(app, which, dpi, win_w, &content, &view);
+    rubraview_scrollbar_t sb = { .total = content, .shown = view };
+    *(which == 1 ? &app->picker_places_scroll : &app->picker_tools_scroll) = rubraview_scrollbar_clamp(&sb, to);
+}
+
+int32_t picker_place_at(const app_state_t *app, double x, double dpi, double win_w, picker_bar_item_t *out) {
+    picker_bar_item_t item;
+    for (size_t i = 0; picker_bar_item(app, i, &item); ++i) {
+        double cx = 0.0, cw = 0.0;
+        if (!picker_chip_span(app, i, dpi, win_w, &cx, &cw)) return -1;
+        if (x >= cx && x < cx + cw) { if (out) *out = item; return (int32_t)i; }
+    }
+    return -1;
+}
+
 /* Where the bar's chip `index` is, as drawn: false past the window's edge. */
 bool picker_chip_span(const app_state_t *app, size_t index, double dpi, double win_w, double *out_x, double *out_w) {
-    double x = 8.0 * dpi;
+    double x = 8.0 * dpi - picker_strip_scroll(app, 1, dpi, win_w);
     picker_bar_item_t item;
     for (size_t i = 0; picker_bar_item(app, i, &item); ++i) {
         double w = picker_chip_width(item.label, dpi);
@@ -292,8 +338,14 @@ proven_u8str_view_t picker_tool_label(const app_state_t *app, int which, char *b
 
 /* Where the tool row's chip `which` is; the all box is a square with a word. */
 rubraview_pal_rect_t picker_tool_rect(const app_state_t *app, double dpi, int which) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    return tool_rect_at(app, dpi, which, picker_strip_scroll(app, 2, dpi, (double)w));   /* RV-313: as slid */
+}
+
+static rubraview_pal_rect_t tool_rect_at(const app_state_t *app, double dpi, int which, double slid) {
     double y = picker_top(app) + PICKER_HEADER_HEIGHT * dpi, h = PICKER_TOOL_HEIGHT * dpi;
-    double x = 8.0 * dpi;
+    double x = 8.0 * dpi - slid;
     for (int i = 0; i <= which; ++i) {
         char buf[96];
         double w = picker_chip_width(picker_tool_label(app, i, buf, sizeof(buf)), dpi) + (i == PICKER_TOOL_ALL ? 26.0 * dpi : 0.0);

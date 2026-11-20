@@ -72,6 +72,7 @@ typedef enum {
     RUBRAVIEW_FILEOP_DID_MOVE,
     RUBRAVIEW_FILEOP_DID_MAKE_DIR,
     RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE,   /* the same file was there: the source went to the Recycle Bin */
+    RUBRAVIEW_FILEOP_DID_DELETE_SOURCE,    /* RV-313: the same, the source deleted for good (no undo) */
 } rubraview_fileop_did_t;
 
 typedef struct rubraview_fileop_stat {
@@ -90,6 +91,7 @@ typedef struct rubraview_fileop_fs {
     bool (*copy)(void *ctx, const char *from, const char *to);          /* `to` must not be there */
     bool (*rename)(void *ctx, const char *from, const char *to);        /* never over a name; false across volumes */
     bool (*replace)(void *ctx, const char *target, const char *staged); /* staged in target's place, target recycled */
+    bool (*replace_deleting)(void *ctx, const char *target, const char *staged); /* RV-313: the same, target deleted for good */
     bool (*recycle)(void *ctx, const char *path);
     bool (*remove)(void *ctx, const char *path);                        /* a staging file of ours, gone for good */
     bool (*make_dir)(void *ctx, const char *path);
@@ -107,6 +109,7 @@ typedef struct rubraview_fileop_item {
     rubraview_fileop_answer_t answer;
     rubraview_fileop_did_t    did;
     bool  overwrote;            /* it replaced a file (that one is in the Recycle Bin: the undo is partial) */
+    bool  gone_for_good;        /* RV-313: what it replaced, or its source, deleted for good rather than recycled */
     bool  kind_differs;         /* a file where a folder is, or the reverse: only skip or keep both */
     bool  expanded;             /* a folder made at the destination, its entries items of their own */
     bool  prepared;
@@ -121,6 +124,7 @@ typedef struct rubraview_fileop {
     rubraview_fileop_item_t *items;
     size_t count, capacity, cursor;
     bool same_recycles_copy;            /* a copy's same file: its source to the Recycle Bin (the owner's choice), or left */
+    bool deletes_for_good;              /* RV-313: what the job removes (a replaced file, a moved or same source) deleted for good, not recycled */
     uint32_t serial;                    /* for the staging names */
     size_t done, skipped, failed, parked;
 } rubraview_fileop_t;
@@ -149,6 +153,12 @@ size_t rubraview_fileop_answer_all(rubraview_fileop_t *op, rubraview_fileop_answ
 /* RV-258: the owner's check boxes, as Explorer's — keep the one coming, keep the one there: both kept (a suffix),
    the one coming alone (overwrite), the one there alone or neither (skip). */
 rubraview_fileop_answer_t rubraview_fileop_answer_of_checks(bool keep_coming, bool keep_there);
+
+/** RV-313: a column's box in the head of the clash list, as a table's "all" box: none, some or all of the column ticked. */
+typedef enum { RUBRAVIEW_FILEOP_TICKS_NONE, RUBRAVIEW_FILEOP_TICKS_SOME, RUBRAVIEW_FILEOP_TICKS_ALL } rubraview_fileop_ticks_t;
+rubraview_fileop_ticks_t rubraview_fileop_ticks_of(size_t ticked, size_t rows);
+/** What a press on that box makes every row of the column: all ticked unticks, anything else ticks all. */
+bool rubraview_fileop_ticks_pressed(size_t ticked, size_t rows);
 
 /* RV-269 (owner, 2026-11-10: "복사 이동도 용량 기준으로도 표시해 주세요"): the bytes of the files it carries (folders
    not counted, only items checked by prepare), and those of the ones ended — done, skipped or failed. A file being

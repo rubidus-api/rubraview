@@ -149,6 +149,12 @@ static bool w_remove_empty_dir(void *ctx, const char *path) {
     return wide(path, p) && RemoveDirectoryW(p) != 0;   /* fails when anything is in it */
 }
 
+static bool w_replace_deleting(void *ctx, const char *target, const char *staged) {   /* RV-313: no backup: the old one gone for good */
+    (void)ctx;
+    WCHAR t[WPATH], s[WPATH];
+    return wide(target, t) && wide(staged, s) && ReplaceFileW(t, s, NULL, REPLACEFILE_IGNORE_MERGE_ERRORS, NULL, NULL) != 0;
+}
+
 static bool w_remove(void *ctx, const char *path) {
     (void)ctx;
     WCHAR p[WPATH];
@@ -210,7 +216,7 @@ static bool w_same_volume(void *ctx, const char *a, const char *b) {
 }
 
 static const rubraview_fileop_fs_t W_FS = {
-    .ctx = NULL, .stat = w_stat, .list = w_list, .copy = w_copy, .rename = w_rename, .replace = w_replace,
+    .ctx = NULL, .stat = w_stat, .list = w_list, .copy = w_copy, .rename = w_rename, .replace = w_replace, .replace_deleting = w_replace_deleting,
     .recycle = w_recycle, .make_dir = w_make_dir, .remove_empty_dir = w_remove_empty_dir, .remove = w_remove,
     .same_bytes = w_same_bytes, .flush = w_flush, .same_volume = w_same_volume,
 };

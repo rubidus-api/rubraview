@@ -4,6 +4,38 @@
  */
 #include "app.h"
 
+/* RV-313: a press on the places' or the tool row; the row slides if it is dragged, else the press acts on release */
+static void strip_begin(app_state_t *app, int which, double x, double y, double dpi, double win_w) {
+    app->strip_press = which;
+    app->strip_press_x = x;
+    app->strip_press_y = y;
+    app->strip_moved = false;
+    app->strip_scroll0 = picker_strip_scroll(app, which, dpi, win_w);
+}
+
+/* 1.24.0: the tool row's chip at (x, y), as drawn, does its part */
+static void tools_act(app_state_t *app, double x, double y, double dpi, double win_w) {
+    for (int k = 0; k < PICKER_TOOL_COUNT; ++k) {
+        rubraview_pal_rect_t t = picker_tool_rect(app, dpi, k);
+        if (!pal_rect_has(t, x, y) || t.x + t.width > picker_tools_end(app, dpi, win_w)) continue;
+        switch (k) {
+            case PICKER_TOOL_EXT:        chooser_open_pickext(app, t.x, t.y + t.height, t.y); break;   /* RV-204 */
+            case PICKER_TOOL_ALL:        picker_select_everything(app); break;
+            case PICKER_TOOL_INDIVIDUAL: picker_button(app, PICKER_BTN_INDIVIDUAL); break;
+            case PICKER_TOOL_RANGE:      picker_button(app, PICKER_BTN_RANGE); break;
+            case PICKER_TOOL_SAME:       picker_button(app, PICKER_BTN_SAME_TYPE); break;
+            case PICKER_TOOL_MEDIA:      picker_button(app, PICKER_BTN_MEDIA); break;
+            case PICKER_TOOL_SHAPE:      shape_begin(app, SHAPE_FOR_PICKER, CHOOSE_IN_MAIN, t.x, t.y + t.height, t.y); break;
+            case PICKER_TOOL_SORT:       chooser_open_sort(app, false, t.x, t.y + t.height, t.y); break;
+            case PICKER_TOOL_ORDER:      chooser_open_sort(app, true, t.x, t.y + t.height, t.y); break;
+            case PICKER_TOOL_VIEW:       picker_button(app, PICKER_BTN_VIEW); break;
+            case PICKER_TOOL_SHOWN:      picker_toggle_every_file(app); break;   /* D-258 */
+            default: break;
+        }
+        return;
+    }
+}
+
 void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
     switch (event->kind) {
         case RUBRAVIEW_WINDOW_EVENT_CLOSE:
@@ -169,6 +201,15 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                     if (app->picker_open) picker_drag_out(app, app->picker_rhold_index, true);
                 }
             }
+            if (app->strip_press) {   /* RV-313: the row follows the pointer once it has moved a little */
+                double sdpi = rubraview_pal_window_dpi_scale(app->window), dx = event->mouse.x - app->strip_press_x;
+                if (fabs(dx) >= 6.0 * sdpi) app->strip_moved = true;
+                if (app->strip_moved) {
+                    int32_t sw = 0, sh = 0;
+                    rubraview_pal_window_get_size(app->window, &sw, &sh);
+                    picker_strip_slide(app, app->strip_press, app->strip_scroll0 - dx, sdpi, (double)sw);
+                }
+            }
             if (app->fav_press >= 0) {
                 app->fav_drag_x = event->mouse.x;
                 if (fabs(event->mouse.x - app->fav_press_x) >= 6.0 * rubraview_pal_window_dpi_scale(app->window)) app->fav_dragging = true;
@@ -325,27 +366,21 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                     int32_t bw0 = 0, bh0 = 0;
                     rubraview_pal_window_get_size(app->window, &bw0, &bh0);
                     if (pal_rect_has(picker_favwin_chip(app, dpi, (double)bw0), event->mouse.x, event->mouse.y)) { favwin_toggle(app); break; }
-                    double x = 8.0 * dpi;
                     picker_bar_item_t item;
-                    for (size_t i = 0; picker_bar_item(app, i, &item); ++i) {
-                        double w = picker_chip_width(item.label, dpi);
-                        if (!item.favorite && i == app->favorites.count && i > 0) x += 10.0 * dpi;   /* as drawn */
-                        if (event->mouse.x >= x && event->mouse.x < x + w) {
-                            if (app->rename_active) rename_end(app);
-                            if (item.favorite && event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {
-                                favorite_rename_begin(app, i);   /* owner, 2026-09-30 */
-                            } else if (item.favorite && event->mouse.button == RUBRAVIEW_MOUSE_LEFT) {
-                                /* opened on release; dragged, it moves (owner, 2026-09-30) */
-                                app->fav_press = (int32_t)i;
-                                app->fav_press_x = app->fav_drag_x = event->mouse.x;
-                                app->fav_dragging = false;
-                            } else {
-                                picker_navigate(app, item.path);
-                                app->picker.focus = 0;
-                            }
-                            break;
-                        }
-                        x += w + 4.0 * dpi;
+                    int32_t i = picker_place_at(app, event->mouse.x, dpi, (double)bw0, &item);
+                    if (i >= 0 && app->rename_active) rename_end(app);
+                    if (i >= 0 && item.favorite && event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {
+                        favorite_rename_begin(app, (size_t)i);   /* owner, 2026-09-30 */
+                    } else if (i >= 0 && item.favorite && event->mouse.button == RUBRAVIEW_MOUSE_LEFT) {
+                        /* opened on release; dragged, it moves (owner, 2026-09-30) */
+                        app->fav_press = i;
+                        app->fav_press_x = app->fav_drag_x = event->mouse.x;
+                        app->fav_dragging = false;
+                    } else if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT) {   /* RV-313: a place on release; dragged, the row slides */
+                        strip_begin(app, 1, event->mouse.x, event->mouse.y, dpi, (double)bw0);
+                    } else if (i >= 0) {
+                        picker_navigate(app, item.path);
+                        app->picker.focus = 0;
                     }
                     break;
                 }
@@ -364,25 +399,8 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                     break;
                 }
                 if (event->mouse.y < header_h + PICKER_TOOL_HEIGHT * dpi) {   /* 1.24.0: the tool row */
-                    for (int k = 0; k < PICKER_TOOL_COUNT; ++k) {
-                        rubraview_pal_rect_t t = picker_tool_rect(app, dpi, k);
-                        if (!pal_rect_has(t, event->mouse.x, event->mouse.y) || t.x + t.width > picker_tools_end(app, dpi, (double)pw)) continue;
-                        switch (k) {
-                            case PICKER_TOOL_EXT:        chooser_open_pickext(app, t.x, t.y + t.height, t.y); break;   /* RV-204 */
-                            case PICKER_TOOL_ALL:        picker_select_everything(app); break;
-                            case PICKER_TOOL_INDIVIDUAL: picker_button(app, PICKER_BTN_INDIVIDUAL); break;
-                            case PICKER_TOOL_RANGE:      picker_button(app, PICKER_BTN_RANGE); break;
-                            case PICKER_TOOL_SAME:       picker_button(app, PICKER_BTN_SAME_TYPE); break;
-                            case PICKER_TOOL_MEDIA:      picker_button(app, PICKER_BTN_MEDIA); break;
-                            case PICKER_TOOL_SHAPE:      shape_begin(app, SHAPE_FOR_PICKER, CHOOSE_IN_MAIN, t.x, t.y + t.height, t.y); break;
-                            case PICKER_TOOL_SORT:       chooser_open_sort(app, false, t.x, t.y + t.height, t.y); break;
-                            case PICKER_TOOL_ORDER:      chooser_open_sort(app, true, t.x, t.y + t.height, t.y); break;
-                            case PICKER_TOOL_VIEW:       picker_button(app, PICKER_BTN_VIEW); break;
-                            case PICKER_TOOL_SHOWN:      picker_toggle_every_file(app); break;   /* D-258 */
-                            default: break;
-                        }
-                        break;
-                    }
+                    if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT) strip_begin(app, 2, event->mouse.x, event->mouse.y, dpi, (double)pw);   /* RV-313 */
+                    else tools_act(app, event->mouse.x, event->mouse.y, dpi, (double)pw);
                     break;
                 }
                 if (event->mouse.y < grid_top) {
@@ -633,6 +651,26 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             seekfan_let_go(app);
             speed_tile_release(app, false);
             app->titlebar_held = RUBRAVIEW_TITLEBAR_NONE;
+            if (app->strip_press) {   /* RV-313: not dragged: what was pressed acts now */
+                int which = app->strip_press;
+                app->strip_press = 0;
+                if (!app->strip_moved && app->picker_open) {
+                    double sdpi = rubraview_pal_window_dpi_scale(app->window);
+                    int32_t sw = 0, sh = 0;
+                    rubraview_pal_window_get_size(app->window, &sw, &sh);
+                    if (which == 2) tools_act(app, app->strip_press_x, app->strip_press_y, sdpi, (double)sw);
+                    else {
+                        picker_bar_item_t item;
+                        if (picker_place_at(app, app->strip_press_x, sdpi, (double)sw, &item) >= 0) {
+                            if (app->rename_active) rename_end(app);
+                            picker_navigate(app, item.path);
+                            app->picker.focus = 0;
+                        }
+                    }
+                }
+                app->strip_moved = false;
+                break;
+            }
             if (app->fav_press >= 0) {
                 size_t from = (size_t)app->fav_press;
                 if (app->fav_dragging && from < app->favorites.count) {
@@ -703,6 +741,16 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (chooser_wheel(app, CHOOSE_IN_MAIN, event->mouse.wheel_delta)) break;   /* 1.24.0 */
             if (tmenu_wheel(app, event->mouse.x, event->mouse.y, event->mouse.wheel_delta)) break;   /* RV-287: the ☰'s lines */
             if (app->picker_open) {
+                double wdpi = rubraview_pal_window_dpi_scale(app->window), wtop = picker_top(app);
+                double wy = event->mouse.y;
+                int which = wy >= wtop + PICKER_CRUMB_HEIGHT * wdpi && wy < wtop + PICKER_HEADER_HEIGHT * wdpi ? 1
+                          : wy >= wtop + PICKER_HEADER_HEIGHT * wdpi && wy < wtop + (PICKER_HEADER_HEIGHT + PICKER_TOOL_HEIGHT) * wdpi ? 2 : 0;
+                if (which) {   /* RV-313: over the places' or the tool row, the wheel slides it */
+                    int32_t sw = 0, sh = 0;
+                    rubraview_pal_window_get_size(app->window, &sw, &sh);
+                    picker_strip_slide(app, which, picker_strip_scroll(app, which, wdpi, (double)sw) - event->mouse.wheel_delta * 80.0 * wdpi, wdpi, (double)sw);
+                    break;
+                }
                 picker_layout(app);
                 rubraview_picker_scroll_by(&app->picker, -event->mouse.wheel_delta * app->picker.tile_extent *
                                                         (picker_details(app) ? 3.0 : 0.5));

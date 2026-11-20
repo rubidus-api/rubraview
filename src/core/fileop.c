@@ -67,6 +67,15 @@ rubraview_fileop_answer_t rubraview_fileop_answer_of_checks(bool keep_coming, bo
     return RUBRAVIEW_FILEOP_ANSWER_SKIP;
 }
 
+rubraview_fileop_ticks_t rubraview_fileop_ticks_of(size_t ticked, size_t rows) {
+    if (rows == 0 || ticked == 0) return RUBRAVIEW_FILEOP_TICKS_NONE;
+    return ticked >= rows ? RUBRAVIEW_FILEOP_TICKS_ALL : RUBRAVIEW_FILEOP_TICKS_SOME;
+}
+
+bool rubraview_fileop_ticks_pressed(size_t ticked, size_t rows) {
+    return rubraview_fileop_ticks_of(ticked, rows) != RUBRAVIEW_FILEOP_TICKS_ALL;
+}
+
 void rubraview_fileop_init(rubraview_fileop_t *op, rubraview_fileop_kind_t kind, const rubraview_fileop_fs_t *fs, const char *dir) {
     *op = (rubraview_fileop_t){ .kind = kind };
     if (fs) op->fs = *fs;
@@ -233,6 +242,12 @@ static bool keep_beside(rubraview_fileop_t *op, rubraview_fileop_item_t *it) {
 static void gone(rubraview_fileop_t *op, const char *staged) { if (staged && op->fs.remove) (void)op->fs.remove(op->fs.ctx, staged); }
 
 /* A file's bytes into place: staged, checked when the source is to go, then renamed (or swapped) in. */
+/* RV-313: what the job removes, to the Recycle Bin or (the reader's choice) deleted for good */
+static bool discard(rubraview_fileop_t *op, const char *path) {
+    if (op->deletes_for_good && op->fs.remove) return op->fs.remove(op->fs.ctx, path);
+    return op->fs.recycle(op->fs.ctx, path);
+}
+
 static void put_file(rubraview_fileop_t *op, size_t i, bool overwrite) {
     rubraview_fileop_item_t *it = &op->items[i];
     bool moving = op->kind == RUBRAVIEW_FILEOP_MOVE;
@@ -254,7 +269,9 @@ static void put_file(rubraview_fileop_t *op, size_t i, bool overwrite) {
         }
     }
     if (!ok) { gone(op, staged); fail(it, same_vol ? "it could not be moved" : "it could not be copied"); rubraview_free(staged); return; }
-    bool placed = overwrite ? op->fs.replace(op->fs.ctx, it->target, staged) : op->fs.rename(op->fs.ctx, staged, it->target);
+    bool for_good = overwrite && op->deletes_for_good && op->fs.replace_deleting;
+    bool placed = !overwrite ? op->fs.rename(op->fs.ctx, staged, it->target)
+                : for_good ? op->fs.replace_deleting(op->fs.ctx, it->target, staged) : op->fs.replace(op->fs.ctx, it->target, staged);
     if (!placed) {
         if (same_vol) (void)op->fs.rename(op->fs.ctx, staged, it->source);   /* back where it was */
         else gone(op, staged);
@@ -266,10 +283,11 @@ static void put_file(rubraview_fileop_t *op, size_t i, bool overwrite) {
     }
     rubraview_free(staged);
     it->overwrote = overwrite;
+    it->gone_for_good = for_good;
     it->state = RUBRAVIEW_FILEOP_DONE;
     it->did = moving && same_vol ? RUBRAVIEW_FILEOP_DID_MOVE : RUBRAVIEW_FILEOP_DID_COPY;
     if (moving && !same_vol) {
-        if (op->fs.recycle(op->fs.ctx, it->source)) it->did = RUBRAVIEW_FILEOP_DID_MOVE;
+        if (discard(op, it->source)) { it->did = RUBRAVIEW_FILEOP_DID_MOVE; it->gone_for_good = it->gone_for_good || op->deletes_for_good; }
         else it->why = "copied, but the source could not be removed: both are kept";
     }
 }
@@ -288,8 +306,12 @@ static void execute(rubraview_fileop_t *op, size_t i) {
                     (same_identity(&s, &t) || (s.size == t.size && op->fs.same_bytes && op->fs.same_bytes(op->fs.ctx, it->source, it->target) == 1));
         if (same) {
             if (op->kind == RUBRAVIEW_FILEOP_MOVE || op->same_recycles_copy) {
-                if (op->fs.recycle(op->fs.ctx, it->source)) { it->state = RUBRAVIEW_FILEOP_DONE; it->did = RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE; }
-                else fail(it, "the same file is there; the source could not go to the Recycle Bin");
+                if (discard(op, it->source)) {
+                    it->state = RUBRAVIEW_FILEOP_DONE;
+                    it->did = op->deletes_for_good && op->fs.remove ? RUBRAVIEW_FILEOP_DID_DELETE_SOURCE : RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE;
+                    it->gone_for_good = it->did == RUBRAVIEW_FILEOP_DID_DELETE_SOURCE;
+                }
+                else fail(it, op->deletes_for_good ? "the same file is there; the source could not be deleted" : "the same file is there; the source could not go to the Recycle Bin");
             } else skip(it, "the same file is there");
             return;
         }

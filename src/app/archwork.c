@@ -205,7 +205,12 @@ void archwork_extract_dest_dropped(app_state_t *app) {
 }
 
 void archwork_extract_dest_browse(app_state_t *app) {
-    rubraview_file_dialog_opts_t opts = { .title = T("Extract into which folder"), .folder_mode = true,
+    char typed[1100];   /* RV-313: from the folder in the box (the archive's own, offered), as a copy's starts where it is */
+    proven_u8str_view_t t = rubraview_textedit_text(&app->rename_ec.te);
+    rubraview_fs_entry_t st;
+    bool there = t.size > 0 && t.size < sizeof typed && rubraview_pal_fs_stat(app->arena, t, &st) && st.is_directory;
+    if (there) { proven_sys_mem_copy(typed, t.ptr, t.size); typed[t.size] = '\0'; }
+    rubraview_file_dialog_opts_t opts = { .title = T("Extract into which folder"), .folder_mode = true, .default_dir = there ? typed : browse_start_dir(app, app->picker_open),
                                           .parent_window_handle = rubraview_pal_window_native_handle(app->window) };
     rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);
     if (picked.accepted && picked.count > 0 && picked.paths[0].size < sizeof(app->rename_buffer))

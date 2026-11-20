@@ -1341,6 +1341,11 @@ typedef struct app_state {
     int32_t                fav_press;
     double                 fav_press_x, fav_drag_x;
     bool                   fav_dragging;
+    /* RV-313: the places' row (1) and the tool row (2) slide sideways, dragged or wheeled; a press there acts on release unless dragged */
+    double                 picker_places_scroll, picker_tools_scroll;
+    int                    strip_press;
+    double                 strip_press_x, strip_press_y, strip_scroll0;
+    bool                   strip_moved;
     char                   rename_buffer[1024];
     /* A folder typed in the settings window (owner, 2026-09-30): the box
        over the focused path row, its setting, and an unfinished IME syllable. */
@@ -2544,6 +2549,11 @@ rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, do
 /* RV-227, D-286: the basket's two icons at the tool row's right end — 0 both, 1 the basket (put in, see), 2 the arrow (put here) */
 rubraview_pal_rect_t picker_basket_rect(const app_state_t *app, double dpi, double win_w, int part);
 double picker_tools_end(const app_state_t *app, double dpi, double win_w);
+/* RV-313: how far the places' row (1) or the tool row (2) is slid, kept within what it holds */
+double picker_strip_scroll(const app_state_t *app, int which, double dpi, double win_w);
+void   picker_strip_slide(app_state_t *app, int which, double to, double dpi, double win_w);
+/* The places' row's chip at x (as drawn), or -1 */
+int32_t picker_place_at(const app_state_t *app, double x, double dpi, double win_w, picker_bar_item_t *out);
 size_t picker_crumbs_first(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double dpi, double win_w, bool *out_star);
 #define PICKER_CRUMBS_MORE "\xE2\x80\xA6"   /* RV-229: the chip standing for the crumbs left out */
 bool picker_basket_shown(const app_state_t *app);
@@ -2908,6 +2918,7 @@ void takeout_end(app_state_t *app);
 void takeout_step(app_state_t *app);
 void target_begin(app_state_t *app, bool moving, bool from_picker);
 void target_browse(app_state_t *app);
+const char *browse_start_dir(app_state_t *app, bool from_picker);   /* RV-313 */
 void target_commit(app_state_t *app);
 bool text_action(app_state_t *app, proven_u8str_view_t action);
 bool text_active(const app_state_t *app);

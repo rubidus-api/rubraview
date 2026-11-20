@@ -19,7 +19,7 @@
 #define FJ_EXTRACT 0xFFFFFFFEu  /* RV-258: a row of an extraction (archwork.c), answered on this thread */
 enum { FJ_JOBS = 16 };
 
-typedef struct fj_item { char *source, *target, *why; uint8_t did, state; bool overwrote; int32_t parent; } fj_item_t;
+typedef struct fj_item { char *source, *target, *why; uint8_t did, state; bool overwrote, gone_for_good; int32_t parent; } fj_item_t;
 
 typedef struct fj_job {
     HANDLE   pipe;
@@ -253,7 +253,7 @@ bool filejob_start_viewer(app_state_t *app, proven_u8str_view_t dir, proven_u8st
 
 static void job_ended(app_state_t *app, fj_job_t *job) {
     uint32_t batch = ++app->undo_batch;
-    size_t done = 0, replaced = 0, same = 0;
+    size_t done = 0, replaced = 0, replaced_for_good = 0, same = 0;
     bool *moved = NULL;
     size_t top = 0;
     for (size_t i = 0; i < job->nitems; ++i) if (job->items[i].parent < 0) top++;
@@ -267,11 +267,13 @@ static void job_ended(app_state_t *app, fj_job_t *job) {
                 .op = it->did == RUBRAVIEW_FILEOP_DID_MOVE ? RUBRAVIEW_FILE_OP_MOVE : RUBRAVIEW_FILE_OP_COPY,
                 .source_path = app_keep(app, cstr(it->source)), .target_path = app_keep(app, cstr(it->target)), .batch = batch });
             if (it->did != RUBRAVIEW_FILEOP_DID_MAKE_DIR) done++;
+        } else if (it->did == RUBRAVIEW_FILEOP_DID_DELETE_SOURCE) {   /* RV-313: gone for good: no undo */
+            same++;
         } else if (it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE) {
             rubraview_undo_push(&app->undo, (rubraview_file_action_t){ .op = RUBRAVIEW_FILE_OP_RECYCLE, .source_path = app_keep(app, cstr(it->source)), .batch = batch });
             same++;
         }
-        if (it->overwrote) replaced++;
+        if (it->overwrote) { replaced++; if (it->gone_for_good) replaced_for_good++; }
         bool why = it->why && it->why[0];
         if (it->state == RUBRAVIEW_FILEOP_FAILED || (why && it->did == RUBRAVIEW_FILEOP_DID_COPY && job->moving)) {
             char line[700];
@@ -279,7 +281,7 @@ static void job_ended(app_state_t *app, fj_job_t *job) {
             if (w > 0) app_log(app, "file", (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)w });
         }
         if (is_top) {
-            if (moved && t < top) moved[t] = it->did == RUBRAVIEW_FILEOP_DID_MOVE || it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE ||
+            if (moved && t < top) moved[t] = it->did == RUBRAVIEW_FILEOP_DID_MOVE || it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE || it->did == RUBRAVIEW_FILEOP_DID_DELETE_SOURCE ||
                                              (it->state == RUBRAVIEW_FILEOP_MERGED);
             t++;
         }
@@ -298,17 +300,18 @@ static void job_ended(app_state_t *app, fj_job_t *job) {
         else app_log(app, "file", said_line);
     }
     if (job->end.stopped) app_log(app, "file", PROVEN_LIT("the copy or move was stopped; what was not reached is where it was"));
-    if (replaced > 0) app_log(app, "file", PROVEN_LIT("replaced files are in the Recycle Bin; Ctrl+Z takes the new ones away, not the old ones back"));
+    if (replaced > replaced_for_good) app_log(app, "file", PROVEN_LIT("replaced files are in the Recycle Bin; Ctrl+Z takes the new ones away, not the old ones back"));
+    if (replaced_for_good > 0) app_log(app, "file", PROVEN_LIT("replaced files were deleted for good, as chosen; Ctrl+Z cannot bring them back"));
     if (app->picker_open) picker_navigate(app, app->picker_dir);   /* what arrived, listed */
     if (job->viewer_page >= 0 && job->nitems > 0) {   /* RV-259: the viewer's own; its name there said, a move leaves the list */
         const fj_item_t *it = &job->items[0];
-        if (it->state == RUBRAVIEW_FILEOP_DONE || it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE) {
+        if (it->state == RUBRAVIEW_FILEOP_DONE || it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE || it->did == RUBRAVIEW_FILEOP_DID_DELETE_SOURCE) {
             char said[sizeof app->notice];
             proven_u8str_view_t put = rubraview_path_basename(cstr(it->target));
             int k = rubraview_fmt(said, sizeof said, "{}: {}", PROVEN_ARG(moving ? T("moved") : T("copied")), PROVEN_ARG(put));
             if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)said, .size = (size_t)k < sizeof said ? (size_t)k : sizeof said - 1 });
         }
-        bool gone = it->did == RUBRAVIEW_FILEOP_DID_MOVE || it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE;
+        bool gone = it->did == RUBRAVIEW_FILEOP_DID_MOVE || it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE || it->did == RUBRAVIEW_FILEOP_DID_DELETE_SOURCE;
         int32_t now = current_page_index(app);
         if (moving && gone && now >= 0 && (size_t)job->viewer_page < page_count(app) && job->viewer_path &&
             rubraview_path_same(app->source.pages[job->viewer_page].path, cstr(job->viewer_path)))
@@ -339,7 +342,7 @@ static void job_take(app_state_t *app, fj_job_t *job, rubraview_jobwire_msg_t *m
             }
             job->items[job->nitems++] = (fj_item_t){ .source = rubraview_strndup_view(w.source), .target = rubraview_strndup_view(w.target),
                                                      .why = w.why.size ? rubraview_strndup_view(w.why) : NULL, .did = w.did, .state = w.state,
-                                                     .overwrote = w.overwrote, .parent = w.parent };
+                                                     .overwrote = w.overwrote, .gone_for_good = w.gone_for_good, .parent = w.parent };
         }
     } else if (m->type == RUBRAVIEW_JOBWIRE_ARCHIVE_DONE && job->archive) {   /* RV-292: kept whole for archwork */
         rubraview_free(job->done_fields);

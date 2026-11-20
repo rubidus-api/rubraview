@@ -887,7 +887,7 @@ so on. `Ctrl+Z` takes a copy away again or brings a moved file back.
 To send it somewhere else, `Alt+C` (copy) and `Alt+M` (move) — also
 Copy to another folder... / Move to another folder... in the right click, and `Ctrl+Shift+C` / `Ctrl+Shift+M` themselves while no folder is set for them —
 open a box in the middle of the window holding the last folder you used.
-Type or paste a folder, or press `Ctrl+O` to browse to one, and press
+Type or paste a folder, or press `Ctrl+O` to browse to one (the folder window opens at the folder you are in), and press
 `Enter`. A folder that is not there yet is not made by accident: the
 first `Enter` says it is new, a second `Enter` makes it and puts the file
 in it; `Esc` leaves everything as it was.
@@ -1590,9 +1590,11 @@ Move here first check every name in the folder. What clashes with nothing
 is copied or moved at once, in the background (the line at the top counts
 it); the names already there wait in **Rubraview - names already there**:
 for each, the one coming and the one there (a picture of each, the size,
-date and folder) and two ticks; a long list scrolls with its bar or the wheel. Both ticked keeps both (the one coming as `name (2).jpg`), only the
+date and folder) and two ticks; a long list scrolls with its bar or the wheel. The box under **coming** and under
+**there** at the top ticks or unticks the whole column (a dash: some are ticked). Both ticked keeps both (the one coming as `name (2).jpg`), only the
 one coming replaces the one there (that one goes to the Recycle Bin), and
-otherwise it is left. **Apply the ticks** (`Enter`), or answer all at once:
+otherwise it is left. **What is removed: to the Recycle Bin** switches (red) to **deleted for good**: the files
+replaced, a move's sources and a same file's source are then deleted, not recycled, and no undo brings them back. **Apply the ticks** (`Enter`), or answer all at once:
 **Overwrite all**, **Keep both, all**, **Skip all**, **Only the same ones**
 (the same size and bytes: the one there is kept — a move's source goes to
 the Recycle Bin, a copy's is left or recycled as the last button says;
@@ -1938,7 +1940,9 @@ itself, as a double click in Explorer does; an app Windows alone can start
 `.msix`, a shortcut ...) is run — each as a program of its own, which
 goes on when Rubraview ends. A program from another computer, or one
 asking to be administrator, goes through Windows, which warns or asks
-first. A file inside an archive is never run: extract it first. **Every file** at the end
+first. A file inside an archive is never run: extract it first. When the window is narrow, drag the places' row or
+the tool row sideways (or turn the wheel over it) to reach what it cuts off; a press that is not dragged acts as
+before, and a favourite dragged still moves. **Every file** at the end
 of the tool row switches to **Viewer's files** — folders and what
 Rubraview opens — and back, and is remembered (Settings › Files). In a
 book the files in it that are no page are listed too; extract them with

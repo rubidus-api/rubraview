@@ -120,7 +120,7 @@ void rubraview_jobwire_get_progress(rubraview_jobwire_msg_t *msg, rubraview_jobw
 typedef struct rubraview_jobwire_item {
     proven_u8str_view_t source, target, why;
     uint8_t did, state;
-    bool    overwrote;
+    bool    overwrote, gone_for_good;
     int32_t parent;
 } rubraview_jobwire_item_t;
 

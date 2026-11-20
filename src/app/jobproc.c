@@ -29,6 +29,7 @@ static struct {
     _Atomic uint64_t copied;
     bool    prepared, finished, skip_clashes;   /* skip_clashes: the clash window closed unanswered (RV-289.5) */
     bool    recycles;
+    bool    for_good;   /* RV-313: what the job removes deleted for good, as the clash window says */
     bool    quiet, quiet_shown;                 /* RV-297: the viewer's file on screen: a window only when it takes long or did not go well */
     double  began;
     jp_answer_t answers[JP_ANSWERS];
@@ -104,7 +105,7 @@ static void send_items_and_end(bool stopped) {
         for (size_t i = first; i < first + n; ++i) {
             const rubraview_fileop_item_t *it = &op->items[i];
             rubraview_jobwire_item_t w = { .source = cstr(it->source), .target = cstr(it->target), .why = cstr(it->why ? it->why : ""),
-                                           .did = (uint8_t)it->did, .state = (uint8_t)it->state, .overwrote = it->overwrote, .parent = it->parent };
+                                           .did = (uint8_t)it->did, .state = (uint8_t)it->state, .overwrote = it->overwrote, .gone_for_good = it->gone_for_good, .parent = it->parent };
             rubraview_jobwire_put_item(&P.out, &w);
         }
         (void)rubraview_jobwire_finish(&P.out);
@@ -175,6 +176,7 @@ static DWORD WINAPI worker(void *arg) {
         proven_sys_mem_copy(answers, J.answers, nanswers * sizeof *answers);
         J.nanswers = 0;
         J.op.same_recycles_copy = J.recycles;
+        J.op.deletes_for_good = J.for_good;
         for (size_t a = 0; a < nanswers; ++a) {
             if (answers[a].all) (void)rubraview_fileop_answer_all(&J.op, answers[a].answer);
             else (void)rubraview_fileop_answer(&J.op, answers[a].index, answers[a].answer);
@@ -213,6 +215,12 @@ static void ui_closed(void *ctx) {   /* RV-289.5: the clashes left are skipped, 
     J.skip_clashes = true;
     ReleaseSRWLockExclusive(&J.lock);
     SetEvent(J.wake);
+}
+static void ui_for_good(void *ctx, bool on) {   /* RV-313 */
+    (void)ctx;
+    AcquireSRWLockExclusive(&J.lock);
+    J.for_good = on;
+    ReleaseSRWLockExclusive(&J.lock);
 }
 static void ui_recycle(void *ctx, bool on) {
     (void)ctx;
@@ -441,7 +449,7 @@ static void pw_summary(jp_win_t *w) {
     for (size_t i = 0; i < J.op.count; ++i) {
         const rubraview_fileop_item_t *it = &J.op.items[i];
         if (it->did == RUBRAVIEW_FILEOP_DID_COPY || it->did == RUBRAVIEW_FILEOP_DID_MOVE) done++;
-        else if (it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE) same++;
+        else if (it->did == RUBRAVIEW_FILEOP_DID_RECYCLE_SOURCE || it->did == RUBRAVIEW_FILEOP_DID_DELETE_SOURCE) same++;
         if (it->overwrote) replaced++;
     }
     (void)rubraview_fmt(w->summary, sizeof w->summary,
@@ -870,7 +878,7 @@ int jobproc_main(const wchar_t *pipe_name) {
     P.wake = CreateEventW(NULL, FALSE, FALSE, NULL);
     P.thread = P.wake ? CreateThread(NULL, 0, writer, NULL, 0, NULL) : NULL;
 
-    clashui_t ui = { .answer = ui_answer, .answer_all = ui_answer_all, .closed = ui_closed, .recycle_set = ui_recycle };
+    clashui_t ui = { .answer = ui_answer, .answer_all = ui_answer_all, .closed = ui_closed, .recycle_set = ui_recycle, .for_good_set = ui_for_good };
     static jp_win_t pw;
     static rubraview_lang_t lang;
     char *temp_dir = NULL;

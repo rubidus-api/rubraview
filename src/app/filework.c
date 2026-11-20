@@ -412,9 +412,25 @@ void target_begin(app_state_t *app, bool moving, bool from_picker) {
     /* RV-238: the card says what to type; no message over it */
 }
 
+/* RV-313 (owner, 2026-11-20: "대상 폴더 고를 때는, 현재 디렉토리에서 그 폴더 선택창이 시작되게"): the folder in hand, the
+   open-file screen's or the file on screen's, when it is a real folder; "" lets the dialog choose (its last). */
+const char *browse_start_dir(app_state_t *app, bool from_picker) {
+    proven_u8str_view_t here = from_picker ? app->picker_dir : rubraview_path_dirname(current_file_path(app));
+    if (here.size == 0 || rubraview_picker_is_places(here)) return "";
+    rubraview_fs_entry_t st;
+    if (!rubraview_pal_fs_stat(app->arena, here, &st) || !st.is_directory) return "";   /* inside an archive, gone */
+    proven_result_mem_mut_t m = proven_arena_alloc(app->arena, here.size + 1);
+    if (!proven_is_ok(m.err)) return "";
+    char *s = (char *)(void *)m.value.ptr;
+    proven_sys_mem_copy(s, here.ptr, here.size);
+    s[here.size] = '\0';
+    return s;
+}
+
 void target_browse(app_state_t *app) {
     rubraview_file_dialog_opts_t opts = {
         .title = app->target_moving ? T("Move to which folder") : T("Copy to which folder"), .folder_mode = true,
+        .default_dir = browse_start_dir(app, app->target_from_picker),
         .parent_window_handle = rubraview_pal_window_native_handle(app->window),
     };
     rubraview_file_dialog_result_t picked = rubraview_pal_file_dialog_pick_folder(app->arena, &opts);

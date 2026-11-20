@@ -186,6 +186,7 @@ void rubraview_jobwire_put_item(rubraview_jobwire_out_t *out, const rubraview_jo
     rubraview_jobwire_put_u8(out, it->did);
     rubraview_jobwire_put_u8(out, it->state);
     rubraview_jobwire_put_u8(out, it->overwrote);
+    rubraview_jobwire_put_u8(out, it->gone_for_good);
     rubraview_jobwire_put_i32(out, it->parent);
 }
 
@@ -197,6 +198,7 @@ void rubraview_jobwire_get_item(rubraview_jobwire_msg_t *msg, rubraview_jobwire_
     it->did = rubraview_jobwire_get_u8(msg);
     it->state = rubraview_jobwire_get_u8(msg);
     it->overwrote = rubraview_jobwire_get_u8(msg) != 0;
+    it->gone_for_good = rubraview_jobwire_get_u8(msg) != 0;
     it->parent = rubraview_jobwire_get_i32(msg);
 }
 

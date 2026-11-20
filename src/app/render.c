@@ -1087,7 +1087,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
 
     /* The places bar: the usual folders and the drives, one tap away from
        anywhere (owner, 2026-09-28: "즐겨찾기 같은 곳에"). The one on screen is lit. */
-    double place_x = 8.0 * dpi;
+    double place_x = 8.0 * dpi - picker_strip_scroll(app, 1, dpi, win_w);   /* RV-313: as slid */
     picker_bar_item_t item;
     for (size_t i = 0; picker_bar_item(app, i, &item); ++i) {
         double w = picker_chip_width(item.label, dpi);

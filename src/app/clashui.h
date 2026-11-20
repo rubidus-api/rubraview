@@ -41,6 +41,8 @@ struct clashui {
     void             (*closed)(void *ctx);   /* closed by its X or Esc with questions left (RV-289: they are skipped) */
     void             (*recycle_set)(void *ctx, bool on);   /* the copy's same file: its source recycled or left */
     bool               same_recycles_copy;
+    void             (*for_good_set)(void *ctx, bool on);  /* RV-313: what is removed deleted for good (NULL: not offered) */
+    bool               for_good;
     proven_u8str_view_t ui_font;     /* Settings › General's face ("" the default) */
     /* its own */
     clashui_row_t     *rows;

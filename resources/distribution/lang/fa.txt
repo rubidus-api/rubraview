@@ -3816,3 +3816,6 @@ menu "Apps' items (Windows 11)" = "موارد برنامه‌ها (ویندوز 
 "type or paste a file or its folder; Enter keeps it, Esc leaves it, Ctrl+O browses" = "پرونده یا پوشه‌اش را بنویسید یا بچسبانید؛ Enter نگه می‌دارد، Esc همان‌طور می‌گذارد، Ctrl+O مرور"
 "kept as {}: it goes from {} to {}" = "به‌صورت {} نگه داشته شد: بازه از {} تا {} است"
 "{} is locked: not extracted" = "{} قفل است: باز نشد"
+"Both ticked: both kept (the one coming as \"name (2)\"). Only the one coming: it replaces the one there (that one deleted for good). Otherwise: left as it is." = "هر دو تیک: هر دو نگه داشته می‌شوند (آینده با \"name (2)\"). فقط آینده: جای موجود را می‌گیرد (موجود برای همیشه پاک می‌شود). وگرنه: همان‌طور می‌ماند."
+"What is removed: deleted for good" = "آنچه برداشته می‌شود: پاک شدن برای همیشه"
+"What is removed: to the Recycle Bin" = "آنچه برداشته می‌شود: به سطل بازیافت"
