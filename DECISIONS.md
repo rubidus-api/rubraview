@@ -4247,3 +4247,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: a typed number was read in the window (a comma, `strtod`) and cut to its range without a word; an int took a fraction. `settings_apply_rest` held about 200 lines, each change found by a `static last_` value of its own, written one way here and another there.
 - Decision: core `rubraview_setting_number_typed` (`RUBRAVIEW_NUMBER_OK`, `_CLAMPED`, `_NOT`) and `rubraview_settings_print` (a fingerprint of the values of the settings named, "section.key ..."); the window's typed number uses the first and says a clamp. `settings_apply_rest` is `ap_every_pass` (copied every pass) and the table `APPLY` of thirteen rows (`ap_fit`, `ap_layout`, `ap_spreads`, `ap_listing`, ...), each called the first time and when its fingerprint changes. A fingerprint, not the per-value revisions: Revert and another window's file change values without them. `check-settings` checks the table's names.
 - Consequences: R336; `test_settings` (T492); VM T491. Adding a setting that acts on a change is a function and a row.
+
+## D-379: Ints And Floats Apart: A Float Is Fixed-Point At Its Step's Decimals (RV-311)
+
+- Date: 2026-11-20
+- Status: Accepted (owner 2026-11-20: "정수형과 실수형(고정소수점)을 구분해야 하지 않을까요").
+- Context: every float was shown with one decimal whatever its step: the film adjustment's exposure (step 0.05) and gamma (step 0.01) were shown cut ("1.07" as "1.1"), the step-1 floats as "3.0"; a typed or stepped float could be kept as 0.30000000000000004; the number box typed two decimals for all.
+- Decision: `rubraview_setting_decimals` (an int 0, a float the decimals of its step: 0.01 → 2, 0.05 → 2, 0.1 and 0.5 → 1, 1 and 5 → 0); `clamp_to` keeps a float rounded to them after its step (every set and every read from the file); `rubraview_setting_number_text` writes a value with them, and the slider's value, its room, the number box and the range said use it.
+- Consequences: R336's numbers; `test_settings` (T492).

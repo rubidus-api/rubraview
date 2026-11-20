@@ -162,6 +162,12 @@ typedef enum rubraview_number_typed {
     RUBRAVIEW_NUMBER_CLAMPED,   /* `*out` is the end of the range it went past */
     RUBRAVIEW_NUMBER_NOT,       /* not a number (or not one this setting takes) */
 } rubraview_number_typed_t;
+/* RV-311 (owner, 2026-11-20: "정수형과 실수형(고정소수점)을 구분"): an int has no decimals, a float as many as its step
+   has (0.05: 2, 0.5: 1, 1: 0); a value is kept rounded to them, and shown and typed with them. */
+int32_t rubraview_setting_decimals(const rubraview_setting_def_t *def);
+/** The value as the setting writes it ("0.3", "1.07", "120"), into `out`. */
+const char *rubraview_setting_number_text(const rubraview_setting_def_t *def, double value, char *out, size_t cap);
+
 /* RV-311: one number for the values of the settings `keys` names ("section.key section.key", spaces between), to see
    that one of them changed whatever changed it (a key, a click, Revert, another window's file). */
 uint64_t rubraview_settings_print(const rubraview_settings_t *settings, const char *keys);

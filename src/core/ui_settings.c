@@ -557,10 +557,10 @@ static int32_t pair_column(const rubraview_settings_view_t *view, const rubravie
 static void slider_cells(const rubraview_settings_view_t *view, const rubraview_setting_def_t *def,
                          int32_t *out_col, int32_t *out_cells) {
     int32_t width = view->cols - view->content_col - 1 - view->label_cols;
-    char value_text[48];
-    int n = def->type == RUBRAVIEW_SETTING_FLOAT
-        ? rubraview_fmt(value_text, sizeof(value_text), " {:.1}", PROVEN_ARG((double)def->max_value))
-        : rubraview_fmt(value_text, sizeof(value_text), " {:.0}", PROVEN_ARG((double)def->max_value));
+    char lo[48], hi[48];   /* RV-311: room for the widest end, written with the setting's decimals */
+    size_t lw = proven_cstr_len(rubraview_setting_number_text(def, def->min_value, lo, sizeof lo));
+    size_t hw = proven_cstr_len(rubraview_setting_number_text(def, def->max_value, hi, sizeof hi));
+    int n = 1 + (int)(lw > hw ? lw : hw);
     int32_t value_cells = (n > 0 ? n : 0) + (def->unit.size > 0 ? cells_of(tr_unit(def->unit)) + 1 : 0);
     int32_t inner = width - 2 - value_cells;
     if (inner < 4) inner = 4;
@@ -942,10 +942,8 @@ proven_u8str_view_t rubraview_settings_line_text(const rubraview_settings_view_t
                     repeat(&w, rubraview_bytes_view("#", filled));
                     repeat(&w, rubraview_bytes_view("-", cells - filled));
                     put_bytes(&w, rubraview_bytes_view("]", 1), 1);
-                    char text[64];
-                    int n = def->type == RUBRAVIEW_SETTING_FLOAT
-                        ? rubraview_fmt(text, sizeof(text), " {:.1}", PROVEN_ARG((double)value))
-                        : rubraview_fmt(text, sizeof(text), " {:.0}", PROVEN_ARG((double)value));
+                    char text[64], digits[48];   /* RV-311: an int bare, a float with its decimals */
+                    int n = rubraview_fmt(text, sizeof(text), " {}", PROVEN_ARG(rubraview_setting_number_text(def, value, digits, sizeof digits)));
                     put_text(&w, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)text, .size = n > 0 ? (size_t)n : 0 }, width - w.cells);
                     if (def->unit.size > 0) {
                         put_bytes(&w, rubraview_bytes_view(" ", 1), 1);

@@ -1853,7 +1853,7 @@ void settings_number_begin(app_state_t *app) {
     if (!def || (def->type != RUBRAVIEW_SETTING_INT && def->type != RUBRAVIEW_SETTING_FLOAT)) return;
     char now[32];
     double v = rubraview_settings_get(&app->settings, def->section, def->key);
-    int n = def->type == RUBRAVIEW_SETTING_FLOAT ? rubraview_fmt(now, sizeof(now), "{:.2}", PROVEN_ARG((double)v)) : rubraview_fmt(now, sizeof(now), "{:.0}", PROVEN_ARG((double)v));
+    int n = (int)proven_cstr_len(rubraview_setting_number_text(def, v, now, sizeof now));   /* RV-311: with its decimals */
     editbox_begin(&app->spath_ec, app->spath_buffer, sizeof(app->spath_buffer), false);
     rubraview_textedit_set(&app->spath_ec.te, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
     rubraview_textedit_select_all(&app->spath_ec.te);
@@ -1866,7 +1866,9 @@ void settings_number_begin(app_state_t *app) {
     app->spath_active = true;
     rubraview_pal_window_text_input(app->settings_window, true);
     char line[160];
-    rubraview_fmt(line, sizeof(line), T("type a number, {} to {}; Enter keeps it, Esc leaves it"), PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(def->min_value), 6)), PROVEN_ARG(rubraview_g_text((char[32]){0}, (double)(def->max_value), 6)));
+    char lo[32], hi[32];
+    rubraview_fmt(line, sizeof(line), T("type a number, {} to {}; Enter keeps it, Esc leaves it"), PROVEN_ARG(rubraview_setting_number_text(def, def->min_value, lo, sizeof lo)),
+                  PROVEN_ARG(rubraview_setting_number_text(def, def->max_value, hi, sizeof hi)));
     settings_say(app, line);
 }
 
@@ -1892,8 +1894,9 @@ static void settings_path_commit(app_state_t *app) {
         settings_event(app, RUBRAVIEW_SEVENT_CHANGED);
         if (got == RUBRAVIEW_NUMBER_CLAMPED) {   /* said, not cut without a word */
             char line[160];
-            (void)rubraview_fmt(line, sizeof line, T("kept as {}: it goes from {} to {}"), PROVEN_ARG(rubraview_g_text((char[32]){0}, v, 6)),
-                                PROVEN_ARG(rubraview_g_text((char[32]){0}, def->min_value, 6)), PROVEN_ARG(rubraview_g_text((char[32]){0}, def->max_value, 6)));
+            char a[32], lo[32], hi[32];
+            (void)rubraview_fmt(line, sizeof line, T("kept as {}: it goes from {} to {}"), PROVEN_ARG(rubraview_setting_number_text(def, v, a, sizeof a)),
+                                PROVEN_ARG(rubraview_setting_number_text(def, def->min_value, lo, sizeof lo)), PROVEN_ARG(rubraview_setting_number_text(def, def->max_value, hi, sizeof hi)));
             settings_say(app, line);
         }
         return;

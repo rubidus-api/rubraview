@@ -52,6 +52,24 @@ proven_u8str_view_t rubraview_settings_tab_name(rubraview_settings_tab_t tab) {
 
 /* ---- values ---- */
 
+int32_t rubraview_setting_decimals(const rubraview_setting_def_t *def) {
+    if (!def || def->type != RUBRAVIEW_SETTING_FLOAT) return 0;
+    if (!(def->step > 0.0)) return 2;
+    double scaled = def->step;
+    for (int32_t d = 0; d <= 6; ++d) {
+        if (fabs(scaled - round(scaled)) < 1e-9 * (scaled > 1.0 ? scaled : 1.0)) return d;
+        scaled *= 10.0;
+    }
+    return 6;
+}
+
+/* RV-311: a float kept at its decimals (fixed point), so 0.1 + 0.2 is kept as 0.3 */
+static double to_decimals(const rubraview_setting_def_t *def, double value) {
+    if (def->type != RUBRAVIEW_SETTING_FLOAT) return value;
+    double k = pow(10.0, (double)rubraview_setting_decimals(def));
+    return round(value * k) / k;
+}
+
 static double clamp_to(const rubraview_setting_def_t *def, double value) {
     if (def->type == RUBRAVIEW_SETTING_PATH) return 0.0;
     if (value < def->min_value) value = def->min_value;
@@ -61,7 +79,15 @@ static double clamp_to(const rubraview_setting_def_t *def, double value) {
         value = def->min_value + floor(steps + 0.5) * def->step;
         if (value > def->max_value) value = def->max_value;
     }
-    return value;
+    return to_decimals(def, value);
+}
+
+const char *rubraview_setting_number_text(const rubraview_setting_def_t *def, double value, char *out, size_t cap) {
+    if (!out || cap == 0) return "";
+    static const char *const FORMATS[7] = { "{:.0}", "{:.1}", "{:.2}", "{:.3}", "{:.4}", "{:.5}", "{:.6}" };
+    int32_t d = rubraview_setting_decimals(def);
+    if (rubraview_fmt(out, cap, FORMATS[d >= 0 && d <= 6 ? d : 2], PROVEN_ARG(value)) <= 0) out[0] = '\0';
+    return out;
 }
 
 rubraview_settings_t rubraview_settings_defaults(void) {
