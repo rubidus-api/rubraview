@@ -3830,3 +3830,5 @@ menu "Apps' items (Windows 11)" = "موارد برنامه‌ها (ویندوز 
 "too many choosing windows are open" = "پنجره‌های برگزیدن بسیار باز است"
 "type a name a file can have" = "نامی بنویسید که پرونده بتواند داشته باشد"
 "Windows' window" = "با پنجرهٔ ویندوز"
+"the window that asked is gone: there is nothing to send this to (Cancel closes)" = "پنجره‌ای که پرسید دیگر نیست: جایی برای فرستادن نیست (لغو می‌بندد)"
+"the window that asked did not take it: try again, or Cancel" = "پنجره‌ای که پرسید آن را نگرفت: دوباره بکوشید یا لغو کنید"

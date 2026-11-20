@@ -1647,6 +1647,12 @@ bool rubraview_pal_choose_take(char **out_blob, size_t *out_len) {
     return true;
 }
 
+bool rubraview_pal_window_alive(uint64_t window) {
+    HWND h = (HWND)(uintptr_t)window;
+    DWORD_PTR r = 0;
+    return h && IsWindow(h) && SendMessageTimeoutW(h, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 2000, &r) != 0;   /* there, and answering */
+}
+
 bool rubraview_pal_choose_send(uint64_t to, proven_u8str_view_t blob) {
     HWND target = (HWND)(uintptr_t)to;
     if (!target || !IsWindow(target) || blob.size == 0 || blob.size > 0x7FFFFFFFu) return false;

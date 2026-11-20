@@ -145,6 +145,8 @@ void rubraview_pal_window_helper_process(void);
 bool rubraview_pal_choose_take(char **out_blob, size_t *out_len);
 /** RV-314: the answer sent to the asking window `to` (its native handle). */
 bool rubraview_pal_choose_send(uint64_t to, proven_u8str_view_t blob);
+/** RV-314: the window (a native handle) is there and answers messages. */
+bool rubraview_pal_window_alive(uint64_t window);
 /** RV-314: `window` sized (in 96-dpi pixels), over the middle of the window `over` (a native handle, or 0), and brought forward. */
 void rubraview_pal_window_place_over(rubraview_window_t *window, uint64_t over, int32_t width, int32_t height);
 

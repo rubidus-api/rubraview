@@ -4295,3 +4295,11 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: 19 places asked Windows' dialogs. Approach A (the open-file screen's state split out of `app_state_t` into a `pickview_t`) measured at 29 files and the shared edit box's 419 uses; approach B reuses the screen whole.
 - Decision: `choose_ask` writes a `rubraview_choose_request_t` (mode, id, the window answered to and the one opened over, title, start folder, name, up to 16 kinds) as a jobwire message, in hex on the command line of `rubraview.exe --choose`, started apart; the process takes it in wWinMain (`choose_mode_take`), skips the command line's launch and hand-over, the job notes, settings, layout and history writes, marks its windows helpers (RV-312), and opens the screen at the start folder, sized 980 x 700 over the asker (`rubraview_pal_window_place_over`). The screen's listing keeps folders and the kind's files (`rubraview_choose_shows`); its bottom row is Windows' window, Cancel, Choose / Open / Save at the right, the kind and the save name at the left (an editbox); a file activated answers (or fills the name). The answer (`rubraview_choose_put_answer`, Windows' separators) goes to the asker's main window by WM_COPYDATA (`IPC_CHOOSE`), queued and taken by `choose_pump` once a pass, which calls the asker's callback; the callers moved their after-dialog code into callbacks that check what asked is still there. Settings › General's Windows' dialog for Open keeps Windows' Open.
 - Consequences: R339; VM T496. Its size is not remembered (it writes no layout). A chooser killed without answering leaves its asker waiting until the next ask.
+
+## D-385: A Choice Sent Only To An Asker Still There (RV-314)
+
+- Date: 2026-11-20
+- Status: Accepted (owner 2026-11-20: "원래 창은 그냥 모달리스 상태로 키보드 입력이 가능한 것으로 하고, 메시지가 오면 그걸 입력창에서 받아서 그걸로 값을 대체 ... 확인을 누르면 원래 어머니 프로세스가 살아있는지 확인하고 경로명을 메시지로 보내는 것으로. 취소일 때에는 취소 메시지 전송").
+- Context: D-384 already left the asker modeless and put the answer into its box; a choice for an asker that had closed was sent into nothing and the chooser closed.
+- Decision: before a choice is sent, `rubraview_pal_window_alive` (the window there, and answering WM_NULL within 2 s); not alive, or the send failing, the chooser stays and says so (Cancel closes); a cancel is sent as before.
+- Consequences: R339 amended; VM T498.

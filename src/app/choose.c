@@ -123,6 +123,12 @@ bool choose_lists(proven_u8str_view_t name, bool is_directory) { return rubravie
 
 static void answer(app_state_t *app, bool accepted, const proven_u8str_view_t *given, size_t count) {
     if (C.answered) return;
+    /* the owner, 2026-11-20: "확인을 누르면 원래 어머니 프로세스가 살아있는지 확인하고 경로명을 메시지로 보내는 것으로. 취소일 때에는
+       취소 메시지 전송": a choice for a window gone (or not answering) is not sent and the window stays, saying so */
+    if (accepted && !rubraview_pal_window_alive(C.req.reply_to)) {
+        osd_say(app, TU8("the window that asked is gone: there is nothing to send this to (Cancel closes)"));
+        return;
+    }
     C.answered = true;
     proven_u8str_view_t *paths = count ? (proven_u8str_view_t *)rubraview_malloc_product(count, sizeof *paths, 1) : NULL;
     for (size_t i = 0; paths && i < count; ++i) {   /* Windows' separators, as its own dialog gives them */
@@ -136,7 +142,14 @@ static void answer(app_state_t *app, bool accepted, const proven_u8str_view_t *g
     if (count && !paths) count = 0;
     rubraview_jobwire_out_t out = { 0 };
     rubraview_choose_put_answer(&out, &(rubraview_choose_answer_t){ .id = C.req.id, .accepted = accepted, .filter = C.filter }, paths, count);
-    if (!out.failed && out.len) (void)rubraview_pal_choose_send(C.req.reply_to, (proven_u8str_view_t){ .ptr = out.data, .size = out.len });
+    bool sent = !out.failed && out.len && rubraview_pal_choose_send(C.req.reply_to, (proven_u8str_view_t){ .ptr = out.data, .size = out.len });
+    if (accepted && !sent) {   /* it went away or hung as it was sent: kept, said */
+        C.answered = false;
+        rubraview_jobwire_out_free(&out);
+        rubraview_free(paths);
+        osd_say(app, TU8("the window that asked did not take it: try again, or Cancel"));
+        return;
+    }
     rubraview_jobwire_out_free(&out);
     rubraview_free(paths);
     rubraview_pal_window_request_close(app->window);

@@ -1594,7 +1594,8 @@ bottom left switches it when there are several), with everything the open-file s
 favourites, typing a path (`Ctrl+L`), the filter, the tiles or details. **Choose this folder** takes the folder
 shown (or a folder ticked), **Open** the file ticked or focused (a double tap opens it at once), **Save** the
 name typed at the bottom (its kind's extension added; a name already there asks once, a second Save replaces
-it; `Tab` goes between the name and the list). **Cancel**, `Esc` or the window's X leave it unanswered.
+it; `Tab` goes between the name and the list). **Cancel**, `Esc` or the window's X leave it unanswered. A choice
+for a window that has closed meanwhile (or does not answer) is not sent: the window says so and stays until Cancel.
 **Windows' window** asks Windows' own dialog instead and gives its answer. (Settings › General's Windows'
 dialog for opening still opens Windows' own Open.)
 
