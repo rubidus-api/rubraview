@@ -15,10 +15,10 @@
  * checks that the two agree.
  */
 
-#define RUBRAVIEW_VERSION_STRING "1.51.0"
+#define RUBRAVIEW_VERSION_STRING "1.52.0"
 
 #define RUBRAVIEW_VERSION_MAJOR 1
-#define RUBRAVIEW_VERSION_MINOR 51
+#define RUBRAVIEW_VERSION_MINOR 52
 #define RUBRAVIEW_VERSION_PATCH 0
 
 /* The day this version was released, for the help window (owner, 2026-10-18). */
