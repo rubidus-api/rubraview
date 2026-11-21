@@ -1531,7 +1531,10 @@ void list_button(rubraview_renderer_t *rr, double px, double py, rubraview_rect_
     rubraview_pal_rect_t box = { r.x + 1.0, r.y + 1.0, r.width - 2.0, r.height - 2.0 };
     if (on) rubraview_pal_render_fill_rect(rr, box, (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0xC0000000u, 2.0);
     else if (rubraview_rect_contains(r, px, py)) rubraview_pal_render_fill_rect(rr, box, COLOR_TILE_FILL, 2.0);
-    rubraview_pal_render_draw_text(rr, cstr(label), box, size, color, RUBRAVIEW_TEXT_CENTER);
+    char cut[160];
+    proven_u8str_view_t text = cstr(label);
+    if (box.width > 4.0) text = fit_text_measured(rr, cut, sizeof(cut), text, box.width - 4.0, size);
+    if (text.size > 0) rubraview_pal_render_draw_text(rr, text, box, size, color, RUBRAVIEW_TEXT_CENTER);
 }
 
 /* RV-181: a list window's button that shows an icon (its letter where the font is missing). */
@@ -1565,17 +1568,17 @@ void draw_list_bar(app_state_t *app, rubraview_renderer_t *rr, const rubraview_l
     char del[40];
     size_t checked = list_checked_total(app);
     if (checked > 0) rubraview_fmt(del, sizeof(del), T("Del ({})"), PROVEN_ARG((size_t)checked)); else rubraview_fmt(del, sizeof(del), T("Del"));
-    list_check_mark(rr, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ALL),
+    list_check_mark(rr, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_ALL),
                     app->list_checked_count > 0 && checked == app->list_checked_count, checked > 0);
-    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_ADD), T("Add"), small, false, COLOR_TEXT);
-    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_URL), T("URL"), small, false, COLOR_TEXT);   /* RV-158 */
-    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_DEL), del, small, false, checked > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
-    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_SAVE), T("Save"), small, false, COLOR_TEXT);
-    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_LOAD), T("Load"), small, false, COLOR_TEXT);
-    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_PATHS), list_saves_whole_paths(app) ? T("Abs") : T("Rel"),
+    list_button(rr, px, py, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_ADD), T("Add"), small, false, COLOR_TEXT);
+    list_button(rr, px, py, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_URL), T("URL"), small, false, COLOR_TEXT);   /* RV-158 */
+    list_button(rr, px, py, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_DEL), del, small, false, checked > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
+    list_button(rr, px, py, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_SAVE), T("Save"), small, false, COLOR_TEXT);
+    list_button(rr, px, py, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_LOAD), T("Load"), small, false, COLOR_TEXT);
+    list_button(rr, px, py, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_PATHS), list_saves_whole_paths(app) ? T("Abs") : T("Rel"),
                 small, false, COLOR_TEXT);
     /* the owner (2026-10-18): Edit's steps onto all of them, as copies; lit while Edit has a step */
-    list_button(rr, px, py, rubraview_listwin_bar_rect(lw, RUBRAVIEW_LISTWIN_APPLY), T("Edit to all"), small, false,
+    list_button(rr, px, py, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_APPLY), T("Edit to all"), small, false,
                 edit_panel_open(app) && app->edit_steps.cursor > 0 ? COLOR_TEXT : COLOR_BOX_BORDER);
     double head_h = rubraview_listwin_head_height(lw);
     rubraview_pal_rect_t rule = { lw->x + 2.0, lw->y + head_h - 1.0, lw->width - 4.0, 1.0 };
@@ -1589,26 +1592,29 @@ void draw_list_tools(app_state_t *app, rubraview_renderer_t *rr, const rubraview
     double small = lw->row_height * 0.5 * place_size(app, PF_LIST);
     char ext[32];
     if (app->list_ext_off_n > 0) rubraview_fmt(ext, sizeof(ext), ".ext (-{})", PROVEN_ARG((size_t)app->list_ext_off_n)); else rubraview_fmt(ext, sizeof(ext), ".ext");
-    list_button(rr, px, py, rubraview_listwin_tool_rect(lw, RUBRAVIEW_LISTWIN_EXT), ext, small, app->list_ext_off_n > 0, COLOR_TEXT);
+    list_button(rr, px, py, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_EXT), ext, small, app->list_ext_off_n > 0, COLOR_TEXT);
     char shape[48];   /* RV-192 */
     rubraview_fmt(shape, sizeof(shape), "{} \xE2\x96\xBE", PROVEN_ARG(T("Shape")));
-    list_button(rr, px, py, rubraview_listwin_tool_rect(lw, RUBRAVIEW_LISTWIN_SHAPE), shape, small, false, COLOR_TEXT);
-    rubraview_rect_t f = rubraview_listwin_tool_rect(lw, RUBRAVIEW_LISTWIN_FILTER);
+    list_button(rr, px, py, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_SHAPE), shape, small, false, COLOR_TEXT);
+    rubraview_rect_t f = list_part_rect(app, lw, RUBRAVIEW_LISTWIN_FILTER);
     if (f.width > 0.0) {
         rubraview_pal_rect_t box = { f.x + 2.0, f.y + 2.0, f.width - 4.0, f.height - 4.0 };
         bool typing = in_files ? app->list_filter_in_files : (app->rename_active && app->rename_is_listfilter);
         rubraview_pal_render_fill_rect(rr, box, 0xFF161616u, 2.0);
         rubraview_pal_render_stroke_rect(rr, box, typing ? 0xFF5B9BD5u : COLOR_BOX_BORDER, 1.0, 2.0);
-        char words[160];
+        char words[160], cut[192];
         bool empty = app->list_filter[0] == '\0';
         rubraview_fmt(words, sizeof(words), "{}{}", PROVEN_ARG(empty && !typing ? T("Filter") : app->list_filter), PROVEN_ARG(typing && in_files ? "|" : ""));
         rubraview_pal_rect_t inner = { box.x + 6.0, box.y, box.width - 12.0 - (empty ? 0.0 : box.height), box.height };
-        rubraview_pal_render_draw_text(rr, cstr(words), inner, small, empty && !typing ? 0x90F0F0F0u : COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        if (inner.width > 0.0) {
+            proven_u8str_view_t shown = fit_text_measured(rr, cut, sizeof(cut), cstr(words), inner.width, small);
+            if (shown.size > 0) rubraview_pal_render_draw_text(rr, shown, inner, small, empty && !typing ? 0x90F0F0F0u : COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        }
         if (!empty) list_button(rr, px, py, (rubraview_rect_t){ f.x + f.width - f.height, f.y, f.height, f.height }, "\xC3\x97", small, false, COLOR_TEXT);
     }
-    list_button(rr, px, py, rubraview_listwin_tool_rect(lw, RUBRAVIEW_LISTWIN_SORT), list_sort_word(app->list_sort_key), small,
+    list_button(rr, px, py, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_SORT), list_sort_word(app->list_sort_key), small,
                 app->list_sort_key > 0, COLOR_TEXT);
-    list_button(rr, px, py, rubraview_listwin_tool_rect(lw, RUBRAVIEW_LISTWIN_ORDER),
+    list_button(rr, px, py, list_part_rect(app, lw, RUBRAVIEW_LISTWIN_ORDER),
                 app->list_sort_desc ? "\xE2\x96\xBC" : "\xE2\x96\xB2", small, false, COLOR_TEXT);
 }
 

@@ -224,7 +224,11 @@ bool propsec_button(app_state_t *app, int which) {
                 pw_say(v, T("Windows' certificate window could not be started"));
             break;
         }
-        case PB_ADVANCED: v->advanced = !v->advanced; break;
+        case PB_ADVANCED:
+            v->advanced = !v->advanced;
+            v->page.scroll = 0.0;
+            v->page.bar = false;
+            break;
         case PB_ADD: pw_name_begin(app, NAME_ADD); break;
         case PB_OWNER: pw_name_begin(app, NAME_OWNER); break;
         case PB_AUDIT_ADD: pw_name_begin(app, NAME_AUDIT); break;
@@ -352,57 +356,69 @@ bool propsec_press(app_state_t *app, double x, double y) {
 
 static double dpi_of(app_state_t *app) { return rubraview_pal_window_dpi_scale(app->props_window); }
 
-static double width_of(app_state_t *app) {
-    int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->props_window, &w, &h);
-    return (double)w;
-}
+static double width_of(app_state_t *app) { return pw_content_width(app); }
 
 /* A row of a list: lit when chosen, its rectangle kept for the pointer. */
 static void list_row(app_state_t *app, rubraview_pal_rect_t *keep, double y, double h, bool chosen) {
-    double dpi = dpi_of(app);
-    rubraview_pal_rect_t r = { 18.0 * dpi, y, width_of(app) - 36.0 * dpi, h };
+    double dpi = dpi_of(app), w = width_of(app);
+    rubraview_pal_rect_t r = { 18.0 * dpi, y, w > 36.0 * dpi ? w - 36.0 * dpi : 0.0, h };
     *keep = r;
+    if (r.width <= 0.0) return;
     bool over = pal_rect_has(r, app->props_px, app->props_py);
     if (chosen || over) rubraview_pal_render_fill_rect(app->props_renderer, r, chosen ? 0xFF2F4A6Au : 0xFF262B32u, 3.0 * dpi);
 }
 
 static void heading(app_state_t *app, double y, const char *words) {
-    double dpi = dpi_of(app);
-    pw_text_at(app->props_renderer, words, (rubraview_pal_rect_t){ 18.0 * dpi, y, width_of(app) - 36.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_HEADING);
+    double dpi = dpi_of(app), w = width_of(app);
+    if (w <= 36.0 * dpi) return;
+    char fit[240];
+    proven_u8str_view_t shown = fit_text_measured(app->props_renderer, fit, sizeof(fit), proven_u8str_view_from_cstr(words), w - 36.0 * dpi, 13.0 * dpi);
+    if (shown.size > 0) rubraview_pal_render_draw_text(app->props_renderer, shown, (rubraview_pal_rect_t){ 18.0 * dpi, y, w - 36.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_HEADING, RUBRAVIEW_TEXT_LEFT);
 }
 
-void propsec_draw_signatures(app_state_t *app, double y, double bottom) {
+static void pw_cell_fit(rubraview_renderer_t *r, const char *s, rubraview_pal_rect_t box, double size, uint32_t color) {
+    if (box.width <= 0.0 || box.height <= 0.0) return;
+    char fit[256];
+    proven_u8str_view_t t = fit_text_measured(r, fit, sizeof(fit), proven_u8str_view_from_cstr(s), box.width, size);
+    if (t.size > 0) rubraview_pal_render_draw_text(r, t, box, size, color, RUBRAVIEW_TEXT_LEFT);
+}
+
+double propsec_draw_signatures(app_state_t *app, double y) {
     props_view_t *v = V(app);
     rubraview_renderer_t *r = app->props_renderer;
     double dpi = dpi_of(app), w = width_of(app);
-    double c1 = 24.0 * dpi, c2 = w * 0.47, c3 = w * 0.72;
+    double lx = 18.0 * dpi, avail = w - 2.0 * lx;
+    if (avail < 60.0 * dpi) avail = 60.0 * dpi;
+    double c1 = lx + 6.0 * dpi, w1 = avail * 0.42, c2 = c1 + w1, w2 = avail * 0.28, c3 = c2 + w2, w3 = lx + avail - c3 - 6.0 * dpi;
     heading(app, y, T("Signature list"));
     y += 24.0 * dpi;
-    pw_text_at(r, T("Name of signer:"), (rubraview_pal_rect_t){ c1, y, c2 - c1, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
-    pw_text_at(r, T("Digest algorithm"), (rubraview_pal_rect_t){ c2, y, c3 - c2, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
-    pw_text_at(r, T("Timestamp"), (rubraview_pal_rect_t){ c3, y, w - c3 - 18.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
+    pw_cell_fit(r, T("Name of signer:"), (rubraview_pal_rect_t){ c1, y, w1 - 4.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
+    pw_cell_fit(r, T("Digest algorithm"), (rubraview_pal_rect_t){ c2, y, w2 - 4.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
+    pw_cell_fit(r, T("Timestamp"), (rubraview_pal_rect_t){ c3, y, w3, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
     y += 22.0 * dpi;
     char when[96];
     for (size_t i = 0; i < PROPS_SIGS_MAX; ++i) v->sig_rect[i] = (rubraview_pal_rect_t){0};
     for (size_t i = 0; i < v->sig_count; ++i) {
         const rubraview_props_sig_t *s = &v->sigs[i];
         list_row(app, &v->sig_rect[i], y, 22.0 * dpi, (int32_t)i == v->sig_sel);
-        pw_text_at(r, s->signer[0] ? s->signer : T("(unknown)"), (rubraview_pal_rect_t){ c1, y + 2.0 * dpi, c2 - c1 - 4.0 * dpi, 18.0 * dpi }, 13.0 * dpi, PW_TEXT);
-        pw_text_at(r, s->algorithm, (rubraview_pal_rect_t){ c2, y + 2.0 * dpi, c3 - c2, 18.0 * dpi }, 13.0 * dpi, PW_TEXT);
+        pw_cell_fit(r, s->signer[0] ? s->signer : T("(unknown)"), (rubraview_pal_rect_t){ c1, y + 2.0 * dpi, w1 - 6.0 * dpi, 18.0 * dpi }, 13.0 * dpi, PW_TEXT);
+        pw_cell_fit(r, s->algorithm, (rubraview_pal_rect_t){ c2, y + 2.0 * dpi, w2 - 6.0 * dpi, 18.0 * dpi }, 13.0 * dpi, PW_TEXT);
         if (s->signed_at) info_local_time(when, sizeof when, s->signed_at);
         else (void)rubraview_fmt(when, sizeof when, "{}", PROVEN_ARG(T("Not available")));
-        pw_text_at(r, when, (rubraview_pal_rect_t){ c3, y + 2.0 * dpi, w - c3 - 18.0 * dpi, 18.0 * dpi }, 13.0 * dpi, PW_TEXT);
+        pw_cell_fit(r, when, (rubraview_pal_rect_t){ c3, y + 2.0 * dpi, w3, 18.0 * dpi }, 13.0 * dpi, PW_TEXT);
         y += 24.0 * dpi;
     }
     y = pw_separator(app, y + 4.0 * dpi);
-    if (v->sig_sel < 0 || (size_t)v->sig_sel >= v->sig_count) return;
+    if (v->sig_sel < 0 || (size_t)v->sig_sel >= v->sig_count) return y;
     const rubraview_props_sig_t *s = &v->sigs[v->sig_sel];
     heading(app, y, T("Digital Signature Information"));
     y += 24.0 * dpi;
+    const char *stat = rubraview_tr(rubraview_props_sig_status_words(s->status));
+    double mw = 0.0, mh = 20.0 * dpi;
+    (void)rubraview_pal_render_measure_text_wrapped(r, proven_u8str_view_from_cstr(stat), 13.0 * dpi, avail, &mw, &mh);
     uint32_t color = s->status == RUBRAVIEW_SIG_OK ? 0xFF7FD08Au : s->status == RUBRAVIEW_SIG_UNCHECKED ? PW_DIM : 0xFFE88080u;
-    pw_text_at(r, rubraview_tr(rubraview_props_sig_status_words(s->status)), (rubraview_pal_rect_t){ 18.0 * dpi, y, w - 36.0 * dpi, 20.0 * dpi }, 13.0 * dpi, color);
-    y += 28.0 * dpi;
+    pw_text_at(r, stat, (rubraview_pal_rect_t){ lx, y, avail, mh + 2.0 * dpi }, 13.0 * dpi, color);
+    y += mh + 8.0 * dpi;
     heading(app, y, T("Signer information"));
     y += 24.0 * dpi;
     char a[96], b[96], text[256];
@@ -425,8 +441,9 @@ void propsec_draw_signatures(app_state_t *app, double y, double bottom) {
     } else {
         y = pw_info_row(app, y, T("Name of signer:"), T("Not available"));
     }
-    if (y + 34.0 * dpi < bottom)
-        pw_button_at(app, PB_CERT, T("View Certificate"), (rubraview_pal_rect_t){ w - 168.0 * dpi, y + 6.0 * dpi, 150.0 * dpi, 26.0 * dpi }, false, true);
+    const int cid = PB_CERT; const char *clbl = T("View Certificate");
+    y += 6.0 * dpi + pw_buttons_row(app, &cid, &clbl, NULL, NULL, 1, lx, w - lx, y + 6.0 * dpi, 120.0 * dpi, 26.0 * dpi);
+    return y;
 }
 
 /* A box of a right in a column: ticked, dim when it holds only by inheritance (not to be unticked here). */
@@ -447,15 +464,16 @@ static double rights_table(app_state_t *app, double y, const rubraview_props_pri
     props_view_t *v = V(app);
     rubraview_renderer_t *r = app->props_renderer;
     double dpi = dpi_of(app), w = width_of(app);
-    double ca = w - 150.0 * dpi, cd = w - 80.0 * dpi;
+    double ca = audit ? (w - 64.0 * dpi) : (w - 132.0 * dpi), cd = w - 64.0 * dpi;
+    if (ca < 100.0 * dpi) { ca = 100.0 * dpi; cd = ca + 68.0 * dpi; }
     bool folder = is_folder(v);
-    pw_text_at(r, audit ? T("Audited") : T("Allow"), (rubraview_pal_rect_t){ ca - 18.0 * dpi, y, 60.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
-    if (!audit) pw_text_at(r, T("Deny"), (rubraview_pal_rect_t){ cd - 14.0 * dpi, y, 60.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
+    pw_cell_fit(r, audit ? T("Audited") : T("Allow"), (rubraview_pal_rect_t){ ca - 18.0 * dpi, y, 60.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
+    if (!audit) pw_cell_fit(r, T("Deny"), (rubraview_pal_rect_t){ cd - 14.0 * dpi, y, 56.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
     y += 20.0 * dpi;
     for (int col = 0; col < 2; ++col) for (int32_t q = 0; q < RUBRAVIEW_RIGHT_COUNT; ++q) v->right_box[col][q] = (rubraview_pal_rect_t){0};
     for (int32_t q = 0; q < RUBRAVIEW_RIGHT_COUNT; ++q) {
         if (!rubraview_props_right_shown(q, folder)) continue;
-        pw_text_at(r, rubraview_tr(rubraview_props_right_name(q)), (rubraview_pal_rect_t){ 30.0 * dpi, y, ca - 60.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_TEXT);
+        pw_cell_fit(r, rubraview_tr(rubraview_props_right_name(q)), (rubraview_pal_rect_t){ 28.0 * dpi, y, ca - 46.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_TEXT);
         bool special = q == RUBRAVIEW_RIGHT_SPECIAL;   /* shown, never set from here (Windows: Advanced) */
         if (audit) {
             uint32_t m = rubraview_props_map_generic(audit->mask);
@@ -471,45 +489,55 @@ static double rights_table(app_state_t *app, double y, const rubraview_props_pri
     return y;
 }
 
-static void name_field(app_state_t *app, double y, const char *label) {
+static double name_field(app_state_t *app, double y, const char *label) {
     props_view_t *v = V(app);
     rubraview_renderer_t *r = app->props_renderer;
-    double dpi = dpi_of(app), w = width_of(app);
-    pw_text_at(r, label, (rubraview_pal_rect_t){ 18.0 * dpi, y, 120.0 * dpi, 22.0 * dpi }, 13.0 * dpi, PW_DIM);
-    rubraview_pal_rect_t box = { 140.0 * dpi, y - 2.0 * dpi, w - 158.0 * dpi, 24.0 * dpi };
+    double dpi = dpi_of(app), w = width_of(app), lx = 18.0 * dpi;
+    double bx = w >= 360.0 * dpi ? 140.0 * dpi : lx;
+    if (bx > lx) pw_cell_fit(r, label, (rubraview_pal_rect_t){ lx, y, bx - lx - 6.0 * dpi, 22.0 * dpi }, 13.0 * dpi, PW_DIM);
+    else { pw_cell_fit(r, label, (rubraview_pal_rect_t){ lx, y, w - 2.0 * lx, 20.0 * dpi }, 13.0 * dpi, PW_DIM); y += 22.0 * dpi; }
+    rubraview_pal_rect_t box = { bx, y - 2.0 * dpi, w - bx - lx > 40.0 * dpi ? w - bx - lx : 40.0 * dpi, 24.0 * dpi };
     rubraview_pal_render_fill_rect(r, box, 0xFF15181Cu, 3.0 * dpi);
     rubraview_pal_render_stroke_rect(r, box, PW_ACCENT, 1.0, 3.0 * dpi);
     v->view.box = box;   /* RV-293: the shared field */
     v->view.size = 13.0 * dpi;
     editbox_draw(r, &v->ec, &v->view, proven_u8str_view_from_cstr(v->composing), true, PW_TEXT, dpi);
-    pw_text_at(r, T("a user or group (Guests, a PC's name\\user); Enter adds, Esc stops"),
-               (rubraview_pal_rect_t){ 140.0 * dpi, y + 24.0 * dpi, w - 158.0 * dpi, 18.0 * dpi }, 11.0 * dpi, PW_DIM);
+    const char *hint = T("a user or group (Guests, a PC's name\\user); Enter adds, Esc stops");
+    double mw = 0.0, mh = 18.0 * dpi;
+    (void)rubraview_pal_render_measure_text_wrapped(r, proven_u8str_view_from_cstr(hint), 11.0 * dpi, box.width, &mw, &mh);
+    pw_text_at(r, hint, (rubraview_pal_rect_t){ bx, y + 24.0 * dpi, box.width, mh + 2.0 * dpi }, 11.0 * dpi, PW_DIM);
+    return y + 26.0 * dpi + mh;
 }
 
-static void draw_advanced(app_state_t *app, double y, double bottom) {
+static double draw_advanced(app_state_t *app, double y) {
     props_view_t *v = V(app);
     rubraview_renderer_t *r = app->props_renderer;
-    double dpi = dpi_of(app), w = width_of(app);
+    double dpi = dpi_of(app), w = width_of(app), lx = 18.0 * dpi, right = w - lx;
     bool folder = is_folder(v);
     /* the owner */
     char text[600];
     (void)rubraview_fmt(text, sizeof text, "{}", PROVEN_ARG(v->owner_want[0] ? v->owner_want : v->sec.owner));
     y = pw_info_row(app, y, T("Owner:"), text);
-    pw_button_at(app, PB_OWNER, T("Change..."), (rubraview_pal_rect_t){ w - 104.0 * dpi, y - 26.0 * dpi, 86.0 * dpi, 24.0 * dpi }, false, !v->sec_asking);
+    {
+        const int id = PB_OWNER; const char *lbl = T("Change..."); bool ena = !v->sec_asking;
+        y += pw_buttons_row(app, &id, &lbl, NULL, &ena, 1, lx, right, y, 80.0 * dpi, 24.0 * dpi) + 4.0 * dpi;
+    }
     /* the inheritance */
     bool off = v->protect_want >= 0 ? v->protect_want == 1 : v->sec.protect;
     y = pw_info_row(app, y, T("Inheritance:"), off ? T("off: only its own permissions") : T("on: the folder above's permissions pass on"));
-    if (off) pw_button_at(app, PB_INH_ON, T("Enable inheritance"), (rubraview_pal_rect_t){ 140.0 * dpi, y, 170.0 * dpi, 24.0 * dpi }, false, true);
-    else {
-        pw_button_at(app, PB_INH_COPY, T("Turn off, keeping them"), (rubraview_pal_rect_t){ 140.0 * dpi, y, 170.0 * dpi, 24.0 * dpi }, false, true);
-        pw_button_at(app, PB_INH_DROP, T("Turn off, removing them"), (rubraview_pal_rect_t){ 318.0 * dpi, y, 170.0 * dpi, 24.0 * dpi }, false, true);
+    if (off) {
+        const int id = PB_INH_ON; const char *lbl = T("Enable inheritance");
+        y += pw_buttons_row(app, &id, &lbl, NULL, NULL, 1, lx, right, y, 130.0 * dpi, 24.0 * dpi) + 6.0 * dpi;
+    } else {
+        const int ids[2] = { PB_INH_COPY, PB_INH_DROP };
+        const char *lbls[2] = { T("Turn off, keeping them"), T("Turn off, removing them") };
+        y += pw_buttons_row(app, ids, lbls, NULL, NULL, 2, lx, right, y, 130.0 * dpi, 24.0 * dpi) + 6.0 * dpi;
     }
-    y = pw_separator(app, y + 28.0 * dpi);
+    y = pw_separator(app, y);
     /* the entries, as Advanced lists them */
     heading(app, y, T("Permission entries"));
     y += 22.0 * dpi;
-    size_t shown = 0;
-    for (size_t i = 0; i < v->ace_count && y < bottom - 210.0 * dpi; ++i, ++shown) {
+    for (size_t i = 0; i < v->ace_count; ++i) {
         const rubraview_props_ace_t *a = &v->aces[i];
         uint32_t m = rubraview_props_map_generic(a->mask);
         const char *access = T("Special");
@@ -517,112 +545,140 @@ static void draw_advanced(app_state_t *app, double y, double bottom) {
             if (rubraview_props_right_shown(q, folder) && m == (rubraview_props_right_mask(q) | (m & 0x100000u)) && rubraview_props_right_mask(q)) { access = rubraview_tr(rubraview_props_right_name(q)); break; }
         (void)rubraview_fmt(text, sizeof text, "{}  {}  {}{}", PROVEN_ARG(a->allow ? T("Allow") : T("Deny")), PROVEN_ARG(a->name), PROVEN_ARG(access),
                             PROVEN_ARG((a->flags & RUBRAVIEW_ACE_INHERITED) ? T("  (inherited)") : (a->flags & RUBRAVIEW_ACE_INHERIT_ONLY) ? T("  (subfolders and files only)") : ""));
-        pw_text_at(r, text, (rubraview_pal_rect_t){ 24.0 * dpi, y, w - 42.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_TEXT);
-        y += 19.0 * dpi;
-    }
-    if (shown < v->ace_count) {   /* a small window: how many did not fit (a taller one shows them) */
-        (void)rubraview_fmt(text, sizeof text, T("... and {} more (make the window taller)"), PROVEN_ARG((uint32_t)(v->ace_count - shown)));
-        pw_text_at(r, text, (rubraview_pal_rect_t){ 24.0 * dpi, y, w - 42.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
+        pw_cell_fit(r, text, (rubraview_pal_rect_t){ 24.0 * dpi, y, w - 42.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_TEXT);
         y += 19.0 * dpi;
     }
     y = pw_separator(app, y + 2.0 * dpi);
     /* what the user running this may do */
     heading(app, y, T("Your effective access"));
     y += 22.0 * dpi;
-    double cw = (w - 36.0 * dpi) / 3.0;
+    int cols = w >= 430.0 * dpi ? 3 : w >= 280.0 * dpi ? 2 : 1;
+    double cwid = (w - 36.0 * dpi) / (double)cols;
     for (int32_t i = 0; i < RUBRAVIEW_SPECIAL_COUNT; ++i) {
         bool has = v->sec.no_dacl || (v->sec.effective & rubraview_props_special_bit(i)) != 0;
         (void)rubraview_fmt(text, sizeof text, "{} {}", PROVEN_ARG(has ? "\xe2\x9c\x93" : "\xe2\x80\x93"), PROVEN_ARG(rubraview_tr(rubraview_props_special_name(i, folder))));
-        double x = 24.0 * dpi + (double)(i % 3) * cw;
-        pw_text_at(r, text, (rubraview_pal_rect_t){ x, y, cw - 6.0 * dpi, 18.0 * dpi }, 11.0 * dpi, has ? PW_TEXT : PW_DIM);
-        if (i % 3 == 2 || i == RUBRAVIEW_SPECIAL_COUNT - 1) y += 18.0 * dpi;
+        double x = 24.0 * dpi + (double)(i % cols) * cwid;
+        pw_cell_fit(r, text, (rubraview_pal_rect_t){ x, y, cwid - 6.0 * dpi, 18.0 * dpi }, 11.0 * dpi, has ? PW_TEXT : PW_DIM);
+        if (i % cols == cols - 1 || i == RUBRAVIEW_SPECIAL_COUNT - 1) y += 18.0 * dpi;
     }
     y = pw_separator(app, y + 2.0 * dpi);
     /* the audit entries: administrator only, read and written by the elevated child */
     heading(app, y, T("Auditing"));
+    y += 22.0 * dpi;
     for (size_t i = 0; i < PROPS_PEOPLE_MAX; ++i) v->audit_rect[i] = (rubraview_pal_rect_t){0};
     v->audit_kind_box[0] = v->audit_kind_box[1] = (rubraview_pal_rect_t){0};
     if (v->audit_state != ASK_DONE) {
-        pw_button_at(app, PB_AUDIT, T("Auditing (administrator)..."), (rubraview_pal_rect_t){ w - 228.0 * dpi, y - 2.0 * dpi, 210.0 * dpi, 24.0 * dpi }, false,
-                     v->audit_state != ASK_WAITING);
-        return;
+        const int id = PB_AUDIT; const char *lbl = T("Auditing (administrator)..."); bool ena = v->audit_state != ASK_WAITING;
+        y += pw_buttons_row(app, &id, &lbl, NULL, &ena, 1, lx, right, y, 160.0 * dpi, 24.0 * dpi) + 6.0 * dpi;
+        return y;
     }
-    pw_button_at(app, PB_AUDIT_ADD, T("Add..."), (rubraview_pal_rect_t){ w - 290.0 * dpi, y - 2.0 * dpi, 80.0 * dpi, 24.0 * dpi }, false, true);
-    pw_button_at(app, PB_AUDIT_REMOVE, T("Remove"), (rubraview_pal_rect_t){ w - 204.0 * dpi, y - 2.0 * dpi, 80.0 * dpi, 24.0 * dpi }, false, v->audit_sel >= 0);
-    pw_button_at(app, PB_AUDIT_APPLY, T("Write"), (rubraview_pal_rect_t){ w - 118.0 * dpi, y - 2.0 * dpi, 100.0 * dpi, 24.0 * dpi }, v->audit_changed,
-                 v->audit_changed && !v->audit_writing);
-    y += 26.0 * dpi;
-    if (v->audit_count == 0) { pw_text_at(r, T("(no audit entries)"), (rubraview_pal_rect_t){ 24.0 * dpi, y, w, 18.0 * dpi }, 12.0 * dpi, PW_DIM); return; }
-    for (size_t i = 0; i < v->audit_count && y < bottom - 24.0 * dpi; ++i) {
+    {
+        const int aids[3] = { PB_AUDIT_ADD, PB_AUDIT_REMOVE, PB_AUDIT_APPLY };
+        const char *albls[3] = { T("Add..."), T("Remove"), T("Write") };
+        const bool aacc[3] = { false, false, v->audit_changed };
+        const bool aena[3] = { true, v->audit_sel >= 0, v->audit_changed && !v->audit_writing };
+        y += pw_buttons_row(app, aids, albls, aacc, aena, 3, lx, right, y, 64.0 * dpi, 24.0 * dpi) + 6.0 * dpi;
+    }
+    if (v->audit_count == 0) {
+        pw_cell_fit(r, T("(no audit entries)"), (rubraview_pal_rect_t){ 24.0 * dpi, y, w - 42.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_DIM);
+        return y + 22.0 * dpi;
+    }
+    for (size_t i = 0; i < v->audit_count; ++i) {
         const rubraview_props_ace_t *a = &v->audits[i];
         list_row(app, &v->audit_rect[i], y, 20.0 * dpi, (int32_t)i == v->audit_sel);
         const char *kind = a->audit == 3 ? T("All") : a->audit == 2 ? T("Fail") : T("Success");
         (void)rubraview_fmt(text, sizeof text, "{}  {}{}", PROVEN_ARG(kind), PROVEN_ARG(a->name), PROVEN_ARG((a->flags & RUBRAVIEW_ACE_INHERITED) ? T("  (inherited)") : ""));
-        pw_text_at(r, text, (rubraview_pal_rect_t){ 24.0 * dpi, y + 1.0 * dpi, w - 42.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_TEXT);
+        pw_cell_fit(r, text, (rubraview_pal_rect_t){ 24.0 * dpi, y + 1.0 * dpi, w - 42.0 * dpi, 18.0 * dpi }, 12.0 * dpi, PW_TEXT);
         y += 21.0 * dpi;
     }
-    if (v->audit_sel >= 0 && (size_t)v->audit_sel < v->audit_count && y + 200.0 * dpi < bottom) {
+    if (v->audit_sel >= 0 && (size_t)v->audit_sel < v->audit_count) {
         const rubraview_props_ace_t *a = &v->audits[v->audit_sel];
         bool own = !(a->flags & RUBRAVIEW_ACE_INHERITED);
         double sx = 24.0 * dpi;
         rubraview_tristate_t succ = (a->audit & 1) ? RUBRAVIEW_TRI_ON : RUBRAVIEW_TRI_OFF, fail = (a->audit & 2) ? RUBRAVIEW_TRI_ON : RUBRAVIEW_TRI_OFF;
-        pw_check_at(app, 7, T("Success"), succ, sx, y + 4.0 * dpi, own);
-        v->audit_kind_box[0] = own ? v->box[7] : (rubraview_pal_rect_t){0};
-        pw_check_at(app, 7, T("Failure"), fail, sx + 120.0 * dpi, y + 4.0 * dpi, own);
-        v->audit_kind_box[1] = own ? v->box[7] : (rubraview_pal_rect_t){0};
+        if (right - sx >= 240.0 * dpi) {
+            double y1 = pw_check_at(app, 7, T("Success"), succ, sx, y + 4.0 * dpi, sx + 116.0 * dpi, own);
+            v->audit_kind_box[0] = own ? v->box[7] : (rubraview_pal_rect_t){0};
+            double y2 = pw_check_at(app, 7, T("Failure"), fail, sx + 120.0 * dpi, y + 4.0 * dpi, right, own);
+            v->audit_kind_box[1] = own ? v->box[7] : (rubraview_pal_rect_t){0};
+            y = y1 > y2 ? y1 : y2;
+        } else {
+            y = pw_check_at(app, 7, T("Success"), succ, sx, y + 4.0 * dpi, right, own);
+            v->audit_kind_box[0] = own ? v->box[7] : (rubraview_pal_rect_t){0};
+            y = pw_check_at(app, 7, T("Failure"), fail, sx, y, right, own);
+            v->audit_kind_box[1] = own ? v->box[7] : (rubraview_pal_rect_t){0};
+        }
         v->box[7] = (rubraview_pal_rect_t){0};
-        (void)rights_table(app, y + 28.0 * dpi, NULL, a, own);
+        y = rights_table(app, y + 4.0 * dpi, NULL, a, own);
     }
+    return y;
 }
 
-void propsec_draw_security(app_state_t *app, double y, double bottom) {
+double propsec_draw_security(app_state_t *app, double y) {
     props_view_t *v = V(app);
     rubraview_renderer_t *r = app->props_renderer;
-    double dpi = dpi_of(app), w = width_of(app);
+    double dpi = dpi_of(app), w = width_of(app), lx = 18.0 * dpi, right = w - lx;
     for (size_t i = 0; i < PROPS_PEOPLE_MAX; ++i) v->person_rect[i] = (rubraview_pal_rect_t){0};
     for (int col = 0; col < 2; ++col) for (int32_t q = 0; q < RUBRAVIEW_RIGHT_COUNT; ++q) v->right_box[col][q] = (rubraview_pal_rect_t){0};
     y = pw_info_row(app, y, T("Object name:"), v->paths[0]);
     if (!v->sec.read_ok) {
         char text[400];
         (void)rubraview_fmt(text, sizeof text, T("The permissions could not be read: {}"), PROVEN_ARG(v->sec.why));
-        pw_text_at(r, text, (rubraview_pal_rect_t){ 18.0 * dpi, y + 6.0 * dpi, w - 36.0 * dpi, 20.0 * dpi }, 13.0 * dpi, 0xFFE8C46Fu);
-        pw_button_at(app, PB_ADVANCED, T("Advanced"), (rubraview_pal_rect_t){ w - 118.0 * dpi, bottom - 30.0 * dpi, 100.0 * dpi, 26.0 * dpi }, false, false);
-        return;
+        double mw = 0.0, mh = 20.0 * dpi;
+        (void)rubraview_pal_render_measure_text_wrapped(r, proven_u8str_view_from_cstr(text), 13.0 * dpi, right - lx, &mw, &mh);
+        pw_text_at(r, text, (rubraview_pal_rect_t){ lx, y + 6.0 * dpi, right - lx, mh + 2.0 * dpi }, 13.0 * dpi, 0xFFE8C46Fu);
+        y += mh + 12.0 * dpi;
+        const int id = PB_ADVANCED; const char *lbl = T("Advanced"); bool ena = false;
+        return y + pw_buttons_row(app, &id, &lbl, NULL, &ena, 1, lx, right, y, 86.0 * dpi, 26.0 * dpi);
     }
-    pw_button_at(app, PB_ADVANCED, v->advanced ? T("Back") : T("Advanced"), (rubraview_pal_rect_t){ w - 118.0 * dpi, bottom - 30.0 * dpi, 100.0 * dpi, 26.0 * dpi },
-                 false, true);
-    if (v->sec_failed || v->sec_asking)
-        pw_button_at(app, PB_ELEVATE, T("\xf0\x9f\x9b\xa1 Apply as administrator"), (rubraview_pal_rect_t){ 18.0 * dpi, bottom - 30.0 * dpi, 220.0 * dpi, 26.0 * dpi },
-                     true, !v->sec_asking);
-    bottom -= 36.0 * dpi;
-    if (v->editing == EDIT_NAME) {
-        name_field(app, y + 4.0 * dpi, v->name_for == NAME_OWNER ? T("New owner:") : T("Add:"));
-        y += 52.0 * dpi;
-    }
-    if (v->advanced) { draw_advanced(app, y, bottom); return; }
-    if (v->sec.no_dacl) {
-        pw_text_at(r, T("It has no permission list: everyone may do everything with it."), (rubraview_pal_rect_t){ 18.0 * dpi, y, w - 36.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_TEXT);
-        y += 24.0 * dpi;
-    }
-    heading(app, y, T("Group or user names:"));
-    pw_button_at(app, PB_ADD, T("Add..."), (rubraview_pal_rect_t){ w - 204.0 * dpi, y - 2.0 * dpi, 90.0 * dpi, 24.0 * dpi }, false, !v->sec_asking);
-    pw_button_at(app, PB_REMOVE, T("Remove"), (rubraview_pal_rect_t){ w - 108.0 * dpi, y - 2.0 * dpi, 90.0 * dpi, 24.0 * dpi }, false,
-                 v->person_sel >= 0 && !v->sec_asking);
-    y += 26.0 * dpi;
-    double list_bottom = y + 7.0 * 22.0 * dpi;
-    for (size_t i = 0; i < v->people_count && y < list_bottom; ++i) {
-        list_row(app, &v->person_rect[i], y, 21.0 * dpi, (int32_t)i == v->person_sel);
-        pw_text_at(r, v->people[i].name, (rubraview_pal_rect_t){ 24.0 * dpi, y + 1.0 * dpi, w - 48.0 * dpi, 19.0 * dpi }, 13.0 * dpi, PW_TEXT);
+    if (v->editing == EDIT_NAME) y = name_field(app, y + 4.0 * dpi, v->name_for == NAME_OWNER ? T("New owner:") : T("Add:"));
+    if (v->advanced) {
+        y = draw_advanced(app, y);
+    } else {
+        if (v->sec.no_dacl) {
+            const char *msg = T("It has no permission list: everyone may do everything with it.");
+            double mw = 0.0, mh = 20.0 * dpi;
+            (void)rubraview_pal_render_measure_text_wrapped(r, proven_u8str_view_from_cstr(msg), 13.0 * dpi, right - lx, &mw, &mh);
+            pw_text_at(r, msg, (rubraview_pal_rect_t){ lx, y, right - lx, mh + 2.0 * dpi }, 13.0 * dpi, PW_TEXT);
+            y += mh + 6.0 * dpi;
+        }
+        heading(app, y, T("Group or user names:"));
         y += 22.0 * dpi;
+        {
+            const int pids[2] = { PB_ADD, PB_REMOVE };
+            const char *plbls[2] = { T("Add..."), T("Remove") };
+            const bool pena[2] = { !v->sec_asking, v->person_sel >= 0 && !v->sec_asking };
+            y += pw_buttons_row(app, pids, plbls, NULL, pena, 2, lx, right, y, 76.0 * dpi, 24.0 * dpi) + 6.0 * dpi;
+        }
+        for (size_t i = 0; i < v->people_count; ++i) {
+            list_row(app, &v->person_rect[i], y, 21.0 * dpi, (int32_t)i == v->person_sel);
+            pw_cell_fit(r, v->people[i].name, (rubraview_pal_rect_t){ 24.0 * dpi, y + 1.0 * dpi, w - 48.0 * dpi, 19.0 * dpi }, 13.0 * dpi, PW_TEXT);
+            y += 22.0 * dpi;
+        }
+        y = pw_separator(app, y + 2.0 * dpi);
+        if (v->person_sel >= 0 && (size_t)v->person_sel < v->people_count) {
+            const rubraview_props_principal_t *p = &v->people[v->person_sel];
+            char text[400];
+            (void)rubraview_fmt(text, sizeof text, T("Permissions for {}"), PROVEN_ARG(p->name));
+            heading(app, y, text);
+            y = rights_table(app, y + 24.0 * dpi, p, NULL, !v->sec_asking);
+            if (!(v->sec.effective & 0x40000u) && !v->sec.no_dacl) {   /* WRITE_DAC */
+                const char *note = T("You may not change these yourself: Apply will offer administrator rights.");
+                double mw = 0.0, mh = 18.0 * dpi;
+                (void)rubraview_pal_render_measure_text_wrapped(r, proven_u8str_view_from_cstr(note), 11.0 * dpi, right - lx, &mw, &mh);
+                pw_text_at(r, note, (rubraview_pal_rect_t){ lx, y + 4.0 * dpi, right - lx, mh + 2.0 * dpi }, 11.0 * dpi, PW_DIM);
+                y += mh + 8.0 * dpi;
+            }
+        }
     }
-    y = pw_separator(app, list_bottom + 2.0 * dpi);
-    if (v->person_sel < 0 || (size_t)v->person_sel >= v->people_count) return;
-    const rubraview_props_principal_t *p = &v->people[v->person_sel];
-    char text[400];
-    (void)rubraview_fmt(text, sizeof text, T("Permissions for {}"), PROVEN_ARG(p->name));
-    heading(app, y, text);
-    y = rights_table(app, y + 4.0 * dpi, p, NULL, !v->sec_asking);
-    if (y + 20.0 * dpi < bottom && !(v->sec.effective & 0x40000u) && !v->sec.no_dacl)   /* WRITE_DAC */
-        pw_text_at(r, T("You may not change these yourself: Apply will offer administrator rights."),
-                   (rubraview_pal_rect_t){ 18.0 * dpi, y + 4.0 * dpi, w - 36.0 * dpi, 18.0 * dpi }, 11.0 * dpi, PW_DIM);
+    int bids[2] = { 0 };
+    const char *blbls[2] = { NULL };
+    bool bacc[2] = { false, false }, bena[2] = { true, true };
+    size_t bn = 0;
+    if (v->sec_failed || v->sec_asking) {
+        bids[bn] = PB_ELEVATE; blbls[bn] = T("\xf0\x9f\x9b\xa1 Apply as administrator"); bacc[bn] = true; bena[bn] = !v->sec_asking; bn++;
+    }
+    bids[bn] = PB_ADVANCED; blbls[bn] = v->advanced ? T("Back") : T("Advanced"); bn++;
+    y += 6.0 * dpi + pw_buttons_row(app, bids, blbls, bacc, bena, bn, lx, right, y + 6.0 * dpi, 86.0 * dpi, 26.0 * dpi);
+    return y;
 }

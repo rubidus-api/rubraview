@@ -654,9 +654,20 @@ static void owned_window_layout(app_state_t *app, int which) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(win, &w, &h);
     double dpi = rubraview_pal_window_dpi_scale(win);
-    /* the names window: its choices at the left, the preview at the right */
-    double width = which == 2 ? fmax(300.0 * dpi, (double)w * 0.5) : (double)w;
-    rubraview_panel_layout_columns(&app->panel, (rubraview_rect_t){ 0.0, 0.0, width, (double)h }, 1, NULL);
+    if (which == 1) {
+        rubraview_panel_layout_columns(&app->panel, (rubraview_rect_t){ 0.0, 0.0, (double)w, (double)h }, 1, NULL);
+        return;
+    }
+    /* The names window: side by side when wide, panel over preview when narrow. */
+    if ((double)w >= 540.0 * dpi) {
+        double pw = (double)w * 0.5;
+        rubraview_panel_layout_columns(&app->panel, (rubraview_rect_t){ 0.0, 0.0, pw, (double)h }, 1, NULL);
+        app->names_pv_rect = (rubraview_rect_t){ pw, 0.0, (double)w - pw, (double)h };
+    } else {
+        double ph = (double)h * 0.55;
+        rubraview_panel_layout_columns(&app->panel, (rubraview_rect_t){ 0.0, 0.0, (double)w, ph }, 1, NULL);
+        app->names_pv_rect = (rubraview_rect_t){ 0.0, ph, (double)w, (double)h - ph > 0.0 ? (double)h - ph : 0.0 };
+    }
 }
 
 /* Called through panel_relayout while an owned panel stands in. */
@@ -841,6 +852,7 @@ static size_t owned_pump(app_state_t *app, int which) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
                 *px = event.mouse.x; *py = event.mouse.y;
                 if (card_motion(app, which == 1 ? CARD_HOST_BATCH : CARD_HOST_NAMES, event.mouse.x, event.mouse.y)) break;   /* RV-265 */
+                if (which == 2 && dlgpage_held(&app->names_pv_page, event.mouse.x, event.mouse.y)) break;
                 if (scrollbar_motion(app, win, event.mouse.x, event.mouse.y)) break;
                 if (app->panel.active_row >= 0) {
                     int32_t dragged = -1;
@@ -854,15 +866,22 @@ static size_t owned_pump(app_state_t *app, int which) {
                 if (chooser_press(app, where, event.mouse.x, event.mouse.y)) break;
                 if (app->rename_active && app->batch_typing && rename_box_press(app, which == 1 ? CARD_HOST_BATCH : CARD_HOST_NAMES, event.mouse.x, event.mouse.y)) break;
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                if (which == 2 && dlgpage_press(&app->names_pv_page, event.mouse.x, event.mouse.y)) break;
+                if (which == 2 && !rubraview_rect_contains(app->panel.bounds, event.mouse.x, event.mouse.y)) break;
                 owned_press(app, which, event.mouse.x, event.mouse.y);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
                 if (card_release(app, which == 1 ? CARD_HOST_BATCH : CARD_HOST_NAMES)) break;   /* RV-265 */
+                if (which == 2) (void)dlgpage_release(&app->names_pv_page);
                 (void)scrollbar_release(app, win);
                 rubraview_panel_release(&app->panel);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
                 if (chooser_wheel(app, where, event.mouse.wheel_delta)) break;
+                if (which == 2 && rubraview_rect_contains(app->names_pv_rect, event.mouse.x, event.mouse.y)) {
+                    (void)dlgpage_wheel(&app->names_pv_page, event.mouse.wheel_delta, rubraview_pal_window_dpi_scale(win));
+                    break;
+                }
                 rubraview_panel_scroll_at(&app->panel, event.mouse.x, -event.mouse.wheel_delta * app->panel.row_height * 3.0);
                 break;
             default:
@@ -915,6 +934,7 @@ void names_window_open(app_state_t *app) {
     }
     ui_font_apply_all(app);
     app->names_px = app->names_py = -1.0;
+    app->names_pv_page = (dlgpage_t){0};
     batch_preview_files(app);
     proven_sys_mem_set(app->names_panel.column_scroll, 0, sizeof(app->names_panel.column_scroll));   /* from its top */
     owned_panel_in(app, 2);
@@ -983,13 +1003,31 @@ const char *names_choice_word(int32_t id, int32_t index) {
 
 /* The preview: each file's name now, and what it will be; a name met twice, or there already, marked. */
 void draw_names_preview(app_state_t *app, double win_w, double win_h, double dpi) {
-    double x0 = app->panel.bounds.x + app->panel.bounds.width + 12.0 * dpi, w = win_w - x0 - 12.0 * dpi;
-    if (w < 80.0 * dpi) return;
-    double row = 26.0 * dpi, font = 13.0 * dpi, y = 12.0 * dpi;
-    rubraview_pal_render_draw_text(app->renderer, TU8("Preview: the first files, now -> new"), (rubraview_pal_rect_t){ x0, y, w, row }, 14.0 * dpi, 0xFFFFC14Du, RUBRAVIEW_TEXT_LEFT);
+    (void)win_w; (void)win_h;
+    rubraview_rect_t pv = app->names_pv_rect;
+    if (pv.width <= 0.0 || pv.height <= 0.0) return;
+    /* Paint over the preview area so panel scrollbars or stacked divider stay clean. */
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ pv.x, pv.y, pv.width, pv.height }, BATCH_BACKGROUND, 0.0);
+    if (pv.x > 0.5) rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ pv.x, pv.y, 1.0, pv.height }, COLOR_BOX_BORDER, 0.0);
+    else rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ pv.x, pv.y, pv.width, 1.0 }, COLOR_BOX_BORDER, 0.0);
+    double pad = 12.0 * dpi;
+    double inner_w = dlgpage_width(&app->names_pv_page, pv.width, dpi) - 2.0 * pad;
+    if (inner_w < 32.0 * dpi) return;
+    double x0 = pv.x + pad, row = 24.0 * dpi, font = 13.0 * dpi;
+    double top_y = pv.y + 8.0 * dpi - app->names_pv_page.scroll, y = top_y;
+    double pv_top = pv.y + 4.0 * dpi, pv_bot = pv.y + pv.height - 2.0 * dpi;
+    char fit[720];
+    if (y >= pv_top && y + row <= pv_bot)
+        rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, fit, sizeof(fit), TU8("Preview: the first files, now -> new"), inner_w, 14.0 * dpi),
+                                       (rubraview_pal_rect_t){ x0, y, inner_w, row }, 14.0 * dpi, 0xFFFFC14Du, RUBRAVIEW_TEXT_LEFT);
     y += row * 1.3;
     if (app->names_file_count == 0) {
-        rubraview_pal_render_draw_text(app->renderer, TU8("no pictures in the list now open"), (rubraview_pal_rect_t){ x0, y, w, row }, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        if (y >= pv_top && y + row <= pv_bot)
+            rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, fit, sizeof(fit), TU8("no pictures in the list now open"), inner_w, font),
+                                           (rubraview_pal_rect_t){ x0, y, inner_w, row }, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        y += row;
+        if (dlgpage_end_in(&app->names_pv_page, app->renderer, pv.x, pv.y, pv.width, pv.height, y - top_y + 12.0 * dpi, app->pointer_x, app->pointer_y, dpi))
+            app->names_dirty = true;
         return;
     }
     void *mem = rubraview_alloc(4u << 20);
@@ -1000,7 +1038,7 @@ void draw_names_preview(app_state_t *app, double win_w, double win_h, double dpi
     proven_u8str_view_t beside = rubraview_path_dirname(app->names_files[0]);
     proven_u8str_view_t out_dir = app->batch.out[0] ? cstr(app->batch.out) : rubraview_path_join(&scratch, beside, PROVEN_LIT("rubraview-out"));
     size_t clashes = 0;
-    for (size_t i = 0; i < app->names_file_count && y + row * 2.0 < win_h; ++i) {
+    for (size_t i = 0; i < app->names_file_count; ++i) {
         bool twice = false;
         for (size_t k = 0; k < app->names_file_count && !twice; ++k) twice = k != i && rubraview_path_same(made[k], made[i]);
         bool there = !rubraview_batch_name_wants_size(made[i]) && rubraview_pal_fs_exists(rubraview_path_join(&scratch, out_dir, made[i]));
@@ -1008,19 +1046,30 @@ void draw_names_preview(app_state_t *app, double win_w, double win_h, double dpi
         proven_u8str_view_t old = rubraview_path_basename(app->names_files[i]);
         char line[700];
         int n = rubraview_fmt(line, sizeof(line), "{}", PROVEN_ARG(rubraview_bytes_view((const char *)old.ptr, (int)old.size)));
-        rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 },
-                                       (rubraview_pal_rect_t){ x0, y, w, row }, font, 0xFFB0B0B0u, RUBRAVIEW_TEXT_LEFT);
+        if (y >= pv_top && y + row <= pv_bot && n > 0)
+            rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, fit, sizeof(fit), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 }, inner_w, font),
+                                           (rubraview_pal_rect_t){ x0, y, inner_w, row }, font, 0xFFB0B0B0u, RUBRAVIEW_TEXT_LEFT);
         y += row * 0.85;
         n = rubraview_fmt(line, sizeof(line), "  -> {}{}", PROVEN_ARG(rubraview_bytes_view((const char *)made[i].ptr, (int)made[i].size)),
                      PROVEN_ARG(twice ? T("   ! the same as another") : there ? T("   ! there already") : ""));
-        rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = n > 0 ? (size_t)n : 0 },
-                                       (rubraview_pal_rect_t){ x0, y, w, row }, font, twice || there ? 0xFFFF7070u : COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        if (y >= pv_top && y + row <= pv_bot && n > 0)
+            rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, fit, sizeof(fit), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1 }, inner_w, font),
+                                           (rubraview_pal_rect_t){ x0, y, inner_w, row }, font, twice || there ? 0xFFFF7070u : COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         y += row * 1.1;
     }
     char foot[300];
     int n = rubraview_fmt(foot, sizeof(foot), "{}{}", PROVEN_ARG(rubraview_batch_name_wants_size(made[0]) ? T("{w}x{h}: the size each file comes out at. ") : ""),
                      PROVEN_ARG(clashes ? T("A marked name follows \"A name already there\".") : ""));
-    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)foot, .size = (size_t)n },
-                                              (rubraview_pal_rect_t){ x0, y + row * 0.4, w, row * 2.0 }, font, 0xFFB0B0B0u, RUBRAVIEW_TEXT_LEFT);
+    if (n > 0) {
+        proven_u8str_view_t fv = { .ptr = (const proven_byte_t *)foot, .size = (size_t)n < sizeof(foot) ? (size_t)n : sizeof(foot) - 1 };
+        double mw = 0.0, mh = row;
+        (void)rubraview_pal_render_measure_text_wrapped(app->renderer, fv, font, inner_w, &mw, &mh);
+        y += row * 0.3;
+        if (y >= pv_top && y + mh <= pv_bot)
+            rubraview_pal_render_draw_text(app->renderer, fv, (rubraview_pal_rect_t){ x0, y, inner_w, mh + 4.0 * dpi }, font, 0xFFB0B0B0u, RUBRAVIEW_TEXT_LEFT);
+        y += mh + 4.0 * dpi;
+    }
     rubraview_free(mem);
+    if (dlgpage_end_in(&app->names_pv_page, app->renderer, pv.x, pv.y, pv.width, pv.height, y - top_y + 12.0 * dpi, app->pointer_x, app->pointer_y, dpi))
+        app->names_dirty = true;
 }

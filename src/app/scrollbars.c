@@ -12,9 +12,11 @@ static double bar_width(double dpi) { return 12.0 * dpi; }
 
 /* A floating list's bar, at its right edge under its head. */
 static rubraview_scrollbar_t list_bar(const rubraview_listwin_t *lw, size_t count, double head_h, double dpi) {
+    double h = lw->height - head_h - 4.0 * dpi;
+    if (h <= 0.0) return (rubraview_scrollbar_t){0};
     double w = bar_width(dpi);
     return (rubraview_scrollbar_t){
-        .area = { lw->x + lw->width - w - 2.0 * dpi, lw->y + head_h + 2.0 * dpi, w, lw->height - head_h - 4.0 * dpi },
+        .area = { lw->x + lw->width - w - 2.0 * dpi, lw->y + head_h + 2.0 * dpi, w, h },
         .button = w, .total = (double)count, .shown = (double)rubraview_listwin_rows_visible(lw),
         .first = (double)lw->first, .step = 1.0, .min_thumb = 16.0 * dpi,
     };
@@ -34,11 +36,17 @@ static int panel_which(app_state_t *app, const rubraview_panel_t *panel) {
          : panel == &app->classify_panel ? RVSB_CLASSIFY : RVSB_NONE;
 }
 
-/* Edit's own window, while it has one; its panels are drawn in the viewer otherwise (and Export's, Print's, ...). */
+/* Edit's, Batch's, or Names' own window while standing in `app->panel`, else the viewer's. */
 static bool edit_windowed(const app_state_t *app) { return app->edit_window && edit_panel_open(app); }
 
+static rubraview_window_t *panel_owner_window(const app_state_t *app) {
+    if (app->panel_is_names && app->names_window) return app->names_window;
+    if (app->panel_is_batch && app->batch_window) return app->batch_window;
+    return edit_windowed(app) ? app->edit_window : app->window;
+}
+
 static rubraview_window_t *scrollbar_window(app_state_t *app, int which) {
-    if (which >= RVSB_PANEL && which < RVSB_PANEL_END) return edit_windowed(app) ? app->edit_window : app->window;
+    if (which >= RVSB_PANEL && which < RVSB_PANEL_END) return panel_owner_window(app);
     switch (which) {
         case RVSB_SEL: case RVSB_CHANGES: return edit_windowed(app) ? app->edit_window : app->window;
         case RVSB_TEXT: case RVSB_STEPS: case RVSB_CLASSIFY: return app->window;
@@ -49,6 +57,7 @@ static rubraview_window_t *scrollbar_window(app_state_t *app, int which) {
         case RVSB_SETTINGS: return app->settings_window;
         case RVSB_FONTPICK: return app->fontpick_window;
         case RVSB_INFO:     return app->info_window;
+        case RVSB_HELP:     return app->help_open ? app->help_window : NULL;
         case RVSB_LOG:      return app->log_open ? app->log_window : NULL;   /* RV-264 */
         default:          return NULL;
     }
@@ -98,6 +107,7 @@ bool scrollbar_of(app_state_t *app, int which, rubraview_scrollbar_t *sb) {
         case RVSB_SETTINGS: if (!settings_sb(app, sb, bar_width(dpi), dpi)) return false; break;
         case RVSB_FONTPICK: if (!fontpick_sb(app, sb, bar_width(dpi), dpi)) return false; break;
         case RVSB_INFO:     if (!info_sb(app, sb, bar_width(dpi), dpi)) return false; break;
+        case RVSB_HELP:     if (!help_sb(app, sb, bar_width(dpi), dpi)) return false; break;
         case RVSB_LOG:      if (!log_sb(app, sb, bar_width(dpi), dpi)) return false; break;
         case RVSB_TEXT:     if (!text_sb(app, sb, bar_width(dpi), dpi)) return false; break;
         case RVSB_CHANGES:
@@ -134,6 +144,7 @@ static void scrollbar_to(app_state_t *app, int which, double first) {
         case RVSB_SETTINGS: settings_sb_to(app, whole(first)); break;
         case RVSB_FONTPICK: fontpick_sb_to(app, whole(first)); break;
         case RVSB_INFO:     info_sb_to(app, whole(first)); break;
+        case RVSB_HELP:     help_sb_to(app, whole(first)); break;
         case RVSB_LOG:      log_sb_to(app, whole(first)); break;
         case RVSB_TEXT:     text_sb_to(app, first); break;
         case RVSB_CHANGES:  app->changes.first = whole(first); break;
@@ -147,6 +158,8 @@ static void scrollbar_to(app_state_t *app, int which, double first) {
     rubraview_window_t *win = scrollbar_window(app, which);
     if (win == app->window) note_activity(app);
     else if (win && win == app->edit_window) app->edit_dirty = true;   /* its picture is drawn again only when told */
+    else if (win && win == app->batch_window) app->batch_dirty = true;
+    else if (win && win == app->names_window) app->names_dirty = true;
 }
 
 bool scrollbar_press(app_state_t *app, int which, double x, double y) {

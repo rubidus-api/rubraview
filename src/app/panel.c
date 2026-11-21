@@ -685,7 +685,9 @@ rows:
         }
         if (row->kind == RUBRAVIEW_ROW_HEADING) {   /* RV-188: a section's name, in the headings' colour, a rule under it */
             rubraview_pal_rect_t words = { r.x, r.y, r.width, r.height - 3.0 };
-            rubraview_pal_render_draw_text(app->renderer, rubraview_tr_u8(row->label), words, text_size * 1.02, SETTINGS_ACCENT, RUBRAVIEW_TEXT_LEFT);
+            char fit[160];
+            rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, fit, sizeof(fit), rubraview_tr_u8(row->label), words.width, text_size * 1.02),
+                                           words, text_size * 1.02, SETTINGS_ACCENT, RUBRAVIEW_TEXT_LEFT);
             rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ r.x, r.y + r.height - 2.0, r.width, 1.0 }, 0x80E0B46Au, 0.0);
             continue;
         }
@@ -699,16 +701,24 @@ rows:
             if (adds && pal_rect_has(button, app->pointer_x, app->pointer_y))
                 rubraview_pal_render_fill_rect(app->renderer, button, 0x30FFFFFFu, 2.0);   /* lit under the pointer */
             rubraview_pal_render_stroke_rect(app->renderer, button, COLOR_BOX_BORDER, 1.0, 2.0);
-            rubraview_pal_render_draw_text(app->renderer, row->label, button,
-                                           text_size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            char fit[240];
+            proven_u8str_view_t text = button.width > 8.0 ? fit_text_measured(app->renderer, fit, sizeof(fit), row->label, button.width - 8.0, text_size) : PROVEN_LIT("");
+            if (text.size > 0) rubraview_pal_render_draw_text(app->renderer, text, button, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
             continue;
         }
 
-        rubraview_pal_rect_t label = { r.x, r.y, panel->label_width, r.height };
-        rubraview_pal_render_draw_text(app->renderer, row->label, label,
-                                       text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        /* Keep label width clamped to the same 60% limit ui_panel.c uses for controls so narrow windows never overlap sliders. */
+        double lw = panel->label_width;
+        if (lw > r.width * 0.6) lw = r.width * 0.6;
+        char lfit[240];
 
         if (row->kind == RUBRAVIEW_ROW_SLIDER) {
+            double fw = text_size * 4.2;
+            if (fw > lw * 0.45) fw = lw * 0.45;
+            double name_w = lw - fw - panel->padding * 0.8;
+            rubraview_pal_rect_t label = { r.x, r.y, name_w > 0.0 ? name_w : 0.0, r.height };
+            if (label.width > 4.0) rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, lfit, sizeof(lfit), row->label, label.width, text_size),
+                                                                  label, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
             rubraview_pal_rect_t track = { c.x, c.y + c.height * 0.4, c.width, c.height * 0.2 };
             rubraview_pal_render_fill_rect(app->renderer, track, COLOR_BOX_BORDER, 1.0);
 
@@ -716,63 +726,64 @@ rows:
             rubraview_pal_rect_t handle = { c.x + c.width * fill - c.height * 0.2, c.y,
                                             c.height * 0.4, c.height };
             rubraview_pal_render_fill_rect(app->renderer, handle, COLOR_TEXT, 2.0);
+            rubraview_pal_rect_t at = { r.x + lw - panel->padding * 0.4 - fw, r.y, fw, r.height };
             if (numbers) {
                 /* The owner's edit: every value as a number, typed by pressing its name. */
-                char number[24];
+                char number[24], nfit[32];
                 int k = rubraview_fmt(number, sizeof(number), row->step >= 1.0 ? "{:.0}" : "{:.2}", PROVEN_ARG((double)row->value));
-                rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding * 0.5, r.height };
-                if (k > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)k }, at,
-                                                          text_size * 0.9, 0xFFB8D0F0u, RUBRAVIEW_TEXT_RIGHT);
+                if (k > 0) rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, nfit, sizeof(nfit), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)k }, at.width - 2.0, text_size * 0.9),
+                                                          at, text_size * 0.9, 0xFFB8D0F0u, RUBRAVIEW_TEXT_RIGHT);
             } else if (!app->panel_is_print && !app->panel_is_convert &&
                 (row->id == PANEL_RESIZE || row->id == PANEL_SHARPEN_RADIUS || row->id == PANEL_SHARPEN_THRESHOLD)) {
-                char number[16];
-                rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
-                rubraview_pal_render_draw_text(app->renderer, adjust_row_text(app, row, rubraview_mem_mut(number, sizeof(number))),
-                                               at, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
+                char number[16], nfit[24];
+                rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, nfit, sizeof(nfit), adjust_row_text(app, row, rubraview_mem_mut(number, sizeof(number))), at.width - 2.0, text_size * 0.9),
+                                               at, text_size * 0.9, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
             }
             bool shown = numbers || (!app->panel_is_print && !app->panel_is_convert &&
                          (row->id == PANEL_RESIZE || row->id == PANEL_SHARPEN_RADIUS || row->id == PANEL_SHARPEN_THRESHOLD));
             if (app->panel_is_print || app->panel_is_convert) {
                 /* D-87: a scale or a margin is chosen by its number. */
-                char number[16];
-                rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
-                rubraview_pal_render_draw_text(app->renderer, print_row_text(row, rubraview_mem_mut(number, sizeof(number))),
-                                               at, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
+                char number[16], nfit[24];
+                rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, nfit, sizeof(nfit), print_row_text(row, rubraview_mem_mut(number, sizeof(number))), at.width - 2.0, text_size * 0.9),
+                                               at, text_size * 0.9, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
                 shown = true;
             }
             if (!shown) {   /* 1.24.0: every slider says its number */
-                char number[24];
+                char number[24], nfit[32];
                 int k = rubraview_fmt(number, sizeof(number), row->step >= 1.0 ? "{:.0}" : "{:.2}", PROVEN_ARG((double)row->value));
-                rubraview_pal_rect_t at = { r.x, r.y, panel->label_width - panel->padding, r.height };
-                if (k > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)k }, at,
-                                                          text_size, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
+                if (k > 0) rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, nfit, sizeof(nfit), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)number, .size = (size_t)k }, at.width - 2.0, text_size * 0.9),
+                                                          at, text_size * 0.9, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
             }
             {   /* 1.24.0: and in a box, which a press opens for typing (as its name does) */
-                double fw = text_size * 4.2;
-                rubraview_pal_rect_t field = { r.x + panel->label_width - panel->padding * 0.4 - fw, r.y + r.height * 0.14, fw, r.height * 0.72 };
+                rubraview_pal_rect_t field = { at.x, r.y + r.height * 0.14, fw, r.height * 0.72 };
                 rubraview_pal_render_stroke_rect(app->renderer, field, pal_rect_has(field, app->pointer_x, app->pointer_y) ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER,
                                                  1.0, 2.0);
             }
-        } else if (row->kind == RUBRAVIEW_ROW_TOGGLE) {
-            rubraview_pal_rect_t box = { c.x, c.y, c.height, c.height };
-            rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 2.0);
-            if (row->value > 0.5) {
-                rubraview_pal_rect_t mark = { box.x + box.width * 0.25, box.y + box.height * 0.25,
-                                              box.width * 0.5, box.height * 0.5 };
-                rubraview_pal_render_fill_rect(app->renderer, mark, COLOR_TEXT, 1.0);
+        } else {
+            rubraview_pal_rect_t label = { r.x, r.y, lw - panel->padding * 0.4, r.height };
+            if (label.width > 4.0) rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, lfit, sizeof(lfit), row->label, label.width, text_size),
+                                                                  label, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+            if (row->kind == RUBRAVIEW_ROW_TOGGLE) {
+                rubraview_pal_rect_t box = { c.x, c.y, c.height, c.height };
+                rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 2.0);
+                if (row->value > 0.5) {
+                    rubraview_pal_rect_t mark = { box.x + box.width * 0.25, box.y + box.height * 0.25,
+                                                  box.width * 0.5, box.height * 0.5 };
+                    rubraview_pal_render_fill_rect(app->renderer, mark, COLOR_TEXT, 1.0);
+                }
+            } else if (row->kind == RUBRAVIEW_ROW_CHOICE && (app->panel_is_print || app->panel_is_convert)) {
+                /* D-87: the print panel's choices have names. */
+                char words[48], cfit[64];
+                rubraview_pal_rect_t value = { c.x, c.y, c.width, c.height };
+                rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, cfit, sizeof(cfit), print_row_text(row, rubraview_mem_mut(words, sizeof(words))), value.width, text_size),
+                                               value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+            } else if (row->kind == RUBRAVIEW_ROW_CHOICE) {
+                /* RV-108: a choice says its word. */
+                char words[48], cfit[64];
+                rubraview_pal_rect_t value = { c.x, c.y, c.width, c.height };
+                rubraview_pal_render_draw_text(app->renderer, fit_text_measured(app->renderer, cfit, sizeof(cfit), adjust_row_text(app, row, rubraview_mem_mut(words, sizeof(words))), value.width, text_size),
+                                               value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
             }
-        } else if (row->kind == RUBRAVIEW_ROW_CHOICE && (app->panel_is_print || app->panel_is_convert)) {
-            /* D-87: the print panel's choices have names. */
-            char words[48];
-            rubraview_pal_rect_t value = { c.x, c.y, c.width, c.height };
-            rubraview_pal_render_draw_text(app->renderer, print_row_text(row, rubraview_mem_mut(words, sizeof(words))),
-                                           value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-        } else if (row->kind == RUBRAVIEW_ROW_CHOICE) {
-            /* RV-108: a choice says its word. */
-            char words[48];
-            rubraview_pal_rect_t value = { c.x, c.y, c.width, c.height };
-            rubraview_pal_render_draw_text(app->renderer, adjust_row_text(app, row, rubraview_mem_mut(words, sizeof(words))),
-                                           value, text_size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         }
     }
     draw_panel_scrollbars(app, panel);   /* RV-172: where its rows are, and moved there */

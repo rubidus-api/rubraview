@@ -286,8 +286,23 @@ static bool edit_key(app_state_t *app, rubraview_key_combo_t k) {
 
 /* ---- drawing ---- */
 
+double pw_content_width(app_state_t *app) {
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->props_window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->props_window);
+    return dlgpage_width(&V(app)->page, (double)w, dpi);
+}
+
 void pw_text_at(rubraview_renderer_t *r, const char *s, rubraview_pal_rect_t box, double size, uint32_t color) {
+    if (box.width <= 0.0 || box.height <= 0.0) return;
     rubraview_pal_render_draw_text(r, proven_u8str_view_from_cstr(s), box, size, color, RUBRAVIEW_TEXT_LEFT);
+}
+
+static void pw_fit_text_at(rubraview_renderer_t *r, const char *s, rubraview_pal_rect_t box, double size, uint32_t color) {
+    if (box.width <= 0.0 || box.height <= 0.0) return;
+    char fit[600];
+    proven_u8str_view_t t = fit_text_measured(r, fit, sizeof(fit), proven_u8str_view_from_cstr(s), box.width, size);
+    if (t.size > 0) rubraview_pal_render_draw_text(r, t, box, size, color, RUBRAVIEW_TEXT_LEFT);
 }
 
 void pw_button_at(app_state_t *app, int which, const char *words, rubraview_pal_rect_t b, bool accent, bool enabled) {
@@ -295,56 +310,82 @@ void pw_button_at(app_state_t *app, int which, const char *words, rubraview_pal_
     rubraview_renderer_t *r = app->props_renderer;
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
     v->button[which] = b;
+    if (b.width <= 0.0 || b.height <= 0.0) return;
     bool over = enabled && pal_rect_has(b, app->props_px, app->props_py);
     rubraview_pal_render_fill_rect(r, b, over ? 0xFF3A4350u : accent ? 0xFF2F5F95u : 0xFF2A2F36u, 4.0 * dpi);
     rubraview_pal_render_stroke_rect(r, b, accent ? PW_ACCENT : 0xFF4A525Cu, 1.0, 4.0 * dpi);
-    rubraview_pal_render_draw_text(r, proven_u8str_view_from_cstr(words), b, 13.0 * dpi, enabled ? PW_TEXT : PW_DIM, RUBRAVIEW_TEXT_CENTER);
+    char fit[128];
+    proven_u8str_view_t text = b.width > 8.0 * dpi ? fit_text_measured(r, fit, sizeof(fit), proven_u8str_view_from_cstr(words), b.width - 8.0 * dpi, 13.0 * dpi) : PROVEN_LIT("");
+    if (text.size > 0) rubraview_pal_render_draw_text(r, text, b, 13.0 * dpi, enabled ? PW_TEXT : PW_DIM, RUBRAVIEW_TEXT_CENTER);
 }
 
-void pw_check_at(app_state_t *app, int which, const char *words, rubraview_tristate_t state, double x, double y, bool enabled) {
+double pw_buttons_row(app_state_t *app, const int *which, const char *const *words, const bool *accent, const bool *enabled, size_t n,
+                      double left, double right, double y, double min_w, double bh) {
+    rubraview_renderer_t *r = app->props_renderer;
+    double dpi = rubraview_pal_window_dpi_scale(app->props_window);
+    rubraview_pal_rect_t rect[16] = { {0} };
+    if (n > 16) n = 16;
+    if (right < left + 20.0 * dpi) right = left + 20.0 * dpi;
+    double h = dlgpage_buttons(r, words, n, left, right, y, 13.0 * dpi, 10.0 * dpi, min_w, bh, 6.0 * dpi, rect);
+    for (size_t i = 0; i < n; ++i)
+        pw_button_at(app, which[i], words[i], rect[i], accent ? accent[i] : false, enabled ? enabled[i] : true);
+    return h;
+}
+
+double pw_check_at(app_state_t *app, int which, const char *words, rubraview_tristate_t state, double x, double y, double max_x, bool enabled) {
     props_view_t *v = V(app);
     rubraview_renderer_t *r = app->props_renderer;
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
     double s = 16.0 * dpi;
+    double avail_tw = max_x - (x + s + 8.0 * dpi);
+    if (avail_tw < 40.0 * dpi) avail_tw = 40.0 * dpi;
+    double tw = 0.0, th = 20.0 * dpi;
+    proven_u8str_view_t wv = proven_u8str_view_from_cstr(words);
+    if (!rubraview_pal_render_measure_text_wrapped(r, wv, 13.0 * dpi, avail_tw, &tw, &th) || th < 20.0 * dpi) th = 20.0 * dpi;
+    double row_h = th + 2.0 * dpi;
     rubraview_pal_rect_t box = { x, y + 2.0 * dpi, s, s };
-    double tw = 0.0;
-    (void)rubraview_pal_render_measure_text(r, proven_u8str_view_from_cstr(words), 13.0 * dpi, &tw);
-    v->box[which] = (rubraview_pal_rect_t){ x, y, s + 8.0 * dpi + tw, 20.0 * dpi };
+    v->box[which] = (rubraview_pal_rect_t){ x, y, s + 8.0 * dpi + (tw < avail_tw ? tw : avail_tw), row_h };
     rubraview_pal_render_fill_rect(r, box, 0xFF15181Cu, 2.0 * dpi);
     rubraview_pal_render_stroke_rect(r, box, enabled ? 0xFF6A737Du : PW_LINE, 1.0, 2.0 * dpi);
     if (state == RUBRAVIEW_TRI_ON) rubraview_pal_render_draw_text(r, PROVEN_LIT("\xe2\x9c\x93"), box, 14.0 * dpi, enabled ? PW_TEXT : PW_DIM, RUBRAVIEW_TEXT_CENTER);
     if (state == RUBRAVIEW_TRI_MIXED)
         rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x + 4.0 * dpi, y + 6.0 * dpi, s - 8.0 * dpi, s - 8.0 * dpi }, enabled ? PW_TEXT : PW_DIM, 1.0);
-    pw_text_at(r, words, (rubraview_pal_rect_t){ x + s + 8.0 * dpi, y, tw + 4.0 * dpi, 20.0 * dpi }, 13.0 * dpi, enabled ? PW_TEXT : PW_DIM);
+    pw_text_at(r, words, (rubraview_pal_rect_t){ x + s + 8.0 * dpi, y, avail_tw, row_h }, 13.0 * dpi, enabled ? PW_TEXT : PW_DIM);
+    return y + row_h + 4.0 * dpi;
 }
 
-/* "label    value" a row; the value may run onto a second line */
+/* "label    value" a row; the value wraps when the window is narrow */
 double pw_info_row(app_state_t *app, double y, const char *label, const char *value) {
     rubraview_renderer_t *r = app->props_renderer;
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
-    int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->props_window, &w, &h);
-    double lx = 18.0 * dpi, vx = 140.0 * dpi;
-    pw_text_at(r, label, (rubraview_pal_rect_t){ lx, y, vx - lx - 6.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
-    pw_text_at(r, value, (rubraview_pal_rect_t){ vx, y, (double)w - vx - 18.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_TEXT);
-    return y + 24.0 * dpi;
+    double w = pw_content_width(app);
+    double lx = 18.0 * dpi, avail = w - 2.0 * lx;
+    double vx = lx + (avail * 0.36 < 122.0 * dpi ? avail * 0.36 : 122.0 * dpi);
+    double val_w = w - vx - lx;
+    if (val_w < 40.0 * dpi) val_w = 40.0 * dpi;
+    double mw = 0.0, mh = 20.0 * dpi;
+    proven_u8str_view_t vv = proven_u8str_view_from_cstr(value);
+    if (vv.size > 0) (void)rubraview_pal_render_measure_text_wrapped(r, vv, 13.0 * dpi, val_w, &mw, &mh);
+    if (mh < 20.0 * dpi) mh = 20.0 * dpi;
+    pw_fit_text_at(r, label, (rubraview_pal_rect_t){ lx, y, vx - lx - 6.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
+    pw_text_at(r, value, (rubraview_pal_rect_t){ vx, y, val_w, mh + 2.0 * dpi }, 13.0 * dpi, PW_TEXT);
+    return y + mh + 5.0 * dpi;
 }
 
 double pw_separator(app_state_t *app, double y) {
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
-    int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->props_window, &w, &h);
-    rubraview_pal_render_fill_rect(app->props_renderer, (rubraview_pal_rect_t){ 18.0 * dpi, y + 5.0 * dpi, (double)w - 36.0 * dpi, 1.0 * dpi }, PW_LINE, 0.0);
+    double w = pw_content_width(app);
+    if (w > 36.0 * dpi)
+        rubraview_pal_render_fill_rect(app->props_renderer, (rubraview_pal_rect_t){ 18.0 * dpi, y + 5.0 * dpi, w - 36.0 * dpi, 1.0 * dpi }, PW_LINE, 0.0);
     return y + 12.0 * dpi;
 }
 
-static void draw_general(app_state_t *app, double y) {
+static double draw_general(app_state_t *app, double y, double cw) {
     props_view_t *v = V(app);
     const rubraview_fileprops_file_t *f = &v->sum;
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
     rubraview_renderer_t *r = app->props_renderer;
-    int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->props_window, &w, &h);
+    double lx = 18.0 * dpi, right = cw - lx;
     char text[1100], a[96], b[96];
     bool one = v->count == 1;
     /* the name, and Rename */
@@ -354,16 +395,37 @@ static void draw_general(app_state_t *app, double y) {
     } else {
         (void)rubraview_fmt(text, sizeof text, T("{} files and folders"), PROVEN_ARG((uint32_t)v->count));
     }
-    rubraview_pal_render_draw_text(r, proven_u8str_view_from_cstr(text), (rubraview_pal_rect_t){ 18.0 * dpi, y, (double)w - 150.0 * dpi, 26.0 * dpi },
-                                   16.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_LEFT);
-    if (one && v->origin != PROPS_FROM_NONE) pw_button_at(app, PB_RENAME, T("Rename..."), (rubraview_pal_rect_t){ (double)w - 124.0 * dpi, y, 106.0 * dpi, 26.0 * dpi }, false, true);
-    else v->button[PB_RENAME] = (rubraview_pal_rect_t){0};
-    y = pw_separator(app, y + 30.0 * dpi);
+    bool has_ren = one && v->origin != PROPS_FROM_NONE;
+    double ren_w = 0.0;
+    if (has_ren) {
+        (void)rubraview_pal_render_measure_text(r, cstr(T("Rename...")), 13.0 * dpi, &ren_w);
+        ren_w += 22.0 * dpi;
+        if (ren_w < 84.0 * dpi) ren_w = 84.0 * dpi;
+    }
+    if (has_ren && cw >= 290.0 * dpi) {
+        char fit[300];
+        double tw = right - lx - ren_w - 8.0 * dpi;
+        rubraview_pal_render_draw_text(r, files_fit_text(fit, sizeof(fit), proven_u8str_view_from_cstr(text), tw, 16.0 * dpi),
+                                       (rubraview_pal_rect_t){ lx, y, tw, 26.0 * dpi }, 16.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_LEFT);
+        pw_button_at(app, PB_RENAME, T("Rename..."), (rubraview_pal_rect_t){ right - ren_w, y, ren_w, 26.0 * dpi }, false, true);
+        y += 30.0 * dpi;
+    } else {
+        char fit[300];
+        rubraview_pal_render_draw_text(r, files_fit_text(fit, sizeof(fit), proven_u8str_view_from_cstr(text), right - lx, 16.0 * dpi),
+                                       (rubraview_pal_rect_t){ lx, y, right - lx, 26.0 * dpi }, 16.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_LEFT);
+        y += 28.0 * dpi;
+        if (has_ren) {
+            const int id = PB_RENAME; const char *lbl = T("Rename...");
+            y += pw_buttons_row(app, &id, &lbl, NULL, NULL, 1, lx, right, y, 80.0 * dpi, 26.0 * dpi) + 4.0 * dpi;
+        } else v->button[PB_RENAME] = (rubraview_pal_rect_t){0};
+    }
+    y = pw_separator(app, y);
     if (one) {
         y = pw_info_row(app, y, T("Type of file:"), f->type_name[0] ? f->type_name : T("(unknown)"));
         if (!f->is_folder) {
             y = pw_info_row(app, y, T("Opens with:"), f->opens_with[0] ? f->opens_with : T("(none)"));
-            pw_button_at(app, PB_CHANGE, T("Change..."), (rubraview_pal_rect_t){ (double)w - 104.0 * dpi, y - 26.0 * dpi, 86.0 * dpi, 24.0 * dpi }, false, true);
+            const int id = PB_CHANGE; const char *lbl = T("Change...");
+            y += pw_buttons_row(app, &id, &lbl, NULL, NULL, 1, lx, right, y, 80.0 * dpi, 24.0 * dpi) + 4.0 * dpi;
         } else v->button[PB_CHANGE] = (rubraview_pal_rect_t){0};
         y = pw_separator(app, y);
         proven_u8str_view_t dir = rubraview_path_dirname(proven_u8str_view_from_cstr(f->path));
@@ -389,85 +451,100 @@ static void draw_general(app_state_t *app, double y) {
         info_local_time(a, sizeof a, f->accessed); y = pw_info_row(app, y, T("Accessed:"), a);
         y = pw_separator(app, y);
     }
-    pw_text_at(r, T("Attributes:"), (rubraview_pal_rect_t){ 18.0 * dpi, y, 120.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
-    pw_check_at(app, 0, T("Read-only"), v->want[0], 140.0 * dpi, y, true);
-    pw_check_at(app, 1, T("Hidden"), v->want[1], 270.0 * dpi, y, true);
-    y += 28.0 * dpi;
-    pw_text_at(r, T("Advanced:"), (rubraview_pal_rect_t){ 18.0 * dpi, y, 120.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
-    pw_check_at(app, 2, T("Ready for archiving"), v->want[2], 140.0 * dpi, y, true);
-    y += 26.0 * dpi;
-    pw_check_at(app, 3, T("Contents indexed besides its properties"), v->want[3], 140.0 * dpi, y, true);
-    y += 26.0 * dpi;
-    pw_check_at(app, 4, T("Compress contents to save disk space"), v->want[4], 140.0 * dpi, y, f->can_compress);
-    y += 26.0 * dpi;
-    pw_check_at(app, 5, T("Encrypt contents to secure data"), v->want[5], 140.0 * dpi, y, f->can_encrypt);
-    y += 28.0 * dpi;
+    bool stack_labels = cw < 380.0 * dpi;
+    double cx0 = stack_labels ? (lx + 12.0 * dpi) : 140.0 * dpi;
+    pw_fit_text_at(r, T("Attributes:"), (rubraview_pal_rect_t){ lx, y, stack_labels ? right - lx : cx0 - lx - 6.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
+    if (stack_labels) y += 22.0 * dpi;
+    double w_ro = 0.0, w_hid = 0.0;
+    (void)rubraview_pal_render_measure_text(r, cstr(T("Read-only")), 13.0 * dpi, &w_ro);
+    (void)rubraview_pal_render_measure_text(r, cstr(T("Hidden")), 13.0 * dpi, &w_hid);
+    double ro_box_w = 24.0 * dpi + w_ro + 16.0 * dpi;
+    if (cx0 + ro_box_w + 24.0 * dpi + w_hid <= right) {
+        double y1 = pw_check_at(app, 0, T("Read-only"), v->want[0], cx0, y, cx0 + ro_box_w, true);
+        double y2 = pw_check_at(app, 1, T("Hidden"), v->want[1], cx0 + ro_box_w, y, right, true);
+        y = y1 > y2 ? y1 : y2;
+    } else {
+        y = pw_check_at(app, 0, T("Read-only"), v->want[0], cx0, y, right, true);
+        y = pw_check_at(app, 1, T("Hidden"), v->want[1], cx0, y, right, true);
+    }
+    y += 4.0 * dpi;
+    pw_fit_text_at(r, T("Advanced:"), (rubraview_pal_rect_t){ lx, y, stack_labels ? right - lx : cx0 - lx - 6.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
+    if (stack_labels) y += 22.0 * dpi;
+    y = pw_check_at(app, 2, T("Ready for archiving"), v->want[2], cx0, y, right, true);
+    y = pw_check_at(app, 3, T("Contents indexed besides its properties"), v->want[3], cx0, y, right, true);
+    y = pw_check_at(app, 4, T("Compress contents to save disk space"), v->want[4], cx0, y, right, f->can_compress);
+    y = pw_check_at(app, 5, T("Encrypt contents to secure data"), v->want[5], cx0, y, right, f->can_encrypt);
     if (f->blocked) {
         y = pw_separator(app, y);
-        pw_text_at(r, T("Security:"), (rubraview_pal_rect_t){ 18.0 * dpi, y, 120.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
-        pw_text_at(r, T("It came from another computer and may be blocked to protect this one."),
-                (rubraview_pal_rect_t){ 140.0 * dpi, y, (double)w - 158.0 * dpi, 20.0 * dpi }, 12.0 * dpi, PW_TEXT);
-        pw_check_at(app, 6, T("Unblock"), v->unblock ? RUBRAVIEW_TRI_ON : RUBRAVIEW_TRI_OFF, 140.0 * dpi, y + 24.0 * dpi, true);
+        pw_fit_text_at(r, T("Security:"), (rubraview_pal_rect_t){ lx, y, stack_labels ? right - lx : cx0 - lx - 6.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
+        if (stack_labels) y += 22.0 * dpi;
+        const char *warn = T("It came from another computer and may be blocked to protect this one.");
+        double mw = 0.0, mh = 20.0 * dpi;
+        (void)rubraview_pal_render_measure_text_wrapped(r, proven_u8str_view_from_cstr(warn), 12.0 * dpi, right - cx0, &mw, &mh);
+        pw_text_at(r, warn, (rubraview_pal_rect_t){ cx0, y, right - cx0, mh + 2.0 * dpi }, 12.0 * dpi, PW_TEXT);
+        y = pw_check_at(app, 6, T("Unblock"), v->unblock ? RUBRAVIEW_TRI_ON : RUBRAVIEW_TRI_OFF, cx0, y + mh + 4.0 * dpi, right, true);
     } else v->box[6] = (rubraview_pal_rect_t){0};
+    return y;
 }
 
-static void draw_details(app_state_t *app, double y, double bottom) {
+static double draw_details(app_state_t *app, double y, double cw) {
     props_view_t *v = V(app);
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
     rubraview_renderer_t *r = app->props_renderer;
-    int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->props_window, &w, &h);
+    int32_t wh = 0, ww = 0;
+    rubraview_pal_window_get_size(app->props_window, &ww, &wh);
     v->rows_drawn = 0;
+    v->rows_drawn_from = 0;
     if (v->details != ASK_DONE) {
         const char *say_it = v->details == ASK_WAITING ? T("reading the details...") : T("the details could not be read");
-        pw_text_at(r, say_it, (rubraview_pal_rect_t){ 18.0 * dpi, y, (double)w - 36.0 * dpi, 20.0 * dpi }, 13.0 * dpi, PW_DIM);
-        return;
+        double mw = 0.0, mh = 20.0 * dpi;
+        (void)rubraview_pal_render_measure_text_wrapped(r, proven_u8str_view_from_cstr(say_it), 13.0 * dpi, cw - 36.0 * dpi, &mw, &mh);
+        pw_text_at(r, say_it, (rubraview_pal_rect_t){ 18.0 * dpi, y, cw - 36.0 * dpi, mh + 2.0 * dpi }, 13.0 * dpi, PW_DIM);
+        return y + mh + 8.0 * dpi;
     }
-    double rh = 24.0 * dpi, lx = 18.0 * dpi, vx = 190.0 * dpi;
-    pw_text_at(r, T("Property"), (rubraview_pal_rect_t){ lx, y, vx - lx, 20.0 * dpi }, 12.0 * dpi, PW_DIM);
-    pw_text_at(r, T("Value"), (rubraview_pal_rect_t){ vx, y, (double)w - vx, 20.0 * dpi }, 12.0 * dpi, PW_DIM);
+    double rh = 24.0 * dpi, lx = 18.0 * dpi, avail = cw - 2.0 * lx;
+    double vx = lx + (avail * 0.42 < 172.0 * dpi ? avail * 0.42 : 172.0 * dpi);
+    pw_fit_text_at(r, T("Property"), (rubraview_pal_rect_t){ lx, y, vx - lx - 6.0 * dpi, 20.0 * dpi }, 12.0 * dpi, PW_DIM);
+    pw_fit_text_at(r, T("Value"), (rubraview_pal_rect_t){ vx, y, cw - vx - lx, 20.0 * dpi }, 12.0 * dpi, PW_DIM);
     y = pw_separator(app, y + 20.0 * dpi);
-    int32_t fits = (int32_t)((bottom - y) / rh);
-    if (v->scroll > (int32_t)v->row_count - fits) v->scroll = (int32_t)v->row_count - fits;
-    if (v->scroll < 0) v->scroll = 0;
-    v->rows_drawn_from = (size_t)v->scroll;
-    for (int32_t i = 0; i < fits && (size_t)(v->scroll + i) < v->row_count; ++i) {
-        size_t at = (size_t)(v->scroll + i);
+    v->rows_drawn = v->row_count;
+    for (size_t at = 0; at < v->row_count; ++at) {
         rubraview_props_row_t *row = &v->rows[at];
-        rubraview_pal_rect_t line = { lx - 6.0 * dpi, y, (double)w - 2.0 * lx + 12.0 * dpi, rh };
-        v->row_rect[at] = line;
-        v->rows_drawn++;
-        if (row->flags & RUBRAVIEW_PROPS_ROW_HEADING) {
-            pw_text_at(r, row->label, (rubraview_pal_rect_t){ lx, y + 2.0 * dpi, (double)w - 2.0 * lx, rh }, 13.0 * dpi, PW_HEADING);
-            y += rh;
-            continue;
-        }
-        bool editable = (row->flags & RUBRAVIEW_PROPS_ROW_EDITABLE) != 0;
-        if (editable && pal_rect_has(line, app->props_px, app->props_py) && (int32_t)at != v->editing)
-            rubraview_pal_render_fill_rect(r, line, 0x18FFFFFFu, 3.0 * dpi);
-        pw_text_at(r, row->label, (rubraview_pal_rect_t){ lx, y + 2.0 * dpi, vx - lx - 8.0 * dpi, rh }, 13.0 * dpi, PW_DIM);
-        rubraview_pal_rect_t val = { vx, y + 2.0 * dpi, (double)w - vx - lx, rh - 4.0 * dpi };
-        if ((int32_t)at == v->editing) {
-            rubraview_pal_render_fill_rect(r, val, 0xFF101215u, 2.0 * dpi);
-            rubraview_pal_render_stroke_rect(r, val, PW_ACCENT, 1.0, 2.0 * dpi);
-            v->view.box = val;   /* RV-293: the shared field */
-            v->view.size = 13.0 * dpi;
-            editbox_draw(r, &v->ec, &v->view, proven_u8str_view_from_cstr(v->composing), true, PW_TEXT, dpi);
-        } else if (row->flags & RUBRAVIEW_PROPS_ROW_RATING) {
-            int32_t stars = rubraview_props_rating_stars((int32_t)rubraview_parse_long(row->value, NULL, 10));
-            for (int s = 0; s < 5; ++s) {
-                rubraview_pal_rect_t sr = { vx + (double)s * 22.0 * dpi, y + 1.0 * dpi, 20.0 * dpi, rh - 2.0 * dpi };
-                v->star_rect[at][s] = sr;
-                rubraview_pal_render_draw_text(r, s < stars ? PROVEN_LIT("\xe2\x98\x85") : PROVEN_LIT("\xe2\x98\x86"), sr, 15.0 * dpi,
-                                               s < stars ? 0xFFE8C46Fu : PW_DIM, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_rect_t line = { lx - 6.0 * dpi, y, cw - 2.0 * lx + 12.0 * dpi, rh };
+        bool in_view = y + rh > 0.0 && y < (double)wh;
+        v->row_rect[at] = in_view ? line : (rubraview_pal_rect_t){0};
+        for (int s = 0; s < 5; ++s) v->star_rect[at][s] = (rubraview_pal_rect_t){0};
+        if (in_view) {
+            if (row->flags & RUBRAVIEW_PROPS_ROW_HEADING) {
+                pw_fit_text_at(r, row->label, (rubraview_pal_rect_t){ lx, y + 2.0 * dpi, cw - 2.0 * lx, rh }, 13.0 * dpi, PW_HEADING);
+            } else {
+                bool editable = (row->flags & RUBRAVIEW_PROPS_ROW_EDITABLE) != 0;
+                if (editable && pal_rect_has(line, app->props_px, app->props_py) && (int32_t)at != v->editing)
+                    rubraview_pal_render_fill_rect(r, line, 0x18FFFFFFu, 3.0 * dpi);
+                pw_fit_text_at(r, row->label, (rubraview_pal_rect_t){ lx, y + 2.0 * dpi, vx - lx - 8.0 * dpi, rh }, 13.0 * dpi, PW_DIM);
+                rubraview_pal_rect_t val = { vx, y + 2.0 * dpi, cw - vx - lx, rh - 4.0 * dpi };
+                if ((int32_t)at == v->editing) {
+                    rubraview_pal_render_fill_rect(r, val, 0xFF101215u, 2.0 * dpi);
+                    rubraview_pal_render_stroke_rect(r, val, PW_ACCENT, 1.0, 2.0 * dpi);
+                    v->view.box = val;   /* RV-293: the shared field */
+                    v->view.size = 13.0 * dpi;
+                    editbox_draw(r, &v->ec, &v->view, proven_u8str_view_from_cstr(v->composing), true, PW_TEXT, dpi);
+                } else if (row->flags & RUBRAVIEW_PROPS_ROW_RATING) {
+                    int32_t stars = rubraview_props_rating_stars((int32_t)rubraview_parse_long(row->value, NULL, 10));
+                    for (int s = 0; s < 5; ++s) {
+                        rubraview_pal_rect_t sr = { vx + (double)s * 22.0 * dpi, y + 1.0 * dpi, 20.0 * dpi, rh - 2.0 * dpi };
+                        v->star_rect[at][s] = sr;
+                        rubraview_pal_render_draw_text(r, s < stars ? PROVEN_LIT("\xe2\x98\x85") : PROVEN_LIT("\xe2\x98\x86"), sr, 15.0 * dpi,
+                                                       s < stars ? 0xFFE8C46Fu : PW_DIM, RUBRAVIEW_TEXT_CENTER);
+                    }
+                } else {
+                    pw_fit_text_at(r, row->value, val, 13.0 * dpi, (row->flags & PROPS_ROW_CHANGED) ? 0xFFE8C46Fu : PW_TEXT);
+                }
             }
-        } else {
-            pw_text_at(r, row->value, val, 13.0 * dpi, (row->flags & PROPS_ROW_CHANGED) ? 0xFFE8C46Fu : PW_TEXT);
         }
         y += rh;
     }
-    if ((size_t)v->scroll + (size_t)(fits > 0 ? fits : 0) < v->row_count)
-        pw_text_at(r, T("(more below: the wheel)"), (rubraview_pal_rect_t){ lx, bottom - 2.0 * dpi, 300.0 * dpi, 18.0 * dpi }, 11.0 * dpi, PW_DIM);
+    return y;
 }
 
 void draw_props_window(app_state_t *app) {
@@ -480,43 +557,89 @@ void draw_props_window(app_state_t *app) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->props_window, &w, &h);
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
+    double cw = dlgpage_width(&v->page, (double)w, dpi), sy = v->page.scroll;
     rubraview_pal_render_begin(r, PW_BACK);
-    /* the tabs */
+
+    /* Wrapping tabs at top (scroll with the page when very short). */
     static const char *const NAMES[RUBRAVIEW_PROPS_TAB_COUNT] = { N_("General"), N_("Digital Signatures"), N_("Security"), N_("Details"), N_("Previous Versions") };
-    double x = 12.0 * dpi;
+    int32_t tab_ids[RUBRAVIEW_PROPS_TAB_COUNT] = { 0 };
+    double tab_w[RUBRAVIEW_PROPS_TAB_COUNT] = { 0 }, tab_x[RUBRAVIEW_PROPS_TAB_COUNT] = { 0 };
+    uint32_t tab_row[RUBRAVIEW_PROPS_TAB_COUNT] = { 0 };
+    size_t tn = 0;
     for (int32_t t = 0; t < RUBRAVIEW_PROPS_TAB_COUNT; ++t) {
         v->tab_rect[t] = (rubraview_pal_rect_t){0};
         if (!tab_shown(v, t)) continue;
-        const char *words = rubraview_tr(NAMES[t]);
         double tw = 0.0;
-        (void)rubraview_pal_render_measure_text(r, proven_u8str_view_from_cstr(words), 13.0 * dpi, &tw);
-        rubraview_pal_rect_t tr = { x, 10.0 * dpi, tw + 26.0 * dpi, 28.0 * dpi };
+        (void)rubraview_pal_render_measure_text(r, proven_u8str_view_from_cstr(rubraview_tr(NAMES[t])), 13.0 * dpi, &tw);
+        tab_ids[tn] = t;
+        tab_w[tn] = tw + 22.0 * dpi;
+        if (tab_w[tn] > cw - 20.0 * dpi && cw > 40.0 * dpi) tab_w[tn] = cw - 20.0 * dpi;
+        tn++;
+    }
+    double room = cw - 20.0 * dpi;
+    if (room < 40.0 * dpi) room = 40.0 * dpi;
+    size_t trows = rubraview_flow_inline(tab_w, tn, 4.0 * dpi, room, tab_row, tab_x);
+    double tab_h = 26.0 * dpi, y0 = 8.0 * dpi - sy;
+    for (size_t k = 0; k < tn; ++k) {
+        int32_t t = tab_ids[k];
+        rubraview_pal_rect_t tr = { 10.0 * dpi + tab_x[k], y0 + (double)tab_row[k] * (tab_h + 4.0 * dpi), tab_w[k], tab_h };
         v->tab_rect[t] = tr;
         bool on = v->tab == t;
         rubraview_pal_render_fill_rect(r, tr, on ? PW_PANEL : pal_rect_has(tr, app->props_px, app->props_py) ? 0xFF2A2F36u : PW_BACK, 4.0 * dpi);
         if (on) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ tr.x, tr.y + tr.height - 2.0 * dpi, tr.width, 2.0 * dpi }, PW_ACCENT, 0.0);
-        rubraview_pal_render_draw_text(r, proven_u8str_view_from_cstr(words), tr, 13.0 * dpi, on ? PW_TEXT : PW_DIM, RUBRAVIEW_TEXT_CENTER);
-        x += tr.width + 4.0 * dpi;
+        char fit[64];
+        proven_u8str_view_t label = tr.width > 8.0 * dpi ? fit_text_measured(r, fit, sizeof(fit), proven_u8str_view_from_cstr(rubraview_tr(NAMES[t])), tr.width - 8.0 * dpi, 13.0 * dpi) : PROVEN_LIT("");
+        if (label.size > 0) rubraview_pal_render_draw_text(r, label, tr, 13.0 * dpi, on ? PW_TEXT : PW_DIM, RUBRAVIEW_TEXT_CENTER);
     }
-    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0, 38.0 * dpi, (double)w, 1.0 * dpi }, PW_LINE, 0.0);
-    double foot = (double)h - 48.0 * dpi;
+    double tabs_end = y0 + (trows ? (double)trows * tab_h + (double)(trows - 1) * 4.0 * dpi : 0.0) + 4.0 * dpi;
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, tabs_end, cw, 1.0 * dpi }, PW_LINE, 0.0);
+
     for (int b = 0; b < PB_COUNT; ++b) v->button[b] = (rubraview_pal_rect_t){0};   /* only what this tab draws answers */
+    for (int b = 0; b < 8; ++b) v->box[b] = (rubraview_pal_rect_t){0};
     if (!tab_shown(v, v->tab)) v->tab = RUBRAVIEW_PROPS_GENERAL;
-    if (v->tab == RUBRAVIEW_PROPS_DETAILS) draw_details(app, 50.0 * dpi, foot - 52.0 * dpi);   /* the hint above the message line */
-    else if (v->tab == RUBRAVIEW_PROPS_SIGNATURES) propsec_draw_signatures(app, 50.0 * dpi, foot - 30.0 * dpi);
-    else if (v->tab == RUBRAVIEW_PROPS_SECURITY) propsec_draw_security(app, 50.0 * dpi, foot - 30.0 * dpi);
-    else if (v->tab == RUBRAVIEW_PROPS_VERSIONS) propsver_draw(app, 50.0 * dpi, foot - 30.0 * dpi);
-    else draw_general(app, 50.0 * dpi);
-    /* what was said, and the foot's buttons */
-    if (v->message[0])
-        pw_text_at(r, v->message, (rubraview_pal_rect_t){ 18.0 * dpi, foot - 26.0 * dpi, (double)w - 36.0 * dpi, 20.0 * dpi }, 12.0 * dpi, 0xFFE8C46Fu);
-    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0, foot - 4.0 * dpi, (double)w, 1.0 * dpi }, PW_LINE, 0.0);
-    double bw = 84.0 * dpi, bh = 28.0 * dpi, by = foot + 6.0 * dpi;
+    double body_y = tabs_end + 10.0 * dpi;
+    if (v->tab == RUBRAVIEW_PROPS_DETAILS) body_y = draw_details(app, body_y, cw);
+    else if (v->tab == RUBRAVIEW_PROPS_SIGNATURES) body_y = propsec_draw_signatures(app, body_y);
+    else if (v->tab == RUBRAVIEW_PROPS_SECURITY) body_y = propsec_draw_security(app, body_y);
+    else if (v->tab == RUBRAVIEW_PROPS_VERSIONS) body_y = propsver_draw(app, body_y);
+    else body_y = draw_general(app, body_y, cw);
+
+    /* Foot message and wrapping buttons (anchored at the bottom when tall enough, or below content when short). */
+    const char *fwords[4] = { T("Windows properties"), T("OK"), T("Cancel"), T("Apply") };
+    rubraview_pal_rect_t frel[4] = { {0} };
+    double msg_w = cw - 36.0 * dpi;
+    if (msg_w < 40.0 * dpi) msg_w = 40.0 * dpi;
+    double mw = 0.0, mh = 0.0;
+    if (v->message[0]) {
+        (void)rubraview_pal_render_measure_text_wrapped(r, proven_u8str_view_from_cstr(v->message), 12.0 * dpi, msg_w, &mw, &mh);
+        if (mh < 18.0 * dpi) mh = 18.0 * dpi;
+    }
+    double btn_left = 12.0 * dpi, btn_right = cw - 12.0 * dpi;
+    if (btn_right < btn_left + 40.0 * dpi) btn_right = btn_left + 40.0 * dpi;
+    double fbtns_h = dlgpage_buttons(r, fwords, 4, btn_left, btn_right, 0.0, 13.0 * dpi, 10.0 * dpi, 76.0 * dpi, 28.0 * dpi, 6.0 * dpi, frel);
+    if (frel[3].y - frel[0].y < 1.0 && frel[0].x > btn_left + 12.0 * dpi) frel[0].x = btn_left;   /* flush left when all 4 fit on 1 row */
+    double foot_block_h = (mh > 0.0 ? mh + 8.0 * dpi : 0.0) + 8.0 * dpi + fbtns_h + 12.0 * dpi;
+    double foot_y = body_y + 10.0 * dpi;
+    double min_foot_y = (double)h - foot_block_h - sy;
+    if (foot_y < min_foot_y) foot_y = min_foot_y;
+    double cur = foot_y;
+    if (v->message[0]) {
+        pw_text_at(r, v->message, (rubraview_pal_rect_t){ 18.0 * dpi, cur, msg_w, mh + 2.0 * dpi }, 12.0 * dpi, 0xFFE8C46Fu);
+        cur += mh + 8.0 * dpi;
+    }
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, cur, cw, 1.0 * dpi }, PW_LINE, 0.0);
+    cur += 8.0 * dpi;
     bool changed = general_changed(v) || details_changed(v) || propsec_changed(v) || v->editing >= 0;
-    pw_button_at(app, PB_WINDOWS, T("Windows properties"), (rubraview_pal_rect_t){ 12.0 * dpi, by, 150.0 * dpi, bh }, false, true);
-    pw_button_at(app, PB_OK, T("OK"), (rubraview_pal_rect_t){ (double)w - 3.0 * (bw + 8.0 * dpi), by, bw, bh }, true, !v->writing);
-    pw_button_at(app, PB_CANCEL, T("Cancel"), (rubraview_pal_rect_t){ (double)w - 2.0 * (bw + 8.0 * dpi), by, bw, bh }, false, true);
-    pw_button_at(app, PB_APPLY, T("Apply"), (rubraview_pal_rect_t){ (double)w - (bw + 8.0 * dpi), by, bw, bh }, false, changed && !v->writing);
+    const int fids[4] = { PB_WINDOWS, PB_OK, PB_CANCEL, PB_APPLY };
+    const bool facc[4] = { false, true, false, false };
+    const bool fena[4] = { true, !v->writing, true, changed && !v->writing };
+    for (int i = 0; i < 4; ++i) {
+        frel[i].y += cur;
+        pw_button_at(app, fids[i], fwords[i], frel[i], facc[i], fena[i]);
+    }
+    double total_content = (cur + fbtns_h + 12.0 * dpi) + sy;
+    if (dlgpage_end(&v->page, r, (double)w, (double)h, total_content, app->props_px, app->props_py, dpi))
+        app->props_dirty = true;
     if (!rubraview_pal_render_end(r)) app->props_dirty = true;
 }
 
@@ -558,6 +681,7 @@ static void props_button(app_state_t *app, int which) {
 
 static void props_press(app_state_t *app, double x, double y) {
     props_view_t *v = V(app);
+    if (dlgpage_press(&v->page, x, y)) { app->props_dirty = true; return; }
     if (v->editing != -1 && editbox_pointer_down(app->props_renderer, &v->ec, &v->view, x, y, false)) {   /* RV-293 */
         v->composing[0] = '\0';
         app->props_dirty = true;
@@ -567,6 +691,8 @@ static void props_press(app_state_t *app, double x, double y) {
         if (v->tab_rect[t].width > 0 && pal_rect_has(v->tab_rect[t], x, y)) {
             if (v->editing >= 0) edit_end(app, true);
             v->tab = t;
+            v->page.scroll = 0.0;
+            v->page.bar = false;
             app->props_dirty = true;
             return;
         }
@@ -639,14 +765,16 @@ size_t props_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
                 app->props_px = event.mouse.x;
                 app->props_py = event.mouse.y;
+                if (dlgpage_held(&v->page, event.mouse.x, event.mouse.y)) { app->props_dirty = true; break; }
                 if (v->editing != -1) (void)editbox_pointer_move(app->props_renderer, &v->ec, &v->view, event.mouse.x);   /* RV-293 */
                 app->props_dirty = true;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
                 v->view.dragging = false;
+                if (dlgpage_release(&v->page)) app->props_dirty = true;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
-                if (v->tab == RUBRAVIEW_PROPS_DETAILS) { v->scroll += event.mouse.wheel_delta > 0 ? -3 : 3; app->props_dirty = true; }
+                if (dlgpage_wheel(&v->page, event.mouse.wheel_delta, rubraview_pal_window_dpi_scale(app->props_window))) app->props_dirty = true;
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
                 if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT) props_press(app, event.mouse.x, event.mouse.y);
@@ -676,10 +804,17 @@ size_t props_pump(app_state_t *app) {
                     int32_t t = v->tab;
                     do { t = (t + ((k.modifiers & RUBRAVIEW_MOD_SHIFT) ? RUBRAVIEW_PROPS_TAB_COUNT - 1 : 1)) % RUBRAVIEW_PROPS_TAB_COUNT; } while (!tab_shown(v, t));
                     v->tab = t;
+                    v->page.scroll = 0.0;
+                    v->page.bar = false;
                     app->props_dirty = true;
                 }
-                if (v->tab == RUBRAVIEW_PROPS_DETAILS && key_is(k, "Down")) { v->scroll++; app->props_dirty = true; }
-                if (v->tab == RUBRAVIEW_PROPS_DETAILS && key_is(k, "Up")) { v->scroll--; app->props_dirty = true; }
+                {
+                    double dpi = rubraview_pal_window_dpi_scale(app->props_window);
+                    if (key_is(k, "Down") && dlgpage_wheel(&v->page, -0.75, dpi)) app->props_dirty = true;
+                    if (key_is(k, "Up") && dlgpage_wheel(&v->page, 0.75, dpi)) app->props_dirty = true;
+                    if (key_is(k, "PageDown") && dlgpage_wheel(&v->page, -4.0, dpi)) app->props_dirty = true;
+                    if (key_is(k, "PageUp") && dlgpage_wheel(&v->page, 4.0, dpi)) app->props_dirty = true;
+                }
                 break;
             }
             default:

@@ -717,6 +717,118 @@ void subs_close(app_state_t *app) {
 }
 
 /* The header and the bar are the list's title; the rows fill the rest. */
+typedef enum { SUBS_PART_ALL = 0, SUBS_PART_EARLIER, SUBS_PART_AMOUNT, SUBS_PART_LATER, SUBS_PART_SAVE, SUBS_PART_TAKEOUT, SUBS_PART_PUTIN } subs_part_t;
+
+static double subs_measure(const app_state_t *app, proven_u8str_view_t s, double size, double fallback) {
+    double tw = fallback;
+    if (app->subs_renderer && s.size > 0) (void)rubraview_pal_render_measure_text(app->subs_renderer, s, size, &tw);
+    return tw;
+}
+
+static void subs_layout_head(app_state_t *app) {
+    rubraview_listwin_t *lw = &app->subs_list;
+    proven_sys_mem_set(app->subs_part_rect, 0, sizeof(app->subs_part_rect));
+    double dpi = app->subs_window ? rubraview_pal_window_dpi_scale(app->subs_window) : 1.0;
+    if (dpi <= 0.0) dpi = 1.0;
+    double rh = lw->row_height > 0.0 ? lw->row_height : 24.0 * dpi;
+    double font = rh * 0.5, pad = rh * 0.3, bh = rh * 0.9, gap = pad;
+    double band = 30.0 * dpi;
+    double room = lw->width - 2.0 * pad;
+    if (room < 40.0 * dpi) room = 40.0 * dpi;
+    int kind = subs_kind(app);
+    double box = rh * 0.6;
+    if (kind == SUBS_TEXT) app->subs_part_rect[SUBS_PART_ALL] = (rubraview_pal_rect_t){ pad, (band - box) * 0.5, box, box };
+    double head_x = kind == SUBS_TEXT ? (pad + box + pad) : pad;
+
+    /* Header buttons: Take out & Put in film sit at top-right if enough room remains for header summary, else wrap onto their own row. */
+    bool takeout_shown = app->media && app->media_info.has_video;
+    bool putin_shown = takeout_shown && kind == SUBS_TEXT;
+    double to_w = 0.0, pi_w = 0.0;
+    double min_btn = rh * 3.6;
+    if (takeout_shown) {
+        char lbl[32];
+        int ln = app->takeout.running ? rubraview_fmt(lbl, sizeof(lbl), T("Stop {} %"), PROVEN_ARG((int)(app->takeout.percent < 0 ? 0 : app->takeout.percent)))
+                                      : rubraview_fmt(lbl, sizeof(lbl), T("Take out"));
+        double tw = ln > 0 ? subs_measure(app, (proven_u8str_view_t){ (const proven_byte_t *)lbl, (size_t)ln }, font, rh * 2.5) : rh * 2.5;
+        to_w = tw + 12.0 * dpi;
+        if (to_w < min_btn) to_w = min_btn;
+        if (to_w > room) to_w = room;
+    }
+    if (putin_shown) {
+        double now = rubraview_pal_time_now_seconds();
+        bool armed = app->putin.armed_at > 0.0 && now - app->putin.armed_at < 6.0;
+        char lbl[32];
+        int ln = app->putin.phase ? rubraview_fmt(lbl, sizeof(lbl), T("Stop {} %"), PROVEN_ARG((int)(app->putin.percent < 0 ? 0 : app->putin.percent)))
+                                  : rubraview_fmt(lbl, sizeof(lbl), "{}", PROVEN_ARG(armed ? T("Sure? Put in") : T("Put in film")));
+        double tw = ln > 0 ? subs_measure(app, (proven_u8str_view_t){ (const proven_byte_t *)lbl, (size_t)ln }, font * 0.95, rh * 2.5) : rh * 2.5;
+        pi_w = tw + 12.0 * dpi;
+        if (pi_w < min_btn) pi_w = min_btn;
+        if (pi_w > room) pi_w = room;
+    }
+    double y = band;
+    double btns_need = (putin_shown ? pi_w + pad : 0.0) + (takeout_shown ? to_w : 0.0);
+    double min_head = rh * 5.0;
+    if (takeout_shown) {
+        if (lw->width - pad - btns_need >= head_x + min_head) {
+            app->subs_part_rect[SUBS_PART_TAKEOUT] = (rubraview_pal_rect_t){ lw->width - pad - to_w, (band - bh) * 0.5, to_w, bh };
+            if (putin_shown)
+                app->subs_part_rect[SUBS_PART_PUTIN] = (rubraview_pal_rect_t){ app->subs_part_rect[SUBS_PART_TAKEOUT].x - pad - pi_w, (band - bh) * 0.5, pi_w, bh };
+        } else {
+            double w2[2] = { pi_w, to_w }, x2[2] = {0};
+            uint32_t r2[2] = {0};
+            if (putin_shown) {
+                size_t rows2 = rubraview_flow_inline(w2, 2, gap, room, r2, x2);
+                if (rows2 == 0) rows2 = 1;
+                app->subs_part_rect[SUBS_PART_PUTIN] = (rubraview_pal_rect_t){ pad + x2[0], y + (double)r2[0] * (bh + 4.0 * dpi), pi_w, bh };
+                app->subs_part_rect[SUBS_PART_TAKEOUT] = (rubraview_pal_rect_t){ pad + x2[1], y + (double)r2[1] * (bh + 4.0 * dpi), to_w, bh };
+                y += (double)rows2 * bh + (double)(rows2 - 1) * 4.0 * dpi + 4.0 * dpi;
+            } else {
+                app->subs_part_rect[SUBS_PART_TAKEOUT] = (rubraview_pal_rect_t){ pad, y, to_w, bh };
+                y += bh + 4.0 * dpi;
+            }
+        }
+    }
+
+    if (kind == SUBS_TEXT) {
+        double ew = subs_measure(app, TU8("< Earlier"), font, rh * 2.5) + 12.0 * dpi;
+        if (ew < rh * 3.6) ew = rh * 3.6;
+        if (ew > room) ew = room;
+        double lw2 = subs_measure(app, TU8("Later >"), font, rh * 2.5) + 12.0 * dpi;
+        if (lw2 < rh * 3.6) lw2 = rh * 3.6;
+        if (lw2 > room) lw2 = room;
+        double sw = subs_measure(app, TU8("Save"), font, rh * 2.0) + 14.0 * dpi;
+        if (sw < rh * 3.2) sw = rh * 3.2;
+        if (sw > room) sw = room;
+        double field = rh * 3.0;
+        if (field > room) field = room;
+        double cluster = field + pad * 0.5 + rh * 0.8;
+        if (cluster > room) cluster = room;
+        double widths[4] = { ew, cluster, lw2, sw }, xs[4] = {0};
+        uint32_t rows_of[4] = {0};
+        size_t rows = rubraview_flow_inline(widths, 4, gap, room, rows_of, xs);
+        if (rows == 0) rows = 1;
+        double y0 = y + 3.0 * dpi;
+        double row_s = bh + 4.0 * dpi;
+        app->subs_part_rect[SUBS_PART_EARLIER] = (rubraview_pal_rect_t){ pad + xs[0], y0 + (double)rows_of[0] * row_s, ew, bh };
+        app->subs_part_rect[SUBS_PART_AMOUNT]  = (rubraview_pal_rect_t){ pad + xs[1], y0 + (double)rows_of[1] * row_s, field < widths[1] ? field : widths[1], bh };
+        app->subs_part_rect[SUBS_PART_LATER]   = (rubraview_pal_rect_t){ pad + xs[2], y0 + (double)rows_of[2] * row_s, lw2, bh };
+        if (rows == 1) {
+            app->subs_part_rect[SUBS_PART_SAVE] = (rubraview_pal_rect_t){ lw->width - pad - sw, y0, sw, bh };
+        } else {
+            app->subs_part_rect[SUBS_PART_SAVE] = (rubraview_pal_rect_t){ pad + xs[3], y0 + (double)rows_of[3] * row_s, sw, bh };
+        }
+        y = y0 + (double)rows * bh + (double)(rows - 1) * 4.0 * dpi + 4.0 * dpi;
+    } else if (kind != SUBS_NONE) {
+        double nw = 0.0, nh = bh;
+        if (app->subs_renderer) (void)rubraview_pal_render_measure_text_wrapped(app->subs_renderer,
+            TU8("picture subtitles: a click goes there; they cannot be moved or edited"), font * 0.9, room, &nw, &nh);
+        double add = nh + 6.0 * dpi;
+        if (add < band) add = band;
+        y += add;
+    }
+    lw->title_height = y;
+}
+
 static void subs_layout(app_state_t *app) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->subs_window, &w, &h);
@@ -727,7 +839,7 @@ static void subs_layout(app_state_t *app) {
     lw->width = (double)w;
     lw->height = (double)h;
     lw->row_height = 24.0 * dpi;
-    lw->title_height = 60.0 * dpi;
+    subs_layout_head(app);
     app->subs_dirty = true;
 }
 
@@ -767,23 +879,8 @@ void subs_show(app_state_t *app) {
     subs_layout(app);
 }
 
-/* Where the parts above the rows are, in the window's own pixels. */
-typedef enum { SUBS_PART_ALL = 0, SUBS_PART_EARLIER, SUBS_PART_AMOUNT, SUBS_PART_LATER, SUBS_PART_SAVE, SUBS_PART_TAKEOUT, SUBS_PART_PUTIN } subs_part_t;
-
 static rubraview_pal_rect_t subs_part_rect(const app_state_t *app, subs_part_t part) {
-    const rubraview_listwin_t *lw = &app->subs_list;
-    double band = lw->title_height * 0.5, rh = lw->row_height;
-    double box = rh * 0.6, pad = rh * 0.3, button = rh * 3.6, field = rh * 3.0;
-    double y = band + (band - rh * 0.9) * 0.5;
-    switch (part) {
-        case SUBS_PART_ALL:     return (rubraview_pal_rect_t){ pad, (band - box) * 0.5, box, box };
-        case SUBS_PART_EARLIER: return (rubraview_pal_rect_t){ pad, y, button, rh * 0.9 };
-        case SUBS_PART_AMOUNT:  return (rubraview_pal_rect_t){ pad * 2.0 + button, y, field, rh * 0.9 };
-        case SUBS_PART_LATER:   return (rubraview_pal_rect_t){ pad * 4.0 + button + field + rh * 0.6, y, button, rh * 0.9 };
-        case SUBS_PART_SAVE:    return (rubraview_pal_rect_t){ lw->width - pad - button, y, button, rh * 0.9 };   /* at the right */
-        case SUBS_PART_TAKEOUT: return (rubraview_pal_rect_t){ lw->width - pad - button, (band - rh * 0.9) * 0.5, button, rh * 0.9 };   /* above Save */
-        default:                return (rubraview_pal_rect_t){ lw->width - 2.0 * (pad + button), (band - rh * 0.9) * 0.5, button, rh * 0.9 };   /* Put in, left of Take out */
-    }
+    return (part >= 0 && part <= SUBS_PART_PUTIN) ? app->subs_part_rect[part] : (rubraview_pal_rect_t){0};
 }
 
 static bool subs_in(rubraview_pal_rect_t r, double x, double y) {
@@ -1105,10 +1202,12 @@ void draw_subs_window(app_state_t *app) {
     }
     if (!app->subs_dirty) return;
     app->subs_dirty = false;
+    subs_layout_head(app);
 
     rubraview_renderer_t *r = app->subs_renderer;
     const rubraview_listwin_t *lw = &app->subs_list;
-    double font = lw->row_height * 0.5, band = lw->title_height * 0.5, pad = lw->row_height * 0.3;
+    double dpi = rubraview_pal_window_dpi_scale(app->subs_window);
+    double font = lw->row_height * 0.5, band = 30.0 * dpi, pad = lw->row_height * 0.3;
     rubraview_pal_render_begin(r, FILES_BACKGROUND);
     rubraview_pal_rect_t head_box = { 0.0, 0.0, lw->width, lw->title_height };
     rubraview_pal_render_fill_rect(r, head_box, COLOR_TILE_FILL, 0.0);
@@ -1130,19 +1229,20 @@ void draw_subs_window(app_state_t *app) {
         subs_draw_box(r, all, count > 0 && picked == count, picked > 0);
         head_x = all.x + all.width + pad;
     }
-    /* Take out: the film's own subtitles written beside it (a Matroska film; it says so of another). */
+    /* Take out & Put in film buttons, placed at header right or wrapped onto their own row. */
     rubraview_pal_rect_t takeout = subs_part_rect(app, SUBS_PART_TAKEOUT);
-    bool takeout_shown = app->media && app->media_info.has_video && takeout.x > head_x + lw->row_height * 4.0;
+    bool takeout_shown = takeout.width > 0.0;
     if (takeout_shown) {
         char label[32];
         int ln = app->takeout.running ? rubraview_fmt(label, sizeof(label), T("Stop {} %"), PROVEN_ARG((int)(app->takeout.percent < 0 ? 0 : app->takeout.percent)))
                                       : rubraview_fmt(label, sizeof(label), T("Take out"));
         rubraview_pal_render_fill_rect(r, takeout, app->takeout.running ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(r, takeout, COLOR_BOX_BORDER, 1.0, 3.0);
-        if (ln > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)label, (size_t)ln }, takeout, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        if (ln > 0) rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)label, (size_t)ln }, takeout.width - 4.0 * dpi, font),
+                                                   takeout, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
     rubraview_pal_rect_t putin = subs_part_rect(app, SUBS_PART_PUTIN);
-    bool putin_shown = takeout_shown && kind == SUBS_TEXT && putin.x > head_x + lw->row_height * 4.0;
+    bool putin_shown = putin.width > 0.0;
     if (putin_shown) {
         double now = rubraview_pal_time_now_seconds();
         bool armed = app->putin.armed_at > 0.0 && now - app->putin.armed_at < 6.0;
@@ -1151,23 +1251,26 @@ void draw_subs_window(app_state_t *app) {
                                   : rubraview_fmt(label, sizeof(label), "{}", PROVEN_ARG(armed ? T("Sure? Put in") : T("Put in film")));
         rubraview_pal_render_fill_rect(r, putin, app->putin.phase || armed ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(r, putin, COLOR_BOX_BORDER, 1.0, 3.0);
-        if (ln > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)label, (size_t)ln }, putin, font * 0.95, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        if (ln > 0) rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)label, (size_t)ln }, putin.width - 4.0 * dpi, font * 0.95),
+                                                   putin, font * 0.95, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         if (armed) app->subs_dirty = true;            /* the question goes away by itself */
     }
-    rubraview_pal_rect_t head_text = { head_x, 0.0, (putin_shown ? putin.x : takeout_shown ? takeout.x : lw->width) - head_x - pad, band };
-    if (hn > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)head, (size_t)(hn < (int)sizeof(head) ? hn : (int)sizeof(head) - 1) },
-                                                                 head_text.width, font), head_text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    double head_right = (putin_shown && putin.y < band) ? putin.x : (takeout_shown && takeout.y < band) ? takeout.x : lw->width;
+    rubraview_pal_rect_t head_text = { head_x, 0.0, head_right - head_x - pad, band };
+    if (hn > 0 && head_text.width > 0.0)
+        rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)head, (size_t)(hn < (int)sizeof(head) ? hn : (int)sizeof(head) - 1) },
+                                                         head_text.width, font), head_text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
 
-    /* The bar: Earlier, the seconds, Later. */
+    /* The bar: Earlier, the seconds, Later, and Save (wrapping cleanly when narrow). */
     if (kind == SUBS_TEXT) {
         rubraview_pal_rect_t earlier = subs_part_rect(app, SUBS_PART_EARLIER), amount = subs_part_rect(app, SUBS_PART_AMOUNT),
-                             later = subs_part_rect(app, SUBS_PART_LATER);
+                             later = subs_part_rect(app, SUBS_PART_LATER), save = subs_part_rect(app, SUBS_PART_SAVE);
         rubraview_pal_render_fill_rect(r, earlier, COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(r, earlier, COLOR_BOX_BORDER, 1.0, 3.0);
-        rubraview_pal_render_draw_text(r, TU8("< Earlier"), earlier, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), TU8("< Earlier"), earlier.width - 4.0 * dpi, font), earlier, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         rubraview_pal_render_fill_rect(r, later, COLOR_BOX_FILL, 3.0);
         rubraview_pal_render_stroke_rect(r, later, COLOR_BOX_BORDER, 1.0, 3.0);
-        rubraview_pal_render_draw_text(r, TU8("Later >"), later, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), TU8("Later >"), later.width - 4.0 * dpi, font), later, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         rubraview_pal_render_fill_rect(r, amount, 0xFF101010u, 2.0);
         rubraview_pal_render_stroke_rect(r, amount, app->subs_amount_focus ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, 1.0, 2.0);
         char typed[24];
@@ -1175,25 +1278,32 @@ void draw_subs_window(app_state_t *app) {
         if (tn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)typed, (size_t)tn }, amount, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
         rubraview_pal_rect_t unit = { amount.x + amount.width + pad * 0.5, amount.y, lw->row_height * 0.8, amount.height };
         rubraview_pal_render_draw_text(r, PROVEN_LIT("s"), unit, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
-        rubraview_pal_rect_t save = subs_part_rect(app, SUBS_PART_SAVE);
-        if (save.x > later.x + later.width + pad) {          /* room for it beside Later */
+        if (save.width > 0.0) {
             bool changed = rubraview_subtitle_changed(&app->subtitle) || app->subtitle.offset_seconds != 0.0;   /* Z / X is saved too */
             rubraview_pal_render_fill_rect(r, save, changed ? COLOR_TILE_CURRENT : COLOR_BOX_FILL, 3.0);
             rubraview_pal_render_stroke_rect(r, save, COLOR_BOX_BORDER, 1.0, 3.0);
-            rubraview_pal_render_draw_text(r, TU8("Save"), save, font, changed ? COLOR_TEXT : 0x70F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+            rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), TU8("Save"), save.width - 4.0 * dpi, font), save, font, changed ? COLOR_TEXT : 0x70F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
     } else if (kind != SUBS_NONE) {
-        rubraview_pal_rect_t note = { pad, band, lw->width - 2.0 * pad, band };
-        rubraview_pal_render_draw_text(r, TU8("picture subtitles: a click goes there; they cannot be moved or edited"), note,
-                                       font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+        double ny = (takeout_shown && takeout.y >= band) ? takeout.y + takeout.height + 4.0 * dpi : band;
+        double nh = lw->title_height > ny ? lw->title_height - ny : band;
+        rubraview_pal_rect_t note = { pad, ny, lw->width - 2.0 * pad, nh };
+        if (note.width > 0.0)
+            rubraview_pal_render_draw_text(r, TU8("picture subtitles: a click goes there; they cannot be moved or edited"), note,
+                                           font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
     }
 
-    /* The rows: the box, when it comes and when it goes, what it says. */
+    /* The rows: the box, when it comes and (if room) when it goes, and what it says, clear of the scrollbar. */
+    rubraview_scrollbar_t sb;
+    double sb_clear = (scrollbar_of(app, RVSB_SUBS, &sb) && sb.total > sb.shown && sb.area.width > 0.0)
+                        ? lw->x + lw->width - sb.area.x + 2.0 * dpi : 0.0;
     size_t rows = rubraview_listwin_rows_visible(lw);
     double time_w = font * 0.56 * 11.0;
     for (size_t i = lw->first; i < count && i < lw->first + rows; ++i) {
         rubraview_rect_t rr = rubraview_listwin_row_rect(lw, i, count);
-        rubraview_pal_rect_t row = { rr.x + 2.0, rr.y, rr.width - 8.0, rr.height };
+        double rw = rr.width - 8.0 - sb_clear;
+        if (rw <= 0.0) continue;
+        rubraview_pal_rect_t row = { rr.x + 2.0, rr.y, rw, rr.height };
         if ((int32_t)i == app->subs_now) rubraview_pal_render_fill_rect(r, row, (COLOR_TILE_CURRENT & 0x00FFFFFFu) | 0x90000000u, 2.0);
         else if ((int32_t)i == app->subs_hover) rubraview_pal_render_fill_rect(r, row, COLOR_TILE_FILL, 2.0);
         double x = row.x + pad;
@@ -1204,14 +1314,20 @@ void draw_subs_window(app_state_t *app) {
         }
         char clock[32], line[1200];   /* a text being typed, the IME's part and the caret fit */
         double end = -1.0, start = subs_row_start(app, i, &end);
-        rubraview_pal_rect_t start_box = { x, row.y, time_w, row.height };
-        rubraview_pal_render_draw_text(r, rubraview_subwin_time(rubraview_mem_mut(clock, sizeof(clock)), start), start_box, font * 0.9, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-        x += time_w;
-        if (end >= 0.0) {
-            rubraview_pal_rect_t end_box = { x, row.y, time_w, row.height };
-            rubraview_pal_render_draw_text(r, rubraview_subwin_time(rubraview_mem_mut(clock, sizeof(clock)), end), end_box, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+        bool show_end = row.x + row.width - (x + time_w * 2.0) - pad >= font * 6.0;
+        double start_w = row.x + row.width - x < time_w ? (row.x + row.width > x ? row.x + row.width - x : 0.0) : time_w;
+        if (start_w > 0.0) {
+            rubraview_pal_rect_t start_box = { x, row.y, start_w, row.height };
+            rubraview_pal_render_draw_text(r, rubraview_subwin_time(rubraview_mem_mut(clock, sizeof(clock)), start), start_box, font * 0.9, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
         }
         x += time_w;
+        if (show_end) {
+            if (end >= 0.0) {
+                rubraview_pal_rect_t end_box = { x, row.y, time_w, row.height };
+                rubraview_pal_render_draw_text(r, rubraview_subwin_time(rubraview_mem_mut(clock, sizeof(clock)), end), end_box, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+            }
+            x += time_w;
+        }
         proven_u8str_view_t said = kind == SUBS_TEXT ? rubraview_subwin_line(rubraview_mem_mut(line, sizeof(line)), app->subtitle.cues[app->subs_rows[i]].text)
                                          : TU8("(picture)");
         rubraview_pal_rect_t text = { x, row.y, row.x + row.width - x - pad, row.height };
@@ -1231,7 +1347,7 @@ void draw_subs_window(app_state_t *app) {
                          (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->subs_edit_composing, .size = app->subs_edit_composing_len }, true,
                          COLOR_TEXT, rubraview_pal_window_dpi_scale(app->subs_window));
         } else
-        if (text.width > 0.0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), said, text.width, font), text, font,
+        if (text.width > 0.0) rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), said, text.width, font), text, font,
                                                              kind == SUBS_TEXT ? COLOR_TEXT : 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
     }
     draw_scrollbar(app, r, RVSB_SUBS, app->subs_px, app->subs_py);   /* where in a long list the rows are; RV-170: it moves them */
@@ -1240,6 +1356,7 @@ void draw_subs_window(app_state_t *app) {
 
 static void subs_press(app_state_t *app, double x, double y, uint32_t modifiers) {
     int kind = subs_kind(app);
+    subs_layout_head(app);
     size_t count = app->subs_count, index = 0;
     bool on_amount = kind == SUBS_TEXT && subs_in(subs_part_rect(app, SUBS_PART_AMOUNT), x, y);
     if (app->subs_edit_row >= 0 && editbox_pointer_down(app->subs_renderer, &app->subs_ec, &app->subs_view, x, y, (modifiers & RUBRAVIEW_MOD_SHIFT) != 0)) {
@@ -1250,8 +1367,8 @@ static void subs_press(app_state_t *app, double x, double y, uint32_t modifiers)
     subs_edit_end(app, true);                    /* a press anywhere keeps what was typed */
     subs_focus_amount(app, on_amount);
     if (on_amount) return;
-    /* The two buttons answer whatever is on: a press that does nothing says why (a film not up yet). */
-    if (subs_in(subs_part_rect(app, SUBS_PART_PUTIN), x, y) && y < app->subs_list.title_height * 0.5) {
+    /* The two buttons answer whatever is on: only active while laid out with non-zero rect. */
+    if (subs_in(subs_part_rect(app, SUBS_PART_PUTIN), x, y)) {
         putin_press(app);
         app->subs_dirty = true;
         return;
@@ -1264,7 +1381,8 @@ static void subs_press(app_state_t *app, double x, double y, uint32_t modifiers)
     if (kind == SUBS_TEXT && y < app->subs_list.title_height) {
         rubraview_pal_rect_t all = subs_part_rect(app, SUBS_PART_ALL);
         /* the box for all, and a little around it: it is small */
-        rubraview_pal_rect_t all_zone = { 0.0, 0.0, all.x + all.width + app->subs_list.row_height * 0.3, app->subs_list.title_height * 0.5 };
+        double pad = app->subs_list.row_height * 0.3;
+        rubraview_pal_rect_t all_zone = all.width > 0.0 ? (rubraview_pal_rect_t){ 0.0, 0.0, all.x + all.width + pad, all.y + all.height + pad } : (rubraview_pal_rect_t){0};
         if (subs_in(all_zone, x, y)) {
             bool every = count > 0 && rubraview_subwin_chosen_count(app->subs_chosen, count) == count;
             rubraview_subwin_choose_all(app->subs_chosen, count, !every);
@@ -1289,9 +1407,16 @@ static void subs_press(app_state_t *app, double x, double y, uint32_t modifiers)
         double now = rubraview_pal_time_now_seconds();
         if (app->subs_click_row == (int32_t)index && now - app->subs_click_at < 0.45) {
             app->subs_click_row = -1;
-            /* RV-115: on the two times, they are typed; on the words, the words */
-            double pad = app->subs_list.row_height * 0.3, time_w = app->subs_list.row_height * 0.5 * 0.56 * 11.0;
-            subs_edit_begin_as(app, index, x < box.x + box.width + pad + time_w * 2.0);
+            /* RV-115: on the two times (if shown), they are typed; on the words, the words */
+            double dpi = rubraview_pal_window_dpi_scale(app->subs_window);
+            double font = app->subs_list.row_height * 0.5, pad = app->subs_list.row_height * 0.3, time_w = font * 0.56 * 11.0;
+            rubraview_scrollbar_t sb;
+            double sb_clear = (scrollbar_of(app, RVSB_SUBS, &sb) && sb.total > sb.shown && sb.area.width > 0.0)
+                                ? app->subs_list.x + app->subs_list.width - sb.area.x + 2.0 * dpi : 0.0;
+            double rw = rr.width - 8.0 - sb_clear;
+            double tx0 = (rr.x + 2.0 + pad) + (box.x + box.width + pad - (rr.x + 2.0 + pad));
+            bool show_end = (rr.x + 2.0 + rw) - (tx0 + time_w * 2.0) - pad >= font * 6.0;
+            subs_edit_begin_as(app, index, x < box.x + box.width + pad + (show_end ? time_w * 2.0 : time_w));
         } else {
             app->subs_click_row = (int32_t)index;
             app->subs_click_at = now;

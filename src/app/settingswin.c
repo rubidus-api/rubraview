@@ -377,13 +377,92 @@ static void settings_measure(app_state_t *app) {
     rubraview_pal_render_set_mono_pad(app->settings_renderer, (app->settings_cell_h - natural) * 0.5);
 }
 
-static void settings_grid(const app_state_t *app, int32_t *out_cols, int32_t *out_rows) {
+static int32_t settings_sidebar_visible(const app_state_t *app, int32_t h) {
+    double avail = (double)h - app->settings_cell_h * 2.5;
+    int32_t vis = app->settings_cell_h > 0.0 && avail > 0.0 ? (int32_t)(avail / app->settings_cell_h) : 0;
+    return vis > 0 ? vis : 0;
+}
+
+static void settings_sidebar_clamp(app_state_t *app, int32_t h) {
+    int32_t pages = (int32_t)(app->settings_view.doc ? app->settings_view.doc->page_count : RUBRAVIEW_TAB_COUNT);
+    int32_t vis = settings_sidebar_visible(app, h);
+    int32_t max_s = pages > vis ? pages - vis : 0;
+    if (app->settings_page_scroll > max_s) app->settings_page_scroll = max_s;
+    if (app->settings_page_scroll < 0) app->settings_page_scroll = 0;
+}
+
+static void settings_sidebar_reveal(app_state_t *app, int32_t h) {
+    int32_t p = app->settings_view.page, vis = settings_sidebar_visible(app, h);
+    if (vis <= 0) { app->settings_page_scroll = p; return; }
+    if (p < app->settings_page_scroll) app->settings_page_scroll = p;
+    if (p >= app->settings_page_scroll + vis) app->settings_page_scroll = p - vis + 1;
+    settings_sidebar_clamp(app, h);
+}
+
+static void settings_layout_buttons(app_state_t *app, int32_t w, int32_t cols) {
+    const rubraview_settings_view_t *v = &app->settings_view;
+    double cw = app->settings_cell_w, ch = app->settings_cell_h;
+    if (cw <= 0.0 || ch <= 0.0) { app->settings_content_top = ch * (double)RUBRAVIEW_SETTINGS_TOP_ROWS; return; }
+    int32_t list_cols = v->doc ? v->list_cols : (cols / 3 < 16 ? cols / 3 : 16);
+    if (v->doc == NULL && list_cols < 8) list_cols = 8;
+    int32_t content_col = v->doc ? v->content_col : list_cols + 2;
+    double x0 = cw * (double)content_col;
+    double right = (double)w - cw;
+    double room = right - x0;
+    if (room < cw * 12.0) room = cw * 12.0;
+    double bw[RUBRAVIEW_BUTTON_COUNT] = { 0 }, bx[RUBRAVIEW_BUTTON_COUNT] = { 0 };
+    uint32_t brow[RUBRAVIEW_BUTTON_COUNT] = { 0 };
+    for (int32_t b = 0; b < RUBRAVIEW_BUTTON_COUNT; ++b) {
+        int32_t cells = rubraview_settings_text_cells(rubraview_settings_button_text((rubraview_settings_button_t)b));
+        bw[b] = cw * (double)cells;
+        if (bw[b] > room) bw[b] = room;
+    }
+    double dpi = rubraview_pal_window_dpi_scale(app->settings_window);
+    double bh = ch, gap_x = cw * 0.7, gap_y = 2.0 * dpi;
+    size_t rows = rubraview_flow_inline(bw, RUBRAVIEW_BUTTON_COUNT, gap_x, room, brow, bx);
+    double by0 = rows > 1 ? ch * 0.95 : ch;
+    for (int32_t b = 0; b < RUBRAVIEW_BUTTON_COUNT; ++b)
+        app->settings_btn[b] = (rubraview_pal_rect_t){ x0 + bx[b], by0 + (double)brow[b] * (bh + gap_y), bw[b], bh };
+    double block = rows ? (double)rows * bh + (double)(rows - 1) * gap_y : 0.0;
+    double top = by0 + block + 4.0 * dpi;
+    if (top < ch * (double)RUBRAVIEW_SETTINGS_TOP_ROWS) top = ch * (double)RUBRAVIEW_SETTINGS_TOP_ROWS;
+    app->settings_content_top = top;
+}
+
+double settings_row_y(const app_state_t *app, int32_t row) {
+    const rubraview_settings_view_t *v = &app->settings_view;
+    double ch = app->settings_cell_h;
+    if (row <= 0) return 0.0;
+    if (row >= v->rows - 1) {
+        int32_t w = 0, h = 0;
+        rubraview_pal_window_get_size(app->settings_window, &w, &h);
+        double my = (double)h - ch;
+        return my > app->settings_content_top ? my : app->settings_content_top;
+    }
+    if (row < RUBRAVIEW_SETTINGS_TOP_ROWS) return ch * (double)row;
+    return app->settings_content_top + ch * (double)(row - RUBRAVIEW_SETTINGS_TOP_ROWS);
+}
+
+static int32_t settings_y_to_row(const app_state_t *app, double y) {
+    if (y < app->settings_cell_h) return 0;
+    if (y < app->settings_content_top) return RUBRAVIEW_SETTINGS_BUTTON_ROW;
+    int32_t r = RUBRAVIEW_SETTINGS_TOP_ROWS + (int32_t)((y - app->settings_content_top) / app->settings_cell_h);
+    int32_t max_r = app->settings_view.rows - 2;
+    if (r > max_r) r = max_r;
+    return r;
+}
+
+static void settings_grid(app_state_t *app, int32_t *out_cols, int32_t *out_rows) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->settings_window, &w, &h);
-    *out_cols = (int32_t)((double)w / app->settings_cell_w);
-    *out_rows = (int32_t)(((double)h - app->settings_cell_h * 0.5) / app->settings_cell_h);   /* half a row spare under the buttons */
-    if (*out_cols < 40) *out_cols = 40;
-    if (*out_rows < 12) *out_rows = 12;
+    int32_t cols = (int32_t)((double)w / app->settings_cell_w);
+    if (cols < 26) cols = 26;
+    settings_layout_buttons(app, w, cols);
+    double avail_px = (double)h - app->settings_content_top - app->settings_cell_h;
+    int32_t avail_rows = app->settings_cell_h > 0.0 && avail_px > 0.0 ? (int32_t)(avail_px / app->settings_cell_h) : 1;
+    if (avail_rows < 1) avail_rows = 1;
+    *out_cols = cols;
+    *out_rows = RUBRAVIEW_SETTINGS_TOP_ROWS + avail_rows + 1;
 }
 
 void settings_open(app_state_t *app) {
@@ -438,6 +517,10 @@ void settings_open(app_state_t *app) {
     int32_t cols = 0, rows = 0;
     settings_grid(app, &cols, &rows);
     app->settings_view = rubraview_settings_view_create(rubraview_settings_document(), cols, rows);
+    /* Converge content_top & visible row count once real content_col is known. */
+    settings_grid(app, &cols, &rows);
+    rubraview_settings_view_resize(&app->settings_view, cols, rows);
+    app->settings_page_scroll = 0;
     rubraview_settings_view_set_info(&app->settings_view, app, settings_info);   /* 1.30.1: long values wrap */
     keymap_table_refresh(app);
     skip_dirs_table_rows(app);
@@ -1816,12 +1899,13 @@ static void skip_dirs_draw_x(app_state_t *app) {
     const rubraview_settings_view_t *v = &app->settings_view;
     rubraview_renderer_t *r = app->settings_renderer;
     const double cw = app->settings_cell_w, ch = app->settings_cell_h;
-    int32_t mc = (int32_t)(app->settings_tip_x / cw), mr = (int32_t)(app->settings_tip_y / ch);
+    int32_t mc = (int32_t)(app->settings_tip_x / cw), mr = settings_y_to_row(app, app->settings_tip_y);
     for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l)
     for (size_t k = 1, n = folder_list_count(app, l); k <= n; ++k) {
         int32_t row = rubraview_settings_view_table_screen_row(v, cstr(FOLDER_LISTS[l].table), (int32_t)k);
         if (row < 0) continue;
-        rubraview_pal_rect_t cell = { cw * skip_dirs_x_col(app), ch * row, cw * 3, ch };
+        double ry = settings_row_y(app, row);
+        rubraview_pal_rect_t cell = { cw * skip_dirs_x_col(app), ry, cw * 3, ch };
         bool over = mr == row && mc >= skip_dirs_x_col(app) && mc < skip_dirs_x_col(app) + 3;
         rubraview_pal_render_fill_rect(r, cell, over ? COLOR_CLOSE_HOVER : SETTINGS_PANE, 2.0);
         rubraview_pal_render_draw_text(r, PROVEN_LIT("X"), cell, app->settings_font, SETTINGS_TEXT, RUBRAVIEW_TEXT_CENTER);
@@ -1832,17 +1916,20 @@ static void skip_dirs_draw_x(app_state_t *app) {
    there even when nothing is typed, an empty field waiting for a folder. */
 static void settings_path_draw(app_state_t *app) {
     rubraview_renderer_t *r = app->settings_renderer;
+    const rubraview_settings_view_t *v = &app->settings_view;
     const double cw = app->settings_cell_w, ch = app->settings_cell_h, fs = app->settings_font;
+    int32_t ww = 0, wh = 0;
+    rubraview_pal_window_get_size(app->settings_window, &ww, &wh);
     int32_t row = 0, col0 = 0, cols = 0;
     int32_t typing = app->spath_active ? (app->spath_list_index >= 0 ? app->spath_list : -1) : -2;
     for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l) {   /* waiting: each field's frame round its hint */
         if (l == typing || !settings_path_box(app, l, &row, &col0, &cols)) continue;
-        rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ cw * col0, ch * row, cw * cols, ch }, 0xFF707070u, 1.0, 0.0);
+        rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ cw * col0, settings_row_y(app, row), cw * cols, ch }, 0xFF707070u, 1.0, 0.0);
     }
     if (!app->spath_active || !settings_path_box(app, typing, &row, &col0, &cols)) return;
     /* 1.25.0 (owner, 2026-10-20: "에디트 컨트롤과 버튼의 세로 길이가 조금 더 넉넉하게"): a little taller than its row */
     double pad = ch * 0.22;
-    double y = ch * row;
+    double y = settings_row_y(app, row);
     rubraview_pal_rect_t box = { cw * col0, y - pad, cw * cols, ch + 2.0 * pad };
     rubraview_pal_render_fill_rect(r, box, 0xFF101010u, 3.0);
     rubraview_pal_render_stroke_rect(r, box, 0xFF5B9BD5u, 1.0, 3.0);
@@ -1873,26 +1960,38 @@ static void settings_path_draw(app_state_t *app) {
                                             cx, y, fs, 0xFFFFD27Fu);
     }
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cx, y + 2.0, 1.5, ch - 4.0 }, SETTINGS_TEXT, 0.0);
-    /* 1.24.0: its buttons on the row under it — OK, Cancel, and Browse... for a folder */
+    /* 1.24.0: its buttons — OK, Cancel, and Browse... in wrapping rows that fit inside the pane */
     const char *words[3] = { T("OK"), T("Cancel"), T("Browse...") };
     int32_t n = !app->spath_number && spath_way(app)->browse ? 3 : 2;   /* RV-311: Browse... for the kinds that have it */
-    double bx = box.x, by = box.y + box.height + pad, bh = ch + 2.0 * pad;
-    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ box.x, box.y + box.height, box.width, bh + 2.0 * pad }, SETTINGS_BACKGROUND, 0.0);   /* the rows under it covered */
-    app->spath_btn_n = n;
+    double x0 = cw * (double)v->content_col, right = (double)ww - cw;
+    if (right < x0 + cw * 10.0) right = x0 + cw * 10.0;
+    double left = (right - box.x >= cw * 22.0) ? box.x : x0;
+    double room = right - left, bh = ch + 2.0 * pad, gap_y = pad * 0.8;
+    double bw[3] = { 0 }, rx[3] = { 0 };
+    uint32_t brow[3] = { 0 };
     for (int32_t i = 0; i < n; ++i) {
-        /* RV-182 (owner, 2026-10-29: the words were pushed right): as wide as the words measure, plus room either side */
         double tw = 0.0;
         if (!rubraview_pal_render_measure_text(r, cstr(words[i]), fs, &tw) || tw <= 0.0) tw = cw * (double)rubraview_utf8_chars(cstr(words[i]));
-        double width = tw + cw * 4.0;
-        if (width < cw * 10.0) width = cw * 10.0;
-        rubraview_pal_rect_t b = { bx, by, width, bh };
+        bw[i] = tw + cw * 3.0;
+        if (bw[i] < cw * 9.0) bw[i] = cw * 9.0;
+        if (bw[i] > room) bw[i] = room;
+    }
+    size_t rows = rubraview_flow_inline(bw, (size_t)n, cw, room, brow, rx);
+    double btns_h = rows ? (double)rows * bh + (double)(rows - 1) * gap_y : bh;
+    double by = box.y + box.height + pad;
+    if (by + btns_h > (double)wh - ch && box.y - pad - btns_h >= app->settings_content_top)
+        by = box.y - pad - btns_h;
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ left - cw * 0.5, by - pad * 0.5, room + cw, btns_h + pad }, SETTINGS_BACKGROUND, 0.0);
+    app->spath_btn_n = n;
+    for (int32_t i = 0; i < n; ++i) {
+        rubraview_pal_rect_t b = { left + rx[i], by + (double)brow[i] * (bh + gap_y), bw[i], bh };
         app->spath_btn[i] = b;
         bool over = pal_rect_has(b, app->settings_px, app->settings_py);
         rubraview_pal_render_fill_rect(r, b, i == 0 ? SETTINGS_FOCUS : over ? 0xFF3A3A3Au : 0xFF2A2A2Au, 3.0);
         rubraview_pal_render_stroke_rect(r, b, 0xFF5B9BD5u, 1.0, 3.0);
-        /* the words in its middle, both ways, laid out by their own font */
-        rubraview_pal_render_draw_text(r, cstr(words[i]), b, fs, SETTINGS_TEXT, RUBRAVIEW_TEXT_CENTER);
-        bx += b.width + cw;
+        char bfit[64];
+        proven_u8str_view_t lbl = b.width > 6.0 ? fit_text_measured(r, bfit, sizeof(bfit), cstr(words[i]), b.width - 6.0, fs) : PROVEN_LIT("");
+        if (lbl.size > 0) rubraview_pal_render_draw_text(r, lbl, b, fs, SETTINGS_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 }
 
@@ -1914,17 +2013,29 @@ size_t settings_pump(app_state_t *app) {
                 return handled;
             case RUBRAVIEW_WINDOW_EVENT_RESIZE: {
                 rubraview_pal_render_resize(app->settings_renderer, event.resize.width, event.resize.height);
+                app->settings_tip_shown = false;
+                double prev_top = app->settings_content_top;
+                int32_t prev_col = view->content_col;
                 int32_t cols = 0, rows = 0;
                 settings_grid(app, &cols, &rows);
                 rubraview_settings_view_resize(view, cols, rows);
+                if (view->content_col != prev_col || fabs(app->settings_content_top - prev_top) > 0.5) {
+                    settings_grid(app, &cols, &rows);
+                    rubraview_settings_view_resize(view, cols, rows);
+                }
+                settings_sidebar_reveal(app, event.resize.height);
                 app->settings_dirty = true;
                 break;
             }
             case RUBRAVIEW_WINDOW_EVENT_DPI_CHANGED: {
                 settings_measure(app);
-                int32_t cols = 0, rows = 0;
+                int32_t cols = 0, rows = 0, sw = 0, sh = 0;
                 settings_grid(app, &cols, &rows);
                 rubraview_settings_view_resize(view, cols, rows);
+                settings_grid(app, &cols, &rows);
+                rubraview_settings_view_resize(view, cols, rows);
+                rubraview_pal_window_get_size(app->settings_window, &sw, &sh);
+                settings_sidebar_reveal(app, sh);
                 app->settings_dirty = true;
                 break;
             }
@@ -1942,11 +2053,16 @@ size_t settings_pump(app_state_t *app) {
                 if (settings_copy_key(app, event.key.combo)) break;
                 rubraview_settings_key_t key;
                 if (settings_key_of(event.key.combo, &key)) {
+                    int32_t sw = 0, sh = 0;
+                    rubraview_pal_window_get_size(app->settings_window, &sw, &sh);
                     settings_event(app, rubraview_settings_view_key(view, &app->settings, key));
+                    settings_sidebar_reveal(app, sh);
                 }
                 break;
             }
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
+                int32_t sw = 0, sh = 0;
+                rubraview_pal_window_get_size(app->settings_window, &sw, &sh);
                 if (chooser_press(app, CHOOSE_IN_SETTINGS, event.mouse.x, event.mouse.y)) break;   /* 1.24.0 */
                 /* RV-170: the scroll bar: its thumb dragged, its track a page, its buttons a row */
                 if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && scrollbar_press(app, RVSB_SETTINGS, event.mouse.x, event.mouse.y)) {
@@ -1968,7 +2084,7 @@ size_t settings_pump(app_state_t *app) {
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
                 if (app->spath_active) {   /* a click in the box moves the caret; elsewhere keeps the folder as it was */
                     int32_t brow = 0, bcol = 0, bcols = 0;
-                    int32_t mc = (int32_t)(event.mouse.x / app->settings_cell_w), mr = (int32_t)(event.mouse.y / app->settings_cell_h);
+                    int32_t mc = (int32_t)(event.mouse.x / app->settings_cell_w), mr = settings_y_to_row(app, event.mouse.y);
                     if (settings_path_box(app, app->spath_list_index >= 0 ? app->spath_list : -1, &brow, &bcol, &bcols) &&
                         mr == brow && mc >= bcol && mc < bcol + bcols) {
                         settings_path_click(app, mc - bcol, bcols, event.mouse.x, event.mouse.y, (event.mouse.modifiers & RUBRAVIEW_MOD_SHIFT) != 0);
@@ -1982,11 +2098,42 @@ size_t settings_pump(app_state_t *app) {
                     app->key_capture = 0;   /* a click elsewhere is a change of mind */
                     settings_say(app, T("no key added"));
                 }
+                /* Top action buttons laid out in wrapping rows. */
+                if (event.mouse.x >= app->settings_cell_w * view->list_cols) {
+                    bool hit_top = false;
+                    static const rubraview_settings_event_t EV[RUBRAVIEW_BUTTON_COUNT] = {
+                        RUBRAVIEW_SEVENT_REVERT, RUBRAVIEW_SEVENT_DEFAULTS,
+                        RUBRAVIEW_SEVENT_DEFAULTS_PAGE, RUBRAVIEW_SEVENT_DEFAULTS_ONE,
+                        RUBRAVIEW_SEVENT_CLOSE,
+                    };
+                    for (int32_t b = 0; b < RUBRAVIEW_BUTTON_COUNT; ++b) {
+                        if (!pal_rect_has(app->settings_btn[b], event.mouse.x, event.mouse.y)) continue;
+                        view->focus_line = -1;
+                        view->focus_button = b;
+                        settings_event(app, EV[b]);
+                        hit_top = true;
+                        break;
+                    }
+                    if (hit_top) break;
+                }
+                /* Left page sidebar (scrolled when window is short). */
+                if (event.mouse.x < app->settings_cell_w * view->list_cols) {
+                    int32_t p = app->settings_page_scroll + (int32_t)(event.mouse.y / app->settings_cell_h) - 2;
+                    int32_t vis = settings_sidebar_visible(app, sh);
+                    if (p >= app->settings_page_scroll && p < app->settings_page_scroll + vis &&
+                        view->doc && p >= 0 && p < (int32_t)view->doc->page_count) {
+                        rubraview_settings_view_set_page(view, p);
+                        settings_sidebar_reveal(app, sh);
+                        app->settings_dirty = true;
+                    }
+                    break;
+                }
+                if (event.mouse.y < app->settings_content_top || event.mouse.y >= (double)sh - app->settings_cell_h) break;
                 /* A drag marks text: on a line that is only text, or with
                    Shift anywhere on the page — a plain click on a setting
                    still changes it. */
                 int32_t col = (int32_t)(event.mouse.x / app->settings_cell_w);
-                int32_t row = (int32_t)(event.mouse.y / app->settings_cell_h);
+                int32_t row = settings_y_to_row(app, event.mouse.y);
                 if (app->settings_sel.active) { app->settings_sel.active = false; app->settings_dirty = true; }
                 if (keys_layout_click(app, event.mouse.x, event.mouse.y)) { app->settings_dirty = true; break; }   /* RV-217 */
                 if (col >= view->content_col && row != RUBRAVIEW_SETTINGS_BUTTON_ROW &&
@@ -2036,18 +2183,17 @@ size_t settings_pump(app_state_t *app) {
                 }
                 if (scrollbar_motion(app, app->settings_window, event.mouse.x, event.mouse.y)) { app->settings_dirty = true; break; }   /* RV-170 */
                 if (scrollbar_hover(app, RVSB_SETTINGS, event.mouse.x, event.mouse.y)) app->settings_dirty = true;   /* its parts light */
-                if (app->spath_active) app->settings_dirty = true;   /* its buttons light under the pointer */
-                int32_t tip = rubraview_settings_view_table_row_at(view, (int32_t)(event.mouse.x / app->settings_cell_w),
-                                                                   (int32_t)(event.mouse.y / app->settings_cell_h));
+                if (app->spath_active || event.mouse.y < app->settings_content_top) app->settings_dirty = true;
+                int32_t rr = settings_y_to_row(app, event.mouse.y);
+                int32_t tip = event.mouse.y >= app->settings_content_top ? rubraview_settings_view_table_row_at(view, (int32_t)(event.mouse.x / app->settings_cell_w), rr) : -1;
                 /* Only the keys' rows say what an action does; the folders' rows are not actions. */
                 for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l) {
-                    if (tip > 0 && rubraview_settings_view_table_screen_row(view, cstr(FOLDER_LISTS[l].table), tip) ==
-                                       (int32_t)(event.mouse.y / app->settings_cell_h)) tip = -1;
+                    if (tip > 0 && rubraview_settings_view_table_screen_row(view, cstr(FOLDER_LISTS[l].table), tip) == rr) tip = -1;
                 }
                 /* The owner (2026-10-17): resting on a setting's name shows its fuller explanation. */
                 int32_t help = -1;
-                if (tip <= 0) {
-                    int32_t c = (int32_t)(event.mouse.x / app->settings_cell_w), rr = (int32_t)(event.mouse.y / app->settings_cell_h);
+                if (tip <= 0 && event.mouse.y >= app->settings_content_top) {
+                    int32_t c = (int32_t)(event.mouse.x / app->settings_cell_w);
                     if (c >= view->content_col && c < view->content_col + view->label_cols) {
                         for (size_t i = 0; i < view->line_count; ++i) {
                             if (view->lines[i].kind != RUBRAVIEW_LINE_SETTING || rubraview_settings_view_screen_row(view, i) != rr) continue;
@@ -2072,7 +2218,7 @@ size_t settings_pump(app_state_t *app) {
             }
                 if (app->settings_selecting) {
                     int32_t c = (int32_t)(event.mouse.x / app->settings_cell_w) - view->content_col;
-                    int32_t rr = (int32_t)(event.mouse.y / app->settings_cell_h);
+                    int32_t rr = settings_y_to_row(app, event.mouse.y);
                     app->settings_sel.end_col = c < 0 ? 0 : c;
                     app->settings_sel.end_row = rr < 0 ? 0 : rr > view->rows - 1 ? view->rows - 1 : rr;
                     app->settings_dirty = true;
@@ -2114,12 +2260,24 @@ size_t settings_pump(app_state_t *app) {
                     app->settings_dirty = true;
                 }
                 break;
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL: {
                 if (chooser_wheel(app, CHOOSE_IN_SETTINGS, event.mouse.wheel_delta)) break;
                 if (app->spath_active) break;   /* the box stays over its row */
+                if (event.mouse.x < app->settings_cell_w * view->list_cols) {
+                    int32_t sw = 0, sh = 0;
+                    rubraview_pal_window_get_size(app->settings_window, &sw, &sh);
+                    int32_t pages = (int32_t)(view->doc ? view->doc->page_count : RUBRAVIEW_TAB_COUNT);
+                    if (settings_sidebar_visible(app, sh) < pages) {
+                        app->settings_page_scroll += event.mouse.wheel_delta > 0 ? -2 : 2;
+                        settings_sidebar_clamp(app, sh);
+                        app->settings_dirty = true;
+                        break;
+                    }
+                }
                 app->settings_sel.active = false;   /* the text under it has moved */
                 settings_event(app, rubraview_settings_view_scroll(view, event.mouse.wheel_delta > 0 ? -3 : 3));
                 break;
+            }
             default:
                 break;
         }
@@ -2266,7 +2424,9 @@ bool settings_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double 
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->settings_window, &w, &h);
     double ch = app->settings_cell_h;
-    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, ch * RUBRAVIEW_SETTINGS_TOP_ROWS, bw, ch * (double)visible },
+    double area_h = (double)h - ch - app->settings_content_top - 2.0 * dpi;
+    if (visible <= 0 || area_h <= 2.0 * bw) return false;
+    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, app->settings_content_top, bw, area_h },
                                    .button = bw, .total = (double)v->content_height, .shown = (double)visible,
                                    .first = (double)v->scroll, .step = 1.0, .min_thumb = ch };
     return true;
@@ -2287,16 +2447,23 @@ void draw_settings_window(app_state_t *app) {
     const double cw = app->settings_cell_w, ch = app->settings_cell_h, fs = app->settings_font;
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->settings_window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->settings_window);
+    settings_layout_buttons(app, w, v->cols);
+    settings_sidebar_clamp(app, h);
     rubraview_settings_sources_t sources = { .user = app, .info = settings_info, .table_row = settings_table_row };
     char line[4096];   /* 1.30.1: a 4K window's rows of 3-byte rules fit */
 
     rubraview_pal_render_begin(r, SETTINGS_BACKGROUND);
 
-    /* The page list. */
+    /* The page list (scrolls vertically when window is short). */
+    int32_t pages = (int32_t)v->doc->page_count, vis_pages = settings_sidebar_visible(app, h);
     rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0, 0, cw * v->list_cols, (double)h }, SETTINGS_PANE, 0.0);
     rubraview_pal_render_draw_text_mono(r, TU8(" Settings"), 0.0, 0.0, fs, SETTINGS_ACCENT);
-    for (int32_t p = 0; p < (int32_t)v->doc->page_count; ++p) {
-        double y = ch * (2 + p);
+    if (app->settings_page_scroll > 0)
+        rubraview_pal_render_draw_text(r, PROVEN_LIT("\xE2\x96\xB2"), (rubraview_pal_rect_t){ 0.0, ch, cw * v->list_cols, ch }, fs * 0.75, SETTINGS_DIM, RUBRAVIEW_TEXT_CENTER);
+    for (int32_t k = 0; k < vis_pages && app->settings_page_scroll + k < pages; ++k) {
+        int32_t p = app->settings_page_scroll + k;
+        double y = ch * (double)(2 + k);
         if (p == v->page) {
             rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0, y, cw * v->list_cols, ch }, SETTINGS_FOCUS, 0.0);
         }
@@ -2308,19 +2475,23 @@ void draw_settings_window(app_state_t *app) {
             settings_text_link(app, (proven_u8str_view_t){ page.ptr + a, page.size - a }, app->settings_cell_w * (double)a, y, SETTINGS_TEXT, page.ptr[a], 0);
         }
     }
+    if (app->settings_page_scroll + vis_pages < pages && (double)h >= ch * 3.0)
+        rubraview_pal_render_draw_text(r, PROVEN_LIT("\xE2\x96\xBC"), (rubraview_pal_rect_t){ 0.0, (double)h - ch, cw * v->list_cols, ch }, fs * 0.75, SETTINGS_DIM, RUBRAVIEW_TEXT_CENTER);
 
     /* The page. Each row's text is kept as drawn, for a marked block to copy. */
     proven_sys_mem_set(app->settings_grid_len, 0, sizeof(app->settings_grid_len));
     double x0 = cw * v->content_col;
     settings_grid_keep(app, 0, rubraview_tr_u8(rubraview_settings_page_title((size_t)v->page)));
     settings_text(app, rubraview_tr_u8(rubraview_settings_page_title((size_t)v->page)), x0, 0.0, SETTINGS_ACCENT);
+    double msg_y = (double)h - ch;
     for (size_t i = 0; i < v->line_count; ++i) {
         const rubraview_settings_line_t *ln = &v->lines[i];
         const rubraview_settings_node_t *node = &v->doc->nodes[ln->node];
         for (int32_t k = 0; k < ln->height; ++k) {
             int32_t content_row = ln->row + k - v->scroll;
             if (content_row < 0 || content_row >= rubraview_settings_view_visible_rows(v)) continue;
-            double y = ch * (RUBRAVIEW_SETTINGS_TOP_ROWS + content_row);
+            double y = settings_row_y(app, RUBRAVIEW_SETTINGS_TOP_ROWS + content_row);
+            if (y + ch > msg_y + 0.5) continue;
             if (ln->kind == RUBRAVIEW_LINE_PREVIEW) {
                 if (k == 0) {
                     rubraview_pal_rect_t box = { x0, y, cw * (v->cols - v->content_col - 1), ch * ln->height };
@@ -2371,11 +2542,6 @@ void draw_settings_window(app_state_t *app) {
     settings_path_draw(app);
     keys_layout_draw(app);   /* RV-217 */
 
-    /* Under the page: the last action's result (the buttons are at the top). */
-    if (app->settings_message[0]) {
-        settings_grid_keep(app, v->rows - 1, cstr(app->settings_message));
-        rubraview_pal_render_draw_text_mono(r, cstr(app->settings_message), x0, ch * (v->rows - 1), fs, SETTINGS_DIM);
-    }
     /* The marked block, shaded over the text it covers. */
     for (int32_t row = 0; row < v->rows; ++row) {
         int32_t c0 = 0, c1 = 0;
@@ -2383,17 +2549,43 @@ void draw_settings_window(app_state_t *app) {
         int32_t last_col = v->cols - v->content_col - 1;
         if (c1 > last_col) c1 = last_col;
         if (c1 < c0) continue;
-        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x0 + cw * c0, ch * row, cw * (c1 - c0 + 1), ch },
+        double sy = settings_row_y(app, row);
+        if (sy + ch > msg_y + 0.5) continue;
+        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x0 + cw * c0, sy, cw * (c1 - c0 + 1), ch },
                                        0x704A90D9u, 0.0);
     }
+    /* Wrapping top action buttons. */
     for (int32_t b = 0; b < RUBRAVIEW_BUTTON_COUNT; ++b) {
-        int32_t col = 0, width = 0;
-        rubraview_settings_view_button_cells(v, (rubraview_settings_button_t)b, &col, &width);
-        double y = ch * RUBRAVIEW_SETTINGS_BUTTON_ROW;
+        rubraview_pal_rect_t br = app->settings_btn[b];
         if (b == v->focus_button) {
-            rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cw * col, y, cw * width, ch }, SETTINGS_FOCUS, 0.0);
+            rubraview_pal_render_fill_rect(r, br, SETTINGS_FOCUS, 0.0);
+        } else if (pal_rect_has(br, app->settings_px, app->settings_py)) {
+            rubraview_pal_render_fill_rect(r, br, 0xFF282D34u, 2.0);
         }
-        settings_text_link(app, rubraview_settings_button_text((rubraview_settings_button_t)b), cw * col, y, SETTINGS_TEXT, '[', ']');
+        proven_u8str_view_t btxt = rubraview_settings_button_text((rubraview_settings_button_t)b);
+        double bx_y = br.y + (br.height - ch) * 0.5;
+        if (cw * (double)rubraview_settings_text_cells(btxt) <= br.width + 1.0)
+            settings_text_link(app, btxt, br.x, bx_y, SETTINGS_TEXT, '[', ']');
+        else {
+            char bfit[80];
+            rubraview_pal_render_draw_text(r, fit_text_measured(r, bfit, sizeof(bfit), btxt, br.width, fs), br, fs, SETTINGS_LINK, RUBRAVIEW_TEXT_CENTER);
+        }
+    }
+
+    /* Mask right scrollbar strip so monospace lines never bleed through, then draw footer message bar. */
+    {
+        rubraview_scrollbar_t sb;
+        if (scrollbar_of(app, RVSB_SETTINGS, &sb)) {
+            rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ sb.area.x - 4.0 * dpi, app->settings_content_top, (double)w - sb.area.x + 4.0 * dpi, msg_y - app->settings_content_top }, SETTINGS_BACKGROUND, 0.0);
+            draw_scrollbar(app, r, RVSB_SETTINGS, app->settings_px, app->settings_py);
+        }
+    }
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x0 - cw * 0.5, msg_y, (double)w - x0 + cw * 0.5, ch }, SETTINGS_BACKGROUND, 0.0);
+    if (app->settings_message[0] && (double)w > x0 + 8.0 * dpi) {
+        char mfit[240];
+        settings_grid_keep(app, v->rows - 1, cstr(app->settings_message));
+        rubraview_pal_render_draw_text(r, fit_text_measured(r, mfit, sizeof(mfit), cstr(app->settings_message), (double)w - x0 - 8.0 * dpi, fs * 0.92),
+                                       (rubraview_pal_rect_t){ x0, msg_y, (double)w - x0 - 8.0 * dpi, ch }, fs * 0.92, SETTINGS_DIM, RUBRAVIEW_TEXT_LEFT);
     }
 
     if (app->settings_tip_shown && app->settings_tip_row > 0 && (size_t)(app->settings_tip_row - 1) < app->keymap.count) {
@@ -2441,7 +2633,6 @@ void draw_settings_window(app_state_t *app) {
         rubraview_pal_render_draw_text(r, help, (rubraview_pal_rect_t){ x + cw, y, tw - cw * 2.0, th }, fs, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
     /* 1.25.0 (owner, 2026-10-20: "가로 세로 스크롤바가 생기거나"): a bar at the right while the page is taller; RV-170 */
-    draw_scrollbar(app, r, RVSB_SETTINGS, app->settings_px, app->settings_py);
     draw_chooser(app, r, CHOOSE_IN_SETTINGS, -1.0, -1.0);   /* 1.24.0 */
     if (!rubraview_pal_render_end(r)) app->settings_dirty = true;
 }

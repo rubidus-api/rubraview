@@ -507,19 +507,41 @@ void info_show(app_state_t *app) {
     live_start(app);
     app->info_scroll = 0;
     app->info_message[0] = '\0';
+    app->info_foot_h = app->info_cell_h * 1.5;
     app->info_key = info_key_now(app);
     info_gather(app);
+}
+
+#define INFO_BACKGROUND 0xFF16181Cu
+#define INFO_HEADING    0xFF7FB2E5u
+#define INFO_TEXT       0xFFE8E8E8u
+#define INFO_DIM        0xFF8A9099u
+
+static double info_foot_height(const app_state_t *app, char *out_foot, size_t cap, int *out_n, int32_t w, double dpi) {
+    int n = rubraview_fmt(out_foot, cap, T(" {}{}drag to mark   |   Ctrl+C copies (all when nothing is marked)   |   Ctrl+A   |   Esc"),
+                          PROVEN_ARG(app->info_message), PROVEN_ARG(app->info_message[0] ? "   |   " : ""));
+    if (out_n) *out_n = n;
+    double pad = 8.0 * dpi, wrap_w = (double)w - 2.0 * pad;
+    if (wrap_w < 40.0 * dpi) wrap_w = 40.0 * dpi;
+    double mw = 0.0, mh = app->info_cell_h;
+    if (n > 0 && app->info_renderer) {
+        size_t len = (size_t)n < cap ? (size_t)n : cap - 1;
+        (void)rubraview_pal_render_measure_text_wrapped(app->info_renderer, (proven_u8str_view_t){ (const proven_byte_t *)out_foot, len }, app->info_font * 0.85, wrap_w, &mw, &mh);
+    }
+    return mh + 10.0 * dpi;
 }
 
 static int32_t info_visible_rows(const app_state_t *app) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->info_window, &w, &h);
-    int32_t rows = (int32_t)((double)h / app->info_cell_h) - 2;
-    return rows > 1 ? rows : 1;
+    double avail = (double)h - app->info_cell_h * 0.5 - app->info_foot_h;
+    int32_t rows = app->info_cell_h > 0.0 && avail > 0.0 ? (int32_t)(avail / app->info_cell_h) : 0;
+    return rows >= 0 ? rows : 0;
 }
 
 static void info_scroll_by(app_state_t *app, int32_t lines) {
-    int32_t last = (int32_t)app->info_count - info_visible_rows(app);
+    int32_t vis = info_visible_rows(app);
+    int32_t last = vis > 0 ? (int32_t)app->info_count - vis : (int32_t)app->info_count;
     if (last < 0) last = 0;
     app->info_scroll += lines;
     if (app->info_scroll > last) app->info_scroll = last;
@@ -534,7 +556,9 @@ bool info_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi)
     rubraview_pal_window_get_size(app->info_window, &w, &h);
     int32_t rows = info_visible_rows(app);
     double ch = app->info_cell_h;
-    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, ch * 0.5, bw, ch * (double)rows },
+    double area_h = (double)h - app->info_foot_h - ch * 0.5 - 2.0 * dpi;
+    if (rows <= 0 || area_h <= 2.0 * bw) return false;
+    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, ch * 0.5, bw, area_h },
                                    .button = bw, .total = (double)app->info_count, .shown = (double)rows,
                                    .first = (double)app->info_scroll, .step = 1.0, .min_thumb = ch };
     return true;
@@ -543,11 +567,6 @@ bool info_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi)
 void info_sb_to(app_state_t *app, size_t first) {
     info_scroll_by(app, (int32_t)first - app->info_scroll);
 }
-
-#define INFO_BACKGROUND 0xFF16181Cu
-#define INFO_HEADING    0xFF7FB2E5u
-#define INFO_TEXT       0xFFE8E8E8u
-#define INFO_DIM        0xFF8A9099u
 
 /* Text on the grid, each narrow run and each wide character at its own cell. */
 static void info_text(app_state_t *app, proven_u8str_view_t text, double x, double y, uint32_t color) {
@@ -571,6 +590,11 @@ void draw_info_window(app_state_t *app) {
     const double cw = app->info_cell_w, ch = app->info_cell_h;
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->info_window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->info_window);
+    char foot[160];
+    int n = 0;
+    app->info_foot_h = info_foot_height(app, foot, sizeof(foot), &n, w, dpi);
+    if (app->info_foot_h > (double)h) app->info_foot_h = (double)h;
     rubraview_pal_render_begin(r, INFO_BACKGROUND);
     double x0 = cw;
     int32_t rows = info_visible_rows(app);
@@ -586,12 +610,20 @@ void draw_info_window(app_state_t *app) {
         }
         info_text(app, app->info_rows[index], x0, y, app->info_heading[index] ? INFO_HEADING : INFO_TEXT);
     }
-    char foot[160];
-    int n = rubraview_fmt(foot, sizeof(foot), T(" {}{}drag to mark   |   Ctrl+C copies (all when nothing is marked)   |   Ctrl+A   |   Esc"),
-                     PROVEN_ARG(app->info_message), PROVEN_ARG(app->info_message[0] ? "   |   " : ""));
-    if (n > 0) rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ (const proven_byte_t *)foot, (size_t)n < sizeof(foot) ? (size_t)n : sizeof(foot) - 1 },
-                                                   0.0, (double)h - ch * 1.2, app->info_font, INFO_DIM);
-    draw_scrollbar(app, r, RVSB_INFO, app->info_px, app->info_py);   /* RV-170 */
+    {
+        rubraview_scrollbar_t sb;
+        if (scrollbar_of(app, RVSB_INFO, &sb)) {
+            rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ sb.area.x - 4.0 * dpi, 0.0, (double)w - sb.area.x + 4.0 * dpi, (double)h - app->info_foot_h }, INFO_BACKGROUND, 0.0);
+            draw_scrollbar(app, r, RVSB_INFO, app->info_px, app->info_py);   /* RV-170 */
+        }
+    }
+    double foot_y = (double)h - app->info_foot_h;
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, foot_y, (double)w, app->info_foot_h }, 0xFF1E1E1Eu, 0.0);
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, foot_y, (double)w, 1.0 }, 0xFF343A42u, 0.0);
+    if (n > 0 && (double)w > 16.0 * dpi)
+        rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)foot, (size_t)n < sizeof(foot) ? (size_t)n : sizeof(foot) - 1 },
+                                       (rubraview_pal_rect_t){ 8.0 * dpi, foot_y + 4.0 * dpi, (double)w - 16.0 * dpi, app->info_foot_h - 8.0 * dpi },
+                                       app->info_font * 0.85, INFO_DIM, RUBRAVIEW_TEXT_LEFT);
     if (!rubraview_pal_render_end(r)) app->info_dirty = true;
 }
 
@@ -636,14 +668,18 @@ size_t info_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL:
                 info_scroll_by(app, event.mouse.wheel_delta > 0 ? -3 : 3);
                 break;
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
                 if (scrollbar_press(app, RVSB_INFO, event.mouse.x, event.mouse.y)) { app->info_dirty = true; break; }   /* RV-170 */
+                int32_t iw = 0, ih = 0;
+                rubraview_pal_window_get_size(app->info_window, &iw, &ih);
+                if (event.mouse.y >= (double)ih - app->info_foot_h || info_visible_rows(app) <= 0) break;
                 app->info_sel = (rubraview_grid_selection_t){ true, row, col, row, col };
                 app->info_selecting = true;
                 app->info_message[0] = '\0';
                 app->info_dirty = true;
                 break;
+            }
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
                 app->info_px = event.mouse.x;
                 app->info_py = event.mouse.y;
@@ -788,6 +824,8 @@ void help_show(app_state_t *app) {
     help_measure(app);
     app->help_open = true;
     app->help_scroll = 0;
+    app->help_px = app->help_py = -1.0;
+    app->help_foot_h = app->help_cell_h * 1.4;
     help_rebuild(app);
 }
 
@@ -796,20 +834,55 @@ void help_show(app_state_t *app) {
    released, the project's page as a link, a blank row. */
 #define HELP_TOP_ROWS 3
 
+static double help_foot_height(const app_state_t *app, char *out_foot, size_t cap, int *out_written, int32_t w, double dpi) {
+    int written = rubraview_fmt(out_foot, cap, T(" {}{}keys, then the licences at the end   |   drag to mark, Ctrl+C copies   |   ?, F1 or Esc closes"),
+                                PROVEN_ARG(app->help_message), PROVEN_ARG(app->help_message[0] ? "   |   " : ""));
+    if (out_written) *out_written = written;
+    double pad = 8.0 * dpi, wrap_w = (double)w - 2.0 * pad;
+    if (wrap_w < 40.0 * dpi) wrap_w = 40.0 * dpi;
+    double mw = 0.0, mh = app->help_cell_h;
+    if (written > 0 && app->help_renderer) {
+        size_t len = (size_t)written < cap ? (size_t)written : cap - 1;
+        (void)rubraview_pal_render_measure_text_wrapped(app->help_renderer, (proven_u8str_view_t){ (const proven_byte_t *)out_foot, len }, app->help_font * 0.85, wrap_w, &mw, &mh);
+    }
+    return mh + 10.0 * dpi;
+}
+
 static int32_t help_rows(const app_state_t *app) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->help_window, &w, &h);
-    int32_t rows = (int32_t)((double)h / app->help_cell_h) - 1 - HELP_TOP_ROWS;
-    return rows > 1 ? rows : 1;
+    double avail = (double)h - app->help_cell_h * (double)HELP_TOP_ROWS - app->help_foot_h;
+    int32_t rows = app->help_cell_h > 0.0 && avail > 0.0 ? (int32_t)(avail / app->help_cell_h) : 0;
+    return rows >= 0 ? rows : 0;
 }
 
 static void help_scroll_by(app_state_t *app, int32_t lines) {
-    int32_t last = (int32_t)app->help_count - help_rows(app);
+    int32_t vis = help_rows(app);
+    int32_t last = vis > 0 ? (int32_t)app->help_count - vis : (int32_t)app->help_count;
     if (last < 0) last = 0;
     app->help_scroll += lines;
     if (app->help_scroll > last) app->help_scroll = last;
     if (app->help_scroll < 0) app->help_scroll = 0;
     app->help_dirty = true;
+}
+
+bool help_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi) {
+    if (!app->help_open) return false;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->help_window, &w, &h);
+    int32_t rows = help_rows(app);
+    double ch = app->help_cell_h;
+    double top = ch * (double)HELP_TOP_ROWS;
+    double area_h = (double)h - app->help_foot_h - top - 2.0 * dpi;
+    if (rows <= 0 || area_h <= 2.0 * bw) return false;
+    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, top, bw, area_h },
+                                   .button = bw, .total = (double)app->help_count, .shown = (double)rows,
+                                   .first = (double)app->help_scroll, .step = 1.0, .min_thumb = ch };
+    return true;
+}
+
+void help_sb_to(app_state_t *app, size_t first) {
+    help_scroll_by(app, (int32_t)first - app->help_scroll);
 }
 
 void draw_help_window(app_state_t *app) {
@@ -819,13 +892,25 @@ void draw_help_window(app_state_t *app) {
     const double cw = app->help_cell_w, ch = app->help_cell_h, fs = app->help_font;
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->help_window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->help_window);
+
+    char foot[160];
+    int written = 0;
+    app->help_foot_h = help_foot_height(app, foot, sizeof(foot), &written, w, dpi);
+    if (app->help_foot_h > (double)h) app->help_foot_h = (double)h;
 
     rubraview_pal_render_begin(r, HELP_BACKGROUND);
 
     int32_t rows = help_rows(app);
     double keys_col = cw * 2.0;
-    double text_col = cw * (double)app->help_key_cols;
-    {
+    bool has_sb = rows > 0 && (int32_t)app->help_count > rows;
+    double right_limit = (double)w - (has_sb ? 18.0 * dpi : 8.0 * dpi);
+    int32_t win_cols = right_limit > keys_col && cw > 0.0 ? (int32_t)((right_limit - keys_col) / cw) : 0;
+    int32_t cap_cols = (win_cols * 42) / 100;
+    if (cap_cols < 12) cap_cols = 12;
+    int32_t shown_key_cols = app->help_key_cols < cap_cols ? app->help_key_cols : cap_cols;
+    double text_col = cw * (double)shown_key_cols;
+    if ((double)h - app->help_foot_h >= ch * 2.0) {
         char top[160];
         int n = rubraview_fmt(top, sizeof(top), T("Rubraview {}, released {}"), PROVEN_ARG(RUBRAVIEW_VERSION_STRING), PROVEN_ARG(RUBRAVIEW_RELEASE_DATE));
         if (n > 0) rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ (const proven_byte_t *)top, (size_t)n }, keys_col, 0.0, fs, HELP_HEADING);
@@ -846,16 +931,19 @@ void draw_help_window(app_state_t *app) {
             if (c1 >= c0) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cw * c0, y, cw * (c1 - c0 + 1), ch }, 0x704A90D9u, 0.0);
         }
         switch (line->kind) {
-            case RUBRAVIEW_HELP_HEADING:
+            case RUBRAVIEW_HELP_HEADING: {
+                double rw = right_limit - keys_col;
                 rubraview_pal_render_draw_text_mono(r, line->text, keys_col, y, fs, HELP_HEADING);
-                rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ keys_col, y + ch * 0.92,
-                                                                          (double)w - keys_col * 2.0, 1.0 },
-                                               HELP_HEADING, 0.0);
+                if (rw > 0.0) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ keys_col, y + ch * 0.92, rw, 1.0 }, HELP_HEADING, 0.0);
                 break;
-            case RUBRAVIEW_HELP_ENTRY:
+            }
+            case RUBRAVIEW_HELP_ENTRY: {
                 rubraview_pal_render_draw_text_mono(r, line->keys, keys_col, y, fs, HELP_KEYS);
-                rubraview_pal_render_draw_text_mono(r, line->text, text_col, y, fs, HELP_TEXT);
+                double k_end = keys_col + cw * (double)(rubraview_text_columns(line->keys) + 2);
+                double desc_x = k_end > text_col ? k_end : text_col;
+                rubraview_pal_render_draw_text_mono(r, line->text, desc_x, y, fs, HELP_TEXT);
                 break;
+            }
             case RUBRAVIEW_HELP_NOTE:
                 rubraview_pal_render_draw_text_mono(r, line->text, keys_col, y, fs, HELP_TEXT);
                 break;
@@ -864,18 +952,25 @@ void draw_help_window(app_state_t *app) {
                 break;
         }
     }
+    {
+        rubraview_scrollbar_t sb;
+        if (scrollbar_of(app, RVSB_HELP, &sb)) {
+            rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ sb.area.x - 4.0 * dpi, 0.0, (double)w - sb.area.x + 4.0 * dpi, (double)h - app->help_foot_h }, HELP_BACKGROUND, 0.0);
+            draw_scrollbar(app, r, RVSB_HELP, app->help_px, app->help_py);
+        }
+    }
 
     /* The bottom line says how to move and how to leave. */
-    char foot[128];
-    int written = rubraview_fmt(foot, sizeof(foot), T(" {}{}keys, then the licences at the end   |   drag to mark, Ctrl+C copies   |   ?, F1 or Esc closes"),
-                           PROVEN_ARG(app->help_message), PROVEN_ARG(app->help_message[0] ? "   |   " : ""));
-    if (written > 0) {
-        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, (double)h - ch, (double)w, ch },
-                                       0xFF1E1E1Eu, 0.0);
-        rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)foot, .size = (size_t)written },
-                                            0.0, (double)h - ch, fs, HELP_HEADING);
+    double foot_y = (double)h - app->help_foot_h;
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, foot_y, (double)w, app->help_foot_h }, 0xFF1E1E1Eu, 0.0);
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, foot_y, (double)w, 1.0 }, 0xFF343A42u, 0.0);
+    if (written > 0 && (double)w > 16.0 * dpi) {
+        size_t len = (size_t)written < sizeof(foot) ? (size_t)written : sizeof(foot) - 1;
+        rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)foot, len },
+                                       (rubraview_pal_rect_t){ 8.0 * dpi, foot_y + 4.0 * dpi, (double)w - 16.0 * dpi, app->help_foot_h - 8.0 * dpi },
+                                       fs * 0.85, HELP_HEADING, RUBRAVIEW_TEXT_LEFT);
     }
-    rubraview_pal_render_end(r);
+    if (!rubraview_pal_render_end(r)) app->help_dirty = true;
 }
 
 size_t help_pump(app_state_t *app) {
@@ -904,6 +999,22 @@ size_t help_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP: {
+                if (event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE) {
+                    app->help_px = event.mouse.x;
+                    app->help_py = event.mouse.y;
+                    if (scrollbar_motion(app, app->help_window, event.mouse.x, event.mouse.y)) { app->help_dirty = true; break; }
+                    if (scrollbar_hover(app, RVSB_HELP, event.mouse.x, event.mouse.y)) app->help_dirty = true;
+                } else if (event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN) {
+                    if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && scrollbar_press(app, RVSB_HELP, event.mouse.x, event.mouse.y)) {
+                        app->help_dirty = true;
+                        break;
+                    }
+                    int32_t hw = 0, hh = 0;
+                    rubraview_pal_window_get_size(app->help_window, &hw, &hh);
+                    if (event.mouse.y >= (double)hh - app->help_foot_h || help_rows(app) <= 0) break;
+                } else if (event.kind == RUBRAVIEW_WINDOW_EVENT_MOUSE_UP) {
+                    if (scrollbar_release(app, app->help_window)) { app->help_dirty = true; break; }
+                }
                 /* A drag marks the text, as in the settings and information windows. */
                 int32_t col = (int32_t)(event.mouse.x / app->help_cell_w);
                 int32_t screen_row = (int32_t)(event.mouse.y / app->help_cell_h);

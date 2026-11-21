@@ -3037,7 +3037,9 @@ static bool edit_windowed(const app_state_t *app) {
 
 enum { EDIT_BAR_UNDO = EDIT_TABS, EDIT_BAR_REDO, EDIT_BAR_SAVE_COPY, EDIT_BAR_SAVE, EDIT_BAR_PARTS };
 
-static double edit_bar_height(const app_state_t *app) { return 40.0 * rubraview_pal_window_dpi_scale(app->edit_window); }
+static double edit_bar_height(const app_state_t *app) {
+    return app->edit_bar_h > 0.0 ? app->edit_bar_h : 40.0 * rubraview_pal_window_dpi_scale(app->edit_window);
+}
 
 static proven_u8str_view_t edit_bar_word(const app_state_t *app, int32_t part, char *buf, size_t cap) {
     static const char *const WORDS[EDIT_BAR_PARTS] = { N_("Adjust"), N_("Effects"), N_("Size"), N_("Edits"),
@@ -3050,48 +3052,73 @@ static proven_u8str_view_t edit_bar_word(const app_state_t *app, int32_t part, c
 
 static const uint32_t EDIT_BAR_ICONS[EDIT_BAR_PARTS - EDIT_TABS] = { 0xE7A7u, 0xE7A6u, 0xE792u, 0xE74Eu };   /* undo, redo, save as, save */
 
-/* Whether the four buttons take only their icons: the tabs' words and theirs do not fit side by side. */
-static bool edit_bar_icons(app_state_t *app) {
-    double dpi = rubraview_pal_window_dpi_scale(app->edit_window), size = 14.0 * dpi, pad = 16.0 * dpi, gap = 4.0 * dpi, need = 16.0 * dpi;
+static void edit_bar_layout(app_state_t *app) {
+    double dpi = rubraview_pal_window_dpi_scale(app->edit_window), size = 14.0 * dpi;
+    double pad = 16.0 * dpi, gap = 4.0 * dpi, row_h = 30.0 * dpi, top = 6.0 * dpi, gap_y = 4.0 * dpi;
     int32_t ww = 0, wh = 0;
     rubraview_pal_window_get_size(app->edit_window, &ww, &wh);
+    double room = (double)ww - 16.0 * dpi;
+    if (room < 40.0 * dpi) room = 40.0 * dpi;
+    double w[EDIT_BAR_PARTS] = {0};
     char buf[64];
+    double tabs_w = 0.0, btns_w = 0.0;
     for (int32_t k = 0; k < EDIT_BAR_PARTS; ++k) {
+        bool tab = k < EDIT_TABS;
         double tw = 60.0 * dpi;
-        if (app->edit_renderer) (void)rubraview_pal_render_measure_text(app->edit_renderer, edit_bar_word(app, k, buf, sizeof(buf)), size, &tw);
-        need += tw + (k < EDIT_TABS ? 2.0 * pad : 1.5 * pad) + gap;
+        if (app->edit_renderer) (void)rubraview_pal_render_measure_text(app->edit_renderer, edit_bar_word(app, k, buf, sizeof(buf)), tab ? size : size * 0.95, &tw);
+        w[k] = tw + (tab ? 2.0 * pad : 1.5 * pad);
+        if (w[k] > room) w[k] = room;
+        if (tab) tabs_w += w[k] + (k > 0 ? gap : 0.0);
+        else btns_w += w[k] + (k > EDIT_TABS ? gap : 0.0);
     }
-    return need > (double)ww;
+    double x_left = 8.0 * dpi, x_right = (double)ww - 8.0 * dpi;
+    double ibw = row_h;
+    double icons_w = (double)(EDIT_BAR_PARTS - EDIT_TABS) * ibw + (double)(EDIT_BAR_PARTS - EDIT_TABS - 1) * gap;
+    if (tabs_w + gap * 2.0 + btns_w <= room) {
+        app->edit_bar_is_icons = false;
+        app->edit_bar_h = 40.0 * dpi;
+        double x = x_left;
+        for (int32_t k = 0; k < EDIT_TABS; ++k) { app->edit_bar_rects[k] = (rubraview_rect_t){ x, top, w[k], row_h }; x += w[k] + gap; }
+        x = x_right;
+        for (int32_t k = EDIT_BAR_PARTS - 1; k >= EDIT_TABS; --k) {
+            x -= w[k];
+            app->edit_bar_rects[k] = (rubraview_rect_t){ x, top + 3.0 * dpi, w[k], row_h - 6.0 * dpi };
+            x -= gap;
+        }
+        return;
+    }
+    if (tabs_w + gap * 2.0 + icons_w <= room) {
+        app->edit_bar_is_icons = true;
+        app->edit_bar_h = 40.0 * dpi;
+        double x = x_left;
+        for (int32_t k = 0; k < EDIT_TABS; ++k) { app->edit_bar_rects[k] = (rubraview_rect_t){ x, top, w[k], row_h }; x += w[k] + gap; }
+        x = x_right;
+        for (int32_t k = EDIT_BAR_PARTS - 1; k >= EDIT_TABS; --k) {
+            x -= ibw;
+            app->edit_bar_rects[k] = (rubraview_rect_t){ x, top + 3.0 * dpi, ibw, row_h - 6.0 * dpi };
+            x -= gap;
+        }
+        return;
+    }
+    /* Too narrow even for icons beside tabs: wrap tabs and action buttons cleanly into multiple rows. */
+    app->edit_bar_is_icons = false;
+    uint32_t row_of[EDIT_BAR_PARTS] = {0};
+    double x_of[EDIT_BAR_PARTS] = {0};
+    size_t rows = rubraview_flow_inline(w, EDIT_BAR_PARTS, gap, room, row_of, x_of);
+    if (rows == 0) rows = 1;
+    double bh = 26.0 * dpi;
+    for (int32_t k = 0; k < EDIT_BAR_PARTS; ++k)
+        app->edit_bar_rects[k] = (rubraview_rect_t){ x_left + x_of[k], top + (double)row_of[k] * (bh + gap_y), w[k], bh };
+    app->edit_bar_h = top + (double)rows * bh + (double)(rows - 1) * gap_y + 4.0 * dpi;
 }
 
-/* A part's rectangle: tabs from the left, the four buttons from the right, each as wide as its word (its icon
-   alone when the window is narrow). */
+static bool edit_bar_icons(app_state_t *app) {
+    return app->edit_bar_is_icons;
+}
+
+/* A part's rectangle computed by edit_bar_layout (single row, icon fallback, or wrapped multi-row). */
 static rubraview_rect_t edit_bar_rect(app_state_t *app, int32_t part) {
-    double dpi = rubraview_pal_window_dpi_scale(app->edit_window), size = 14.0 * dpi, pad = 16.0 * dpi, gap = 4.0 * dpi;
-    double bar = edit_bar_height(app), top = 6.0 * dpi, h = bar - 10.0 * dpi;
-    int32_t ww = 0, wh = 0;
-    rubraview_pal_window_get_size(app->edit_window, &ww, &wh);
-    char buf[64];
-    double x = 8.0 * dpi;
-    if (part < EDIT_TABS) {
-        for (int32_t k = 0; k <= part; ++k) {
-            double tw = 60.0 * dpi;
-            if (app->edit_renderer) (void)rubraview_pal_render_measure_text(app->edit_renderer, edit_bar_word(app, k, buf, sizeof(buf)), size, &tw);
-            if (k == part) return (rubraview_rect_t){ x, top, tw + 2.0 * pad, h };
-            x += tw + 2.0 * pad + gap;
-        }
-    }
-    x = (double)ww - 8.0 * dpi;
-    bool icons = edit_bar_icons(app);
-    for (int32_t k = EDIT_BAR_PARTS - 1; k >= part && k >= EDIT_TABS; --k) {
-        double tw = 60.0 * dpi;
-        if (app->edit_renderer) (void)rubraview_pal_render_measure_text(app->edit_renderer, edit_bar_word(app, k, buf, sizeof(buf)), size * 0.95, &tw);
-        double bw = icons ? h - 6.0 * dpi + 6.0 * dpi : tw + 1.5 * pad;
-        x -= bw;
-        if (k == part) return (rubraview_rect_t){ x, top + 3.0 * dpi, bw, h - 6.0 * dpi };
-        x -= gap;
-    }
-    return (rubraview_rect_t){0};
+    return (part >= 0 && part < EDIT_BAR_PARTS) ? app->edit_bar_rects[part] : (rubraview_rect_t){0};
 }
 
 static int32_t edit_bar_part_at(app_state_t *app, double x, double y) {
@@ -3107,7 +3134,7 @@ static void draw_edit_bar(app_state_t *app) {
     double bar = edit_bar_height(app);
     rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, bar - 1.0, (double)ww, 1.0 }, COLOR_BOX_BORDER, 0.0);
     int32_t hover = edit_bar_part_at(app, app->edit_px, app->edit_py);
-    char buf[64];
+    char buf[64], cut[128];
     for (int32_t k = 0; k < EDIT_BAR_PARTS; ++k) {
         rubraview_rect_t r = edit_bar_rect(app, k);
         if (r.width <= 0.0) continue;
@@ -3126,8 +3153,9 @@ static void draw_edit_bar(app_state_t *app) {
             rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 3.0);
         }
         if (!tab && edit_bar_icons(app)) { draw_sign(app->renderer, EDIT_BAR_ICONS[k - EDIT_TABS], k == EDIT_BAR_UNDO ? "<" : k == EDIT_BAR_REDO ? ">" : "S", b, size, COLOR_TEXT); continue; }
-        rubraview_pal_render_draw_text(app->renderer, edit_bar_word(app, k, buf, sizeof(buf)), b, tab ? size : size * 0.95,
-                                       on ? COLOR_TEXT : tab ? 0xFFB0B0B0u : COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        double tsize = tab ? size : size * 0.95;
+        proven_u8str_view_t label = fit_text_measured(app->renderer, cut, sizeof(cut), edit_bar_word(app, k, buf, sizeof(buf)), b.width - 4.0 * dpi, tsize);
+        if (label.size > 0) rubraview_pal_render_draw_text(app->renderer, label, b, tsize, on ? COLOR_TEXT : tab ? 0xFFB0B0B0u : COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
 }
 
@@ -3181,18 +3209,20 @@ void edit_window_layout(app_state_t *app) {
         rubraview_panel_set_spacer(&app->panel, PANEL_SP_SEL, head + (double)app->sel_panel.row_count * app->sel_panel.row_height + app->sel_panel.padding * 2.0);
     size_t shown = app->edit_steps.count < 3 ? 3 : app->edit_steps.count > 8 ? 8 : app->edit_steps.count;
     rubraview_panel_set_spacer(&app->panel, PANEL_SP_CHANGES, head + (double)shown * app->changes.row_height + 4.0 * dpi);
+    edit_bar_layout(app);
     double bar = edit_bar_height(app);   /* RV-188: the tab bar over the rows */
-    rubraview_panel_layout_columns(&app->panel, (rubraview_rect_t){ 0.0, bar, (double)w, (double)h - bar }, mode + 1, app->edit_firsts);
+    double body_h = (double)h > bar ? (double)h - bar : 0.0;
+    rubraview_panel_layout_columns(&app->panel, (rubraview_rect_t){ 0.0, bar, (double)w, body_h }, mode + 1, app->edit_firsts);
     rubraview_rect_t r = edit_room(app, PANEL_SP_SEL);
     if (app->sel_panel.open) {
-        if (r.width > 0.0) rubraview_panel_layout_columns(&app->sel_panel, (rubraview_rect_t){ r.x, r.y + head, r.width, r.height - head }, 1, NULL);
+        if (r.width > 0.0 && r.height > head) rubraview_panel_layout_columns(&app->sel_panel, (rubraview_rect_t){ r.x, r.y + head, r.width, r.height - head }, 1, NULL);
         else app->sel_panel.bounds = (rubraview_rect_t){ 0.0, -1.0e6, 0.0, 0.0 };
     }
     r = edit_room(app, PANEL_SP_CHANGES);
     app->changes.x = r.x;
     app->changes.y = r.y + head;
     app->changes.width = r.width;
-    app->changes.height = r.width > 0.0 ? r.height - head : 0.0;
+    app->changes.height = (r.width > 0.0 && r.height > head) ? r.height - head : 0.0;
 }
 
 void edit_window_close(app_state_t *app) {
@@ -3351,7 +3381,7 @@ static void draw_changes(app_state_t *app) {
         char line[96], fit[200];
         proven_u8str_view_t words = edit_step_words(&app->edit_steps.steps[i], i + 1, rubraview_mem_mut(line, sizeof(line)));
         rubraview_pal_rect_t t = { text_x, r0.y, r0.x + r0.width - clear - text_x - 4.0, r0.height };
-        rubraview_pal_render_draw_text(rr, files_fit_text(fit, sizeof(fit), words, t.width, small), t, small,
+        rubraview_pal_render_draw_text(rr, fit_text_measured(rr, fit, sizeof(fit), words, t.width, small), t, small,
                                        in_force ? COLOR_TEXT : COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);   /* undone: dimmed */
     }
     if (app->change_dragging && app->change_press >= 0) {   /* where the carried change would go */
@@ -3362,8 +3392,9 @@ static void draw_changes(app_state_t *app) {
             rubraview_pal_render_fill_rect(rr, (rubraview_pal_rect_t){ lw->x, y - 1.0, lw->width, 2.0 }, 0xFF5B9BD5u, 0.0);
     }
     if (count == 0) {
-        rubraview_pal_render_draw_text(rr, TU8("no edit yet: move a slider or choose an effect"),
-                                       (rubraview_pal_rect_t){ lw->x, lw->y, lw->width, lw->row_height }, small, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+        char fit[128];
+        proven_u8str_view_t empty = fit_text_measured(rr, fit, sizeof(fit), TU8("no edit yet: move a slider or choose an effect"), lw->width, small);
+        if (empty.size > 0) rubraview_pal_render_draw_text(rr, empty, (rubraview_pal_rect_t){ lw->x, lw->y, lw->width, lw->row_height }, small, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
     }
     draw_scrollbar(app, rr, RVSB_CHANGES, app->pointer_x, app->pointer_y);
 }
@@ -3371,10 +3402,13 @@ static void draw_changes(app_state_t *app) {
 static void edit_heading(app_state_t *app, int32_t id, const char *words, size_t number) {
     rubraview_rect_t r = edit_room(app, id);
     if (r.width <= 0.0) return;
-    char text[96];
+    char text[96], fit[128];
     int n = number ? rubraview_fmt(text, sizeof(text), "{}   {}", PROVEN_ARG(words), PROVEN_ARG((size_t)number)) : rubraview_fmt(text, sizeof(text), "{}", PROVEN_ARG(words));
-    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)text, (size_t)n }, (rubraview_pal_rect_t){ r.x, r.y, r.width, app->panel.row_height },
-                                              app->panel.row_height * 0.5, SETTINGS_ACCENT, RUBRAVIEW_TEXT_LEFT);
+    double font = app->panel.row_height * 0.5;
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer,
+                                              fit_text_measured(app->renderer, fit, sizeof(fit), (proven_u8str_view_t){ (const proven_byte_t *)text, (size_t)n }, r.width, font),
+                                              (rubraview_pal_rect_t){ r.x, r.y, r.width, app->panel.row_height },
+                                              font, SETTINGS_ACCENT, RUBRAVIEW_TEXT_LEFT);
 }
 
 /* What the window shows, cheaply: drawn again when it changes (or twice a second, for the histogram). */

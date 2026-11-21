@@ -25,47 +25,59 @@ static void versions_read(app_state_t *app) {
     v->version_count = rubraview_props_versions_tidy(v->versions, v->version_count, v->files[0].modified, v->files[0].size);
 }
 
-void propsver_draw(app_state_t *app, double y, double bottom) {
+double propsver_draw(app_state_t *app, double y) {
     props_view_t *v = V(app);
     rubraview_renderer_t *r = app->props_renderer;
     double dpi = rubraview_pal_window_dpi_scale(app->props_window);
-    int32_t w = 0, h = 0;
-    rubraview_pal_window_get_size(app->props_window, &w, &h);
+    double w = pw_content_width(app);
     if (!v->versions_read) versions_read(app);
-    double lx = 18.0 * dpi;
-    pw_text_at(r, T("Previous versions come from restore points and backups' copies of the drive."),
-               (rubraview_pal_rect_t){ lx, y, (double)w - 2.0 * lx, 20.0 * dpi }, 12.0 * dpi, PW_DIM);
-    y += 28.0 * dpi;
-    double name_w = (double)w * 0.42, when_x = lx + name_w, size_x = (double)w - 130.0 * dpi;
-    pw_text_at(r, T("Name"), (rubraview_pal_rect_t){ lx + 6.0 * dpi, y, name_w, 20.0 * dpi }, 12.0 * dpi, PW_HEADING);
-    pw_text_at(r, T("Date modified"), (rubraview_pal_rect_t){ when_x, y, size_x - when_x, 20.0 * dpi }, 12.0 * dpi, PW_HEADING);
-    pw_text_at(r, T("Size"), (rubraview_pal_rect_t){ size_x, y, 120.0 * dpi, 20.0 * dpi }, 12.0 * dpi, PW_HEADING);
+    double lx = 18.0 * dpi, avail = w - 2.0 * lx;
+    if (avail < 60.0 * dpi) avail = 60.0 * dpi;
+    const char *intro = T("Previous versions come from restore points and backups' copies of the drive.");
+    double mw = 0.0, mh = 20.0 * dpi;
+    (void)rubraview_pal_render_measure_text_wrapped(r, proven_u8str_view_from_cstr(intro), 12.0 * dpi, avail, &mw, &mh);
+    pw_text_at(r, intro, (rubraview_pal_rect_t){ lx, y, avail, mh + 2.0 * dpi }, 12.0 * dpi, PW_DIM);
+    y += mh + 8.0 * dpi;
+    double name_w = avail * 0.42, when_x = lx + name_w, when_w = avail * 0.34, size_x = when_x + when_w, size_w = avail * 0.24;
+    char fit[300];
+    rubraview_pal_render_draw_text(r, fit_text_measured(r, fit, sizeof(fit), proven_u8str_view_from_cstr(T("Name")), name_w - 6.0 * dpi, 12.0 * dpi),
+                                   (rubraview_pal_rect_t){ lx + 6.0 * dpi, y, name_w - 6.0 * dpi, 20.0 * dpi }, 12.0 * dpi, PW_HEADING, RUBRAVIEW_TEXT_LEFT);
+    rubraview_pal_render_draw_text(r, fit_text_measured(r, fit, sizeof(fit), proven_u8str_view_from_cstr(T("Date modified")), when_w - 4.0 * dpi, 12.0 * dpi),
+                                   (rubraview_pal_rect_t){ when_x, y, when_w - 4.0 * dpi, 20.0 * dpi }, 12.0 * dpi, PW_HEADING, RUBRAVIEW_TEXT_LEFT);
+    rubraview_pal_render_draw_text(r, fit_text_measured(r, fit, sizeof(fit), proven_u8str_view_from_cstr(T("Size")), size_w, 12.0 * dpi),
+                                   (rubraview_pal_rect_t){ size_x, y, size_w, 20.0 * dpi }, 12.0 * dpi, PW_HEADING, RUBRAVIEW_TEXT_LEFT);
     y += 24.0 * dpi;
-    double list_bottom = bottom - 40.0 * dpi, rh = 24.0 * dpi;
+    double rh = 24.0 * dpi;
     proven_u8str_view_t name = rubraview_path_basename(proven_u8str_view_from_cstr(v->paths[0]));
     char nm[300], when[64], size[64];
     (void)rubraview_fmt(nm, sizeof nm, "{}", PROVEN_ARG(name));
-    if (v->version_count == 0)
-        pw_text_at(r, T("There are no previous versions available."), (rubraview_pal_rect_t){ lx + 6.0 * dpi, y + 4.0 * dpi, (double)w - 2.0 * lx, 20.0 * dpi }, 13.0 * dpi, PW_TEXT);
+    if (v->version_count == 0) {
+        const char *none = T("There are no previous versions available.");
+        (void)rubraview_pal_render_measure_text_wrapped(r, proven_u8str_view_from_cstr(none), 13.0 * dpi, avail, &mw, &mh);
+        pw_text_at(r, none, (rubraview_pal_rect_t){ lx + 6.0 * dpi, y + 4.0 * dpi, avail - 6.0 * dpi, mh + 2.0 * dpi }, 13.0 * dpi, PW_TEXT);
+        y += mh + 12.0 * dpi;
+    }
     for (size_t i = 0; i < v->version_count; ++i) {
-        v->version_rect[i] = (rubraview_pal_rect_t){0};
-        if (y + rh > list_bottom) continue;
-        rubraview_pal_rect_t line = { lx, y, (double)w - 2.0 * lx, rh };
+        rubraview_pal_rect_t line = { lx, y, avail, rh };
         v->version_rect[i] = line;
         if ((int32_t)i == v->version_sel) rubraview_pal_render_fill_rect(r, line, 0xFF2D4A6Bu, 3.0 * dpi);
         else if (pal_rect_has(line, app->props_px, app->props_py)) rubraview_pal_render_fill_rect(r, line, 0x18FFFFFFu, 3.0 * dpi);
         info_local_time(when, sizeof when, v->versions[i].modified);
         rubraview_info_bytes(size, sizeof size, v->versions[i].size);
-        pw_text_at(r, nm, (rubraview_pal_rect_t){ lx + 6.0 * dpi, y + 2.0 * dpi, name_w - 8.0 * dpi, rh }, 13.0 * dpi, PW_TEXT);
-        pw_text_at(r, when, (rubraview_pal_rect_t){ when_x, y + 2.0 * dpi, size_x - when_x, rh }, 13.0 * dpi, PW_TEXT);
-        pw_text_at(r, size, (rubraview_pal_rect_t){ size_x, y + 2.0 * dpi, 120.0 * dpi, rh }, 13.0 * dpi, PW_TEXT);
+        rubraview_pal_render_draw_text(r, fit_text_measured(r, fit, sizeof(fit), proven_u8str_view_from_cstr(nm), name_w - 10.0 * dpi, 13.0 * dpi),
+                                       (rubraview_pal_rect_t){ lx + 6.0 * dpi, y + 2.0 * dpi, name_w - 10.0 * dpi, rh }, 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_LEFT);
+        rubraview_pal_render_draw_text(r, fit_text_measured(r, fit, sizeof(fit), proven_u8str_view_from_cstr(when), when_w - 6.0 * dpi, 13.0 * dpi),
+                                       (rubraview_pal_rect_t){ when_x, y + 2.0 * dpi, when_w - 6.0 * dpi, rh }, 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_LEFT);
+        rubraview_pal_render_draw_text(r, fit_text_measured(r, fit, sizeof(fit), proven_u8str_view_from_cstr(size), size_w - 4.0 * dpi, 13.0 * dpi),
+                                       (rubraview_pal_rect_t){ size_x, y + 2.0 * dpi, size_w - 4.0 * dpi, rh }, 13.0 * dpi, PW_TEXT, RUBRAVIEW_TEXT_LEFT);
         y += rh;
     }
     bool one = v->version_sel >= 0 && (size_t)v->version_sel < v->version_count;
-    double by = bottom - 30.0 * dpi, bw = 100.0 * dpi, bx = (double)w - 3.0 * (bw + 8.0 * dpi) - 10.0 * dpi;
-    pw_button_at(app, PB_VER_OPEN, T("Open"), (rubraview_pal_rect_t){ bx, by, bw, 26.0 * dpi }, false, one);
-    pw_button_at(app, PB_VER_COPY, T("Copy..."), (rubraview_pal_rect_t){ bx + bw + 8.0 * dpi, by, bw, 26.0 * dpi }, false, one);
-    pw_button_at(app, PB_VER_RESTORE, T("Restore..."), (rubraview_pal_rect_t){ bx + 2.0 * (bw + 8.0 * dpi), by, bw, 26.0 * dpi }, false, one);
+    const int bids[3] = { PB_VER_OPEN, PB_VER_COPY, PB_VER_RESTORE };
+    const char *blbls[3] = { T("Open"), T("Copy..."), T("Restore...") };
+    const bool bena[3] = { one, one, one };
+    y += 8.0 * dpi + pw_buttons_row(app, bids, blbls, NULL, bena, 3, lx, w - lx, y + 8.0 * dpi, 76.0 * dpi, 26.0 * dpi);
+    return y;
 }
 
 bool propsver_press(app_state_t *app, double x, double y) {

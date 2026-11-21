@@ -463,7 +463,7 @@ typedef struct chooser {
 /* RV-170 (owner, 2026-10-25): the lists whose scroll bar moves them, each in its own window. RV-172 (owner,
    2026-10-26): the panels too — Edit's (a bar to each of its columns), its selection box and its list of edits,
    Export, Print, Batch, the steps, Classify — and the text page. */
-enum { RVSB_NONE = 0, RVSB_LIST, RVSB_RECENT, RVSB_FAVS, RVSB_PICKER, RVSB_CHOOSER, RVSB_FILES, RVSB_SUBS, RVSB_SETTINGS, RVSB_FONTPICK, RVSB_INFO,
+enum { RVSB_NONE = 0, RVSB_LIST, RVSB_RECENT, RVSB_FAVS, RVSB_PICKER, RVSB_CHOOSER, RVSB_FILES, RVSB_SUBS, RVSB_SETTINGS, RVSB_FONTPICK, RVSB_INFO, RVSB_HELP,
        RVSB_TEXT, RVSB_CHANGES, RVSB_SEL, RVSB_STEPS, RVSB_CLASSIFY, RVSB_LOG,
        RVSB_PANEL, RVSB_PANEL_END = RVSB_PANEL + RUBRAVIEW_PANEL_MAX_COLUMNS, RVSB_COUNT = RVSB_PANEL_END };
 
@@ -926,6 +926,7 @@ typedef struct app_state {
     size_t                     subs_edit_composing_len;
     int32_t                    subs_click_row;     /* for a double click */
     double                     subs_click_at;
+    rubraview_pal_rect_t       subs_part_rect[7];  /* RV-316: wrapped header/toolbar parts (subs_part_t) */
     rubraview_window_t        *files_window;
     /* RV-136: the font picker, a window of its own over the settings */
     rubraview_window_t        *fontpick_window;
@@ -943,6 +944,8 @@ typedef struct app_state {
     size_t                     fontpick_find_len;
     double                     fontpick_px, fontpick_py;
     void                      *fontpick_mem;
+    dlgpage_t                  fontpick_page;                    /* RV-316: scrolls when window is very short */
+    rubraview_pal_rect_t       fontpick_btn[5];                  /* RV-316: wrapped bottom buttons (FONTPICK_PLACES) */
     /* RV-194: Batch, and its names, in windows of their own, each with its own panel (swapped into `panel` while
        they are handled, so the panel code serves them as it serves the viewer's) */
     rubraview_window_t        *batch_window, *names_window;
@@ -956,6 +959,8 @@ typedef struct app_state {
     int64_t                    names_taken[12];    /* the preview's files' dates, read when it opens */
     proven_u8str_view_t        names_files[12];
     size_t                     names_file_count;
+    dlgpage_t                  names_pv_page;                    /* RV-316: scrollable Names preview */
+    rubraview_rect_t           names_pv_rect;
     /* RV-137: Edit in a window of its own (owner, 2026-10-18) */
     rubraview_window_t        *edit_window;
     rubraview_renderer_t      *edit_renderer;
@@ -965,6 +970,9 @@ typedef struct app_state {
     size_t                     edit_firsts[3];
     bool                       edit_dirty, edit_text_on;
     uint64_t                   edit_sig;
+    rubraview_rect_t           edit_bar_rects[8];                /* RV-316: dynamic/wrapping Edit bar (EDIT_BAR_PARTS) */
+    double                     edit_bar_h;
+    bool                       edit_bar_is_icons;
     rubraview_listwin_t        changes;            /* the change list, rows as the playlist's */
     bool                       change_checked[RUBRAVIEW_EDIT_MAX_STEPS];
     int32_t                    change_press;       /* the change whose name is held, or -1 */
@@ -981,6 +989,10 @@ typedef struct app_state {
     int32_t                    files_frame[4];
     rubraview_listwin_t        files_list;         /* the rows, in that window's own pixels */
     rubraview_rect_t           files_preview_rect;
+    double                     files_title_h, files_head_h;      /* RV-316: wrapped bar & tools in narrow files window */
+    rubraview_rect_t           files_bar_rect[8];
+    rubraview_rect_t           files_tool_rect[5];
+    bool                       files_wrapped_bar;
     const rubraview_page_ref_t *files_pages;       /* the list it was last drawn for: another one resets it */
     size_t                     files_count;
     int32_t                    files_selected;     /* the row the keys moved to; -1: none */
@@ -1460,12 +1472,14 @@ typedef struct app_state {
     bool                      *info_all_heading;
     bool                       info_selecting;
     char                       info_message[64];
+    double                     info_foot_h;
     /* the folder's summary, kept while the folder stays the same */
     char                       info_folder[1024];
     uint64_t                   info_counts[7], info_bytes[7];   /* pictures, films, songs, archives, folders, other, all */
     bool                       help_dirty;
     int32_t                    help_scroll;      /* the first line on screen */
     double                     help_font, help_cell_w, help_cell_h;
+    double                     help_foot_h, help_px, help_py;
     rubraview_help_line_t      help_lines[2048];   /* the keys, then the licence notices */
     size_t                     help_count;
     int32_t                    help_key_cols;    /* the widest key list, so nothing overlaps */
@@ -1482,6 +1496,9 @@ typedef struct app_state {
     rubraview_renderer_t      *settings_renderer;
     rubraview_settings_view_t  settings_view;
     double                     settings_font, settings_cell_w, settings_cell_h;
+    double                     settings_content_top;
+    int32_t                    settings_page_scroll;
+    rubraview_pal_rect_t       settings_btn[RUBRAVIEW_BUTTON_COUNT];
     int32_t                    settings_tip_row;   /* the keys table's row the pointer rests on; -1 (owner, 2026-10-14) */
     double                     settings_tip_since, settings_tip_x, settings_tip_y;
     bool                       settings_tip_shown;
@@ -1586,6 +1603,7 @@ typedef struct app_state {
     proven_u8str_view_t   *log_rows;
     size_t                 log_row_count, log_built;
     char                   log_message[160];
+    double                 log_foot_h;
     rubraview_pal_rect_t   log_btn[3];
     rubraview_grid_selection_t log_sel;             /* RV-264: what is marked, as in the information window */
     bool                   log_selecting;
@@ -2255,6 +2273,7 @@ bool ffmpeg_row_changed(app_state_t *app, int32_t id, double v);
 void ffmpeg_typed(app_state_t *app);
 void files_close(app_state_t *app);
 proven_u8str_view_t files_fit_text(char *buf, size_t cap, proven_u8str_view_t text, double width, double size);
+proven_u8str_view_t fit_text_measured(rubraview_renderer_t *r, char *buf, size_t cap, proven_u8str_view_t text, double width, double size);
 void files_go_to(app_state_t *app, int32_t index);
 void files_layout(app_state_t *app);
 void files_preview_drop(app_state_t *app);
@@ -2733,6 +2752,7 @@ void settings_open(app_state_t *app);
 void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def);
 size_t settings_pump(app_state_t *app);
 void settings_read_file(app_state_t *app);
+double settings_row_y(const app_state_t *app, int32_t row);
 bool settings_row_is_text(const app_state_t *app, int32_t row);
 void settings_say(app_state_t *app, const char *text);
 void settings_event(app_state_t *app, rubraview_settings_event_t event);   /* RV-310: chooser.c answers a setting's list */
@@ -2759,6 +2779,12 @@ bool fontpick_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double 
 void fontpick_sb_to(app_state_t *app, size_t first);
 bool info_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);
 void info_sb_to(app_state_t *app, size_t first);
+bool help_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi);
+void help_sb_to(app_state_t *app, size_t first);
+void files_bar_layout(app_state_t *app);
+rubraview_rect_t files_part_rect(const app_state_t *app, rubraview_listwin_part_t part);
+rubraview_rect_t list_part_rect(const app_state_t *app, const rubraview_listwin_t *lw, rubraview_listwin_part_t part);
+rubraview_listwin_part_t list_hit(const app_state_t *app, const rubraview_listwin_t *lw, double x, double y, size_t count, size_t *out_index);
 void settings_share(app_state_t *app, double now);
 void settings_took_effect(app_state_t *app);
 void settings_write_if_changed(app_state_t *app, bool say);
@@ -2937,6 +2963,7 @@ const char *browse_start_dir(app_state_t *app, bool from_picker);   /* RV-313 */
 double dlgpage_width(const dlgpage_t *p, double w, double dpi);
 /* After the content (drawn at y - scroll): how tall it came out; the bar drawn when needed. True: draw again (the bar came or went). */
 bool dlgpage_end(dlgpage_t *p, rubraview_renderer_t *r, double w, double h, double content, double px, double py, double dpi);
+bool dlgpage_end_in(dlgpage_t *p, rubraview_renderer_t *r, double x, double y, double w, double h, double content, double px, double py, double dpi);
 bool dlgpage_wheel(dlgpage_t *p, double delta, double dpi);
 bool dlgpage_press(dlgpage_t *p, double x, double y);
 bool dlgpage_held(dlgpage_t *p, double x, double y);

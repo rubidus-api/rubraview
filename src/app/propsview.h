@@ -95,6 +95,7 @@ typedef struct props_view {
     bool                         versions_read;
     int32_t                      version_sel;
     rubraview_pal_rect_t         version_rect[PROPS_VERSIONS_MAX];
+    dlgpage_t                    page;           /* RV-316: scrollable body/tabs/buttons when short */
     char                         message[300];
 } props_view_t;
 
@@ -109,10 +110,13 @@ typedef struct props_view {
 
 
 props_view_t *V(app_state_t *app);
+double pw_content_width(app_state_t *app);
 void pw_say(props_view_t *v, const char *text);
 void pw_text_at(rubraview_renderer_t *r, const char *s, rubraview_pal_rect_t box, double size, uint32_t color);
 void pw_button_at(app_state_t *app, int which, const char *words, rubraview_pal_rect_t b, bool accent, bool enabled);
-void pw_check_at(app_state_t *app, int which, const char *words, rubraview_tristate_t state, double x, double y, bool enabled);
+double pw_buttons_row(app_state_t *app, const int *which, const char *const *words, const bool *accent, const bool *enabled, size_t n,
+                      double left, double right, double y, double min_w, double bh);
+double pw_check_at(app_state_t *app, int which, const char *words, rubraview_tristate_t state, double x, double y, double max_x, bool enabled);
 double pw_info_row(app_state_t *app, double y, const char *label, const char *value);
 double pw_separator(app_state_t *app, double y);
 void pw_name_begin(app_state_t *app, int32_t name_for);
@@ -120,8 +124,8 @@ void pw_name_begin(app_state_t *app, int32_t name_for);
 /* propsec.c */
 void propsec_read(app_state_t *app);                 /* the signatures and the permissions, read again */
 bool propsec_sig_tab(const props_view_t *v);
-void propsec_draw_signatures(app_state_t *app, double y, double bottom);
-void propsec_draw_security(app_state_t *app, double y, double bottom);
+double propsec_draw_signatures(app_state_t *app, double y);
+double propsec_draw_security(app_state_t *app, double y);
 bool propsec_press(app_state_t *app, double x, double y);
 bool propsec_button(app_state_t *app, int which);
 void propsec_poll(app_state_t *app);
@@ -132,7 +136,7 @@ void propsec_name_done(app_state_t *app, const char *typed);
 
 /* propsver.c (phase 3) */
 bool propsver_tab(const props_view_t *v);
-void propsver_draw(app_state_t *app, double y, double bottom);
+double propsver_draw(app_state_t *app, double y);
 bool propsver_press(app_state_t *app, double x, double y);
 bool propsver_button(app_state_t *app, int which);   /* true when the window stays */
 

@@ -323,7 +323,8 @@ void chooser_open_setting(app_state_t *app) {
     }
     int32_t row = rubraview_settings_view_screen_row(v, (size_t)v->focus_line);
     double x = app->settings_cell_w * (double)(v->content_col + v->label_cols);
-    chooser_show(app, CHOOSE_IN_SETTINGS, x, app->settings_cell_h * (double)(row + 1), app->settings_cell_h * (double)row);
+    double ry = settings_row_y(app, row);
+    chooser_show(app, CHOOSE_IN_SETTINGS, x, ry + app->settings_cell_h, ry);
 }
 
 /* The open-file screen's sorting: by which column, and which way. */

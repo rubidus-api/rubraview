@@ -10,17 +10,18 @@ double dlgpage_width(const dlgpage_t *p, double w, double dpi) {
     return p->bar ? w - DLGPAGE_BAR * dpi - 4.0 * dpi : w;
 }
 
-bool dlgpage_end(dlgpage_t *p, rubraview_renderer_t *r, double w, double h, double content, double px, double py, double dpi) {
-    bool bar = content > h + 0.5;
+bool dlgpage_end_in(dlgpage_t *p, rubraview_renderer_t *r, double x, double y, double w, double h, double content, double px, double py, double dpi) {
+    bool bar = w > 0.0 && h > 0.0 && content > h + 0.5;
     bool changed = bar != p->bar;   /* the width for the content changed: drawn again */
     p->bar = bar;
     double sbw = DLGPAGE_BAR * dpi;
-    p->sb = (rubraview_scrollbar_t){ .area = { w - sbw - 2.0 * dpi, 2.0 * dpi, sbw, h - 4.0 * dpi }, .button = sbw, .total = content,
+    p->sb = (rubraview_scrollbar_t){ .area = { x + w - sbw - 2.0 * dpi, y + 2.0 * dpi, sbw, h > 4.0 * dpi ? h - 4.0 * dpi : 0.0 },
+                                     .button = sbw, .total = content,
                                      .shown = h, .first = p->scroll, .step = 40.0 * dpi, .min_thumb = 24.0 * dpi };
     double kept = bar ? rubraview_scrollbar_clamp(&p->sb, p->scroll) : 0.0;
     if (kept != p->scroll) { p->scroll = kept; changed = true; }
     p->sb.first = p->scroll;
-    if (bar && r) {
+    if (bar && r && p->sb.area.height > 8.0 * dpi) {
         rubraview_scrollbar_part_t over = rubraview_scrollbar_hit(&p->sb, px, py);
         rubraview_rect_t tr = rubraview_scrollbar_track(&p->sb), th = rubraview_scrollbar_thumb(&p->sb);
         double radius = sbw * 0.5;
@@ -36,6 +37,10 @@ bool dlgpage_end(dlgpage_t *p, rubraview_renderer_t *r, double w, double h, doub
         }
     }
     return changed;
+}
+
+bool dlgpage_end(dlgpage_t *p, rubraview_renderer_t *r, double w, double h, double content, double px, double py, double dpi) {
+    return dlgpage_end_in(p, r, 0.0, 0.0, w, h, content, px, py, dpi);
 }
 
 bool dlgpage_wheel(dlgpage_t *p, double delta, double dpi) {

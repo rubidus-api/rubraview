@@ -526,23 +526,24 @@ bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, double y, b
     listwin_sync(app);
     lw->editable = list_editable(app);
     lw->tools = true;
+    if (in_files) files_bar_layout(app);
     if (!right && scrollbar_press(app, in_files ? RVSB_FILES : RVSB_LIST, x, y)) {   /* RV-170: its scroll bar moves it */
         if (in_files) app->files_dirty = true;
         return true;
     }
-    rubraview_listwin_part_t part = rubraview_listwin_hit(lw, x, y, list_rows(app), &row);
+    rubraview_listwin_part_t part = list_hit(app, lw, x, y, list_rows(app), &row);
     if (part == RUBRAVIEW_LISTWIN_NONE) return false;
     note_activity(app);
     size_t index = list_page(app, row);   /* 1.25.0: the page of that row */
     bool viewed = list_viewed(app);       /* rows of a filtered list keep their pages' order */
     if (!right && part == RUBRAVIEW_LISTWIN_SHAPE) {   /* RV-192 */
-        rubraview_rect_t t = rubraview_listwin_tool_rect(lw, part);
+        rubraview_rect_t t = list_part_rect(app, lw, part);
         shape_begin(app, SHAPE_FOR_LIST, in_files ? CHOOSE_IN_FILES : CHOOSE_IN_MAIN, t.x, t.y + t.height, t.y);
         if (in_files) app->files_dirty = true;
         return true;
     }
     if (!right && part >= RUBRAVIEW_LISTWIN_EXT && part <= RUBRAVIEW_LISTWIN_ORDER) {
-        rubraview_rect_t t = rubraview_listwin_tool_rect(lw, part);
+        rubraview_rect_t t = list_part_rect(app, lw, part);
         int where = in_files ? CHOOSE_IN_FILES : CHOOSE_IN_MAIN;
         if (part == RUBRAVIEW_LISTWIN_EXT) chooser_open_listext(app, where, t.x, t.y + t.height, t.y);
         else if (part == RUBRAVIEW_LISTWIN_SORT) chooser_open_listsort(app, where, t.x, t.y + t.height, t.y);
@@ -1167,11 +1168,142 @@ void files_close(app_state_t *app) {
     app->files_open = false;
 }
 
+rubraview_rect_t files_part_rect(const app_state_t *app, rubraview_listwin_part_t part) {
+    static const rubraview_listwin_part_t BAR[8] = {
+        RUBRAVIEW_LISTWIN_ALL, RUBRAVIEW_LISTWIN_ADD, RUBRAVIEW_LISTWIN_URL, RUBRAVIEW_LISTWIN_DEL,
+        RUBRAVIEW_LISTWIN_SAVE, RUBRAVIEW_LISTWIN_LOAD, RUBRAVIEW_LISTWIN_PATHS, RUBRAVIEW_LISTWIN_APPLY,
+    };
+    static const rubraview_listwin_part_t TOOL[5] = {
+        RUBRAVIEW_LISTWIN_EXT, RUBRAVIEW_LISTWIN_SHAPE, RUBRAVIEW_LISTWIN_FILTER,
+        RUBRAVIEW_LISTWIN_SORT, RUBRAVIEW_LISTWIN_ORDER,
+    };
+    for (size_t i = 0; i < 8; ++i) if (BAR[i] == part) return app->files_bar_rect[i];
+    for (size_t i = 0; i < 5; ++i) if (TOOL[i] == part) return app->files_tool_rect[i];
+    return (rubraview_rect_t){0};
+}
+
+rubraview_rect_t list_part_rect(const app_state_t *app, const rubraview_listwin_t *lw, rubraview_listwin_part_t part) {
+    if (lw == &app->files_list && app->files_wrapped_bar) return files_part_rect(app, part);
+    if (part >= RUBRAVIEW_LISTWIN_EXT && part <= RUBRAVIEW_LISTWIN_ORDER) return rubraview_listwin_tool_rect(lw, part);
+    return rubraview_listwin_bar_rect(lw, part);
+}
+
+rubraview_listwin_part_t list_hit(const app_state_t *app, const rubraview_listwin_t *lw, double x, double y, size_t count, size_t *out_index) {
+    if (lw == &app->files_list && app->files_wrapped_bar) {
+        if (!lw->open || !rubraview_rect_contains(rubraview_listwin_rect(lw), x, y)) return RUBRAVIEW_LISTWIN_NONE;
+        double head = rubraview_listwin_head_height(lw);
+        if (y < lw->y + head) {
+            static const rubraview_listwin_part_t BAR[8] = {
+                RUBRAVIEW_LISTWIN_ALL, RUBRAVIEW_LISTWIN_ADD, RUBRAVIEW_LISTWIN_URL, RUBRAVIEW_LISTWIN_DEL,
+                RUBRAVIEW_LISTWIN_SAVE, RUBRAVIEW_LISTWIN_LOAD, RUBRAVIEW_LISTWIN_PATHS, RUBRAVIEW_LISTWIN_APPLY,
+            };
+            static const rubraview_listwin_part_t TOOL[5] = {
+                RUBRAVIEW_LISTWIN_EXT, RUBRAVIEW_LISTWIN_SHAPE, RUBRAVIEW_LISTWIN_FILTER,
+                RUBRAVIEW_LISTWIN_SORT, RUBRAVIEW_LISTWIN_ORDER,
+            };
+            for (size_t i = 0; i < 8; ++i) if (rubraview_rect_contains(app->files_bar_rect[i], x, y)) return BAR[i];
+            for (size_t i = 0; i < 5; ++i) if (rubraview_rect_contains(app->files_tool_rect[i], x, y)) return TOOL[i];
+            return y < lw->y + app->files_title_h ? RUBRAVIEW_LISTWIN_TITLE : RUBRAVIEW_LISTWIN_BODY;
+        }
+    }
+    return rubraview_listwin_hit(lw, x, y, count, out_index);
+}
+
+void files_bar_layout(app_state_t *app) {
+    rubraview_listwin_t *lw = &app->files_list;
+    double dpi = app->files_window ? rubraview_pal_window_dpi_scale(app->files_window) : 1.0;
+    if (dpi <= 0.0) dpi = 1.0;
+    double title_h = 30.0 * dpi;
+    app->files_title_h = title_h;
+    app->files_wrapped_bar = false;
+    proven_sys_mem_set(app->files_bar_rect, 0, sizeof(app->files_bar_rect));
+    proven_sys_mem_set(app->files_tool_rect, 0, sizeof(app->files_tool_rect));
+    if (!lw->editable || lw->width <= 0.0) {
+        lw->title_height = title_h;
+        lw->bar_height = 28.0 * dpi;
+        app->files_head_h = rubraview_listwin_head_height(lw);
+        return;
+    }
+    double small = lw->row_height * 0.5 * place_size(app, PF_LIST);
+    double inset = 4.0 * dpi, gap = 3.0 * dpi, gap_y = 3.0 * dpi, bh = 24.0 * dpi, pad = 10.0 * dpi;
+    double room = lw->width - 2.0 * inset;
+    if (room < 40.0 * dpi) room = 40.0 * dpi;
+    char del[40], ext[32], shape[48];
+    size_t checked = list_checked_total(app);
+    if (checked > 0) rubraview_fmt(del, sizeof(del), T("Del ({})"), PROVEN_ARG((size_t)checked));
+    else rubraview_fmt(del, sizeof(del), T("Del"));
+    if (app->list_ext_off_n > 0) rubraview_fmt(ext, sizeof(ext), ".ext (-{})", PROVEN_ARG((size_t)app->list_ext_off_n));
+    else rubraview_fmt(ext, sizeof(ext), ".ext");
+    rubraview_fmt(shape, sizeof(shape), "{} \xE2\x96\xBE", PROVEN_ARG(T("Shape")));
+    proven_u8str_view_t blabels[8] = {
+        {0}, cstr(T("Add")), cstr(T("URL")), cstr(del), cstr(T("Save")), cstr(T("Load")),
+        cstr(list_saves_whole_paths(app) ? T("Abs") : T("Rel")), cstr(T("Edit to all")),
+    };
+    double bw[8] = {0}, bx[8] = {0};
+    uint32_t brow[8] = {0};
+    bw[0] = bh;
+    for (size_t i = 1; i < 8; ++i) {
+        double tw = small * 4.0;
+        if (app->files_renderer) (void)rubraview_pal_render_measure_text(app->files_renderer, blabels[i], small, &tw);
+        bw[i] = tw + pad;
+        if (bw[i] > room) bw[i] = room;
+    }
+    size_t brows = rubraview_flow_inline(bw, 8, gap, room, brow, bx);
+    if (brows == 0) brows = 1;
+    double y = title_h + 2.0 * dpi;
+    for (size_t i = 0; i < 8; ++i)
+        app->files_bar_rect[i] = (rubraview_rect_t){ lw->x + inset + bx[i], y + (double)brow[i] * (bh + gap_y), bw[i], bh };
+    y += (double)brows * bh + (double)(brows - 1) * gap_y;
+    if (lw->tools) {
+        y += 4.0 * dpi;
+        proven_u8str_view_t tlabels[5] = {
+            cstr(ext), cstr(shape), cstr(T("Filter")), cstr(list_sort_word(app->list_sort_key)),
+            cstr(app->list_sort_desc ? "\xE2\x96\xBC" : "\xE2\x96\xB2"),
+        };
+        double twv[5] = {0}, tx[5] = {0};
+        uint32_t trow[5] = {0};
+        for (size_t i = 0; i < 5; ++i) {
+            double tw = small * 3.0;
+            if (app->files_renderer) (void)rubraview_pal_render_measure_text(app->files_renderer, tlabels[i], small, &tw);
+            if (i == 2) {
+                double min_f = room < 96.0 * dpi ? room : 96.0 * dpi;
+                twv[i] = tw + 28.0 * dpi;
+                if (twv[i] < min_f) twv[i] = min_f;
+            } else if (i == 4) {
+                twv[i] = bh > tw + pad ? bh : tw + pad;
+            } else {
+                twv[i] = tw + pad;
+            }
+            if (twv[i] > room) twv[i] = room;
+        }
+        size_t trows = rubraview_flow_inline(twv, 5, gap, room, trow, tx);
+        if (trows == 0) trows = 1;
+        double last_x = 0.0;
+        for (size_t i = 0; i < 5; ++i) if (trow[i] == trow[2]) last_x = tx[i] + twv[i];
+        double slack = room - last_x;
+        if (slack > 2.0 * dpi) {
+            twv[2] += slack;
+            for (size_t i = 3; i < 5; ++i) if (trow[i] == trow[2]) tx[i] += slack;
+        }
+        for (size_t i = 0; i < 5; ++i)
+            app->files_tool_rect[i] = (rubraview_rect_t){ lw->x + inset + tx[i], y + (double)trow[i] * (bh + gap_y), twv[i], bh };
+        y += (double)trows * bh + (double)(trows - 1) * gap_y;
+    }
+    double head_h = y + 4.0 * dpi;
+    app->files_wrapped_bar = true;
+    app->files_head_h = head_h;
+    lw->title_height = title_h;
+    lw->bar_height = (head_h - title_h) / (lw->tools ? 2.0 : 1.0);
+}
+
 void files_layout(app_state_t *app) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->files_window, &w, &h);
     app->files_preview_rect = rubraview_filewin_layout(&app->files_list, (double)w, (double)h,
                                                        rubraview_pal_window_dpi_scale(app->files_window));
+    app->files_list.editable = list_editable(app);
+    app->files_list.tools = true;
+    files_bar_layout(app);
     app->files_dirty = true;
 }
 
@@ -1281,7 +1413,8 @@ int files_size_text(char *buf, size_t cap, uint64_t bytes) {
 /* As much of `text` as about fits `width` at `size`, cut at a whole
    character with "..." (there is no clipping to lean on). */
 proven_u8str_view_t files_fit_text(char *buf, size_t cap, proven_u8str_view_t text, double width, double size) {
-    size_t room = size > 0.0 ? (size_t)(width / (size * 0.56)) : 0;
+    if (width <= 0.0 || size <= 0.0) return PROVEN_LIT("");
+    size_t room = (size_t)(width / (size * 0.56));
     size_t chars = 0, at = 0;
     while (at < text.size) {
         size_t next = at + 1;
@@ -1302,4 +1435,47 @@ proven_u8str_view_t files_fit_text(char *buf, size_t cap, proven_u8str_view_t te
     proven_sys_mem_copy(buf, text.ptr, at);
     proven_sys_mem_copy(buf + at, "...", 3);
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = at + 3 };
+}
+
+/* Fit proportional text using exact renderer measurement; falls back to files_fit_text without a renderer. */
+proven_u8str_view_t fit_text_measured(rubraview_renderer_t *r, char *buf, size_t cap, proven_u8str_view_t text, double width, double size) {
+    if (width <= 0.0 || size <= 0.0 || text.size == 0) return PROVEN_LIT("");
+    if (!r) return files_fit_text(buf, cap, text, width, size);
+    double tw = 0.0;
+    if (!rubraview_pal_render_measure_text(r, text, size, &tw))
+        return files_fit_text(buf, cap, text, width, size);
+    if (tw <= width + 0.5) return text;
+    if (cap < 4) return PROVEN_LIT("");
+    size_t max_bytes = text.size + 4 <= cap ? text.size : cap - 4;
+    size_t lo = 0, hi = max_bytes, best = 0;
+    while (lo <= hi) {
+        size_t mid = lo + (hi - lo) / 2;
+        while (mid > lo && (((unsigned char)text.ptr[mid] & 0xC0) == 0x80)) mid--;
+        if (mid == lo && mid < hi) {
+            size_t next = lo + 1;
+            while (next < hi && (((unsigned char)text.ptr[next] & 0xC0) == 0x80)) next++;
+            mid = next;
+            if (mid > hi) break;
+        }
+        proven_sys_mem_copy(buf, text.ptr, mid);
+        proven_sys_mem_copy(buf + mid, "...", 3);
+        double mw = 0.0;
+        if (rubraview_pal_render_measure_text(r, (proven_u8str_view_t){ (const proven_byte_t *)buf, mid + 3 }, size, &mw) && mw <= width + 0.5) {
+            best = mid;
+            if (mid == hi) break;
+            lo = mid + 1;
+            while (lo < hi && (((unsigned char)text.ptr[lo] & 0xC0) == 0x80)) lo++;
+        } else {
+            if (mid == 0) break;
+            hi = mid - 1;
+        }
+    }
+    if (best == 0) {
+        double mw = 0.0;
+        if (!rubraview_pal_render_measure_text(r, PROVEN_LIT("..."), size, &mw) || mw > width + 0.5)
+            return PROVEN_LIT("");
+    }
+    proven_sys_mem_copy(buf, text.ptr, best);
+    proven_sys_mem_copy(buf + best, "...", 3);
+    return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = best + 3 };
 }

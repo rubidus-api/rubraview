@@ -92,19 +92,53 @@ void log_show(app_state_t *app) {
     app->log_open = true;
     app->log_follow = true;
     app->log_message[0] = '\0';
+    app->log_foot_h = app->log_cell_h * 2.5;
     app->log_built = (size_t)-1;
     app->log_dirty = true;
+}
+
+#define LOG_BACKGROUND 0xFF16181Cu
+#define LOG_TEXT       0xFFE0E0E0u
+#define LOG_TIME       0xFF7FB2E5u
+#define LOG_DIM        0xFF8A9099u
+
+static void log_layout_foot(app_state_t *app, int32_t w, int32_t h, double dpi, rubraview_pal_rect_t btns[3],
+                            rubraview_pal_rect_t *out_status, double *out_foot_h) {
+    const char *words[3] = { T("Save as text... (Ctrl+S)"), T("Copy all (Ctrl+C)"), T("Clear") };
+    double ch = app->log_cell_h > 0.0 ? app->log_cell_h : 16.5 * dpi;
+    double pad = 8.0 * dpi, gap = 8.0 * dpi, bh = ch * 1.45;
+    if (bh < 24.0 * dpi) bh = 24.0 * dpi;
+    double right = (double)w - pad;
+    if (right < pad + 20.0 * dpi) right = pad + 20.0 * dpi;
+    rubraview_pal_rect_t rel[3] = { {0} };
+    double btns_h = dlgpage_buttons(app->log_renderer, words, 3, pad, right, 0.0, 13.0 * dpi, 10.0 * dpi, 54.0 * dpi, bh, gap, rel);
+    bool one_row = rel[2].y - rel[0].y < 1.0 && rel[0].x - pad >= 160.0 * dpi;
+    double foot_h = one_row ? (btns_h + 2.0 * pad) : (ch * 1.15 + 4.0 * dpi + btns_h + 2.0 * pad);
+    if (foot_h > (double)h) foot_h = (double)h;
+    double btn_y0 = (double)h - pad - btns_h;
+    for (int i = 0; i < 3; ++i) {
+        btns[i] = rel[i];
+        btns[i].y += btn_y0;
+    }
+    if (out_status) {
+        *out_status = one_row
+            ? (rubraview_pal_rect_t){ pad, btn_y0, rel[0].x - pad - 8.0 * dpi, bh }
+            : (rubraview_pal_rect_t){ pad, (double)h - foot_h + pad * 0.75, right - pad, ch * 1.15 };
+    }
+    *out_foot_h = foot_h;
 }
 
 static int32_t log_visible_rows(const app_state_t *app) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->log_window, &w, &h);
-    int32_t rows = (int32_t)((double)h / app->log_cell_h) - 3;   /* the foot's buttons under them */
-    return rows > 1 ? rows : 1;
+    double avail = (double)h - app->log_cell_h * 0.5 - app->log_foot_h;
+    int32_t rows = app->log_cell_h > 0.0 && avail > 0.0 ? (int32_t)(avail / app->log_cell_h) : 0;
+    return rows >= 0 ? rows : 0;
 }
 
 static void log_scroll_by(app_state_t *app, int32_t lines) {
-    int32_t last = (int32_t)app->log_row_count - log_visible_rows(app);
+    int32_t vis = log_visible_rows(app);
+    int32_t last = vis > 0 ? (int32_t)app->log_row_count - vis : (int32_t)app->log_row_count;
     if (last < 0) last = 0;
     app->log_scroll += lines;
     if (app->log_scroll > last) app->log_scroll = last;
@@ -120,7 +154,9 @@ bool log_sb(app_state_t *app, rubraview_scrollbar_t *sb, double bw, double dpi) 
     rubraview_pal_window_get_size(app->log_window, &w, &h);
     int32_t rows = log_visible_rows(app);
     double ch = app->log_cell_h;
-    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, ch * 0.5, bw, ch * (double)rows },
+    double area_h = (double)h - app->log_foot_h - ch * 0.5 - 2.0 * dpi;
+    if (rows <= 0 || area_h <= 2.0 * bw) return false;
+    *sb = (rubraview_scrollbar_t){ .area = { (double)w - bw - 2.0 * dpi, ch * 0.5, bw, area_h },
                                    .button = bw, .total = (double)app->log_row_count, .shown = (double)rows,
                                    .first = (double)app->log_scroll, .step = 1.0, .min_thumb = ch };
     return true;
@@ -131,11 +167,6 @@ void log_sb_to(app_state_t *app, size_t first) {
     log_scroll_by(app, (int32_t)first - app->log_scroll);
 }
 
-#define LOG_BACKGROUND 0xFF16181Cu
-#define LOG_TEXT       0xFFE0E0E0u
-#define LOG_TIME       0xFF7FB2E5u
-#define LOG_DIM        0xFF8A9099u
-
 void draw_log_window(app_state_t *app) {
     if (!app->log_open || !app->log_dirty) return;
     app->log_dirty = false;
@@ -145,6 +176,8 @@ void draw_log_window(app_state_t *app) {
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->log_window, &w, &h);
     double dpi = rubraview_pal_window_dpi_scale(app->log_window);
+    rubraview_pal_rect_t status_rect = {0};
+    log_layout_foot(app, w, h, dpi, app->log_btn, &status_rect, &app->log_foot_h);
     int32_t rows = log_visible_rows(app);
     if (app->log_follow) {
         int32_t last = (int32_t)app->log_row_count - rows;
@@ -168,26 +201,35 @@ void draw_log_window(app_state_t *app) {
             rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ .ptr = line.ptr + head, .size = line.size - head },
                                                 cw * (0.5 + (double)head), y, app->log_font, LOG_TEXT);
     }
-    /* the foot: three buttons and what was said */
+    {
+        rubraview_scrollbar_t sb;
+        if (scrollbar_of(app, RVSB_LOG, &sb)) {
+            /* Monospace lines do not clip at the right edge; mask behind the scrollbar first. */
+            rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ sb.area.x - 4.0 * dpi, 0.0, (double)w - sb.area.x + 4.0 * dpi, (double)h - app->log_foot_h }, LOG_BACKGROUND, 0.0);
+            draw_scrollbar(app, r, RVSB_LOG, app->log_px, app->log_py);   /* RV-264 */
+        }
+    }
+    /* Opaque footer with wrapping buttons and status text so scrolled rows stay clear. */
+    double foot_y = (double)h - app->log_foot_h;
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, foot_y, (double)w, app->log_foot_h }, 0xFF1A1A1Au, 0.0);
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ 0.0, foot_y, (double)w, 1.0 }, 0xFF343A42u, 0.0);
     const char *words[3] = { T("Save as text... (Ctrl+S)"), T("Copy all (Ctrl+C)"), T("Clear") };
-    double by = (double)h - ch * 2.2, bh = ch * 1.8, x = cw * 0.5;
     for (int i = 0; i < 3; ++i) {
-        double tw = 0.0;
-        (void)rubraview_pal_render_measure_text(r, cstr(words[i]), 13.0 * dpi, &tw);
-        rubraview_pal_rect_t b = { x, by, tw + 24.0 * dpi, bh };
-        app->log_btn[i] = b;
+        rubraview_pal_rect_t b = app->log_btn[i];
+        if (b.width <= 0.0) continue;
         bool over = pal_rect_has(b, app->log_px, app->log_py);
         rubraview_pal_render_fill_rect(r, b, over ? 0x50FFFFFFu : 0xFF2A2F36u, 4.0 * dpi);
         rubraview_pal_render_stroke_rect(r, b, 0xFF4A525Cu, 1.0, 4.0 * dpi);
-        rubraview_pal_render_draw_text(r, cstr(words[i]), b, 13.0 * dpi, LOG_TEXT, RUBRAVIEW_TEXT_CENTER);
-        x += b.width + 8.0 * dpi;
+        char bfit[80];
+        proven_u8str_view_t label = b.width > 8.0 ? fit_text_measured(r, bfit, sizeof(bfit), cstr(words[i]), b.width - 8.0, 13.0 * dpi) : PROVEN_LIT("");
+        if (label.size > 0) rubraview_pal_render_draw_text(r, label, b, 13.0 * dpi, LOG_TEXT, RUBRAVIEW_TEXT_CENTER);
     }
-    char foot[256];
+    char foot[256], sfit[256];
     int n = rubraview_fmt(foot, sizeof foot, T("{} lines, {} KB of {} KB{}{}"), PROVEN_ARG(app->log.lines), PROVEN_ARG((app->log.len + 1023u) / 1024u),
                           PROVEN_ARG(app->log.cap / 1024u), PROVEN_ARG(app->log_message[0] ? "   |   " : ""), PROVEN_ARG(app->log_message));
-    if (n > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)foot, (size_t)n < sizeof foot ? (size_t)n : sizeof foot - 1 },
-                                              (rubraview_pal_rect_t){ x + 8.0 * dpi, by, (double)w - x - 16.0 * dpi, bh }, 12.0 * dpi, LOG_DIM, RUBRAVIEW_TEXT_LEFT);
-    draw_scrollbar(app, r, RVSB_LOG, app->log_px, app->log_py);   /* RV-264 */
+    if (n > 0 && status_rect.width > 4.0)
+        rubraview_pal_render_draw_text(r, fit_text_measured(r, sfit, sizeof(sfit), (proven_u8str_view_t){ (const proven_byte_t *)foot, (size_t)n < sizeof foot ? (size_t)n : sizeof foot - 1 }, status_rect.width, 12.0 * dpi),
+                                       status_rect, 12.0 * dpi, LOG_DIM, RUBRAVIEW_TEXT_LEFT);
     if (!rubraview_pal_render_end(r)) app->log_dirty = true;
 }
 
@@ -295,12 +337,15 @@ size_t log_pump(app_state_t *app) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN: {
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
+                int32_t w = 0, h = 0;
+                rubraview_pal_window_get_size(app->log_window, &w, &h);
+                log_layout_foot(app, w, h, rubraview_pal_window_dpi_scale(app->log_window), app->log_btn, NULL, &app->log_foot_h);
                 bool on_button = false;
                 for (int i = 0; i < 3; ++i) if (pal_rect_has(app->log_btn[i], event.mouse.x, event.mouse.y)) { log_button(app, i); on_button = true; break; }
                 if (!app->log_open) return handled;
                 if (on_button) break;
                 if (scrollbar_press(app, RVSB_LOG, event.mouse.x, event.mouse.y)) { app->log_dirty = true; break; }   /* RV-264 */
-                if (event.mouse.y < app->log_btn[0].y) {   /* a drag over the rows marks them */
+                if (event.mouse.y < (double)h - app->log_foot_h && log_visible_rows(app) > 0) {   /* a drag over the rows marks them */
                     app->log_sel = (rubraview_grid_selection_t){ true, row, col, row, col };
                     app->log_selecting = true;
                     app->log_follow = false;

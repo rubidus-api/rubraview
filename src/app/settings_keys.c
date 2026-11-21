@@ -283,7 +283,7 @@ static keys_layout_box_t keys_layout_box(app_state_t *app) {
     double room = cw * (double)(v->cols - v->content_col - 2);
     b.unit = room / w < ch * 2.3 ? room / w : ch * 2.3;   /* RV-244: a little bigger, the pad and the arrows under it */
     b.x = cw * v->content_col;
-    b.y = ch * (double)(at - first + 1);   /* table row 1's top, wherever the page is scrolled */
+    b.y = settings_row_y(app, at) - ch * (double)(first - 1);   /* table row 1's top, wherever the page is scrolled */
     b.ok = b.unit > 4.0;
     return b;
 }
@@ -308,8 +308,8 @@ void keys_layout_draw(app_state_t *app) {
     if (!b.ok) return;
     rubraview_renderer_t *r = app->settings_renderer;
     const rubraview_settings_view_t *v = &app->settings_view;
-    double ch = app->settings_cell_h;
-    double top = ch * RUBRAVIEW_SETTINGS_TOP_ROWS, bottom = ch * (RUBRAVIEW_SETTINGS_TOP_ROWS + rubraview_settings_view_visible_rows(v));
+    double cw = app->settings_cell_w, ch = app->settings_cell_h;
+    double top = app->settings_content_top, bottom = top + ch * (double)rubraview_settings_view_visible_rows(v);
     size_t count = 0;
     const rubraview_keycap_t *caps = rubraview_keyboard_caps(&count);
     double gap = b.unit * 0.08;
@@ -335,18 +335,27 @@ void keys_layout_draw(app_state_t *app) {
             if (lit) rubraview_pal_render_stroke_rect(r, c, 0xFFFFFFFFu, 1.5, d / 2);
         }
     }
-    /* the dots' key, on the row under the keyboard */
+    /* the dots' key, wrapped in rows under the keyboard so narrow windows keep it legible */
     double w = 0, h = 0;
     rubraview_keyboard_extent(&w, &h);
     double y = b.y + b.unit * h + ch * 0.3;
     if (y < top || y + ch > bottom) return;
     const char *const WORDS[RUBRAVIEW_KEYMARK_KINDS] = { T("alone"), "Shift", "Ctrl", "Alt", T("two or more") };
-    double x = b.x;
+    double lw[RUBRAVIEW_KEYMARK_KINDS] = { 0 }, lx[RUBRAVIEW_KEYMARK_KINDS] = { 0 };
+    uint32_t lrow[RUBRAVIEW_KEYMARK_KINDS] = { 0 };
+    double room = cw * (double)(v->cols - v->content_col - 2);
+    if (room < cw * 10.0) room = cw * 10.0;
     for (int m = 0; m < RUBRAVIEW_KEYMARK_KINDS; ++m) {
-        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ x, y + ch * 0.3, ch * 0.4, ch * 0.4 }, KEYMARK_COLOR[m], ch * 0.2);
-        proven_u8str_view_t said = proven_u8str_view_from_cstr(WORDS[m]);
-        rubraview_pal_render_draw_text_mono(r, said, x + ch * 0.6, y, app->settings_font, SETTINGS_TEXT);
-        x += ch * 0.6 + app->settings_cell_w * (double)(rubraview_settings_text_cells(said) + 3);
+        lw[m] = ch * 0.6 + cw * (double)(rubraview_settings_text_cells(proven_u8str_view_from_cstr(WORDS[m])) + 1);
+        if (lw[m] > room) lw[m] = room;
+    }
+    (void)rubraview_flow_inline(lw, RUBRAVIEW_KEYMARK_KINDS, cw * 2.0, room, lrow, lx);
+    for (int m = 0; m < RUBRAVIEW_KEYMARK_KINDS; ++m) {
+        double ly = y + (double)lrow[m] * ch;
+        if (ly + ch > bottom) continue;
+        double ix = b.x + lx[m];
+        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ ix, ly + ch * 0.3, ch * 0.4, ch * 0.4 }, KEYMARK_COLOR[m], ch * 0.2);
+        rubraview_pal_render_draw_text_mono(r, proven_u8str_view_from_cstr(WORDS[m]), ix + ch * 0.6, ly, app->settings_font, SETTINGS_TEXT);
     }
 }
 

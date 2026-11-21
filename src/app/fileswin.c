@@ -31,9 +31,11 @@ void draw_files_window(app_state_t *app) {
     listwin_sync(app);
     size_t shown = list_rows(app);   /* 1.25.0: the rows the filter and .ext leave */
     app->files_list.editable = list_editable(app);   /* RV-117: changed as the floating list is, or only looked at */
+    files_bar_layout(app);
     const rubraview_listwin_t *lw = &app->files_list;
     double dpi = rubraview_pal_window_dpi_scale(app->files_window);
     double font = lw->row_height * 0.5;
+    double title_h = app->files_title_h > 0.0 ? app->files_title_h : lw->title_height;
     rubraview_pal_render_begin(r, FILES_BACKGROUND);
 
     /* The header: what the list is, and where the file on screen is in it. */
@@ -44,22 +46,28 @@ void draw_files_window(app_state_t *app) {
                  : rubraview_path_basename(app->source_dir);
     int hn = current >= 0 ? rubraview_fmt(head, sizeof(head), "{} / {}   {}", PROVEN_ARG((int)(current + 1)), PROVEN_ARG((size_t)count), PROVEN_ARG(rubraview_bytes_view(what.ptr, (int)(what.size < 560 ? what.size : 560))))
                           : rubraview_fmt(head, sizeof(head), "{}   {}", PROVEN_ARG((size_t)count), PROVEN_ARG(rubraview_bytes_view(what.ptr, (int)(what.size < 560 ? what.size : 560))));
-    rubraview_pal_rect_t head_box = { lw->x, lw->y, lw->width, lw->title_height };
+    rubraview_pal_rect_t head_box = { lw->x, lw->y, lw->width, title_h };
     rubraview_pal_render_fill_rect(r, head_box, COLOR_TILE_FILL, 0.0);
-    rubraview_pal_rect_t head_text = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->row_height * 0.8, lw->title_height };
-    if (hn > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)head, (size_t)hn }, head_text.width, font),
-                                               head_text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    rubraview_pal_rect_t head_text = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->row_height * 0.8, title_h };
+    if (hn > 0 && head_text.width > 0.0)
+        rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)head, (size_t)hn }, head_text.width, font),
+                                       head_text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     if (lw->editable) {
         draw_list_bar(app, r, lw, app->files_px, app->files_py);
         draw_list_tools(app, r, lw, app->files_px, app->files_py, true);
     }
 
+    rubraview_scrollbar_t sb;
+    double sb_clear = (scrollbar_of(app, RVSB_FILES, &sb) && sb.total > sb.shown && sb.area.width > 0.0)
+                        ? lw->x + lw->width - sb.area.x + 2.0 * dpi : 0.0;
     size_t rows = rubraview_listwin_rows_visible(lw);
     for (size_t at = lw->first; at < shown && at < lw->first + rows; ++at) {
         size_t i = list_page(app, at);
         if (i == SIZE_MAX) break;
         rubraview_rect_t rr = rubraview_listwin_row_rect(lw, at, shown);
-        rubraview_pal_rect_t row = { rr.x + 2.0, rr.y, rr.width - 8.0, rr.height };
+        double rw = rr.width - 8.0 - sb_clear;
+        if (rw <= 0.0) continue;
+        rubraview_pal_rect_t row = { rr.x + 2.0, rr.y, rw, rr.height };
         bool checked = i < app->list_checked_count && app->list_checked[i];
         bool carried = app->list_row_dragging && app->list_held_in_files && (i == app->list_press_row ||
                        (checked && app->list_press_row < app->list_checked_count && app->list_checked[app->list_press_row]));
@@ -76,28 +84,34 @@ void draw_files_window(app_state_t *app) {
         double size_w = 0.0;
         if (bytes > 0) {
             int sn = files_size_text(size_text, sizeof(size_text), bytes);
-            size_w = font * 0.56 * 9.0;
-            rubraview_pal_rect_t size_box = { row.x + row.width - size_w - lw->row_height * 0.3, row.y, size_w, row.height };
-            if (sn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)size_text, (size_t)sn }, size_box, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_RIGHT);
+            double want_sw = font * 0.56 * 9.0;
+            if (row.x + row.width - want_sw - lw->row_height * 0.6 > text_left + font * 4.0) {
+                size_w = want_sw;
+                rubraview_pal_rect_t size_box = { row.x + row.width - size_w - lw->row_height * 0.3, row.y, size_w, row.height };
+                if (sn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)size_text, (size_t)sn }, size_box, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_RIGHT);
+            }
         }
         char line[640];
         proven_u8str_view_t name = page_display_name(app, i);
         int m = rubraview_fmt(line, sizeof(line), "{:4}   {}", PROVEN_ARG((size_t)(i + 1)), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 600 ? name.size : 600))));
-        rubraview_pal_rect_t text = { text_left + lw->row_height * 0.3, row.y, row.x + row.width - text_left - lw->row_height * 0.9 - size_w, row.height };
-        if (m > 0) rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) }, text.width, font),
-                                                  text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        double tw = row.x + row.width - text_left - lw->row_height * 0.9 - size_w;
+        rubraview_pal_rect_t text = { text_left + lw->row_height * 0.3, row.y, tw, row.height };
+        if (m > 0 && tw > 0.0)
+            rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) }, text.width, font),
+                                           text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
     draw_list_drop_line(app, r, lw, true);
     draw_scrollbar(app, r, RVSB_FILES, app->files_px, app->files_py);   /* where in a long list the rows are; RV-170: it moves them */
 
     /* The preview: the picture fitted above two lines that say what it is. */
     rubraview_rect_t pv = app->files_preview_rect;
-    if (pv.width > 0.0) {
+    if (pv.width > 0.0 && pv.height > 0.0) {
         rubraview_pal_rect_t edge = { pv.x, pv.y, 1.0, pv.height };
         rubraview_pal_render_fill_rect(r, edge, COLOR_BOX_BORDER, 0.0);
-        double caption_h = lw->row_height * 2.4;
-        rubraview_rect_t room = { pv.x, pv.y, pv.width, pv.height - caption_h };
         int32_t page = app->files_preview_page;
+        double want_cap = (page >= 0 && (size_t)page < count) ? lw->row_height * 2.4 : 0.0;
+        double caption_h = want_cap <= pv.height ? want_cap : pv.height;
+        rubraview_rect_t room = { pv.x, pv.y, pv.width, pv.height > caption_h ? pv.height - caption_h : 0.0 };
         const char *say = NULL;
         switch (app->files_preview_state) {
             case FILES_PREVIEW_SHOWN: {
@@ -117,26 +131,33 @@ void draw_files_window(app_state_t *app) {
             case FILES_PREVIEW_MEDIA:  say = T("a film or a sound: Enter or a click plays it"); break;
             default:                   say = page >= 0 ? NULL : T("point at a file, or use the arrow keys"); break;
         }
-        if (say) {
+        if (say && room.height >= font * 1.4 && room.width > 16.0 * dpi) {
             rubraview_pal_rect_t mid = { room.x + 8.0 * dpi, room.y, room.width - 16.0 * dpi, room.height };
             rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)say, proven_cstr_len(say) }, mid, font, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
-        if (page >= 0 && (size_t)page < count) {
-            rubraview_pal_rect_t line1 = { pv.x + 8.0 * dpi, pv.y + pv.height - caption_h, pv.width - 16.0 * dpi, caption_h * 0.5 };
-            rubraview_pal_rect_t line2 = { line1.x, line1.y + caption_h * 0.5 - 2.0, line1.width, caption_h * 0.5 };
-            proven_u8str_view_t name = page_display_name(app, (size_t)page);
-            rubraview_pal_render_draw_text(r, files_fit_text(cut, sizeof(cut), name, line1.width, font), line1, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-            char facts[160], size_text[32];
-            int fn = 0;
-            uint64_t bytes = rubraview_page_source_entry_size(&app->source, (size_t)page);
-            if (bytes > 0) files_size_text(size_text, sizeof(size_text), bytes); else size_text[0] = '\0';
-            if (app->files_preview_state == FILES_PREVIEW_SHOWN) {
-                fn = bytes > 0 ? rubraview_fmt(facts, sizeof(facts), "{} x {}   {}", PROVEN_ARG((int)app->files_preview_w), PROVEN_ARG((int)app->files_preview_h), PROVEN_ARG(size_text))
-                               : rubraview_fmt(facts, sizeof(facts), "{} x {}", PROVEN_ARG((int)app->files_preview_w), PROVEN_ARG((int)app->files_preview_h));
-            } else if (bytes > 0) {
-                fn = rubraview_fmt(facts, sizeof(facts), "{}", PROVEN_ARG(size_text));
+        if (page >= 0 && (size_t)page < count && caption_h >= font * 1.1) {
+            double h1 = caption_h >= font * 2.0 ? caption_h * 0.5 : caption_h;
+            rubraview_pal_rect_t line1 = { pv.x + 8.0 * dpi, pv.y + pv.height - caption_h, pv.width - 16.0 * dpi, h1 };
+            if (line1.width > 0.0) {
+                proven_u8str_view_t name = page_display_name(app, (size_t)page);
+                rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), name, line1.width, font), line1, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
             }
-            if (fn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)facts, (size_t)fn }, line2, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+            if (caption_h >= font * 2.0) {
+                rubraview_pal_rect_t line2 = { line1.x, line1.y + h1 - 2.0, line1.width, caption_h - h1 };
+                char facts[160], size_text[32];
+                int fn = 0;
+                uint64_t bytes = rubraview_page_source_entry_size(&app->source, (size_t)page);
+                if (bytes > 0) files_size_text(size_text, sizeof(size_text), bytes); else size_text[0] = '\0';
+                if (app->files_preview_state == FILES_PREVIEW_SHOWN) {
+                    fn = bytes > 0 ? rubraview_fmt(facts, sizeof(facts), "{} x {}   {}", PROVEN_ARG((int)app->files_preview_w), PROVEN_ARG((int)app->files_preview_h), PROVEN_ARG(size_text))
+                                   : rubraview_fmt(facts, sizeof(facts), "{} x {}", PROVEN_ARG((int)app->files_preview_w), PROVEN_ARG((int)app->files_preview_h));
+                } else if (bytes > 0) {
+                    fn = rubraview_fmt(facts, sizeof(facts), "{}", PROVEN_ARG(size_text));
+                }
+                if (fn > 0 && line2.width > 0.0)
+                    rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)facts, (size_t)fn }, line2.width, font * 0.9),
+                                                   line2, font * 0.9, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+            }
         }
     }
     if (app->ctx_in_files) draw_ctxmenu_on(app, r, app->files_px, app->files_py);   /* RV-117: a file's own list */
@@ -178,7 +199,7 @@ size_t files_pump(app_state_t *app) {
                 app->files_py = event.mouse.y;
                 if (scrollbar_motion(app, app->files_window, event.mouse.x, event.mouse.y)) { app->files_dirty = true; break; }   /* RV-170 */
                 if (scrollbar_hover(app, RVSB_FILES, event.mouse.x, event.mouse.y)) app->files_dirty = true;
-                app->files_hover = rubraview_listwin_hit(&app->files_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
+                app->files_hover = list_hit(app, &app->files_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
                                      ? (int32_t)list_page(app, index) : -1;
                 if (app->files_hover != was) app->files_dirty = true;
                 if (app->chooser.open && app->chooser.where == CHOOSE_IN_FILES) app->files_dirty = true;
@@ -210,7 +231,7 @@ size_t files_pump(app_state_t *app) {
                 bool right = event.mouse.button == RUBRAVIEW_MOUSE_RIGHT;
                 if (chooser_press(app, CHOOSE_IN_FILES, event.mouse.x, event.mouse.y)) { app->files_dirty = true; break; }   /* 1.25.0 */
                 if (app->list_filter_in_files &&
-                    !rubraview_rect_contains(rubraview_listwin_tool_rect(&app->files_list, RUBRAVIEW_LISTWIN_FILTER), event.mouse.x, event.mouse.y))
+                    !rubraview_rect_contains(list_part_rect(app, &app->files_list, RUBRAVIEW_LISTWIN_FILTER), event.mouse.x, event.mouse.y))
                     list_filter_files_end(app);   /* a press elsewhere: done typing, the filter kept */
                 if (app->ctx_open && app->ctx_in_files) {          /* its own list takes the press first */
                     if (popups_press(app, event.mouse.x, event.mouse.y, right) || !right) { app->files_dirty = true; break; }
@@ -225,7 +246,7 @@ size_t files_pump(app_state_t *app) {
                 if (chooser_wheel(app, CHOOSE_IN_FILES, event.mouse.wheel_delta)) break;   /* 1.25.0 */
                 rubraview_listwin_scroll(&app->files_list, event.mouse.wheel_delta > 0 ? -3 : 3, count);
                 /* the row under the pointer is another one now */
-                app->files_hover = rubraview_listwin_hit(&app->files_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
+                app->files_hover = list_hit(app, &app->files_list, event.mouse.x, event.mouse.y, count, &index) == RUBRAVIEW_LISTWIN_ROW
                                      ? (int32_t)list_page(app, index) : -1;
                 app->files_dirty = true;
                 break;
