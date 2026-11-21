@@ -1340,7 +1340,7 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         if (key_is(combo, "Up"))    { if (!app->picker_in_book) picker_go_up(app); return true; }
     }
 
-    if (combo.key_name.size == 1) {
+    if (combo.key_name.size == 1 && combo.modifiers == 0) {
         char c = combo.key_name.ptr[0];
         if (app->picker_has_pending && c == '0') {
             app->picker_has_pending = false;

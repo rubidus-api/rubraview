@@ -1083,7 +1083,6 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
                 if (picker_in_archive(app)) picker_leave_archive(app);
                 if (!app->picker_open) handle_action(app, PROVEN_LIT("open_picker"));
                 picker_navigate(app, paths[0]);
-                app->picker.focus = 0;
                 break;
             }
             open_path(app, paths[0]);

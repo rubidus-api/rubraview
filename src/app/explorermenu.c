@@ -84,10 +84,20 @@ static void targets_for_page(app_state_t *app) {
 static void targets_for_picker(app_state_t *app, size_t index) {
     targets_clear(app);
     if (picker_in_archive(app) || app->picker_in_book) return;
-    bool folder = false;
-    if (index < app->picker_listing.count) targets_add(app, app->picker_listing.entries[index].path, &folder);   /* the one clicked first */
+    bool folder = false, picked_any = false;
     for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i)
-        if (app->picker_selected[i] && i != index) { bool f = false; targets_add(app, app->picker_listing.entries[i].path, &f); }
+        if (app->picker_selected[i] && !picker_is_up(app, i)) { picked_any = true; break; }
+    if (picked_any) {
+        if (index < app->picker_listing.count && app->picker_selected[index] && !picker_is_up(app, index))
+            targets_add(app, app->picker_listing.entries[index].path, &folder);   /* the one clicked first */
+        for (size_t i = 0; i < app->picker_listing.count; ++i)
+            if (app->picker_selected[i] && !picker_is_up(app, i) && i != index) {
+                bool f = false;
+                targets_add(app, app->picker_listing.entries[i].path, app->shell_target_count == 0 ? &folder : &f);
+            }
+    } else if (index < app->picker_listing.count && !picker_is_up(app, index)) {
+        targets_add(app, app->picker_listing.entries[index].path, &folder);
+    }
     targets_read_verbs(app, folder);
 }
 
