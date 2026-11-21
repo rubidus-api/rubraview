@@ -39,8 +39,3 @@ __pycache__/
 .DS_Store
 .env
 .env.*
-/scripts/sot-check.sh
-/scripts/claim.sh
-/scripts/install-hook.sh
-/scripts/readme-topline.sh
-/scripts/commit-both.sh
