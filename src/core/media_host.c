@@ -108,6 +108,7 @@ void rubraview_mhost_info_put(rubraview_mhost_info_t *w, const rubraview_media_i
     w->hdr_tone_mapped = info->hdr_tone_mapped;
     w->hdr_output = info->hdr_output;
     w->live = info->live;
+    w->sdr_gpu = info->sdr_gpu;
     w->duration_seconds = info->duration_seconds;
     w->frame_rate = info->frame_rate;
     rubraview_mhost_text_put(w->path_decoder, sizeof w->path_decoder, info->path_decoder);
@@ -123,7 +124,7 @@ bool rubraview_mhost_info_take(const rubraview_mhost_info_t *w, rubraview_media_
     if (!w || !out) return false;
     proven_sys_mem_set(out, 0, sizeof(*out));
     if (w->has_video > 1 || w->has_audio > 1 || w->audio_output > 1 || w->hardware_decode > 1 || w->hdr_tone_mapped > 1 ||
-        w->hdr_output > 1 || w->live > 1) return false;
+        w->hdr_output > 1 || w->live > 1 || w->sdr_gpu > 1) return false;
     if (w->has_video && (w->width <= 0 || w->height <= 0 || w->width > RUBRAVIEW_MHOST_MAX_SIDE || w->height > RUBRAVIEW_MHOST_MAX_SIDE))
         return false;
     if (!w->has_video && (w->width != 0 || w->height != 0)) return false;
@@ -148,6 +149,7 @@ bool rubraview_mhost_info_take(const rubraview_mhost_info_t *w, rubraview_media_
     out->hdr_tone_mapped = w->hdr_tone_mapped;
     out->hdr_output = w->hdr_output;
     out->live = w->live;
+    out->sdr_gpu = w->sdr_gpu;
     rubraview_mhost_text_take(out->path_decoder, sizeof out->path_decoder, w->path_decoder, sizeof w->path_decoder);
     rubraview_mhost_text_take(out->path_colours, sizeof out->path_colours, w->path_colours, sizeof w->path_colours);
     rubraview_mhost_text_take(out->path_handover, sizeof out->path_handover, w->path_handover, sizeof w->path_handover);

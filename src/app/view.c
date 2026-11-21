@@ -141,7 +141,8 @@ void boxes_apply_size(app_state_t *app) {
 static void media_reopen(app_state_t *app);
 
 void media_reopen_on_new_device(app_state_t *app) {
-    if (!app->media || !app->media_info.has_video || !(app->media_info.hardware_decode || app->media_info.hdr_tone_mapped)) return;
+    if (!app->media || !app->media_info.has_video ||
+        !(app->media_info.hardware_decode || app->media_info.hdr_tone_mapped || app->media_info.sdr_gpu)) return;
     media_reopen(app);
     osd_say(app, TU8("the graphics device was reset: the film was opened again"));
 }

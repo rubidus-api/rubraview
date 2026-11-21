@@ -5,6 +5,7 @@
 #include <d3d11.h>
 #include <d3d11_4.h>   /* ID3D11Multithread */
 #include <d3dcommon.h>
+#include <dxgi.h>
 #include <stdlib.h>
 #include <string.h>
 #include "rubraview/pal/pal_hdr.h"
@@ -17,6 +18,9 @@
  * PQ or HLG (with its 1000-nit OOTF) to nits, BT.2390's EETF on the
  * brightest channel, BT.2020 to BT.709, sRGB's curve.
  *
+ * D-334 follow-up: `ps_sdr8` reuses the same pass and D3D11 shader state
+ * to convert 8-bit planar Y'CbCr (`R8_UNORM`) into the shared BGRA slot.
+ *
  * The shader is compiled at run time by Windows' d3dcompiler_47.dll, as
  * the resize shaders are (D-55); it runs on WARP as well, which is how the
  * VM sees it.
@@ -27,6 +31,10 @@ typedef HRESULT (WINAPI *d3dcompile_fn)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADE
 
 static const GUID HDR_IID_ID3D11Multithread =
     { 0x9b7e4e00, 0x342c, 0x4106, { 0xa1, 0x9f, 0x4f, 0x27, 0x04, 0xf6, 0x89, 0xf0 } };
+static const GUID HDR_IID_IDXGIDevice =
+    { 0x54ec77fa, 0x1377, 0x44e6, { 0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c } };
+static const GUID HDR_IID_IDXGIAdapter1 =
+    { 0x29038f61, 0x3839, 0x4626, { 0x91, 0xfd, 0x08, 0x68, 0x79, 0x01, 0x1a, 0x05 } };
 
 static const char SHADER[] =
     "cbuffer tone : register(b0) { float4 a; float4 b; float4 c; };\n"
@@ -121,6 +129,15 @@ static const char SHADER[] =
     "float4 ps_p010(vs_out i) : SV_Target {\n"
     "    float2 c = plane_uv.Sample(linear_clamp, i.uv) * a.x;\n"
     "    return tone(plane_y.Sample(linear_clamp, i.uv) * a.x, c.x, c.y);\n"
+    "}\n"
+    "float4 ps_sdr8(vs_out i) : SV_Target {\n"
+    "    float yv  = (plane_y.Sample(linear_clamp, i.uv) * 255.0 - a.x) * a.y;\n"
+    "    float cbv = (plane_u.Sample(linear_clamp, i.uv) * 255.0 - a.z) * a.w;\n"
+    "    float crv = (plane_v.Sample(linear_clamp, i.uv) * 255.0 - a.z) * a.w;\n"
+    "    float r  = saturate(yv + b.x * crv);\n"
+    "    float g  = saturate(yv - b.y * cbv - b.z * crv);\n"
+    "    float bl = saturate(yv + b.w * cbv);\n"
+    "    return float4(r, g, bl, 1.0);\n"
     "}\n";
 
 #define TARGET_VIEWS 8   /* a film's slots, with room */
@@ -132,11 +149,13 @@ struct rubraview_hdr_pass {
     ID3D11VertexShader *vs;
     ID3D11PixelShader *ps;
     ID3D11PixelShader *ps_p010;          /* RV-151 */
+    ID3D11PixelShader *ps_sdr8;          /* D-334 follow-up */
     ID3D11Buffer *params;
     ID3D11SamplerState *sampler;
-    ID3D11Texture2D *planes[4];          /* Y', Cb, Cr (R16), and P010's Cb Cr from memory (R16G16) */
+    ID3D11Texture2D *planes[4];          /* Y', Cb, Cr (R16 or R8), and P010's Cb Cr from memory (R16G16) */
     ID3D11ShaderResourceView *views[4];
     int32_t sizes[4][2];
+    DXGI_FORMAT formats[4];
     bool p010_views;                     /* the card samples P010 */
     ID3D11Texture2D *p010;               /* a decoder's slice copied here */
     ID3D11ShaderResourceView *p010_y, *p010_uv;
@@ -167,6 +186,7 @@ void rubraview_pal_hdr_pass_free(rubraview_hdr_pass_t *p) {
     if (p->test_array) ID3D11Texture2D_Release(p->test_array);
     if (p->test_staging) ID3D11Texture2D_Release(p->test_staging);
     if (p->ps_p010) ID3D11PixelShader_Release(p->ps_p010);
+    if (p->ps_sdr8) ID3D11PixelShader_Release(p->ps_sdr8);
     if (p->sampler) ID3D11SamplerState_Release(p->sampler);
     if (p->params) ID3D11Buffer_Release(p->params);
     if (p->ps) ID3D11PixelShader_Release(p->ps);
@@ -206,16 +226,19 @@ rubraview_hdr_pass_t *rubraview_pal_hdr_pass_create(void *d3d11_device, const ch
         p->lock = NULL;
 
     ID3DBlob *vs = compile(compile_fn, "vs", "vs_4_0"), *ps = compile(compile_fn, "ps", "ps_4_0");
-    ID3DBlob *ps2 = compile(compile_fn, "ps_p010", "ps_4_0");
+    ID3DBlob *ps2 = compile(compile_fn, "ps_p010", "ps_4_0"), *ps3 = compile(compile_fn, "ps_sdr8", "ps_4_0");
     if (vs && FAILED(ID3D11Device_CreateVertexShader(p->device, ID3D10Blob_GetBufferPointer(vs), ID3D10Blob_GetBufferSize(vs), NULL, &p->vs)))
         p->vs = NULL;
     if (ps && FAILED(ID3D11Device_CreatePixelShader(p->device, ID3D10Blob_GetBufferPointer(ps), ID3D10Blob_GetBufferSize(ps), NULL, &p->ps)))
         p->ps = NULL;
     if (ps2 && FAILED(ID3D11Device_CreatePixelShader(p->device, ID3D10Blob_GetBufferPointer(ps2), ID3D10Blob_GetBufferSize(ps2), NULL, &p->ps_p010)))
         p->ps_p010 = NULL;
+    if (ps3 && FAILED(ID3D11Device_CreatePixelShader(p->device, ID3D10Blob_GetBufferPointer(ps3), ID3D10Blob_GetBufferSize(ps3), NULL, &p->ps_sdr8)))
+        p->ps_sdr8 = NULL;
     if (vs) ID3D10Blob_Release(vs);
     if (ps) ID3D10Blob_Release(ps);
     if (ps2) ID3D10Blob_Release(ps2);
+    if (ps3) ID3D10Blob_Release(ps3);
     UINT support = 0;   /* RV-151: P010 read in place needs it as a texture the shaders sample */
     p->p010_views = p->ps_p010 && SUCCEEDED(ID3D11Device_CheckFormatSupport(p->device, DXGI_FORMAT_P010, &support)) &&
                     (support & D3D11_FORMAT_SUPPORT_TEXTURE2D) && (support & D3D11_FORMAT_SUPPORT_SHADER_SAMPLE);
@@ -237,9 +260,8 @@ rubraview_hdr_pass_t *rubraview_pal_hdr_pass_create(void *d3d11_device, const ch
     return p;
 }
 
-static bool plane_ready(rubraview_hdr_pass_t *p, int i, int32_t w, int32_t h) {
-    DXGI_FORMAT format = i == 3 ? DXGI_FORMAT_R16G16_UNORM : DXGI_FORMAT_R16_UNORM;
-    if (p->planes[i] && p->sizes[i][0] == w && p->sizes[i][1] == h) return true;
+static bool plane_ready(rubraview_hdr_pass_t *p, int i, int32_t w, int32_t h, DXGI_FORMAT format) {
+    if (p->planes[i] && p->formats[i] == format && p->sizes[i][0] == w && p->sizes[i][1] == h) return true;
     if (p->views[i]) { ID3D11ShaderResourceView_Release(p->views[i]); p->views[i] = NULL; }
     if (p->planes[i]) { ID3D11Texture2D_Release(p->planes[i]); p->planes[i] = NULL; }
     D3D11_TEXTURE2D_DESC desc = {
@@ -253,6 +275,7 @@ static bool plane_ready(rubraview_hdr_pass_t *p, int i, int32_t w, int32_t h) {
     }
     p->sizes[i][0] = w;
     p->sizes[i][1] = h;
+    p->formats[i] = format;
     return true;
 }
 
@@ -267,18 +290,11 @@ static ID3D11RenderTargetView *target_view(rubraview_hdr_pass_t *p, ID3D11Textur
     return view;
 }
 
-/* The shader over the whole target: `views` at t0..t3, the samples scaled to codes by `scale`. Under the lock. */
-static bool draw(rubraview_hdr_pass_t *p, ID3D11PixelShader *ps, ID3D11ShaderResourceView *const views[4], double scale,
-                 const rubraview_tonemap_t *tone, ID3D11Texture2D *target, int32_t width, int32_t height) {
+/* Fullscreen shader pass over `target`: `views` at t0..t3 with 12-float constant buffer `params`. Under the lock. */
+static bool draw_params(rubraview_hdr_pass_t *p, ID3D11PixelShader *ps, ID3D11ShaderResourceView *const views[4],
+                        const float params[12], ID3D11Texture2D *target, int32_t width, int32_t height) {
     ID3D11RenderTargetView *rtv = target_view(p, target);
     if (!rtv) return false;
-    int bits = tone->bits >= 8 && tone->bits <= 16 ? tone->bits : 10;
-    float params[12] = {
-        (float)scale, (float)tone->transfer, tone->full_range ? 1.0f : 0.0f, (float)((1 << bits) - 1),
-        (float)tone->peak_nits, (float)(tone->white_nits > 0.0 ? tone->white_nits : RUBRAVIEW_SDR_WHITE_NITS),
-        (float)(1 << (bits - 8)), (float)(1 << (bits - 1)),
-        (float)(tone->screen_peak_nits > 0.0 ? tone->screen_peak_nits : 0.0), 0.0f, 0.0f, 0.0f,
-    };
     ID3D11DeviceContext_UpdateSubresource(p->context, (ID3D11Resource*)p->params, 0, NULL, params, 0, 0);
     D3D11_VIEWPORT viewport = { 0.0f, 0.0f, (float)width, (float)height, 0.0f, 1.0f };
     ID3D11DeviceContext_IASetInputLayout(p->context, NULL);
@@ -300,15 +316,27 @@ static bool draw(rubraview_hdr_pass_t *p, ID3D11PixelShader *ps, ID3D11ShaderRes
     return true;
 }
 
+static bool draw(rubraview_hdr_pass_t *p, ID3D11PixelShader *ps, ID3D11ShaderResourceView *const views[4], double scale,
+                 const rubraview_tonemap_t *tone, ID3D11Texture2D *target, int32_t width, int32_t height) {
+    int bits = tone->bits >= 8 && tone->bits <= 16 ? tone->bits : 10;
+    float params[12] = {
+        (float)scale, (float)tone->transfer, tone->full_range ? 1.0f : 0.0f, (float)((1 << bits) - 1),
+        (float)tone->peak_nits, (float)(tone->white_nits > 0.0 ? tone->white_nits : RUBRAVIEW_SDR_WHITE_NITS),
+        (float)(1 << (bits - 8)), (float)(1 << (bits - 1)),
+        (float)(tone->screen_peak_nits > 0.0 ? tone->screen_peak_nits : 0.0), 0.0f, 0.0f, 0.0f,
+    };
+    return draw_params(p, ps, views, params, target, width, height);
+}
+
 bool rubraview_pal_hdr_pass_run(rubraview_hdr_pass_t *p, const rubraview_hdr_planes_t *planes,
                                 const rubraview_tonemap_t *tone, void *target) {
     if (!p || !planes || !tone || !target || planes->width <= 0 || planes->height <= 0 ||
         planes->chroma_width <= 0 || planes->chroma_height <= 0) return false;
 
     if (p->lock) ID3D11Multithread_Enter(p->lock);   /* the context is shared with the decoders' threads */
-    bool ok = plane_ready(p, 0, planes->width, planes->height) &&
-              plane_ready(p, 1, planes->chroma_width, planes->chroma_height) &&
-              plane_ready(p, 2, planes->chroma_width, planes->chroma_height);
+    bool ok = plane_ready(p, 0, planes->width, planes->height, DXGI_FORMAT_R16_UNORM) &&
+              plane_ready(p, 1, planes->chroma_width, planes->chroma_height, DXGI_FORMAT_R16_UNORM) &&
+              plane_ready(p, 2, planes->chroma_width, planes->chroma_height, DXGI_FORMAT_R16_UNORM);
     if (ok) {
         for (int i = 0; i < 3; ++i)
             ID3D11DeviceContext_UpdateSubresource(p->context, (ID3D11Resource*)p->planes[i], 0, NULL,
@@ -372,7 +400,7 @@ bool rubraview_pal_hdr_pass_run_p010(rubraview_hdr_pass_t *p, const rubraview_hd
     if (!source->data[0] || !source->data[1] || source->stride[0] <= 0 || source->stride[1] <= 0) return false;
     int32_t cw = (w + 1) / 2, ch = (h + 1) / 2;
     if (p->lock) ID3D11Multithread_Enter(p->lock);
-    if (plane_ready(p, 0, w, h) && plane_ready(p, 3, cw, ch)) {
+    if (plane_ready(p, 0, w, h, DXGI_FORMAT_R16_UNORM) && plane_ready(p, 3, cw, ch, DXGI_FORMAT_R16G16_UNORM)) {
         ID3D11DeviceContext_UpdateSubresource(p->context, (ID3D11Resource*)p->planes[0], 0, NULL, source->data[0], (UINT)source->stride[0], 0);
         ID3D11DeviceContext_UpdateSubresource(p->context, (ID3D11Resource*)p->planes[3], 0, NULL, source->data[1], (UINT)source->stride[1], 0);
         ID3D11ShaderResourceView *views[4] = { p->views[0], NULL, NULL, p->views[3] };
@@ -451,6 +479,63 @@ bool rubraview_pal_hdr_pass_run_as_p010(rubraview_hdr_pass_t *p, const rubraview
     if (!ok) return false;
     rubraview_hdr_p010_t source = { .texture = p->test_array, .slice = 1, .width = w, .height = h };
     return rubraview_pal_hdr_pass_run_p010(p, &source, tone, target);
+}
+
+/* D-334 follow-up: 8-bit SDR planar Y'CbCr (`R8_UNORM`) -> BGRA directly on the card. */
+bool rubraview_pal_hdr_pass_run_sdr8(rubraview_hdr_pass_t *p, const rubraview_hdr_planes_t *planes,
+                                     const rubraview_sdr_yuv_t *sdr, void *target) {
+    if (!p || !p->ps_sdr8 || !planes || !sdr || !target || planes->width <= 0 || planes->height <= 0 ||
+        planes->chroma_width <= 0 || planes->chroma_height <= 0 || !planes->data[0] || !planes->data[1] || !planes->data[2] ||
+        planes->stride[0] < planes->width || planes->stride[1] < planes->chroma_width || planes->stride[2] < planes->chroma_width)
+        return false;
+
+    double c[4];
+    rubraview_sdr_yuv_coeffs(sdr->matrix, c);
+    bool full = sdr->full_range;
+    float params[12] = {
+        full ? 0.0f : 16.0f, full ? (1.0f / 255.0f) : (1.0f / 219.0f),
+        128.0f,              full ? (1.0f / 255.0f) : (1.0f / 224.0f),
+        (float)c[0], (float)c[1], (float)c[2], (float)c[3],
+        0.0f, 0.0f, 0.0f, 0.0f,
+    };
+
+    if (p->lock) ID3D11Multithread_Enter(p->lock);
+    bool ok = plane_ready(p, 0, planes->width, planes->height, DXGI_FORMAT_R8_UNORM) &&
+              plane_ready(p, 1, planes->chroma_width, planes->chroma_height, DXGI_FORMAT_R8_UNORM) &&
+              plane_ready(p, 2, planes->chroma_width, planes->chroma_height, DXGI_FORMAT_R8_UNORM);
+    if (ok) {
+        for (int i = 0; i < 3; ++i)
+            ID3D11DeviceContext_UpdateSubresource(p->context, (ID3D11Resource*)p->planes[i], 0, NULL,
+                                                  planes->data[i], (UINT)planes->stride[i], 0);
+        ID3D11ShaderResourceView *views[4] = { p->views[0], p->views[1], p->views[2], NULL };
+        ok = draw_params(p, p->ps_sdr8, views, params, (ID3D11Texture2D*)target, planes->width, planes->height);
+    }
+    if (p->lock) ID3D11Multithread_Leave(p->lock);
+    return ok;
+}
+
+bool rubraview_pal_hdr_device_is_software(void *d3d11_device) {
+    if (!d3d11_device) return false;
+    IDXGIDevice *dxgi = NULL;
+    IDXGIAdapter *adapter = NULL;
+    bool software = false;
+    if (SUCCEEDED(ID3D11Device_QueryInterface((ID3D11Device *)d3d11_device, &HDR_IID_IDXGIDevice, (void **)&dxgi)) && dxgi) {
+        if (SUCCEEDED(IDXGIDevice_GetAdapter(dxgi, &adapter)) && adapter) {
+            IDXGIAdapter1 *a1 = NULL;
+            if (SUCCEEDED(IDXGIAdapter_QueryInterface(adapter, &HDR_IID_IDXGIAdapter1, (void **)&a1)) && a1) {
+                DXGI_ADAPTER_DESC1 d1;
+                if (SUCCEEDED(IDXGIAdapter1_GetDesc1(a1, &d1)))
+                    software = (d1.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || d1.VendorId == 0x1414u;
+                IDXGIAdapter1_Release(a1);
+            } else {
+                DXGI_ADAPTER_DESC d;
+                if (SUCCEEDED(IDXGIAdapter_GetDesc(adapter, &d))) software = d.VendorId == 0x1414u;
+            }
+            IDXGIAdapter_Release(adapter);
+        }
+        IDXGIDevice_Release(dxgi);
+    }
+    return software;
 }
 
 /* ---- RV-153 (D-183): the scene to the scRGB back buffer ---- */

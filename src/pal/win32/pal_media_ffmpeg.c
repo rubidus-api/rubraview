@@ -135,6 +135,9 @@ typedef struct ff_media {
     bool tone_peak_read;                     /* the first picture's metadata was looked at */
     _Atomic(double) tone_peak;               /* what the caller is told */
     const char *hdr_why;                     /* HDR not tone mapped: why (an N_ literal) */
+    /* D-334 follow-up: 8-bit SDR planar YUV converted by our shader into the shared slot textures */
+    rubraview_hdr_pass_t *sdr_pass;
+    int sdr_colorspace, sdr_color_range;
     /* RV-157: an internet radio station, opened over the network */
     bool station;
     ULONGLONG open_deadline_ms;              /* while opening one: when to give up (the decode thread's own) */
@@ -667,6 +670,7 @@ bool rubraview_pal_ffmpeg_jxl_frames(proven_mem_view_t data_view, int32_t max_si
 static bool ff_hw_api(void);
 static bool ff_hw_attach(ff_media_t *m, AVCodecContext *video);
 static void ff_tone_setup(ff_media_t *m, const AVCodecParameters *par);
+static void ff_sdr_setup(ff_media_t *m, const AVCodecContext *video, const AVCodecParameters *par);
 
 typedef struct ff_decode {
     AVFormatContext *format;
@@ -1184,6 +1188,7 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
                 m->failure = rubraview_media_classify(true, true, false, fourcc);
                 return false;
             }
+            if (!hdr) ff_sdr_setup(m, d->video, par);
         }
         m->width = par->width;
         m->height = par->height;
@@ -1252,8 +1257,14 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         } else {
             in->decode_threads = d->video->thread_count > 0 ? d->video->thread_count : -1;
             rubraview_fmt(in->path_decoder, sizeof(in->path_decoder), "{}", PROVEN_ARG(N_("FFmpeg's decoder on the processor")));
-            rubraview_fmt(in->path_colours, sizeof(in->path_colours), "{}", PROVEN_ARG(N_("swscale on the processor, bilinear, to BGRA")));
-            rubraview_fmt(in->path_handover, sizeof(in->path_handover), "{}", PROVEN_ARG(N_("pixels written into the page's texture, a picture at a time")));
+            if (m->sdr_pass) {
+                in->sdr_gpu = true;
+                rubraview_fmt(in->path_colours, sizeof(in->path_colours), "{}", PROVEN_ARG(N_("our shader on the graphics card (Direct3D 11), 8-bit YUV to BGRA")));
+                rubraview_fmt(in->path_handover, sizeof(in->path_handover), "{}", PROVEN_ARG(N_("the planes uploaded as they are; a shared texture (keyed mutex), copied on the card into the page's")));
+            } else {
+                rubraview_fmt(in->path_colours, sizeof(in->path_colours), "{}", PROVEN_ARG(N_("swscale on the processor, bilinear, to BGRA")));
+                rubraview_fmt(in->path_handover, sizeof(in->path_handover), "{}", PROVEN_ARG(N_("pixels written into the page's texture, a picture at a time")));
+            }
             rubraview_fmt(in->path_why_software, sizeof(in->path_why_software), "{}", PROVEN_ARG(m->hw_why ? m->hw_why : ""));
         }
         in->hdr_transfer = (int32_t)m->tone.transfer;
@@ -1821,6 +1832,75 @@ static bool ff_tone_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
     return ok;
 }
 
+/* ---- D-334 follow-up: 8-bit SDR planar YUV on the graphics card ---- */
+
+static bool ff_sdr_format(int format, int *shift_x, int *shift_y) {
+    switch (format) {
+    case AV_PIX_FMT_YUV420P:
+    case AV_PIX_FMT_YUVJ420P: *shift_x = 1; *shift_y = 1; return true;
+    case AV_PIX_FMT_YUV422P:
+    case AV_PIX_FMT_YUVJ422P: *shift_x = 1; *shift_y = 0; return true;
+    case AV_PIX_FMT_YUV444P:
+    case AV_PIX_FMT_YUVJ444P: *shift_x = 0; *shift_y = 0; return true;
+    default: return false;
+    }
+}
+
+static rubraview_sdr_yuv_t ff_sdr_yuv_of(const AVFrame *f, int fallback_space, int fallback_range) {
+    int spc = f->colorspace != AVCOL_SPC_UNSPECIFIED ? (int)f->colorspace : fallback_space;
+    int rng = f->color_range != AVCOL_RANGE_UNSPECIFIED ? (int)f->color_range : fallback_range;
+    rubraview_yuv_matrix_t matrix = RUBRAVIEW_YUV_BT601;
+    if (spc == AVCOL_SPC_BT2020_NCL || spc == AVCOL_SPC_BT2020_CL) matrix = RUBRAVIEW_YUV_BT2020;
+    else if (spc == AVCOL_SPC_BT709) matrix = RUBRAVIEW_YUV_BT709;
+    else if (spc == AVCOL_SPC_BT470BG || spc == AVCOL_SPC_SMPTE170M || spc == AVCOL_SPC_SMPTE240M || spc == AVCOL_SPC_FCC)
+        matrix = RUBRAVIEW_YUV_BT601;
+    else if (f->height >= 720)
+        matrix = RUBRAVIEW_YUV_BT709;
+    bool jfmt = f->format == AV_PIX_FMT_YUVJ420P || f->format == AV_PIX_FMT_YUVJ422P || f->format == AV_PIX_FMT_YUVJ444P;
+    return (rubraview_sdr_yuv_t){ .matrix = matrix, .full_range = jfmt || rng == AVCOL_RANGE_JPEG };
+}
+
+static void ff_sdr_setup(ff_media_t *m, const AVCodecContext *video, const AVCodecParameters *par) {
+    if (!m->gpu.shader_device) return;
+    char env[8] = "";
+    DWORD en = GetEnvironmentVariableA("RUBRAVIEW_SDR_GPU", env, sizeof(env));
+    if (en == 0 || en >= sizeof(env)) env[0] = '\0';
+    bool sw = rubraview_pal_hdr_device_is_software(m->gpu.shader_device);
+    if (!rubraview_sdr_gpu_want(sw, rubraview_sdr_gpu_env(env))) return;
+    int fmt = video && video->pix_fmt != AV_PIX_FMT_NONE ? (int)video->pix_fmt : (int)par->format;
+    int sx = 0, sy = 0;
+    if (!ff_sdr_format(fmt, &sx, &sy)) return;
+    const char *why = NULL;
+    m->sdr_pass = rubraview_pal_hdr_pass_create(m->gpu.shader_device, &why);
+    m->sdr_colorspace = (int)par->color_space;
+    m->sdr_color_range = (int)par->color_range;
+    rubraview_pal_media_log("ffmpeg: SDR 8-bit YUV shader {}{}",
+                            PROVEN_ARG(m->sdr_pass ? "ready" : "refused: "),
+                            PROVEN_ARG(m->sdr_pass ? "" : (why ? why : "unknown")));
+}
+
+static bool ff_sdr_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
+    int sx = 0, sy = 0;
+    if (!m->sdr_pass || !m->gpu.shader_device || f->width != m->width || f->height != m->height ||
+        !f->data[0] || !f->data[1] || !f->data[2] || !ff_sdr_format(f->format, &sx, &sy))
+        return false;
+    int32_t cw = (f->width + (1 << sx) - 1) >> sx, ch = (f->height + (1 << sy) - 1) >> sy;
+    if (f->linesize[0] < f->width || f->linesize[1] < cw || f->linesize[2] < cw) return false;
+    if (!ff_slot_texture(m, s, (ID3D11Device *)m->gpu.shader_device)) return false;
+    rubraview_hdr_planes_t planes = {
+        .data = { f->data[0], f->data[1], f->data[2] },
+        .stride = { f->linesize[0], f->linesize[1], f->linesize[2] },
+        .width = f->width, .height = f->height, .chroma_width = cw, .chroma_height = ch,
+    };
+    rubraview_sdr_yuv_t sdr = ff_sdr_yuv_of(f, m->sdr_colorspace, m->sdr_color_range);
+    bool ok = false;
+    if (IDXGIKeyedMutex_AcquireSync(s->mutex, 0, 500) == S_OK) {
+        ok = rubraview_pal_hdr_pass_run_sdr8(m->sdr_pass, &planes, &sdr, s->texture);
+        IDXGIKeyedMutex_ReleaseSync(s->mutex, 0);
+    }
+    return ok;
+}
+
 /* One picture of the card's turned into BGRA by its video processor, into the slot's own texture. */
 static bool ff_vp_blit(ff_media_t *m, const AVFrame *f, ff_slot_t *s) {
     if (!m->hw_device || !f->data[0]) return false;
@@ -1920,6 +2000,8 @@ static bool store_video(ff_media_t *m, ff_decode_t *d, double pts, double durati
     m->slots[slot].on_gpu = false;
     if (m->hdr_pass && ff_tone_blit(m, d->frame, &m->slots[slot])) {
         m->slots[slot].on_gpu = true;   /* RV-150; RV-151 the card's P010 where it is */
+    } else if (m->sdr_pass && ff_sdr_blit(m, d->frame, &m->slots[slot])) {
+        m->slots[slot].on_gpu = true;   /* D-334 follow-up: 8-bit SDR planar YUV on the card */
     } else if (d->frame->format == AV_PIX_FMT_D3D11) {
         if (!m->hdr_pass && ff_vp_blit(m, d->frame, &m->slots[slot])) {   /* the video processor knows no PQ */
             m->slots[slot].on_gpu = true;
@@ -2241,6 +2323,8 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
     ff_hw_release(m);      /* ... then the processor's views and the device (RV-149) */
     rubraview_pal_hdr_pass_free(m->hdr_pass);   /* RV-150 */
     m->hdr_pass = NULL;
+    rubraview_pal_hdr_pass_free(m->sdr_pass);   /* D-334 follow-up */
+    m->sdr_pass = NULL;
     return 0;
 }
 

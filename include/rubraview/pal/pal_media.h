@@ -53,6 +53,7 @@ typedef struct rubraview_media_info {
     bool     hdr_tone_mapped;            /* its pictures are tone mapped to SDR on the graphics card */
     char     path_hdr_why[128];          /* HDR not tone mapped: why (an N_ literal; empty otherwise) */
     bool     hdr_output;                 /* RV-153: its pictures are for an HDR screen (FP16, 1.0 the SDR white) */
+    bool     sdr_gpu;                    /* D-334 follow-up: 8-bit SDR planar YUV converted by GPU shader */
     bool     live;                       /* RV-157: an internet radio station: no length, no seeking */
 } rubraview_media_info_t;
 

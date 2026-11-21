@@ -1328,11 +1328,11 @@ static int32_t child_open(child_play_t *cp) {
     rubraview_media_gpu_t gpu = { .mode = b->gpu_mode, .tone_mapping = b->tone_mapping,
                                   .hdr_screen_peak = b->hdr_screen_peak, .hdr_sdr_white = b->hdr_sdr_white,
                                   .open_ahead = b->request_args[4] != 0 };   /* RV-177; RV-261 */
-    if ((b->gpu_mode > 0 || b->tone_mapping > 0) && !cp->device) cp->device = child_device(b->adapter_luid, &cp->profiles);
+    if (b->adapter_luid && !cp->device) cp->device = child_device(b->adapter_luid, &cp->profiles);
     gpu.decoder_profiles = cp->profiles;
     if (cp->device) {
         if (b->gpu_mode > 0) gpu.device = cp->device;
-        if (b->tone_mapping > 0) gpu.shader_device = cp->device;
+        gpu.shader_device = cp->device;
     }
     rubraview_ffmpeg_hosting_t hosting = { .ring = &b->ring, .slots = b->slots, .pixels = child_frames_room, .room = g_child_room };
     rubraview_media_failure_t failure = RUBRAVIEW_MEDIA_FAIL_FILE;

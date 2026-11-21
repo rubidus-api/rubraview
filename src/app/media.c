@@ -396,15 +396,15 @@ static app_page_t *media_page_ready(app_state_t *app) {
         page->texture = !app->media_info.has_video
             ? audio_page_picture(app, app->source.pages[app->media_page].path, &w, &h)
             : app->media_info.hdr_output ? rubraview_pal_texture_create_video_hdr(app->renderer, w, h)   /* RV-153 */
-            : app->media_info.hardware_decode || app->media_info.hdr_tone_mapped
+            : app->media_info.hardware_decode || app->media_info.hdr_tone_mapped || app->media_info.sdr_gpu
                 ? rubraview_pal_texture_create_video(app->renderer, w, h)
                 : rubraview_pal_texture_create_bgra(app->renderer, w, h);
         if (!page->texture) return NULL;
-        rubraview_pal_media_log("app: page {} texture {}x{} made {} (hdr_output {}, hw {}, tone {})", PROVEN_ARG((int64_t)app->media_page),
+        rubraview_pal_media_log("app: page {} texture {}x{} made {} (hdr_output {}, hw {}, tone {}, sdr_gpu {})", PROVEN_ARG((int64_t)app->media_page),
                                 PROVEN_ARG((int64_t)w), PROVEN_ARG((int64_t)h),
                                 PROVEN_ARG(rubraview_pal_texture_is_hdr(page->texture) ? "FP16" : rubraview_pal_texture_on_card(page->texture) ? "BGRA on the card" : "BGRA"),
                                 PROVEN_ARG((int64_t)app->media_info.hdr_output), PROVEN_ARG((int64_t)app->media_info.hardware_decode),
-                                PROVEN_ARG((int64_t)app->media_info.hdr_tone_mapped));
+                                PROVEN_ARG((int64_t)app->media_info.hdr_tone_mapped), PROVEN_ARG((int64_t)app->media_info.sdr_gpu));
         page->width = w;
         page->height = h;
         page->loaded = true;
@@ -1074,9 +1074,17 @@ static void film_open_make(app_state_t *app, int32_t index, proven_u8str_view_t 
     rubraview_media_gpu_t *gpu = &fo->gpu;
     gpu->mode = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hardware_decode")));
     if (gpu->mode > 0) gpu->device = rubraview_pal_render_video_device(app->renderer, &gpu->decoder_profiles);
-    /* RV-150: an HDR film is tone mapped by our shader on the renderer's decode device */
+    /* RV-150: an HDR film is tone mapped by our shader on the renderer's decode device;
+       D-334 follow-up: 8-bit SDR planar YUV also runs there on non-software adapters (or RUBRAVIEW_SDR_GPU). */
     gpu->tone_mapping = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hdr_tone_mapping")));
-    if (gpu->tone_mapping > 0) gpu->shader_device = gpu->device ? gpu->device : rubraview_pal_render_video_device(app->renderer, NULL);
+    char sdr_env[8] = "";
+    DWORD sdr_n = GetEnvironmentVariableA("RUBRAVIEW_SDR_GPU", sdr_env, sizeof(sdr_env));
+    if (sdr_n == 0 || sdr_n >= sizeof(sdr_env)) sdr_env[0] = '\0';
+    rubraview_render_facts_t rf;
+    bool sw_adapter = !rubraview_pal_render_facts(app->renderer, &rf) || rf.warp || rf.screen_copies;
+    bool sdr_want = rubraview_sdr_gpu_want(sw_adapter, rubraview_sdr_gpu_env(sdr_env));
+    if (gpu->tone_mapping > 0 || sdr_want)
+        gpu->shader_device = gpu->device ? gpu->device : rubraview_pal_render_video_device(app->renderer, NULL);
     /* RV-153: [video] hdr_output — an HDR film tone mapped for the HDR screen the window is on (always: any screen) */
     int32_t hdr_out = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("hdr_output")));
     rubraview_pal_render_hdr_display(app->renderer, &app->media_hdr_screen);
@@ -1368,7 +1376,7 @@ static bool media_blend_swap(app_state_t *app, app_page_t *page) {
         int32_t w = page->width, h = page->height;
         /* RV-270: of the page's own kind (on the card when the adjustment made it so) */
         app->media_prev_texture = app->media_info.hardware_decode || app->media_info.hdr_tone_mapped ||
-                                  rubraview_pal_texture_on_card(page->texture)
+                                  app->media_info.sdr_gpu || rubraview_pal_texture_on_card(page->texture)
             ? rubraview_pal_texture_create_video(app->renderer, w, h)
             : rubraview_pal_texture_create_bgra(app->renderer, w, h);
         if (!app->media_prev_texture) return false;

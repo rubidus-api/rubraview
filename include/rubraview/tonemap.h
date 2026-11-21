@@ -73,6 +73,30 @@ double rubraview_tonemap_sample_scale(int bits, bool high_bits);
 #define RUBRAVIEW_TONEMAP_OFF 0
 #define RUBRAVIEW_TONEMAP_BT2390 1
 
+/** D-334 follow-up: SDR 8-bit planar Y'CbCr -> RGB matrices, ranges, and GPU offload policy. */
+typedef enum rubraview_yuv_matrix {
+    RUBRAVIEW_YUV_BT601  = 0,
+    RUBRAVIEW_YUV_BT709  = 1,
+    RUBRAVIEW_YUV_BT2020 = 2,
+} rubraview_yuv_matrix_t;
+
+typedef struct rubraview_sdr_yuv {
+    rubraview_yuv_matrix_t matrix;
+    bool full_range;   /* 0..255 for all channels; otherwise Y 16..235, Cb/Cr 16..240 */
+} rubraview_sdr_yuv_t;
+
+/** Coefficients `c[4]` for `R = Y + c[0]*Cr`, `G = Y - c[1]*Cb - c[2]*Cr`, `B = Y + c[3]*Cb`. */
+void rubraview_sdr_yuv_coeffs(rubraview_yuv_matrix_t matrix, double out_coeffs[4]);
+
+/** Reference SDR 8-bit conversion: Y', Cb, Cr normalised to 0..1 (`code / 255.0`), to sRGB/RGB 0..1. */
+void rubraview_sdr_yuv_pixel(const rubraview_sdr_yuv_t *s, double y, double cb, double cr, double out_rgb[3]);
+
+/** Parse `RUBRAVIEW_SDR_GPU` ("0" -> 0, "1" -> 1, unset/other -> -1). */
+int rubraview_sdr_gpu_env(const char *value);
+
+/** Whether to offload 8-bit SDR planar YUV to the GPU shader (skips software adapters unless overridden). */
+bool rubraview_sdr_gpu_want(bool software_adapter, int env_override);
+
 #ifdef __cplusplus
 }
 #endif

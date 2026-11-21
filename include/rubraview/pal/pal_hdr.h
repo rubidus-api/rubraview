@@ -20,7 +20,7 @@ extern "C" {
 typedef struct rubraview_hdr_pass rubraview_hdr_pass_t;
 
 typedef struct rubraview_hdr_planes {
-    const uint8_t *data[3];   /* Y', Cb, Cr: 16-bit little-endian samples */
+    const uint8_t *data[3];   /* Y', Cb, Cr: 16-bit LE samples (HDR), or 8-bit samples (run_sdr8) */
     int32_t stride[3];        /* bytes a row */
     int32_t width, height;    /* the luma plane's */
     int32_t chroma_width, chroma_height;
@@ -57,6 +57,13 @@ bool rubraview_pal_hdr_pass_run_p010(rubraview_hdr_pass_t *pass, const rubraview
     as a picture brought back from the card is. False when it cannot. */
 bool rubraview_pal_hdr_pass_run_as_p010(rubraview_hdr_pass_t *pass, const rubraview_hdr_planes_t *planes,
                                         const rubraview_tonemap_t *tone, void *target, bool in_memory);
+
+/** Draws 8-bit SDR planar Y'CbCr (`R8_UNORM`) into BGRA `target`. The caller holds whatever lock the target needs. */
+bool rubraview_pal_hdr_pass_run_sdr8(rubraview_hdr_pass_t *pass, const rubraview_hdr_planes_t *planes,
+                                     const rubraview_sdr_yuv_t *sdr, void *target);
+
+/** True when `d3d11_device` runs on a software adapter (WARP / Microsoft Basic Render Driver). */
+bool rubraview_pal_hdr_device_is_software(void *d3d11_device);
 
 void rubraview_pal_hdr_pass_free(rubraview_hdr_pass_t *pass);
 

@@ -140,3 +140,40 @@ double rubraview_tonemap_sample_scale(int bits, bool high_bits) {
     if (!high_bits || bits < 8 || bits > 16) return 65535.0;
     return 65535.0 / (double)(1 << (16 - bits));
 }
+
+void rubraview_sdr_yuv_coeffs(rubraview_yuv_matrix_t matrix, double out_coeffs[4]) {
+    double kr = 0.2990, kb = 0.1140;
+    if (matrix == RUBRAVIEW_YUV_BT709) { kr = 0.2126; kb = 0.0722; }
+    else if (matrix == RUBRAVIEW_YUV_BT2020) { kr = 0.2627; kb = 0.0593; }
+    double kg = 1.0 - kr - kb;
+    out_coeffs[0] = 2.0 * (1.0 - kr);
+    out_coeffs[1] = 2.0 * kb * (1.0 - kb) / kg;
+    out_coeffs[2] = 2.0 * kr * (1.0 - kr) / kg;
+    out_coeffs[3] = 2.0 * (1.0 - kb);
+}
+
+void rubraview_sdr_yuv_pixel(const rubraview_sdr_yuv_t *s, double y, double cb, double cr, double out_rgb[3]) {
+    double c[4];
+    rubraview_sdr_yuv_coeffs(s ? s->matrix : RUBRAVIEW_YUV_BT601, c);
+    bool full = s && s->full_range;
+    double yc = y * 255.0, cbc = cb * 255.0, crc = cr * 255.0;
+    double yv  = full ? yc / 255.0 : (yc - 16.0) / 219.0;
+    double cbv = (cbc - 128.0) / (full ? 255.0 : 224.0);
+    double crv = (crc - 128.0) / (full ? 255.0 : 224.0);
+    out_rgb[0] = clamp01(yv + c[0] * crv);
+    out_rgb[1] = clamp01(yv - c[1] * cbv - c[2] * crv);
+    out_rgb[2] = clamp01(yv + c[3] * cbv);
+}
+
+int rubraview_sdr_gpu_env(const char *value) {
+    if (!value || !value[0] || value[1] != '\0') return -1;
+    if (value[0] == '0') return 0;
+    if (value[0] == '1') return 1;
+    return -1;
+}
+
+bool rubraview_sdr_gpu_want(bool software_adapter, int env_override) {
+    if (env_override == 0) return false;
+    if (env_override == 1) return true;
+    return !software_adapter;
+}

@@ -78,7 +78,7 @@ typedef struct rubraview_mhost_info {
     int32_t  width, height;
     int32_t  decode_threads, hdr_transfer;
     uint32_t video_fourcc, audio_sample_rate, audio_channels, bitrate_kbps;
-    uint8_t  has_video, has_audio, audio_output, hardware_decode, hdr_tone_mapped, hdr_output, live, pad;
+    uint8_t  has_video, has_audio, audio_output, hardware_decode, hdr_tone_mapped, hdr_output, live, sdr_gpu;
     double   duration_seconds, frame_rate;
     char     path_decoder[128], path_colours[128], path_handover[128], path_why_software[128], path_hdr_why[128];
 } rubraview_mhost_info_t;
