@@ -1562,6 +1562,14 @@ bool rename_box_press(app_state_t *app, int32_t host, double x, double y) {
         switch (app->rename_btn_kind[i]) {
             case RENAME_BTN_OK:     rename_commit(app); break;
             case RENAME_BTN_CANCEL: rename_cancel(app); break;
+            case RENAME_BTN_COPY: {
+                proven_u8str_view_t text = rubraview_textedit_text(&app->rename_ec.te);
+                if (text.size > 0) {
+                    rubraview_pal_clipboard_set_text(app->window, text);
+                    osd_say(app, TU8("path copied"));
+                }
+                break;
+            }
             case RENAME_BTN_BROWSE: if (app->rename_is_extract) archwork_extract_dest_browse(app); else target_browse(app); break;
             case RENAME_BTN_BACK:   text_find_step(app, false); break;
             case RENAME_BTN_EYE:    password_eye_toggle(app); break;   /* D-262 */
@@ -1754,6 +1762,7 @@ void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
         return;
     }
     if (triage_handle_key(app, combo)) return;
+    if (favpop_key(app, combo)) return;
     if (picker_handle_key(app, combo)) return;
     /* RV-251: the open-file screen is the window's own screen, not a sheet over the picture: what it does not take
        reaches the window's common actions and the ways to open, never the picture, film or file behind it */

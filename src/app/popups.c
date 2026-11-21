@@ -1233,6 +1233,7 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
                      : app->rename_is_extract ? T("Extract")
                      : app->rename_is_password ? (app->password_for_extract ? T("Extract") : T("Open")) : app->rename_is_filter || app->rename_is_listfilter ? T("Done") : T("OK");
             kinds[n++] = RENAME_BTN_OK;
+            if (app->rename_is_path) { words[n] = T("Copy"); kinds[n++] = RENAME_BTN_COPY; }
             if (app->rename_is_extension && app->ext_at + 1 < app->ext_n) { words[n] = T("Apply"); kinds[n++] = RENAME_BTN_OK + 100; }
             if (app->rename_is_target || app->rename_is_extract) { words[n] = T("Browse..."); kinds[n++] = RENAME_BTN_BROWSE; }
             words[n] = T("Cancel"); kinds[n++] = RENAME_BTN_CANCEL;
@@ -1244,7 +1245,11 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
             if (rubraview_pal_render_measure_text(app->renderer, cstr(words[i]), 15.0 * dpi, &tw) && tw + 36.0 * dpi > bw) bw = tw + 36.0 * dpi;
         }
         rubraview_pal_rect_t at = box;
-        double bx = app->rename_is_path || app->rename_is_filter ? at.x + at.width - (bw + gap) * (double)n
+        if ((app->rename_is_path || app->rename_is_filter) && n > 0) {
+            double max_bw = (at.width - gap * (double)(n - 1)) / (double)n;
+            if (bw > max_bw) bw = fmax(44.0 * dpi, max_bw);
+        }
+        double bx = app->rename_is_path || app->rename_is_filter ? fmax(at.x, at.x + at.width - (bw + gap) * (double)n + gap)
                                                                    : at.x + (at.width - (bw + gap) * (double)n + gap) * 0.5;
         double by = at.y + at.height + 10.0 * dpi;
         if (card) {   /* RV-238: along the card's foot, at its right */
@@ -1252,13 +1257,18 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
             by = card_rect.y + card_rect.height - 20.0 * dpi - bh;
         }
         app->rename_btn_n = n;
+        if ((app->rename_is_path || app->rename_is_filter) && n > 0) {
+            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, by - 4.0 * dpi, win_w, bh + 8.0 * dpi },
+                                           0xFF101010u, 0.0);
+        }
         for (int32_t i = 0; i < n; ++i) {
             rubraview_pal_rect_t b = { bx + (double)i * (bw + gap), by, bw, bh };
             app->rename_btn[i] = b;
             app->rename_btn_kind[i] = kinds[i];
             bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
             double round = card ? 5.0 * dpi : 3.0;
-            rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? COLOR_TILE_CURRENT : over ? 0x50FFFFFFu : card ? COLOR_TILE_FILL : COLOR_BOX_FILL, round);
+            uint32_t idle = (app->rename_is_path || app->rename_is_filter) ? 0xFF242424u : card ? COLOR_TILE_FILL : COLOR_BOX_FILL;
+            rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? COLOR_TILE_CURRENT : over ? 0x50FFFFFFu : idle, round);
             if (i == 0 && over && card) rubraview_pal_render_fill_rect(app->renderer, b, 0x30FFFFFFu, round);
             if (!card || i > 0) rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, round);
             rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, (card ? 14.0 : 15.0) * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);

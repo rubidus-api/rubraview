@@ -249,6 +249,10 @@ void rubraview_pal_render_stroke_rect(rubraview_renderer_t *renderer,
                                       double stroke_width,
                                       double corner_radius);
 
+/** RV-317: push/pop an axis-aligned pixel clip rectangle around overflow strips. */
+void rubraview_pal_render_push_clip(rubraview_renderer_t *renderer, rubraview_pal_rect_t rect);
+void rubraview_pal_render_pop_clip(rubraview_renderer_t *renderer);
+
 typedef enum rubraview_text_align {
     RUBRAVIEW_TEXT_LEFT = 0,
     RUBRAVIEW_TEXT_CENTER,

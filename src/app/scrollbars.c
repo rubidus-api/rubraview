@@ -50,7 +50,7 @@ static rubraview_window_t *scrollbar_window(app_state_t *app, int which) {
     switch (which) {
         case RVSB_SEL: case RVSB_CHANGES: return edit_windowed(app) ? app->edit_window : app->window;
         case RVSB_TEXT: case RVSB_STEPS: case RVSB_CLASSIFY: return app->window;
-        case RVSB_LIST: case RVSB_RECENT: case RVSB_FAVS: case RVSB_PICKER: return app->window;
+        case RVSB_LIST: case RVSB_RECENT: case RVSB_FAVS: case RVSB_FAVPOP_LEFT: case RVSB_FAVPOP_RIGHT: case RVSB_PICKER: return app->window;
         case RVSB_CHOOSER:  return chooser_sb_window(app);
         case RVSB_FILES:    return app->files_window;
         case RVSB_SUBS:     return app->subs_window;
@@ -85,6 +85,13 @@ bool scrollbar_of(app_state_t *app, int which, rubraview_scrollbar_t *sb) {
             if (!app->favwin.open) return false;
             *sb = list_bar(&app->favwin, app->favorites.count, rubraview_listwin_head_height(&app->favwin), dpi);
             break;
+        case RVSB_FAVPOP_LEFT:
+        case RVSB_FAVPOP_RIGHT: {
+            int32_t w = 0, h = 0;
+            rubraview_pal_window_get_size(app->window, &w, &h);
+            if (!favpop_sb(app, which == RVSB_FAVPOP_LEFT ? 1 : 2, sb, (double)w, (double)h, dpi)) return false;
+            break;
+        }
         case RVSB_SUBS:
             if (!app->subs_open) return false;
             *sb = list_bar(&app->subs_list, app->subs_count, app->subs_list.title_height, dpi);
@@ -130,6 +137,13 @@ static void scrollbar_to(app_state_t *app, int which, double first) {
         case RVSB_LIST:   app->listwin.first = whole(first); break;
         case RVSB_RECENT: app->recentwin.first = whole(first); break;
         case RVSB_FAVS:   app->favwin.first = whole(first); break;
+        case RVSB_FAVPOP_LEFT:
+        case RVSB_FAVPOP_RIGHT: {
+            int32_t w = 0, h = 0;
+            rubraview_pal_window_get_size(app->window, &w, &h);
+            favpop_sb_to(app, which == RVSB_FAVPOP_LEFT ? 1 : 2, whole(first), (double)w, (double)h, rubraview_pal_window_dpi_scale(app->window));
+            break;
+        }
         case RVSB_FILES:  app->files_list.first = whole(first); app->files_dirty = true; break;
         case RVSB_SUBS:
             app->subs_list.first = whole(first);

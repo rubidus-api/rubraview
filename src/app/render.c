@@ -967,37 +967,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
             if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)head, (size_t)n }, at, font,
                                                       COLOR_TEXT, right ? RUBRAVIEW_TEXT_RIGHT : RUBRAVIEW_TEXT_LEFT);   /* D-286: the sorted one has its arrow */
         }
-        /* 1.24.0: the tool row over the heads — the all box, the ways of picking, sorting, the view */
-        size_t rows = 0, on = 0;
-        for (size_t i = 0; i < app->picker_listing.count; ++i) {
-            if (picker_is_up(app, i)) continue;
-            rows++;
-            if (app->picker_selected && app->picker_selected[i]) on++;
-        }
-        for (int k = 0; k < PICKER_TOOL_COUNT; ++k) {
-            rubraview_pal_rect_t t = picker_tool_rect(app, dpi, k);
-            if (t.x + t.width > picker_tools_end(app, dpi, win_w)) break;
-            bool lit = (k == PICKER_TOOL_INDIVIDUAL && app->picker.mode == RUBRAVIEW_PICK_INDIVIDUAL) ||
-                       (k == PICKER_TOOL_RANGE && app->picker.mode == RUBRAVIEW_PICK_RANGE);
-            bool over = pal_rect_has(t, app->pointer_x, app->pointer_y);
-            rubraview_pal_render_fill_rect(app->renderer, t, lit ? COLOR_TILE_CURRENT : over ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
-            rubraview_pal_render_stroke_rect(app->renderer, t, COLOR_BOX_BORDER, 1.0, 3.0);
-            char buf[96];
-            proven_u8str_view_t label = picker_tool_label(app, k, buf, sizeof(buf));
-            rubraview_pal_rect_t words = t;
-            if (k == PICKER_TOOL_ALL) {   /* the box: all, some (a dash) or none */
-                double side = 18.0 * dpi;
-                rubraview_pal_rect_t box = { t.x + 8.0 * dpi, t.y + (t.height - side) * 0.5, side, side };
-                bool all = rows > 0 && on == rows;
-                rubraview_pal_render_fill_rect(app->renderer, box, on > 0 ? 0xFF2E7BD6u : 0xB0101010u, 3.0 * dpi);
-                rubraview_pal_render_stroke_rect(app->renderer, box, on > 0 ? 0xFFFFFFFFu : 0xC0FFFFFFu, 1.5 * dpi, 3.0 * dpi);
-                if (on > 0) rubraview_pal_render_draw_text(app->renderer, all ? PROVEN_LIT("\xE2\x9C\x93") : PROVEN_LIT("\xE2\x80\x93"), box,
-                                                           box.height * 0.8, 0xFFFFFFFFu, RUBRAVIEW_TEXT_CENTER);
-                words.x += 22.0 * dpi;
-                words.width -= 22.0 * dpi;
-            }
-            rubraview_pal_render_draw_text(app->renderer, label, words, 13.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        }
+        /* RV-317: Row 2 compact touch toolbar */
     }
     if (top > 0.0) {
         /* What this screen is, and nothing to press. */
@@ -1010,7 +980,8 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                                                            : TU8("Rubraview  ·  Open a file or a folder"),
                                        words, top * 0.36, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
     }
-    /* 1.24.0: back, up, forward (owner, 2026-10-19), dim when there is nowhere to go */
+    /* RV-317: Row 1 (Path bar: nav arrows, clipped scrollable breadcrumbs with ‹ › overflow arrows, always-visible Edit icon) */
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, top, win_w, crumb_h }, COLOR_BAR_FILL, 0.0);
     {
         static const char *const NAV[3] = { "\xE2\x97\x80", "\xE2\x96\xB2", "\xE2\x96\xB6" };
         bool can[3] = { app->picker_back_n > 0, rubraview_picker_parent(app->picker_dir).size > 0 && !app->picker_in_book, app->picker_fwd_n > 0 };
@@ -1022,38 +993,103 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
             rubraview_pal_render_draw_text(app->renderer, cstr(NAV[k]), b, crumb_h * 0.34, can[k] ? COLOR_TEXT : 0x50F0F0F0u, RUBRAVIEW_TEXT_CENTER);
         }
     }
-    rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
-    double crumb_x = PICKER_CRUMB_START * dpi;
-    bool star_room = true;
-    size_t crumb_first = picker_crumbs_first(app, &crumbs, dpi, win_w, &star_room);   /* RV-229 */
-    for (size_t i = crumb_first > 0 ? crumb_first - 1 : 0; i < crumbs.count; ++i) {
-        proven_u8str_view_t label = i + 1 == crumb_first ? PROVEN_LIT(PICKER_CRUMBS_MORE) : crumbs.items[i].label;
-        double w = picker_chip_width(label, dpi);
-        rubraview_pal_rect_t chip = { crumb_x, top + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
-        rubraview_pal_render_fill_rect(app->renderer, chip, COLOR_TILE_FILL, 2.0);
-        rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
-        rubraview_pal_render_draw_text(app->renderer, label, chip,
-                                       crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        crumb_x += w + 4.0 * dpi;
+    {
+        rubraview_pal_rect_t edit_r = picker_path_edit_rect(dpi, win_w, top);
+        bool over = pal_rect_has(edit_r, app->pointer_x, app->pointer_y);
+        rubraview_pal_render_fill_rect(app->renderer, edit_r, app->rename_is_path ? COLOR_TILE_CURRENT : over ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, edit_r, COLOR_BOX_BORDER, 1.0, 3.0);
+        draw_sign(app->renderer, 0xE70Fu, "\xE2\x9C\x8E", edit_r, edit_r.height * 0.46, COLOR_TEXT);
     }
-    proven_u8str_view_t star = star_room ? picker_star_label(app) : PROVEN_LIT("");
-    if (star.size > 0) {
-        double w = picker_chip_width(star, dpi);
-        rubraview_pal_rect_t chip = { crumb_x, top + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
-        bool lit = rubraview_favorites_contains(&app->favorites, app->picker_dir);
-        rubraview_pal_render_fill_rect(app->renderer, chip, lit ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 2.0);
-        rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
-        rubraview_pal_render_draw_text(app->renderer, star, chip, crumb_h * 0.42, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        crumb_x += w + 4.0 * dpi;
+    {
+        rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
+        rubraview_hstrip_t cs = picker_crumbs_strip(app, &crumbs, dpi, win_w);
+        if (cs.overflow) {
+            rubraview_pal_rect_t la = { cs.x, cs.y, cs.arrow_w, cs.height };
+            rubraview_pal_rect_t ra = { cs.view_x + cs.view_w, cs.y, cs.arrow_w, cs.height };
+            bool lo = cs.can_left && pal_rect_has(la, app->pointer_x, app->pointer_y);
+            bool ro = cs.can_right && pal_rect_has(ra, app->pointer_x, app->pointer_y);
+            rubraview_pal_render_fill_rect(app->renderer, la, lo ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 2.0);
+            rubraview_pal_render_stroke_rect(app->renderer, la, COLOR_BOX_BORDER, 1.0, 2.0);
+            rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("\xE2\x80\xB9"), la, crumb_h * 0.42, cs.can_left ? COLOR_TEXT : 0x45F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+            rubraview_pal_render_fill_rect(app->renderer, ra, ro ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 2.0);
+            rubraview_pal_render_stroke_rect(app->renderer, ra, COLOR_BOX_BORDER, 1.0, 2.0);
+            rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("\xE2\x80\xBA"), ra, crumb_h * 0.42, cs.can_right ? COLOR_TEXT : 0x45F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        }
+        rubraview_pal_rect_t clip_c = { cs.view_x, cs.y - 2.0 * dpi, cs.view_w, cs.height + 4.0 * dpi };
+        rubraview_pal_render_push_clip(app->renderer, clip_c);
+        double cx = cs.view_x - cs.scroll;
+        for (size_t i = 0; i < crumbs.count; ++i) {
+            double w = picker_chip_width(crumbs.items[i].label, dpi);
+            rubraview_pal_rect_t chip = { cx, cs.y, w, cs.height };
+            bool last = i + 1 == crumbs.count;
+            bool over = pal_rect_has(clip_c, app->pointer_x, app->pointer_y) && pal_rect_has(chip, app->pointer_x, app->pointer_y);
+            rubraview_pal_render_fill_rect(app->renderer, chip, over ? 0x40FFFFFFu : last ? 0xFF282828u : COLOR_TILE_FILL, 2.0);
+            rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
+            rubraview_pal_render_draw_text(app->renderer, crumbs.items[i].label, chip, crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+            cx += w + 4.0 * dpi;
+        }
+        if (!cs.overflow && !app->rename_is_path && cx + 130.0 * dpi < cs.view_x + cs.view_w) {
+            rubraview_pal_rect_t hint = { cx + 8.0 * dpi, cs.y, cs.view_x + cs.view_w - cx - 12.0 * dpi, cs.height };
+            rubraview_pal_render_draw_text(app->renderer, TU8("tap here or Ctrl+L to type a path"), hint, crumb_h * 0.28, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
+        }
+        rubraview_pal_render_pop_clip(app->renderer);
     }
-    /* 1.22.0: the filter's chip at the bar's right end */
-    char filter_buf[200];
-    proven_u8str_view_t filter_label;
-    rubraview_pal_rect_t filter_chip = picker_filter_chip(app, win_w, dpi, &filter_label, filter_buf, sizeof(filter_buf));
-    if (!app->picker_in_book && !app->rename_is_path && !app->rename_is_filter) {
-        rubraview_pal_render_fill_rect(app->renderer, filter_chip, app->picker_filter[0] ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 2.0);
-        rubraview_pal_render_stroke_rect(app->renderer, filter_chip, COLOR_BOX_BORDER, 1.0, 2.0);
-        rubraview_pal_render_draw_text(app->renderer, filter_label, filter_chip, crumb_h * 0.32, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    /* RV-317: Row 2 (6 compact tools with ‹ › overflow arrows + Basket icons) */
+    {
+        double row2_y = top + crumb_h, tool_h = PICKER_TOOL_HEIGHT * dpi;
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, row2_y, win_w, tool_h }, COLOR_BAR_FILL, 0.0);
+        rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, row2_y + tool_h - 1.0, win_w, 1.0 }, 0x30FFFFFFu, 0.0);
+        rubraview_hstrip_t ts = picker_tools_strip(app, dpi, win_w);
+        if (ts.overflow) {
+            rubraview_pal_rect_t la = { ts.x, ts.y, ts.arrow_w, ts.height };
+            rubraview_pal_rect_t ra = { ts.view_x + ts.view_w, ts.y, ts.arrow_w, ts.height };
+            bool lo = ts.can_left && pal_rect_has(la, app->pointer_x, app->pointer_y);
+            bool ro = ts.can_right && pal_rect_has(ra, app->pointer_x, app->pointer_y);
+            rubraview_pal_render_fill_rect(app->renderer, la, lo ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 2.0);
+            rubraview_pal_render_stroke_rect(app->renderer, la, COLOR_BOX_BORDER, 1.0, 2.0);
+            rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("\xE2\x80\xB9"), la, tool_h * 0.42, ts.can_left ? COLOR_TEXT : 0x45F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+            rubraview_pal_render_fill_rect(app->renderer, ra, ro ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 2.0);
+            rubraview_pal_render_stroke_rect(app->renderer, ra, COLOR_BOX_BORDER, 1.0, 2.0);
+            rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("\xE2\x80\xBA"), ra, tool_h * 0.42, ts.can_right ? COLOR_TEXT : 0x45F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+        }
+        size_t rows = 0, on = 0;
+        for (size_t i = 0; i < app->picker_listing.count; ++i) {
+            if (picker_is_up(app, i)) continue;
+            rows++;
+            if (app->picker_selected && app->picker_selected[i]) on++;
+        }
+        rubraview_pal_rect_t clip_t = { ts.view_x, ts.y - 2.0 * dpi, ts.view_w, ts.height + 4.0 * dpi };
+        rubraview_pal_render_push_clip(app->renderer, clip_t);
+        int tcount = app->picker_in_book ? PICKER_TOOL_FILTER : PICKER_TOOL_COUNT;
+        for (int k = 0; k < tcount; ++k) {
+            rubraview_pal_rect_t t = picker_tool_rect(app, k, dpi);
+            bool lit = (k == PICKER_TOOL_FAVS && app->favpop_open) ||
+                       (k == PICKER_TOOL_SELECT && (app->picker.mode == RUBRAVIEW_PICK_INDIVIDUAL || app->picker.mode == RUBRAVIEW_PICK_RANGE)) ||
+                       (k == PICKER_TOOL_FILTER && app->picker_filter[0]);
+            bool over = pal_rect_has(clip_t, app->pointer_x, app->pointer_y) && pal_rect_has(t, app->pointer_x, app->pointer_y);
+            rubraview_pal_render_fill_rect(app->renderer, t, lit ? COLOR_TILE_CURRENT : over ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
+            rubraview_pal_render_stroke_rect(app->renderer, t, COLOR_BOX_BORDER, 1.0, 3.0);
+            rubraview_pal_rect_t clr;
+            if (k == PICKER_TOOL_FILTER && over && picker_filter_clear_rect(app, dpi, t, &clr) && pal_rect_has(clr, app->pointer_x, app->pointer_y)) {
+                rubraview_pal_render_fill_rect(app->renderer, clr, 0x40FFFFFFu, 3.0);
+            }
+            char buf[160];
+            proven_u8str_view_t label = picker_tool_label(app, k, buf, sizeof(buf));
+            rubraview_pal_rect_t words = t;
+            if (k == PICKER_TOOL_ALL) {
+                double side = 18.0 * dpi;
+                rubraview_pal_rect_t box = { t.x + 8.0 * dpi, t.y + (t.height - side) * 0.5, side, side };
+                bool all = rows > 0 && on == rows;
+                rubraview_pal_render_fill_rect(app->renderer, box, on > 0 ? 0xFF2E7BD6u : 0xB0101010u, 3.0 * dpi);
+                rubraview_pal_render_stroke_rect(app->renderer, box, on > 0 ? 0xFFFFFFFFu : 0xC0FFFFFFu, 1.5 * dpi, 3.0 * dpi);
+                if (on > 0) rubraview_pal_render_draw_text(app->renderer, all ? PROVEN_LIT("\xE2\x9C\x93") : PROVEN_LIT("\xE2\x80\x93"), box,
+                                                           box.height * 0.8, 0xFFFFFFFFu, RUBRAVIEW_TEXT_CENTER);
+                words.x += 22.0 * dpi;
+                words.width -= 22.0 * dpi;
+            }
+            rubraview_pal_render_draw_text(app->renderer, label, words, 13.5 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        }
+        rubraview_pal_render_pop_clip(app->renderer);
     }
     /* RV-227, D-286: the basket's icon (how many are in the baskets at its corner) and the arrow that puts them here */
     if (picker_basket_shown(app)) {
@@ -1076,50 +1112,6 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
             rubraview_pal_render_fill_rect(app->renderer, badge, COLOR_TILE_CURRENT, side * 0.4);
             rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)basket_buf, .size = bn > 0 ? (size_t)bn : 0 },
                                            badge, side * 0.62, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        }
-    }
-    /* The rest of the bar takes a typed path (owner, 2026-09-28), and says so. */
-    if (!app->rename_is_path && crumb_x + 200.0 * dpi < filter_chip.x) {
-        rubraview_pal_rect_t hint = { crumb_x + 8.0 * dpi, top, win_w - crumb_x - 16.0 * dpi, crumb_h };
-        rubraview_pal_render_draw_text(app->renderer, TU8("tap here or Ctrl+L to type a path"), hint,
-                                       crumb_h * 0.30, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
-    }
-
-    /* The places bar: the usual folders and the drives, one tap away from
-       anywhere (owner, 2026-09-28: "즐겨찾기 같은 곳에"). The one on screen is lit. */
-    double place_x = 8.0 * dpi - picker_strip_scroll(app, 1, dpi, win_w);   /* RV-313: as slid */
-    picker_bar_item_t item;
-    for (size_t i = 0; picker_bar_item(app, i, &item); ++i) {
-        double w = picker_chip_width(item.label, dpi);
-        /* A little gap between the reader's favourites and the fixed places. */
-        if (!item.favorite && i == app->favorites.count && i > 0) place_x += 10.0 * dpi;
-        if (place_x + w > picker_favwin_chip(app, dpi, win_w).x - 6.0 * dpi) break;
-        rubraview_pal_rect_t chip = { place_x, top + crumb_h + 2.0 * dpi, w, PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi };
-        bool here = rubraview_path_same(item.path, app->picker_dir);
-        rubraview_pal_render_fill_rect(app->renderer, chip,
-                                       here ? COLOR_TILE_CURRENT : item.favorite ? COLOR_TILE_FILL : COLOR_BAR_FILL, 2.0);
-        rubraview_pal_render_stroke_rect(app->renderer, chip, item.favorite ? COLOR_TEXT : COLOR_BOX_BORDER, 1.0, 2.0);
-        rubraview_pal_render_draw_text(app->renderer, item.label, chip,
-                                       crumb_h * 0.30, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        if (app->fav_dragging && (int32_t)i == app->fav_press) {
-            rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_TILE_CURRENT, 2.0, 2.0);
-        }
-        place_x += w + 4.0 * dpi;
-    }
-    {   /* 1.24.0: the favourites window, files and folders, all of them */
-        rubraview_pal_rect_t fc = picker_favwin_chip(app, dpi, win_w);
-        rubraview_pal_render_fill_rect(app->renderer, fc, app->favwin.open ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 2.0);
-        rubraview_pal_render_stroke_rect(app->renderer, fc, COLOR_TEXT, 1.0, 2.0);
-        rubraview_pal_render_draw_text(app->renderer, TU8("\xE2\x98\x85 Favourites"), fc, crumb_h * 0.30, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-    }
-    /* A favourite being dragged: a bar where it would land. */
-    if (app->fav_dragging && app->fav_press >= 0) {
-        size_t to = favorite_drop_index(app, app->fav_drag_x, dpi, win_w);
-        double cx = 0.0, cw = 0.0;
-        if (picker_chip_span(app, to, dpi, win_w, &cx, &cw)) {
-            double bx = to > (size_t)app->fav_press ? cx + cw + 2.0 * dpi : cx - 4.0 * dpi;
-            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ bx, top + crumb_h + 2.0 * dpi, 2.0 * dpi,
-                                           PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi }, COLOR_TILE_CURRENT, 0.0);
         }
     }
 
@@ -1165,6 +1157,99 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
     draw_progress_card(app, win_w, win_h, dpi);   /* RV-268: over the open-file screen too */
     draw_notice(app, win_w, win_h, dpi);
     draw_titlebar(app, win_w);   /* over the band at the top */
+}
+
+static rubraview_pal_rect_t pal_r(rubraview_rect_t r) {
+    return (rubraview_pal_rect_t){ r.x, r.y, r.width, r.height };
+}
+
+/* RV-317: full-window two-column Favourites (left) + Places (right) popup. */
+static void draw_favpop(app_state_t *app, double win_w, double win_h) {
+    if (!app->picker_open || !app->favpop_open) return;
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    double pop_top = picker_top(app) + (PICKER_HEADER_HEIGHT + PICKER_TOOL_HEIGHT) * dpi;
+    rubraview_favpop_layout_t lo = rubraview_favpop_place(pop_top, win_w, win_h, dpi);
+    if (lo.popup.height <= 0.0) return;
+
+    rubraview_pal_render_fill_rect(app->renderer, pal_r(lo.popup), 0xF6141414u, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, pal_r(lo.header), 0xFF1D1D1Du, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, lo.header.y + lo.header.height - 1.0, win_w, 1.0 }, 0x40FFFFFFu, 0.0);
+
+    rubraview_pal_rect_t title_r = { 14.0 * dpi, lo.header.y, fmax(0.0, lo.manage_btn.x - 22.0 * dpi), lo.header.height };
+    rubraview_pal_render_draw_text(app->renderer, TU8("Favourites & Places"), title_r, 15.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+
+    bool over_mgr = rubraview_rect_contains(lo.manage_btn, app->pointer_x, app->pointer_y);
+    rubraview_pal_render_fill_rect(app->renderer, pal_r(lo.manage_btn), over_mgr ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
+    rubraview_pal_render_stroke_rect(app->renderer, pal_r(lo.manage_btn), COLOR_BOX_BORDER, 1.0, 3.0);
+    rubraview_pal_render_draw_text(app->renderer, TU8("Manage..."), pal_r(lo.manage_btn), 13.5 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+
+    bool over_cls = rubraview_rect_contains(lo.close_btn, app->pointer_x, app->pointer_y);
+    rubraview_pal_render_fill_rect(app->renderer, pal_r(lo.close_btn), over_cls ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
+    rubraview_pal_render_stroke_rect(app->renderer, pal_r(lo.close_btn), COLOR_BOX_BORDER, 1.0, 3.0);
+    rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("\xE2\x9C\x95"), pal_r(lo.close_btn), 15.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+
+    rubraview_pal_render_fill_rect(app->renderer, pal_r(lo.divider), 0x40FFFFFFu, 0.0);
+
+    rubraview_pal_render_draw_text(app->renderer, TU8("Favourites"), pal_r(lo.left_heading), 13.0 * dpi, 0xFFB8B8B8u, RUBRAVIEW_TEXT_LEFT);
+    rubraview_pal_render_draw_text(app->renderer, TU8("Places"), pal_r(lo.right_heading), 13.0 * dpi, 0xFFB8B8B8u, RUBRAVIEW_TEXT_LEFT);
+
+    bool can_star = picker_can_favorite_current(app);
+    bool starred = can_star && rubraview_favorites_contains(&app->favorites, app->picker_dir);
+    bool over_star = can_star && rubraview_rect_contains(lo.star_btn, app->pointer_x, app->pointer_y);
+    rubraview_pal_render_fill_rect(app->renderer, pal_r(lo.star_btn),
+                                   !can_star ? 0xFF1A1A1Au : starred ? COLOR_TILE_CURRENT : over_star ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
+    rubraview_pal_render_stroke_rect(app->renderer, pal_r(lo.star_btn), COLOR_BOX_BORDER, 1.0, 3.0);
+    {
+        char sbuf[160];
+        int sn = can_star ? rubraview_fmt(sbuf, sizeof(sbuf), "{}  {}", PROVEN_ARG(starred ? "\xE2\x98\x85" : "\xE2\x98\x86"),
+                                          PROVEN_ARG(starred ? T("Remove current folder") : T("Add current folder")))
+                          : rubraview_fmt(sbuf, sizeof(sbuf), "{}", PROVEN_ARG(T("Open a folder to star it")));
+        rubraview_pal_rect_t tr = { lo.star_btn.x + 12.0 * dpi, lo.star_btn.y, fmax(0.0, lo.star_btn.width - 24.0 * dpi), lo.star_btn.height };
+        rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)sbuf, sn > 0 ? (size_t)sn : 0 },
+                                       tr, 14.0 * dpi, can_star ? COLOR_TEXT : 0x80B8B8B8u, RUBRAVIEW_TEXT_LEFT);
+    }
+
+    size_t fav_count = favpop_fav_count(app);
+    size_t max_fav = fav_count > lo.left_vis_rows && lo.left_vis_rows > 0 ? fav_count - lo.left_vis_rows : 0;
+    size_t fav_first = app->favpop_fav_first > max_fav ? max_fav : app->favpop_fav_first;
+    double step = lo.row_h + lo.row_gap;
+    for (size_t k = 0; k < lo.left_vis_rows && fav_first + k < fav_count; ++k) {
+        size_t idx = fav_first + k;
+        rubraview_pal_rect_t rr = { lo.left_list.x, lo.left_list.y + (double)k * step, lo.left_list.width, lo.row_h };
+        bool here = rubraview_path_same(app->favorites.paths[idx], app->picker_dir);
+        bool over = pal_rect_has(rr, app->pointer_x, app->pointer_y);
+        rubraview_pal_render_fill_rect(app->renderer, rr, here ? COLOR_TILE_CURRENT : over ? 0x38FFFFFFu : COLOR_TILE_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, rr, COLOR_BOX_BORDER, 1.0, 3.0);
+        char raw[260], fit[260];
+        proven_u8str_view_t title = rubraview_favorites_title(&app->favorites, idx);
+        int rn = rubraview_fmt(raw, sizeof(raw), "\xE2\x98\x85  {}", PROVEN_ARG(title));
+        rubraview_pal_rect_t tr = { rr.x + 12.0 * dpi, rr.y, fmax(0.0, rr.width - 24.0 * dpi), rr.height };
+        proven_u8str_view_t drawn = fit_text_measured(app->renderer, fit, sizeof(fit),
+                                                      (proven_u8str_view_t){ (const proven_byte_t *)raw, rn > 0 ? (size_t)rn : 0 },
+                                                      tr.width, 14.0 * dpi);
+        rubraview_pal_render_draw_text(app->renderer, drawn, tr, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    }
+
+    size_t place_count = favpop_place_count(app);
+    size_t max_place = place_count > lo.right_vis_rows && lo.right_vis_rows > 0 ? place_count - lo.right_vis_rows : 0;
+    size_t place_first = app->favpop_place_first > max_place ? max_place : app->favpop_place_first;
+    for (size_t k = 0; k < lo.right_vis_rows && place_first + k < place_count; ++k) {
+        size_t idx = place_first + k;
+        picker_bar_item_t item;
+        if (!favpop_place_item(app, idx, &item)) continue;
+        rubraview_pal_rect_t rr = { lo.right_list.x, lo.right_list.y + (double)k * step, lo.right_list.width, lo.row_h };
+        bool here = rubraview_path_same(item.path, app->picker_dir);
+        bool over = pal_rect_has(rr, app->pointer_x, app->pointer_y);
+        rubraview_pal_render_fill_rect(app->renderer, rr, here ? COLOR_TILE_CURRENT : over ? 0x38FFFFFFu : COLOR_TILE_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, rr, COLOR_BOX_BORDER, 1.0, 3.0);
+        char fit[260];
+        rubraview_pal_rect_t tr = { rr.x + 12.0 * dpi, rr.y, fmax(0.0, rr.width - 24.0 * dpi), rr.height };
+        proven_u8str_view_t drawn = fit_text_measured(app->renderer, fit, sizeof(fit), item.label, tr.width, 14.0 * dpi);
+        rubraview_pal_render_draw_text(app->renderer, drawn, tr, 14.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    }
+
+    draw_scrollbar(app, app->renderer, RVSB_FAVPOP_LEFT, app->pointer_x, app->pointer_y);
+    draw_scrollbar(app, app->renderer, RVSB_FAVPOP_RIGHT, app->pointer_x, app->pointer_y);
 }
 
 /* Text with a dark outline around it, for subtitles and their preview.
@@ -1620,7 +1705,8 @@ void render_frame(app_state_t *app) {
     if (app->picker_open) {
         picker_filter_follow(app);   /* 1.22.0: the rows follow the filter as it is typed */
         draw_picker(app, (double)win_w, (double)win_h);
-        draw_favwin(app, (double)win_w, (double)win_h);   /* 1.24.0: opened from its chip */
+        draw_favpop(app, (double)win_w, (double)win_h);   /* RV-317: two-column Favourites + Places popup */
+        draw_favwin(app, (double)win_w, (double)win_h);   /* 1.24.0: opened from Manage... */
         draw_ctxmenu(app);           /* 1.22.0: a tile's right click */
     } else {
         edit_preview_update(app);
@@ -1763,6 +1849,13 @@ uint64_t scene_signature(const app_state_t *app) {
     }
     SIG(&h, app->pointer_inside); SIG(&h, app->cursor.hidden);
     SIG(&h, app->picker_open); SIG(&h, app->settings_open); SIG(&h, app->panel.open);
+    SIG(&h, app->favpop_open);
+    if (app->favpop_open) { SIG(&h, app->favpop_fav_first); SIG(&h, app->favpop_place_first); SIG(&h, app->favorites.count); SIG(&h, app->picker_places.count); }
+    if (app->picker_open) {
+        SIG(&h, (int64_t)lround(app->picker_crumbs_scroll));
+        SIG(&h, (int64_t)lround(app->picker_tools_scroll));
+        SIG(&h, (int)app->picker.mode);
+    }
     SIG(&h, app->chrome_hidden); SIG(&h, (int64_t)app->picker.columns);
     SIG(&h, app->page_job != NULL); SIG(&h, app->resume_offer); SIG(&h, app->confirm_purge); SIG(&h, app->confirm_restart);
     SIG(&h, app->arc_job != NULL); SIG(&h, app->arc_ask);

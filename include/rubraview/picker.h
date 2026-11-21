@@ -4,6 +4,7 @@
 #include "rubraview/core.h"
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/ui_virtual.h"
+#include "rubraview/ui_box.h"
 #include "rubraview/pagesource.h"
 
 #ifdef __cplusplus
@@ -110,6 +111,76 @@ rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(proven_u8str_view_t path);
  * (n - 1) when not even it and that chip fit.
  */
 size_t rubraview_picker_crumbs_first(const double *widths, size_t n, double gap, double room, double more_w);
+
+/**
+ * RV-317 (D-388): overflowing horizontal strip with left/right scroll arrow buttons.
+ * When content_w <= width + 0.5, overflow is false and view_x..view_x+view_w occupies
+ * the full strip width with no arrows. Otherwise arrow_w is reserved at both ends
+ * (clamped if width is very small) and scroll is clamped to [0, max_scroll].
+ */
+typedef struct rubraview_hstrip {
+    double x, y, width, height;
+    double view_x, view_w;
+    double arrow_w;
+    double scroll, max_scroll;
+    bool overflow;
+    bool can_left, can_right;
+} rubraview_hstrip_t;
+
+rubraview_hstrip_t rubraview_hstrip_layout(double x, double y, double width, double height,
+                                           double arrow_w, double content_w, double scroll);
+
+/** Steps strip scroll left (dir < 0) or right (dir > 0) by ~65% of the viewport (min 60 px). */
+double rubraview_hstrip_step(const rubraview_hstrip_t *strip, int dir);
+
+/** Returns -1 on the left scroll arrow, +1 on the right scroll arrow, or 0 otherwise. */
+int rubraview_hstrip_hit_arrow(const rubraview_hstrip_t *strip, double px, double py);
+
+/**
+ * RV-317 (D-388): full-window two-column Favourites + Places popup layout below `top`:
+ * left column holds the current-folder star toggle and favourites; right column holds
+ * Recent, PC, special folders, and drives.
+ */
+typedef enum rubraview_favpop_hit {
+    RUBRAVIEW_FAVPOP_HIT_NONE = 0,
+    RUBRAVIEW_FAVPOP_HIT_MANAGE,
+    RUBRAVIEW_FAVPOP_HIT_CLOSE,
+    RUBRAVIEW_FAVPOP_HIT_STAR_TOGGLE,
+    RUBRAVIEW_FAVPOP_HIT_FAV_ROW,
+    RUBRAVIEW_FAVPOP_HIT_PLACE_ROW,
+    RUBRAVIEW_FAVPOP_HIT_LEFT_SB,
+    RUBRAVIEW_FAVPOP_HIT_RIGHT_SB,
+} rubraview_favpop_hit_t;
+
+typedef struct rubraview_favpop_layout {
+    rubraview_rect_t popup;
+    rubraview_rect_t header;
+    rubraview_rect_t manage_btn;
+    rubraview_rect_t close_btn;
+    rubraview_rect_t left_pane;
+    rubraview_rect_t right_pane;
+    rubraview_rect_t divider;
+    rubraview_rect_t left_heading;
+    rubraview_rect_t star_btn;
+    rubraview_rect_t left_list;
+    rubraview_rect_t left_sb;
+    rubraview_rect_t right_heading;
+    rubraview_rect_t right_list;
+    rubraview_rect_t right_sb;
+    double row_h;
+    double row_gap;
+    double sb_w;
+    size_t left_vis_rows;
+    size_t right_vis_rows;
+} rubraview_favpop_layout_t;
+
+rubraview_favpop_layout_t rubraview_favpop_place(double top, double win_w, double win_h, double dpi);
+
+rubraview_favpop_hit_t rubraview_favpop_hit(const rubraview_favpop_layout_t *lo,
+                                            double px, double py,
+                                            size_t fav_first, size_t fav_count,
+                                            size_t place_first, size_t place_count,
+                                            size_t *out_index);
 
 /** RV-248: items laid left to right as a line of inline words wraps: one that does not fit what is left of its line
     starts the next (one wider than the whole room stands alone on its own). row_of[i] gets each item's line, x_of[i]

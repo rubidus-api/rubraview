@@ -494,10 +494,12 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
     app->picker_thumbs = (struct picker_thumb *)rubraview_alloc_zero(listing.count ? listing.count : 1, sizeof(*app->picker_thumbs));
     app->picker_thumb_count = app->picker_thumbs ? listing.count : 0;
     app->picker_dir = dir;
+    app->picker_crumbs_scroll = 1e9;
+    app->favpop_open = false;
     if (pa != app->arena) app->picker_side ^= 1;   /* the new listing is the one shown */
     app->picker_listing = listing;
     app->picker = rubraview_picker_create(&app->picker_listing, tile,
-                                          (double)win_h - picker_top(app) - (PICKER_HEADER_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
+                                          (double)win_h - picker_top(app) - (PICKER_HEADER_HEIGHT + PICKER_TOOL_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
                                           picker_columns(app));
     picker_layout(app);
     app->picker.selected = app->picker_selected;

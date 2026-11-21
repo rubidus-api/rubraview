@@ -327,22 +327,48 @@ void chooser_open_setting(app_state_t *app) {
     chooser_show(app, CHOOSE_IN_SETTINGS, x, ry + app->settings_cell_h, ry);
 }
 
-/* The open-file screen's sorting: by which column, and which way. */
-void chooser_open_sort(app_state_t *app, bool order, double x, double y, double above_y) {
+/* The open-file screen's sorting: Rising / Falling and sort column in one chooser. */
+void chooser_open_sort(app_state_t *app, double x, double y, double above_y) {
     chooser_t *c = &app->chooser;
-    *c = (chooser_t){ .kind = order ? CHOOSE_ORDER : CHOOSE_SORT };
+    *c = (chooser_t){ .kind = CHOOSE_SORT };
     int key = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
     bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
-    if (order) {
-        rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Order")));
-        chooser_word(c, 0, "{} \xE2\x96\xB2", PROVEN_ARG(T("Rising")));
-        chooser_word(c, 1, "{} \xE2\x96\xBC", PROVEN_ARG(T("Falling")));
-        c->current = desc ? 1 : 0;
-    } else {
-        rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Sort by")));
-        for (int k = 0; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) chooser_word(c, k, "{}", PROVEN_ARG(rubraview_picker_sort_name((rubraview_picker_sort_key_t)k)));
-        c->current = key;
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Sort")));
+    chooser_word(c, -1.0, "{}  {} \xE2\x96\xB2", PROVEN_ARG(!desc ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Rising")));
+    chooser_word(c, -2.0, "{}  {} \xE2\x96\xBC", PROVEN_ARG(desc ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Falling")));
+    for (int k = 0; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) chooser_word(c, k, "{}", PROVEN_ARG(rubraview_picker_sort_name((rubraview_picker_sort_key_t)k)));
+    c->current = 2 + (key >= 0 ? key : 0);
+    chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
+}
+
+void chooser_open_picker_select(app_state_t *app, double x, double y, double above_y) {
+    chooser_t *c = &app->chooser;
+    *c = (chooser_t){ .kind = CHOOSE_PICKER_SELECT, .current = -1 };
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Select")));
+    chooser_word(c, 0.0, "{}  {}", PROVEN_ARG(app->picker.mode == RUBRAVIEW_PICK_INDIVIDUAL ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Individual")));
+    chooser_word(c, 1.0, "{}  {}", PROVEN_ARG(app->picker.mode == RUBRAVIEW_PICK_RANGE ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Range")));
+    chooser_word(c, 2.0, "{}", PROVEN_ARG(T("Same type")));
+    chooser_word(c, 3.0, "{}", PROVEN_ARG(T("Media")));
+    chooser_word(c, 4.0, "{}...", PROVEN_ARG(T("By extension")));
+    chooser_word(c, 5.0, "{}...", PROVEN_ARG(T("By shape")));
+    if (app->picker.mode == RUBRAVIEW_PICK_INDIVIDUAL) c->current = 0;
+    else if (app->picker.mode == RUBRAVIEW_PICK_RANGE) c->current = 1;
+    chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
+}
+
+void chooser_open_picker_view(app_state_t *app, double x, double y, double above_y) {
+    chooser_t *c = &app->chooser;
+    *c = (chooser_t){ .kind = CHOOSE_PICKER_VIEW, .current = -1 };
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("View")));
+    bool details = picker_details(app);
+    chooser_word(c, 0.0, "{}  {}", PROVEN_ARG(!details ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Tiles")));
+    chooser_word(c, 1.0, "{}  {}", PROVEN_ARG(details ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Details")));
+    if (!app->picker_in_book) {
+        bool every = picker_every_file(app);
+        chooser_word(c, 2.0, "{}  {}", PROVEN_ARG(!every ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Viewer's files")));
+        chooser_word(c, 3.0, "{}  {}", PROVEN_ARG(every ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Every file")));
     }
+    c->current = details ? 1 : 0;
     chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
 }
 
@@ -662,13 +688,34 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             app->settings_dirty = true;
             break;
         case CHOOSE_SORT: {
+            int val = (int)lround(c->values[index]);
+            int key = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
             bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
-            picker_sort_set(app, (int)c->values[index], desc);
+            if (val == -1 || val == -2) picker_sort_set(app, key < 0 ? 0 : key, val == -2);
+            else picker_sort_set(app, val, desc);
             break;
         }
-        case CHOOSE_ORDER: {
-            int key = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
-            picker_sort_set(app, key < 0 ? 0 : key, c->values[index] > 0.5);
+        case CHOOSE_PICKER_SELECT: {
+            int val = (int)lround(c->values[index]);
+            double dpi = rubraview_pal_window_dpi_scale(app->window);
+            rubraview_pal_rect_t tr = picker_tool_rect(app, PICKER_TOOL_SELECT, dpi);
+            switch (val) {
+                case 0: picker_button(app, PICKER_BTN_INDIVIDUAL); break;
+                case 1: picker_button(app, PICKER_BTN_RANGE); break;
+                case 2: picker_button(app, PICKER_BTN_SAME_TYPE); break;
+                case 3: picker_button(app, PICKER_BTN_MEDIA); break;
+                case 4: chooser_open_pickext(app, tr.x, tr.y + tr.height, tr.y); break;
+                case 5: shape_begin(app, SHAPE_FOR_PICKER, CHOOSE_IN_MAIN, tr.x, tr.y + tr.height, tr.y); break;
+                default: break;
+            }
+            break;
+        }
+        case CHOOSE_PICKER_VIEW: {
+            int val = (int)lround(c->values[index]);
+            if (val == 0 && picker_details(app)) picker_button(app, PICKER_BTN_VIEW);
+            else if (val == 1 && !picker_details(app)) picker_button(app, PICKER_BTN_VIEW);
+            else if (val == 2 && picker_every_file(app)) picker_toggle_every_file(app);
+            else if (val == 3 && !picker_every_file(app)) picker_toggle_every_file(app);
             break;
         }
         case CHOOSE_LISTEXT: {   /* stays open: the next box is a click away */

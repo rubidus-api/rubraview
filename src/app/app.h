@@ -437,8 +437,9 @@ typedef struct apply_all_job {
 } apply_all_job_t;
 
 /* 1.24.0 (owner, 2026-10-19): the list a one-of-many choice opens, in the window where it was pressed. */
-enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_ORDER, CHOOSE_LISTEXT, CHOOSE_LISTSORT, CHOOSE_SHAPE,
-       CHOOSE_PICKEXT /* RV-204 */, CHOOSE_BASKET /* RV-227 */, CHOOSE_BASKET_FILES /* D-286 */, CHOOSE_DROP /* RV-286 */, CHOOSE_EDITMENU /* RV-293 */ };
+enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_LISTEXT, CHOOSE_LISTSORT, CHOOSE_SHAPE,
+       CHOOSE_PICKEXT /* RV-204 */, CHOOSE_PICKER_SELECT /* RV-317 */, CHOOSE_PICKER_VIEW /* RV-317 */,
+       CHOOSE_BASKET /* RV-227 */, CHOOSE_BASKET_FILES /* D-286 */, CHOOSE_DROP /* RV-286 */, CHOOSE_EDITMENU /* RV-293 */ };
 enum { SHAPE_FOR_PICKER = 1, SHAPE_FOR_LIST };   /* RV-192 */
 /* RV-202: what a reading of sizes and lengths is for: the shape's choice, the list sorted by length, the open-file
    screen sorted by length or by resolution */
@@ -463,7 +464,7 @@ typedef struct chooser {
 /* RV-170 (owner, 2026-10-25): the lists whose scroll bar moves them, each in its own window. RV-172 (owner,
    2026-10-26): the panels too — Edit's (a bar to each of its columns), its selection box and its list of edits,
    Export, Print, Batch, the steps, Classify — and the text page. */
-enum { RVSB_NONE = 0, RVSB_LIST, RVSB_RECENT, RVSB_FAVS, RVSB_PICKER, RVSB_CHOOSER, RVSB_FILES, RVSB_SUBS, RVSB_SETTINGS, RVSB_FONTPICK, RVSB_INFO, RVSB_HELP,
+enum { RVSB_NONE = 0, RVSB_LIST, RVSB_RECENT, RVSB_FAVS, RVSB_FAVPOP_LEFT, RVSB_FAVPOP_RIGHT, RVSB_PICKER, RVSB_CHOOSER, RVSB_FILES, RVSB_SUBS, RVSB_SETTINGS, RVSB_FONTPICK, RVSB_INFO, RVSB_HELP,
        RVSB_TEXT, RVSB_CHANGES, RVSB_SEL, RVSB_STEPS, RVSB_CLASSIFY, RVSB_LOG,
        RVSB_PANEL, RVSB_PANEL_END = RVSB_PANEL + RUBRAVIEW_PANEL_MAX_COLUMNS, RVSB_COUNT = RVSB_PANEL_END };
 
@@ -1360,11 +1361,16 @@ typedef struct app_state {
     const char            *open_password;         /* for the open under way, or NULL */
     size_t                 open_password_len;
     /* A favourite chip pressed: opened on release, or dragged to a new place. */
-    int32_t                fav_press;
-    double                 fav_press_x, fav_drag_x;
-    bool                   fav_dragging;
-    /* RV-313: the places' row (1) and the tool row (2) slide sideways, dragged or wheeled; a press there acts on release unless dragged */
-    double                 picker_places_scroll, picker_tools_scroll;
+    /* RV-317: full-window two-column Favourites + Places popup state (left = favs, right = Recent/PC/folders/drives). */
+    bool                   favpop_open;
+    size_t                 favpop_fav_first;
+    size_t                 favpop_place_first;
+    int                    favpop_drag_pane;   /* 0 = none, 1 = left favs, 2 = right places */
+    double                 favpop_drag_x0, favpop_drag_y0;
+    size_t                 favpop_drag_first0;
+    bool                   favpop_drag_moved;
+    /* RV-313 / RV-317: Row 1 breadcrumb strip (1) and Row 2 tool strip (2) scroll sideways via arrows, drag, or wheel. */
+    double                 picker_crumbs_scroll, picker_tools_scroll;
     int                    strip_press;
     double                 strip_press_x, strip_press_y, strip_scroll0;
     bool                   strip_moved;
@@ -1809,11 +1815,12 @@ extern rubraview_plugin_t g_plugins[RUBRAVIEW_PLUGIN_MAX];
 
 /* Moved from main.c: more than one file uses them (RV-163). */
 enum { PF_NONE = 0, PF_TITLE, PF_MENU, PF_NAME, PF_LIST, PF_BUTTONS };
-#define PICKER_CRUMB_HEIGHT 44.0
-#define PICKER_PLACES_HEIGHT 40.0   /* the places bar under the path (owner, 2026-09-28) */
-#define PICKER_HEADER_HEIGHT (PICKER_CRUMB_HEIGHT + PICKER_PLACES_HEIGHT)
-#define PICKER_TOOL_HEIGHT 42.0     /* 1.24.0: all, Individual, Range, Same type, Media, Sort, Order, the view */
-#define PICKER_NAV_W 40.0           /* 1.24.0: back, up and forward at the path bar's left, a finger wide */
+#define PICKER_CRUMB_HEIGHT 48.0
+#define PICKER_HEADER_HEIGHT PICKER_CRUMB_HEIGHT
+#define PICKER_TOOL_HEIGHT 48.0     /* RV-317: two-row touch header (48 + 48) */
+#define PICKER_NAV_W 44.0           /* RV-317: back, up and forward at the path bar's left, touch width */
+#define PICKER_STRIP_ARROW_W 38.0   /* RV-317: left/right scroll arrows on overflowing strips */
+#define PICKER_PATH_EDIT_W 46.0     /* RV-317: always-accessible Edit path button at Row 1 right */
 #define PICKER_DETAIL_ROW 30.0
 #define PICKER_DETAIL_HEAD 26.0   /* the line naming the columns */
 #define PICKER_HEAD_CHECK_ROOM 30.0   /* 1.23.0: the heads' check box, before Name */
@@ -1853,11 +1860,12 @@ static const picker_button_t PICKER_BOTTOM[] = { PICKER_BTN_PLAYLIST, PICKER_BTN
                                                  PICKER_BTN_MOVE, PICKER_BTN_COPY, PICKER_BTN_CANCEL, PICKER_BTN_OPEN };
 #define PICKER_BOTTOM_COUNT ((int32_t)(sizeof(PICKER_BOTTOM) / sizeof(PICKER_BOTTOM[0])))
 #define PICKER_CRUMB_START (8.0 + 3.0 * (PICKER_NAV_W + 4.0) + 6.0)
-enum { PICKER_TOOL_EXT = 0,   /* RV-204: the files picked by extension, leftmost */
-       PICKER_TOOL_ALL, PICKER_TOOL_INDIVIDUAL, PICKER_TOOL_RANGE, PICKER_TOOL_SAME, PICKER_TOOL_MEDIA,
-       PICKER_TOOL_SHAPE,   /* RV-192 */
-       PICKER_TOOL_SORT, PICKER_TOOL_ORDER, PICKER_TOOL_VIEW,
-       PICKER_TOOL_SHOWN,   /* D-258: every file, or only what the viewer opens */
+enum { PICKER_TOOL_FAVS = 0,  /* RV-317: Favourites + Places 2-column popup */
+       PICKER_TOOL_ALL,       /* All/None checkbox toggle */
+       PICKER_TOOL_SELECT,    /* RV-317: 2-step selection chooser */
+       PICKER_TOOL_SORT,      /* RV-317: unified sort key + Rising/Falling chooser */
+       PICKER_TOOL_VIEW,      /* RV-317: unified view layout + file filter chooser */
+       PICKER_TOOL_FILTER,    /* RV-317: filter field (omitted inside a book) */
        PICKER_TOOL_COUNT };
 enum {
     FILES_PREVIEW_NONE = 0,   /* nothing asked for yet */
@@ -1952,7 +1960,7 @@ extern double g_col_w[RUBRAVIEW_PICKER_SORT_COUNT];
 
 
 /* Moved from main.c: more than one file uses them (RV-163). */
-enum { RENAME_BTN_OK = 1, RENAME_BTN_CANCEL, RENAME_BTN_BROWSE, RENAME_BTN_BACK, RENAME_BTN_EYE /* D-262 */ };
+enum { RENAME_BTN_OK = 1, RENAME_BTN_CANCEL, RENAME_BTN_BROWSE, RENAME_BTN_BACK, RENAME_BTN_EYE /* D-262 */, RENAME_BTN_COPY /* RV-317 */ };
 
 
 /* Shared variables, defined in the file that owns them. */
@@ -2084,7 +2092,9 @@ void chooser_open_panel(app_state_t *app, int32_t which, int32_t row, double x, 
 void chooser_open_setting(app_state_t *app);
 void chooser_open_shape(app_state_t *app, int where, double x, double y, double above_y);
 void chooser_open_pickext(app_state_t *app, double x, double y, double above_y);   /* RV-204 */
-void chooser_open_sort(app_state_t *app, bool order, double x, double y, double above_y);
+void chooser_open_sort(app_state_t *app, double x, double y, double above_y);
+void chooser_open_picker_select(app_state_t *app, double x, double y, double above_y);
+void chooser_open_picker_view(app_state_t *app, double x, double y, double above_y);
 bool chooser_open_tile(app_state_t *app, proven_u8str_view_t action, double x, double y, double above_y);
 bool chooser_press(app_state_t *app, int where, double x, double y);
 bool chooser_wheel(app_state_t *app, int where, double notches);
@@ -2257,7 +2267,6 @@ bool eqwin_wheel(app_state_t *app, double x, double y, double delta);
 bool export_more_apply(rubraview_export_options_t *o, int32_t id, double v);
 void export_more_rows(rubraview_panel_t *pn, const rubraview_export_options_t *o, uint32_t rows);
 void ext_switch(app_state_t *app, int32_t row);
-size_t favorite_drop_index(const app_state_t *app, double x, double dpi, double win_w);
 void favorite_rename_begin(app_state_t *app, size_t index);
 void favorite_rename_commit(app_state_t *app);
 bool favorite_toggle_path(app_state_t *app, proven_u8str_view_t path);
@@ -2552,13 +2561,11 @@ void picker_activate(app_state_t *app, size_t index);
 int picker_taps(app_state_t *app, size_t index);
 void picker_pick_alone(app_state_t *app, size_t index);
 void picker_add_to_list(app_state_t *app);
-bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_item_t *out);
 void picker_button(app_state_t *app, picker_button_t button);
 rubraview_pal_rect_t picker_button_rect(double win_w, double win_h, double dpi, int32_t index);
 int32_t picker_bottom_list(const app_state_t *app, picker_button_t *out);   /* D-260: the buttons shown, in order */
 int32_t picker_bottom_slot(int32_t index, int32_t shown);                    /* where the shown one `index` sits */
 rubraview_pal_rect_t picker_check_rect(const app_state_t *app, size_t index, double win_w, double dpi);
-bool picker_chip_span(const app_state_t *app, size_t index, double dpi, double win_w, double *out_x, double *out_w);
 double picker_chip_width(proven_u8str_view_t label, double dpi);
 int picker_column_at(const picker_columns_t *c, double x);
 int picker_column_edge(const picker_columns_t *c, double x, double dpi);
@@ -2574,19 +2581,31 @@ void picker_curate_to(app_state_t *app, proven_u8str_view_t target_dir, bool mov
 picker_columns_t picker_detail_columns(double win_w, double dpi);
 bool picker_details(const app_state_t *app);
 bool picker_enter_book(app_state_t *app, size_t index);
-rubraview_pal_rect_t picker_favwin_chip(const app_state_t *app, double dpi, double win_w);
+rubraview_pal_rect_t picker_path_edit_rect(double dpi, double win_w, double top);
+rubraview_hstrip_t picker_crumbs_strip(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double dpi, double win_w);
+rubraview_pal_rect_t picker_crumb_rect(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, size_t index, double dpi, double win_w);
 void picker_filter_begin(app_state_t *app);
-rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, double dpi, proven_u8str_view_t *out_label, char *buf, size_t cap);
+bool picker_filter_clear_rect(const app_state_t *app, double dpi, rubraview_pal_rect_t tool_rect, rubraview_pal_rect_t *out);
 /* RV-227, D-286: the basket's two icons at the tool row's right end — 0 both, 1 the basket (put in, see), 2 the arrow (put here) */
 rubraview_pal_rect_t picker_basket_rect(const app_state_t *app, double dpi, double win_w, int part);
 double picker_tools_end(const app_state_t *app, double dpi, double win_w);
-/* RV-313: how far the places' row (1) or the tool row (2) is slid, kept within what it holds */
+rubraview_hstrip_t picker_tools_strip(const app_state_t *app, double dpi, double win_w);
+/* RV-313 / RV-317: Row 1 breadcrumb strip (1) or Row 2 tool strip (2) scroll offset and slide */
 double picker_strip_scroll(const app_state_t *app, int which, double dpi, double win_w);
 void   picker_strip_slide(app_state_t *app, int which, double to, double dpi, double win_w);
-/* The places' row's chip at x (as drawn), or -1 */
-int32_t picker_place_at(const app_state_t *app, double x, double dpi, double win_w, picker_bar_item_t *out);
-size_t picker_crumbs_first(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double dpi, double win_w, bool *out_star);
-#define PICKER_CRUMBS_MORE "\xE2\x80\xA6"   /* RV-229: the chip standing for the crumbs left out */
+rubraview_pal_rect_t picker_tool_rect(const app_state_t *app, int which, double dpi);
+void favpop_toggle(app_state_t *app);
+void favpop_close(app_state_t *app);
+size_t favpop_fav_count(const app_state_t *app);
+size_t favpop_place_count(const app_state_t *app);
+bool favpop_place_item(const app_state_t *app, size_t index, picker_bar_item_t *out);
+bool favpop_sb(const app_state_t *app, int pane, rubraview_scrollbar_t *sb, double win_w, double win_h, double dpi);
+void favpop_sb_to(app_state_t *app, int pane, size_t first, double win_w, double win_h, double dpi);
+bool favpop_press(app_state_t *app, double x, double y, bool right);
+bool favpop_motion(app_state_t *app, double x, double y);
+bool favpop_release(app_state_t *app);
+bool favpop_wheel(app_state_t *app, double x, double y, double notches);
+bool favpop_key(app_state_t *app, rubraview_key_combo_t combo);
 bool picker_basket_shown(const app_state_t *app);
 void basket_add_picked(app_state_t *app, double x, double y, double above_y);
 void basket_put_open(app_state_t *app, double x, double y, double above_y);
@@ -2631,14 +2650,13 @@ bool shape_table(app_state_t *app, int32_t target, uint8_t **out_shapes, size_t 
 void picker_sort_by(app_state_t *app, int key);
 void picker_sort_set(app_state_t *app, int key, bool desc);
 void picker_resort(app_state_t *app);   /* RV-210 */
-proven_u8str_view_t picker_star_label(const app_state_t *app);
+bool picker_can_favorite_current(const app_state_t *app);
 void picker_thumbs_free(app_state_t *app);
 void picker_thumbs_step(app_state_t *app);
 int32_t picker_tile_columns(const app_state_t *app);
 void picker_tile_size(app_state_t *app, double *out_w, double *out_h);
 void picker_toggle_favorite(app_state_t *app);
 proven_u8str_view_t picker_tool_label(const app_state_t *app, int which, char *buf, size_t cap);
-rubraview_pal_rect_t picker_tool_rect(const app_state_t *app, double dpi, int which);
 double picker_top(const app_state_t *app);
 size_t picture_bytes(size_t w, size_t h, size_t per_pixel, size_t extra);
 void picture_copy(app_state_t *app);

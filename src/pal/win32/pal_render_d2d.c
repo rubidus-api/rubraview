@@ -1037,6 +1037,22 @@ void rubraview_pal_render_stroke_rect(rubraview_renderer_t *renderer,
     ID2D1SolidColorBrush_Release(brush);
 }
 
+void rubraview_pal_render_push_clip(rubraview_renderer_t *renderer, rubraview_pal_rect_t rect) {
+    if (!renderer || !renderer->target) return;
+    if (rect.width < 0.0) rect.width = 0.0;
+    if (rect.height < 0.0) rect.height = 0.0;
+    ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+    set_identity(rt);
+    D2D1_RECT_F clip = to_d2d_rect(rect);
+    ID2D1RenderTarget_PushAxisAlignedClip(rt, &clip, D2D1_ANTIALIAS_MODE_ALIASED);
+}
+
+void rubraview_pal_render_pop_clip(rubraview_renderer_t *renderer) {
+    if (!renderer || !renderer->target) return;
+    ID2D1RenderTarget *rt = (ID2D1RenderTarget*)renderer->target;
+    ID2D1RenderTarget_PopAxisAlignedClip(rt);
+}
+
 /* Whether Segoe MDL2 Assets is installed: asked once. */
 static int g_icon_font = -1;
 

@@ -6,6 +6,7 @@
 #include "rubraview/path.h"
 #include "rubraview/sort.h"
 #include <ctype.h>
+#include <math.h>
 #include <string.h>
 #include <stdlib.h>
 
@@ -174,6 +175,153 @@ size_t rubraview_picker_crumbs_first(const double *widths, size_t n, double gap,
     size_t first = n;
     while (first > 1 && tail + widths[first - 1] + gap <= room) tail += widths[--first] + gap;
     return first < n ? first : n - 1;
+}
+
+rubraview_hstrip_t rubraview_hstrip_layout(double x, double y, double width, double height,
+                                           double arrow_w, double content_w, double scroll) {
+    rubraview_hstrip_t out = {
+        .x = x, .y = y, .width = width > 0.0 ? width : 0.0, .height = height > 0.0 ? height : 0.0,
+        .view_x = x, .view_w = width > 0.0 ? width : 0.0,
+    };
+    if (out.width <= 0.0 || out.height <= 0.0 || content_w <= out.width + 0.5) return out;
+
+    double aw = arrow_w > 0.0 ? arrow_w : 0.0;
+    if (aw * 2.0 > out.width * 0.5) aw = out.width * 0.25;
+    out.overflow = true;
+    out.arrow_w = aw;
+    out.view_x = x + aw;
+    out.view_w = out.width - 2.0 * aw;
+    out.max_scroll = content_w > out.view_w ? content_w - out.view_w : 0.0;
+    if (scroll < 0.0) scroll = 0.0;
+    if (scroll > out.max_scroll) scroll = out.max_scroll;
+    out.scroll = scroll;
+    out.can_left = scroll > 0.5;
+    out.can_right = scroll < out.max_scroll - 0.5;
+    return out;
+}
+
+double rubraview_hstrip_step(const rubraview_hstrip_t *strip, int dir) {
+    if (!strip || !strip->overflow) return 0.0;
+    double step = strip->view_w * 0.65;
+    if (step < 60.0) step = 60.0;
+    double next = strip->scroll + (dir < 0 ? -step : step);
+    if (next < 0.0) next = 0.0;
+    if (next > strip->max_scroll) next = strip->max_scroll;
+    return next;
+}
+
+int rubraview_hstrip_hit_arrow(const rubraview_hstrip_t *strip, double px, double py) {
+    if (!strip || !strip->overflow) return 0;
+    if (py < strip->y || py >= strip->y + strip->height) return 0;
+    if (px >= strip->x && px < strip->view_x) return -1;
+    if (px >= strip->view_x + strip->view_w && px < strip->x + strip->width) return 1;
+    return 0;
+}
+
+rubraview_favpop_layout_t rubraview_favpop_place(double top, double win_w, double win_h, double dpi) {
+    if (dpi <= 0.0) dpi = 1.0;
+    double w = win_w > 0.0 ? win_w : 0.0;
+    double h = win_h > top ? win_h - top : 0.0;
+    double pad = 12.0 * dpi;
+    double head_h = fmin(48.0 * dpi, h);
+    double sub_h = 34.0 * dpi;
+    double row_h = 46.0 * dpi;
+    double row_gap = 6.0 * dpi;
+    double sb_w = 18.0 * dpi;
+
+    rubraview_favpop_layout_t lo = {
+        .popup = { 0.0, top, w, h },
+        .header = { 0.0, top, w, head_h },
+        .row_h = row_h,
+        .row_gap = row_gap,
+        .sb_w = sb_w,
+    };
+
+    double btn_h = fmax(0.0, head_h - 8.0 * dpi);
+    double close_w = fmin(48.0 * dpi, fmax(0.0, w - 2.0 * pad));
+    double manage_w = fmin(112.0 * dpi, fmax(0.0, w - 2.0 * pad - close_w - 8.0 * dpi));
+    lo.close_btn = (rubraview_rect_t){ fmax(0.0, w - pad - close_w), top + 4.0 * dpi, close_w, btn_h };
+    lo.manage_btn = (rubraview_rect_t){ fmax(0.0, lo.close_btn.x - 8.0 * dpi - manage_w), top + 4.0 * dpi, manage_w, btn_h };
+
+    double body_y = top + head_h;
+    double body_h = fmax(0.0, h - head_h);
+    double div_w = fmax(1.0, floor(dpi + 0.5));
+    double div_x = floor(w * 0.5);
+    if (div_x + div_w > w) div_w = fmax(0.0, w - div_x);
+
+    lo.divider = (rubraview_rect_t){ div_x, body_y, div_w, body_h };
+    lo.left_pane = (rubraview_rect_t){ 0.0, body_y, fmax(0.0, div_x), body_h };
+    lo.right_pane = (rubraview_rect_t){ div_x + div_w, body_y, fmax(0.0, w - (div_x + div_w)), body_h };
+
+    double l_pad = fmin(pad, lo.left_pane.width * 0.25);
+    double l_sb_w = fmin(sb_w, fmax(0.0, lo.left_pane.width - 2.0 * l_pad));
+    double l_inner_w = fmax(0.0, lo.left_pane.width - l_pad - l_sb_w - 6.0 * dpi);
+    double l_head_h = fmin(sub_h, body_h);
+    lo.left_heading = (rubraview_rect_t){ lo.left_pane.x + l_pad, body_y + 4.0 * dpi, l_inner_w, fmax(0.0, l_head_h - 4.0 * dpi) };
+    double star_y = body_y + l_head_h;
+    double star_h = fmin(row_h, fmax(0.0, body_y + body_h - star_y));
+    lo.star_btn = (rubraview_rect_t){ lo.left_pane.x + l_pad, star_y, l_inner_w, star_h };
+
+    double l_list_y = star_y + star_h + row_gap;
+    double l_list_h = fmax(0.0, body_y + body_h - l_list_y - fmin(pad, body_h));
+    lo.left_list = (rubraview_rect_t){ lo.left_pane.x + l_pad, l_list_y, l_inner_w, l_list_h };
+    lo.left_sb = (rubraview_rect_t){ fmax(lo.left_pane.x, lo.left_pane.x + lo.left_pane.width - l_sb_w - 4.0 * dpi),
+                                     l_list_y, l_sb_w, l_list_h };
+
+    double r_pad = fmin(pad, lo.right_pane.width * 0.25);
+    double r_sb_w = fmin(sb_w, fmax(0.0, lo.right_pane.width - 2.0 * r_pad));
+    double r_inner_w = fmax(0.0, lo.right_pane.width - r_pad - r_sb_w - 6.0 * dpi);
+    double r_head_h = fmin(sub_h, body_h);
+    lo.right_heading = (rubraview_rect_t){ lo.right_pane.x + r_pad, body_y + 4.0 * dpi, r_inner_w, fmax(0.0, r_head_h - 4.0 * dpi) };
+    double r_list_y = body_y + r_head_h;
+    double r_list_h = fmax(0.0, body_y + body_h - r_list_y - fmin(pad, body_h));
+    lo.right_list = (rubraview_rect_t){ lo.right_pane.x + r_pad, r_list_y, r_inner_w, r_list_h };
+    lo.right_sb = (rubraview_rect_t){ fmax(lo.right_pane.x, lo.right_pane.x + lo.right_pane.width - r_sb_w - 4.0 * dpi),
+                                      r_list_y, r_sb_w, r_list_h };
+
+    double step = row_h + row_gap;
+    if (l_list_h >= row_h * 0.5) {
+        size_t n = (size_t)((l_list_h + row_gap) / step);
+        lo.left_vis_rows = n > 0 ? n : 1;
+    }
+    if (r_list_h >= row_h * 0.5) {
+        size_t n = (size_t)((r_list_h + row_gap) / step);
+        lo.right_vis_rows = n > 0 ? n : 1;
+    }
+    return lo;
+}
+
+static rubraview_favpop_hit_t favpop_list_hit(rubraview_rect_t list, double row_h, double row_gap,
+                                              double px, double py, size_t first, size_t count,
+                                              rubraview_favpop_hit_t kind, size_t *out_index) {
+    if (!rubraview_rect_contains(list, px, py) || row_h <= 0.0) return RUBRAVIEW_FAVPOP_HIT_NONE;
+    double step = row_h + row_gap;
+    if (step <= 0.0) return RUBRAVIEW_FAVPOP_HIT_NONE;
+    double rel_y = py - list.y;
+    size_t k = (size_t)(rel_y / step);
+    double in_row = rel_y - (double)k * step;
+    if (in_row >= row_h || first + k >= count) return RUBRAVIEW_FAVPOP_HIT_NONE;
+    if (out_index) *out_index = first + k;
+    return kind;
+}
+
+rubraview_favpop_hit_t rubraview_favpop_hit(const rubraview_favpop_layout_t *lo,
+                                            double px, double py,
+                                            size_t fav_first, size_t fav_count,
+                                            size_t place_first, size_t place_count,
+                                            size_t *out_index) {
+    if (out_index) *out_index = 0;
+    if (!lo || !rubraview_rect_contains(lo->popup, px, py)) return RUBRAVIEW_FAVPOP_HIT_NONE;
+    if (rubraview_rect_contains(lo->manage_btn, px, py)) return RUBRAVIEW_FAVPOP_HIT_MANAGE;
+    if (rubraview_rect_contains(lo->close_btn, px, py)) return RUBRAVIEW_FAVPOP_HIT_CLOSE;
+    if (rubraview_rect_contains(lo->star_btn, px, py)) return RUBRAVIEW_FAVPOP_HIT_STAR_TOGGLE;
+    if (rubraview_rect_contains(lo->left_sb, px, py)) return RUBRAVIEW_FAVPOP_HIT_LEFT_SB;
+    if (rubraview_rect_contains(lo->right_sb, px, py)) return RUBRAVIEW_FAVPOP_HIT_RIGHT_SB;
+    rubraview_favpop_hit_t hit = favpop_list_hit(lo->left_list, lo->row_h, lo->row_gap, px, py,
+                                                 fav_first, fav_count, RUBRAVIEW_FAVPOP_HIT_FAV_ROW, out_index);
+    if (hit != RUBRAVIEW_FAVPOP_HIT_NONE) return hit;
+    return favpop_list_hit(lo->right_list, lo->row_h, lo->row_gap, px, py,
+                           place_first, place_count, RUBRAVIEW_FAVPOP_HIT_PLACE_ROW, out_index);
 }
 
 size_t rubraview_flow_inline(const double *widths, size_t n, double gap, double room, uint32_t *row_of, double *x_of) {

@@ -198,7 +198,7 @@ double chooser_main_y(app_state_t *app);
 int text_enc_now(const app_state_t *app);
 void chooser_open_panel(app_state_t *app, int32_t which, int32_t row, double x, double y, double above_y);
 void chooser_open_setting(app_state_t *app);
-void chooser_open_sort(app_state_t *app, bool order, double x, double y, double above_y);
+void chooser_open_sort(app_state_t *app, double x, double y, double above_y);
 void chooser_close(app_state_t *app);
 bool chooser_press(app_state_t *app, int where, double x, double y);
 void chooser_open_listext(app_state_t *app, int where, double x, double y, double above_y);

@@ -37,13 +37,13 @@ double picker_top(const app_state_t *app) {
     return app->frameless ? app->titlebar.height : 0.0;
 }
 
-/* Where the tiles or the rows begin, below the path, the places and — in
+/* Where the tiles or the rows begin, below the two-row header and — in
    the details view — the columns' names. */
 double picker_grid_top(const app_state_t *app, double dpi) {
     return picker_top(app) + (PICKER_HEADER_HEIGHT + PICKER_TOOL_HEIGHT + PICKER_DETAIL_HEAD) * dpi;   /* 1.24.0: the tool row, then the heads */
 }
 
-/* A chip in the path or the places bar, as wide as its label. 1.24.0 (owner, 2026-10-19: narrower, but not
+/* A chip in the path or the tool bar, as wide as its label. 1.24.0 (owner, 2026-10-19: narrower, but not
    too small for a finger): its letters counted (a Hangul or a Han one as two), a little room, 44 at least. */
 double picker_chip_width(proven_u8str_view_t label, double dpi) {
     double units = 0.0;
@@ -59,31 +59,34 @@ double picker_chip_width(proven_u8str_view_t label, double dpi) {
     return w < 44.0 * dpi ? 44.0 * dpi : w;
 }
 
-/* The places bar's items in order: the reader's favourites (D-43), then
-   the PC page's places. False past the end. */
+/* RV-317: Right pane of the Favourites popup: Recent, PC, special folders and drives. */
+size_t favpop_fav_count(const app_state_t *app) {
+    return app->favorites.count;
+}
 
-bool picker_bar_item(const app_state_t *app, size_t index, picker_bar_item_t *out) {
-    if (index < app->favorites.count) {
-        *out = (picker_bar_item_t){ rubraview_favorites_title(&app->favorites, index),
-                                    app->favorites.paths[index], true };
-        return true;
-    }
-    index -= app->favorites.count;
-    if (index == 0) {   /* the recent files, a place of their own (owner, 2026-10-16) */
+size_t favpop_place_count(const app_state_t *app) {
+    return 2 + app->picker_places.count;
+}
+
+bool favpop_place_item(const app_state_t *app, size_t index, picker_bar_item_t *out) {
+    if (index == 0) {
         *out = (picker_bar_item_t){ TU8("Recent"), PROVEN_LIT(RUBRAVIEW_PICKER_RECENT), false };
         return true;
     }
-    index -= 1;
-    if (index >= app->picker_places.count) return false;
-    *out = (picker_bar_item_t){ rubraview_tr_u8(app->picker_places.entries[index].name), app->picker_places.entries[index].path, false };
+    if (index == 1) {
+        *out = (picker_bar_item_t){ TU8("PC"), PROVEN_LIT(RUBRAVIEW_PICKER_PLACES), false };
+        return true;
+    }
+    size_t pi = index - 2;
+    if (pi >= app->picker_places.count) return false;
+    *out = (picker_bar_item_t){ rubraview_tr_u8(app->picker_places.entries[pi].name), app->picker_places.entries[pi].path, false };
     return true;
 }
 
-/* The star after the path: lit when the folder on screen is a favourite.
-   None on the PC page, which is not a folder. */
-proven_u8str_view_t picker_star_label(const app_state_t *app) {
-    if (rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) || app->picker_in_book) return PROVEN_LIT("");
-    return rubraview_favorites_contains(&app->favorites, app->picker_dir) ? PROVEN_LIT("\xE2\x98\x85") : PROVEN_LIT("\xE2\x98\x86");
+/* Can the current folder be starred / unstarred? */
+bool picker_can_favorite_current(const app_state_t *app) {
+    return !app->picker_in_book && app->picker_dir.size > 0 &&
+           !rubraview_picker_is_places(app->picker_dir) && !rubraview_picker_is_recent(app->picker_dir);
 }
 
 void osd_say(app_state_t *app, proven_u8str_view_t text);
@@ -92,8 +95,7 @@ void osd_say(app_state_t *app, proven_u8str_view_t text);
    file written at once, so a crash later does not lose it. */
 bool favorite_toggle_path(app_state_t *app, proven_u8str_view_t path);
 void picker_toggle_favorite(app_state_t *app) {
-    if (rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) ||
-        app->picker_dir.size == 0 || app->picker_in_book) return;
+    if (!picker_can_favorite_current(app)) return;
     (void)favorite_toggle_path(app, app->picker_dir);
 }
 
@@ -105,15 +107,12 @@ void favorites_save(app_state_t *app) {
     if (!written) osd_say(app, TU8("could not write favorites.ini"));
 }
 
-/* RV-227 (owner, 2026-11-06: "파일 관리자 우측 상단에 장바구니 버튼(그리고 그 아래에 추가 열기를 위한 아래 화살표)"); D-286
-   (owner, 2026-11-07: "장바구니와 그 화살표는 가로로 나열된 그림 아이콘으로"; "도구 줄 오른쪽 끝"): the basket's icon and its
-   arrow side by side at the tool row's right end, as high as its chips; the basket puts what is picked in a basket
-   (or shows them), the arrow puts a basket's files here. Not in a book's pages. */
+/* RV-227, D-286: the basket's icon and its arrow side by side at Row 2's right end, as high as its buttons. */
 #define PICKER_BASKET_ICON_W 48.0
 bool picker_basket_shown(const app_state_t *app) { return app->picker_open && !app->picker_in_book; }
 
 rubraview_pal_rect_t picker_basket_rect(const app_state_t *app, double dpi, double win_w, int part) {
-    double y = picker_top(app) + PICKER_HEADER_HEIGHT * dpi + 4.0 * dpi, h = PICKER_TOOL_HEIGHT * dpi - 8.0 * dpi;
+    double y = picker_top(app) + PICKER_HEADER_HEIGHT * dpi + 6.0 * dpi, h = PICKER_TOOL_HEIGHT * dpi - 12.0 * dpi;
     double w = PICKER_BASKET_ICON_W * dpi, gap = 4.0 * dpi;
     rubraview_pal_rect_t r = { win_w - 8.0 * dpi - 2.0 * w - gap, y, 2.0 * w + gap, h };
     if (part == 1) r.width = w;
@@ -121,101 +120,87 @@ rubraview_pal_rect_t picker_basket_rect(const app_state_t *app, double dpi, doub
     return r;
 }
 
-/* Where the tool row's chips stop: before the basket's icons. */
+/* Where Row 2's tool strip stops: before the basket's icons. */
 double picker_tools_end(const app_state_t *app, double dpi, double win_w) {
-    return picker_basket_shown(app) ? picker_basket_rect(app, dpi, win_w, 0).x - 6.0 * dpi : win_w;
+    return picker_basket_shown(app) ? picker_basket_rect(app, dpi, win_w, 0).x - 6.0 * dpi : win_w - 8.0 * dpi;
 }
 
-/* What stands at the path's and the places' right ends. */
-static double picker_right_edge(const app_state_t *app, double dpi, double win_w) {
-    (void)app; (void)dpi;
-    return win_w;
+/* RV-317: always-accessible Edit Path button at Row 1 right. */
+rubraview_pal_rect_t picker_path_edit_rect(double dpi, double win_w, double top) {
+    double w = PICKER_PATH_EDIT_W * dpi, crumb_h = PICKER_CRUMB_HEIGHT * dpi;
+    double x = fmax(PICKER_CRUMB_START * dpi, win_w - 8.0 * dpi - w);
+    return (rubraview_pal_rect_t){ x, top + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
 }
 
-/* 1.24.0: the favourites window's chip at the places bar's right end; the places stop short of it. */
-rubraview_pal_rect_t picker_favwin_chip(const app_state_t *app, double dpi, double win_w) {
-    double w = picker_chip_width(TU8("\xE2\x98\x85 Favourites"), dpi);
-    return (rubraview_pal_rect_t){ picker_right_edge(app, dpi, win_w) - w - 8.0 * dpi, picker_top(app) + PICKER_CRUMB_HEIGHT * dpi + 2.0 * dpi, w, PICKER_PLACES_HEIGHT * dpi - 8.0 * dpi };
+static int picker_tool_count(const app_state_t *app) {
+    return app->picker_in_book ? PICKER_TOOL_FILTER : PICKER_TOOL_COUNT;
 }
 
-/* RV-313 (owner, 2026-11-20: "상단의 즐겨찾기나 .ext 가 있는 줄은, 가로로 드래그해서 가로 스크롤 가능하게"): what the row
-   holds, from its left, and where it must stop; slid by at most the difference. */
-static rubraview_pal_rect_t tool_rect_at(const app_state_t *app, double dpi, int which, double slid);
-static void strip_extent(const app_state_t *app, int which, double dpi, double win_w, double *content, double *view) {
-    if (which == 1) {
-        double x = 8.0 * dpi, end = 0.0;
-        picker_bar_item_t item;
-        for (size_t i = 0; picker_bar_item(app, i, &item); ++i) {
-            double w = picker_chip_width(item.label, dpi);
-            if (!item.favorite && i == app->favorites.count && i > 0) x += 10.0 * dpi;
-            end = x + w;
-            x += w + 4.0 * dpi;
-        }
-        *content = end;
-        *view = picker_favwin_chip(app, dpi, win_w).x - 6.0 * dpi;
-    } else {
-        rubraview_pal_rect_t last = tool_rect_at(app, dpi, PICKER_TOOL_COUNT - 1, 0.0);
-        *content = last.x + last.width;
-        *view = picker_tools_end(app, dpi, win_w);
+static double tool_chip_width(const app_state_t *app, int which, double dpi) {
+    char buf[160];
+    double w = picker_chip_width(picker_tool_label(app, which, buf, sizeof(buf)), dpi);
+    if (which == PICKER_TOOL_ALL) w += 24.0 * dpi;
+    if (which == PICKER_TOOL_FILTER && app->picker_filter[0]) w += 18.0 * dpi;
+    return w;
+}
+
+rubraview_hstrip_t picker_crumbs_strip(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double dpi, double win_w) {
+    double top = picker_top(app);
+    double edit_x = picker_path_edit_rect(dpi, win_w, top).x;
+    double sx = PICKER_CRUMB_START * dpi;
+    double sw = fmax(0.0, edit_x - 6.0 * dpi - sx);
+    double content = 0.0, gap = 4.0 * dpi;
+    for (size_t i = 0; i < crumbs->count; ++i) {
+        content += picker_chip_width(crumbs->items[i].label, dpi);
+        if (i + 1 < crumbs->count) content += gap;
     }
+    return rubraview_hstrip_layout(sx, top + 6.0 * dpi, sw, PICKER_CRUMB_HEIGHT * dpi - 12.0 * dpi,
+                                   PICKER_STRIP_ARROW_W * dpi, content, app->picker_crumbs_scroll);
+}
+
+rubraview_pal_rect_t picker_crumb_rect(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, size_t index, double dpi, double win_w) {
+    if (!crumbs || index >= crumbs->count) return (rubraview_pal_rect_t){ 0 };
+    rubraview_hstrip_t s = picker_crumbs_strip(app, crumbs, dpi, win_w);
+    double x = s.view_x - s.scroll, gap = 4.0 * dpi;
+    for (size_t i = 0; i <= index; ++i) {
+        double w = picker_chip_width(crumbs->items[i].label, dpi);
+        if (i == index) return (rubraview_pal_rect_t){ x, s.y, w, s.height };
+        x += w + gap;
+    }
+    return (rubraview_pal_rect_t){ 0 };
+}
+
+rubraview_hstrip_t picker_tools_strip(const app_state_t *app, double dpi, double win_w) {
+    int count = picker_tool_count(app);
+    double content = 0.0, gap = 6.0 * dpi;
+    for (int i = 0; i < count; ++i) {
+        content += tool_chip_width(app, i, dpi);
+        if (i + 1 < count) content += gap;
+    }
+    double sx = 8.0 * dpi;
+    double sy = picker_top(app) + PICKER_HEADER_HEIGHT * dpi + 6.0 * dpi;
+    double sh = PICKER_TOOL_HEIGHT * dpi - 12.0 * dpi;
+    double sw = fmax(0.0, picker_tools_end(app, dpi, win_w) - sx);
+    return rubraview_hstrip_layout(sx, sy, sw, sh, PICKER_STRIP_ARROW_W * dpi, content, app->picker_tools_scroll);
 }
 
 double picker_strip_scroll(const app_state_t *app, int which, double dpi, double win_w) {
-    double content = 0.0, view = 0.0;
-    strip_extent(app, which, dpi, win_w, &content, &view);
-    rubraview_scrollbar_t sb = { .total = content, .shown = view };
-    return rubraview_scrollbar_clamp(&sb, which == 1 ? app->picker_places_scroll : app->picker_tools_scroll);
+    if (which == 1) {
+        rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
+        return picker_crumbs_strip(app, &crumbs, dpi, win_w).scroll;
+    }
+    return picker_tools_strip(app, dpi, win_w).scroll;
 }
 
 void picker_strip_slide(app_state_t *app, int which, double to, double dpi, double win_w) {
-    double content = 0.0, view = 0.0;
-    strip_extent(app, which, dpi, win_w, &content, &view);
-    rubraview_scrollbar_t sb = { .total = content, .shown = view };
-    *(which == 1 ? &app->picker_places_scroll : &app->picker_tools_scroll) = rubraview_scrollbar_clamp(&sb, to);
-}
-
-int32_t picker_place_at(const app_state_t *app, double x, double dpi, double win_w, picker_bar_item_t *out) {
-    picker_bar_item_t item;
-    for (size_t i = 0; picker_bar_item(app, i, &item); ++i) {
-        double cx = 0.0, cw = 0.0;
-        if (!picker_chip_span(app, i, dpi, win_w, &cx, &cw)) return -1;
-        if (x >= cx && x < cx + cw) { if (out) *out = item; return (int32_t)i; }
+    if (which == 1) {
+        rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
+        app->picker_crumbs_scroll = to;
+        app->picker_crumbs_scroll = picker_crumbs_strip(app, &crumbs, dpi, win_w).scroll;
+    } else {
+        app->picker_tools_scroll = to;
+        app->picker_tools_scroll = picker_tools_strip(app, dpi, win_w).scroll;
     }
-    return -1;
-}
-
-/* Where the bar's chip `index` is, as drawn: false past the window's edge. */
-bool picker_chip_span(const app_state_t *app, size_t index, double dpi, double win_w, double *out_x, double *out_w) {
-    double x = 8.0 * dpi - picker_strip_scroll(app, 1, dpi, win_w);
-    picker_bar_item_t item;
-    for (size_t i = 0; picker_bar_item(app, i, &item); ++i) {
-        double w = picker_chip_width(item.label, dpi);
-        if (!item.favorite && i == app->favorites.count && i > 0) x += 10.0 * dpi;
-        if (x + w > picker_favwin_chip(app, dpi, win_w).x - 6.0 * dpi) return false;
-        if (i == index) { *out_x = x; *out_w = w; return true; }
-        x += w + 4.0 * dpi;
-    }
-    return false;
-}
-
-/* The favourite a drag let go at `x` goes to: the one whose middle it passed. */
-size_t favorite_drop_index(const app_state_t *app, double x, double dpi, double win_w) {
-    size_t to = 0;
-    for (size_t i = 0; i < app->favorites.count; ++i) {
-        double cx = 0.0, cw = 0.0;
-        if (!picker_chip_span(app, i, dpi, win_w, &cx, &cw)) break;
-        if (x >= cx + cw * 0.5) to = i;
-    }
-    if (app->fav_press >= 0 && (size_t)app->fav_press > to) {
-        /* moving left: before the first chip whose middle is past x */
-        to = app->favorites.count - 1;
-        for (size_t i = 0; i < app->favorites.count; ++i) {
-            double cx = 0.0, cw = 0.0;
-            if (!picker_chip_span(app, i, dpi, win_w, &cx, &cw)) break;
-            if (x < cx + cw * 0.5) { to = i; break; }
-        }
-    }
-    return to;
 }
 
 /* A right press on a favourite (owner, 2026-09-30): the rename box with its name, all of it chosen. */
@@ -312,47 +297,55 @@ rubraview_pal_rect_t picker_nav_rect(const app_state_t *app, double dpi, int whi
                                    PICKER_NAV_W * dpi, crumb_h - 12.0 * dpi };
 }
 
-/* The tool row over the list: what each chip is, in order. */
+/* The tool row over the list: what each compact button is, in order. */
 
 proven_u8str_view_t picker_tool_label(const app_state_t *app, int which, char *buf, size_t cap) {
     int key = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
     bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
     int n = 0;
     switch (which) {
-        case PICKER_TOOL_EXT:        n = rubraview_fmt(buf, cap, ".ext \xE2\x96\xBE"); break;   /* RV-204 */
-        case PICKER_TOOL_ALL:        n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("All"))); break;
-        case PICKER_TOOL_INDIVIDUAL: n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Individual"))); break;
-        case PICKER_TOOL_RANGE:      n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Range"))); break;
-        case PICKER_TOOL_SAME:       n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Same type"))); break;
-        case PICKER_TOOL_MEDIA:      n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Media"))); break;
-        case PICKER_TOOL_SHAPE:      n = rubraview_fmt(buf, cap, "{} \xE2\x96\xBE", PROVEN_ARG(T("Shape"))); break;   /* RV-192 */
-        case PICKER_TOOL_SORT:
-            n = rubraview_fmt(buf, cap, "{} \xE2\x96\xBE", PROVEN_ARG(key >= 0 && key < RUBRAVIEW_PICKER_SORT_COUNT
-                                                       ? rubraview_picker_sort_name((rubraview_picker_sort_key_t)key) : T("Sort by")));
+        case PICKER_TOOL_FAVS:
+            n = rubraview_fmt(buf, cap, "\xE2\x98\x85 {} \xE2\x96\xBE", PROVEN_ARG(T("Favourites")));
             break;
-        case PICKER_TOOL_ORDER:      n = rubraview_fmt(buf, cap, "{} \xE2\x96\xBE", PROVEN_ARG(desc ? T("Falling") : T("Rising"))); break;
-        case PICKER_TOOL_VIEW:       n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(picker_details(app) ? T("Tiles") : T("Details"))); break;
-        case PICKER_TOOL_SHOWN:      n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(picker_every_file(app) ? T("Every file") : T("Viewer's files"))); break;
+        case PICKER_TOOL_ALL:
+            n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("All")));
+            break;
+        case PICKER_TOOL_SELECT: {
+            const char *word = app->picker.mode == RUBRAVIEW_PICK_INDIVIDUAL ? T("Individual")
+                             : app->picker.mode == RUBRAVIEW_PICK_RANGE ? T("Range") : T("Select");
+            n = rubraview_fmt(buf, cap, "{} \xE2\x96\xBE", PROVEN_ARG(word));
+            break;
+        }
+        case PICKER_TOOL_SORT: {
+            const char *sname = key >= 0 && key < RUBRAVIEW_PICKER_SORT_COUNT
+                              ? rubraview_picker_sort_name((rubraview_picker_sort_key_t)key) : T("Sort");
+            n = rubraview_fmt(buf, cap, "{} {} \xE2\x96\xBE", PROVEN_ARG(sname), PROVEN_ARG(desc ? "\xE2\x96\xBC" : "\xE2\x96\xB2"));
+            break;
+        }
+        case PICKER_TOOL_VIEW:
+            n = rubraview_fmt(buf, cap, "{} \xE2\x96\xBE", PROVEN_ARG(T("View")));
+            break;
+        case PICKER_TOOL_FILTER:
+            n = app->picker_filter[0] ? rubraview_fmt(buf, cap, T("Filter: {}   \xC3\x97"), PROVEN_ARG(app->picker_filter))
+                                      : rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Filter")));
+            break;
         default: break;
     }
     return (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
 }
 
-/* Where the tool row's chip `which` is; the all box is a square with a word. */
-rubraview_pal_rect_t picker_tool_rect(const app_state_t *app, double dpi, int which) {
+/* Where Row 2's chip `which` sits in window coordinates (after overflow arrows + strip scroll). */
+rubraview_pal_rect_t picker_tool_rect(const app_state_t *app, int which, double dpi) {
+    int count = picker_tool_count(app);
+    if (which < 0 || which >= count) return (rubraview_pal_rect_t){ 0 };
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->window, &w, &h);
-    return tool_rect_at(app, dpi, which, picker_strip_scroll(app, 2, dpi, (double)w));   /* RV-313: as slid */
-}
-
-static rubraview_pal_rect_t tool_rect_at(const app_state_t *app, double dpi, int which, double slid) {
-    double y = picker_top(app) + PICKER_HEADER_HEIGHT * dpi, h = PICKER_TOOL_HEIGHT * dpi;
-    double x = 8.0 * dpi - slid;
+    rubraview_hstrip_t s = picker_tools_strip(app, dpi, (double)w);
+    double x = s.view_x - s.scroll, gap = 6.0 * dpi;
     for (int i = 0; i <= which; ++i) {
-        char buf[96];
-        double w = picker_chip_width(picker_tool_label(app, i, buf, sizeof(buf)), dpi) + (i == PICKER_TOOL_ALL ? 26.0 * dpi : 0.0);
-        if (i == which) return (rubraview_pal_rect_t){ x, y + 4.0 * dpi, w, h - 8.0 * dpi };
-        x += w + (i == PICKER_TOOL_EXT || i == PICKER_TOOL_ALL || i == PICKER_TOOL_SHAPE || i == PICKER_TOOL_ORDER || i == PICKER_TOOL_VIEW ? 14.0 : 4.0) * dpi;   /* gaps between the kinds */
+        double cw = tool_chip_width(app, i, dpi);
+        if (i == which) return (rubraview_pal_rect_t){ x, s.y, cw, s.height };
+        x += cw + gap;
     }
     return (rubraview_pal_rect_t){ 0 };
 }
@@ -412,7 +405,7 @@ static void picker_reinstall(app_state_t *app) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     rubraview_picker_mode_t mode = app->picker.mode;
     app->picker = rubraview_picker_create(&app->picker_listing, PICKER_TILE * dpi,
-                                          (double)win_h - picker_top(app) - (PICKER_HEADER_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
+                                          (double)win_h - picker_top(app) - (PICKER_HEADER_HEIGHT + PICKER_TOOL_HEIGHT + PICKER_ACTION_HEIGHT) * dpi,
                                           picker_columns(app));
     picker_layout(app);
     app->picker.selected = app->picker_selected;
@@ -514,20 +507,233 @@ void picker_filter_follow(app_state_t *app) {
     if (!proven_u8str_view_eq(typed, cstr(app->picker_filter))) picker_filter_set(app, typed);
 }
 
-/* The filter's chip at the path bar's right end: the words, and where its X is. */
-rubraview_pal_rect_t picker_filter_chip(const app_state_t *app, double win_w, double dpi, proven_u8str_view_t *out_label, char *buf, size_t cap) {
-    int n = app->picker_filter[0] ? rubraview_fmt(buf, cap, T("Filter: {}   \xC3\x97"), PROVEN_ARG(app->picker_filter))
-                                  : rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Filter names (Ctrl+F)")));
-    *out_label = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
-    double w = picker_chip_width(*out_label, dpi);
-    /* RV-229: a narrow window leaves the path some room: the chip's one word */
-    if (!app->picker_filter[0] && picker_right_edge(app, dpi, win_w) - w - 8.0 * dpi < (PICKER_CRUMB_START + 160.0) * dpi) {
-        n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(T("Filter")));
-        *out_label = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n > 0 ? (size_t)n : 0 };
-        w = picker_chip_width(*out_label, dpi);
+/* RV-317: active Filter: <text> × button has a touch clear hit area on its right. */
+bool picker_filter_clear_rect(const app_state_t *app, double dpi, rubraview_pal_rect_t tool_rect, rubraview_pal_rect_t *out) {
+    if (!app->picker_filter[0] || app->picker_in_book || tool_rect.width <= 0.0) return false;
+    double cw = fmin(34.0 * dpi, tool_rect.width);
+    if (out) *out = (rubraview_pal_rect_t){ tool_rect.x + tool_rect.width - cw, tool_rect.y, cw, tool_rect.height };
+    return true;
+}
+
+/* RV-317: Two-column full-window Favourites + Places popup below the 2-row picker header. */
+static double favpop_top(const app_state_t *app, double dpi) {
+    return picker_top(app) + (PICKER_HEADER_HEIGHT + PICKER_TOOL_HEIGHT) * dpi;
+}
+
+static size_t favpop_max_first(size_t count, size_t vis) {
+    return count > vis && vis > 0 ? count - vis : 0;
+}
+
+static void favpop_clamp(app_state_t *app, double win_w, double win_h, double dpi) {
+    rubraview_favpop_layout_t lo = rubraview_favpop_place(favpop_top(app, dpi), win_w, win_h, dpi);
+    size_t max_fav = favpop_max_first(favpop_fav_count(app), lo.left_vis_rows);
+    size_t max_place = favpop_max_first(favpop_place_count(app), lo.right_vis_rows);
+    if (app->favpop_fav_first > max_fav) app->favpop_fav_first = max_fav;
+    if (app->favpop_place_first > max_place) app->favpop_place_first = max_place;
+}
+
+void favpop_close(app_state_t *app) {
+    app->favpop_open = false;
+    app->favpop_drag_pane = 0;
+    app->favpop_drag_moved = false;
+}
+
+void favpop_toggle(app_state_t *app) {
+    app->favpop_open = !app->favpop_open;
+    app->favpop_drag_pane = 0;
+    app->favpop_drag_moved = false;
+    if (app->favpop_open) {
+        chooser_close(app);
+        ctx_close(app);
     }
-    double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
-    return (rubraview_pal_rect_t){ picker_right_edge(app, dpi, win_w) - w - 8.0 * dpi, picker_top(app) + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
+}
+
+bool favpop_sb(const app_state_t *app, int pane, rubraview_scrollbar_t *sb, double win_w, double win_h, double dpi) {
+    if (!app->favpop_open || !app->picker_open) return false;
+    rubraview_favpop_layout_t lo = rubraview_favpop_place(favpop_top(app, dpi), win_w, win_h, dpi);
+    if (pane == 1) {
+        size_t count = favpop_fav_count(app);
+        size_t maxf = favpop_max_first(count, lo.left_vis_rows);
+        *sb = (rubraview_scrollbar_t){
+            .area = { lo.left_sb.x, lo.left_sb.y, lo.left_sb.width, lo.left_sb.height },
+            .button = lo.sb_w, .total = (double)count, .shown = (double)lo.left_vis_rows,
+            .first = (double)(app->favpop_fav_first > maxf ? maxf : app->favpop_fav_first),
+            .step = 1.0, .min_thumb = 16.0 * dpi,
+        };
+        return true;
+    }
+    if (pane == 2) {
+        size_t count = favpop_place_count(app);
+        size_t maxf = favpop_max_first(count, lo.right_vis_rows);
+        *sb = (rubraview_scrollbar_t){
+            .area = { lo.right_sb.x, lo.right_sb.y, lo.right_sb.width, lo.right_sb.height },
+            .button = lo.sb_w, .total = (double)count, .shown = (double)lo.right_vis_rows,
+            .first = (double)(app->favpop_place_first > maxf ? maxf : app->favpop_place_first),
+            .step = 1.0, .min_thumb = 16.0 * dpi,
+        };
+        return true;
+    }
+    return false;
+}
+
+void favpop_sb_to(app_state_t *app, int pane, size_t first, double win_w, double win_h, double dpi) {
+    rubraview_favpop_layout_t lo = rubraview_favpop_place(favpop_top(app, dpi), win_w, win_h, dpi);
+    if (pane == 1) {
+        size_t maxf = favpop_max_first(favpop_fav_count(app), lo.left_vis_rows);
+        app->favpop_fav_first = first > maxf ? maxf : first;
+    } else if (pane == 2) {
+        size_t maxf = favpop_max_first(favpop_place_count(app), lo.right_vis_rows);
+        app->favpop_place_first = first > maxf ? maxf : first;
+    }
+}
+
+static void favpop_activate_fav(app_state_t *app, size_t idx) {
+    if (idx >= app->favorites.count) return;
+    rubraview_fs_entry_t st;
+    proven_u8str_view_t path = app_keep(app, app->favorites.paths[idx]);
+    favpop_close(app);
+    if (rubraview_pal_fs_stat(app->arena, path, &st) && !st.is_directory) {
+        app->picker_open = false;
+        open_path_or_tree(app, path);
+    } else {
+        picker_navigate(app, path);
+        app->picker.focus = 0;
+    }
+}
+
+static void favpop_activate_place(app_state_t *app, size_t idx) {
+    picker_bar_item_t item;
+    if (!favpop_place_item(app, idx, &item)) return;
+    favpop_close(app);
+    picker_navigate(app, item.path);
+    app->picker.focus = 0;
+}
+
+bool favpop_press(app_state_t *app, double x, double y, bool right) {
+    if (!app->favpop_open) return false;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    favpop_clamp(app, (double)w, (double)h, dpi);
+    rubraview_favpop_layout_t lo = rubraview_favpop_place(favpop_top(app, dpi), (double)w, (double)h, dpi);
+    if (!rubraview_rect_contains(lo.popup, x, y)) return false;
+
+    if (!right && (scrollbar_press(app, RVSB_FAVPOP_LEFT, x, y) || scrollbar_press(app, RVSB_FAVPOP_RIGHT, x, y))) return true;
+    size_t idx = 0;
+    rubraview_favpop_hit_t hit = rubraview_favpop_hit(&lo, x, y, app->favpop_fav_first, favpop_fav_count(app),
+                                                      app->favpop_place_first, favpop_place_count(app), &idx);
+    if (right) {
+        if (hit == RUBRAVIEW_FAVPOP_HIT_FAV_ROW && idx < app->favorites.count) {
+            favpop_close(app);
+            favorite_rename_begin(app, idx);
+        }
+        return true;
+    }
+    switch (hit) {
+        case RUBRAVIEW_FAVPOP_HIT_MANAGE:
+            favpop_close(app);
+            favwin_toggle(app);
+            return true;
+        case RUBRAVIEW_FAVPOP_HIT_CLOSE:
+            favpop_close(app);
+            return true;
+        case RUBRAVIEW_FAVPOP_HIT_STAR_TOGGLE:
+            picker_toggle_favorite(app);
+            favpop_clamp(app, (double)w, (double)h, dpi);
+            return true;
+        case RUBRAVIEW_FAVPOP_HIT_FAV_ROW:
+            app->favpop_drag_pane = 1;
+            app->favpop_drag_x0 = x;
+            app->favpop_drag_y0 = y;
+            app->favpop_drag_first0 = app->favpop_fav_first;
+            app->favpop_drag_moved = false;
+            return true;
+        case RUBRAVIEW_FAVPOP_HIT_PLACE_ROW:
+            app->favpop_drag_pane = 2;
+            app->favpop_drag_x0 = x;
+            app->favpop_drag_y0 = y;
+            app->favpop_drag_first0 = app->favpop_place_first;
+            app->favpop_drag_moved = false;
+            return true;
+        default:
+            if (rubraview_rect_contains(lo.left_list, x, y)) {
+                app->favpop_drag_pane = 1;
+                app->favpop_drag_x0 = x;
+                app->favpop_drag_y0 = y;
+                app->favpop_drag_first0 = app->favpop_fav_first;
+                app->favpop_drag_moved = false;
+            } else if (rubraview_rect_contains(lo.right_list, x, y)) {
+                app->favpop_drag_pane = 2;
+                app->favpop_drag_x0 = x;
+                app->favpop_drag_y0 = y;
+                app->favpop_drag_first0 = app->favpop_place_first;
+                app->favpop_drag_moved = false;
+            }
+            return true;
+    }
+}
+
+bool favpop_motion(app_state_t *app, double x, double y) {
+    (void)x;
+    if (!app->favpop_open || app->favpop_drag_pane == 0) return false;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_favpop_layout_t lo = rubraview_favpop_place(favpop_top(app, dpi), (double)w, (double)h, dpi);
+    double step = lo.row_h + lo.row_gap;
+    double dy = y - app->favpop_drag_y0;
+    if (fabs(dy) >= 8.0 * dpi) app->favpop_drag_moved = true;
+    if (app->favpop_drag_moved && step > 0.0) {
+        int64_t delta = (int64_t)llround(-dy / step);
+        int64_t target = (int64_t)app->favpop_drag_first0 + delta;
+        favpop_sb_to(app, app->favpop_drag_pane, target < 0 ? 0 : (size_t)target, (double)w, (double)h, dpi);
+    }
+    return true;
+}
+
+bool favpop_release(app_state_t *app) {
+    if (app->favpop_drag_pane == 0) return false;
+    bool moved = app->favpop_drag_moved;
+    double x0 = app->favpop_drag_x0, y0 = app->favpop_drag_y0;
+    app->favpop_drag_pane = 0;
+    app->favpop_drag_moved = false;
+    if (!moved && app->favpop_open) {
+        int32_t w = 0, h = 0;
+        rubraview_pal_window_get_size(app->window, &w, &h);
+        double dpi = rubraview_pal_window_dpi_scale(app->window);
+        favpop_clamp(app, (double)w, (double)h, dpi);
+        rubraview_favpop_layout_t lo = rubraview_favpop_place(favpop_top(app, dpi), (double)w, (double)h, dpi);
+        size_t idx = 0;
+        rubraview_favpop_hit_t hit = rubraview_favpop_hit(&lo, x0, y0, app->favpop_fav_first, favpop_fav_count(app),
+                                                          app->favpop_place_first, favpop_place_count(app), &idx);
+        if (hit == RUBRAVIEW_FAVPOP_HIT_FAV_ROW) favpop_activate_fav(app, idx);
+        else if (hit == RUBRAVIEW_FAVPOP_HIT_PLACE_ROW) favpop_activate_place(app, idx);
+    }
+    return true;
+}
+
+bool favpop_wheel(app_state_t *app, double x, double y, double notches) {
+    if (!app->favpop_open) return false;
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    favpop_clamp(app, (double)w, (double)h, dpi);
+    rubraview_favpop_layout_t lo = rubraview_favpop_place(favpop_top(app, dpi), (double)w, (double)h, dpi);
+    if (!rubraview_rect_contains(lo.popup, x, y)) return false;
+    int pane = rubraview_rect_contains(lo.left_pane, x, y) ? 1 : 2;
+    size_t cur = pane == 1 ? app->favpop_fav_first : app->favpop_place_first;
+    int64_t next = (int64_t)cur + (notches > 0.0 ? -3 : 3);
+    favpop_sb_to(app, pane, next < 0 ? 0 : (size_t)next, (double)w, (double)h, dpi);
+    return true;
+}
+
+bool favpop_key(app_state_t *app, rubraview_key_combo_t combo) {
+    if (!app->favpop_open) return false;
+    if (proven_u8str_view_eq(combo.key_name, PROVEN_LIT("Escape")) && combo.modifiers == 0) {
+        favpop_close(app);
+        return true;
+    }
+    return true;
 }
 
 /* RV-213 (owner, 2026-10-31: "더블클릭하면 해당 파일 열기 또는 폴더 열기"): a click on tile `index` is its first (1) or,
@@ -570,24 +776,6 @@ bool picker_file_key(app_state_t *app, proven_u8str_view_t action) {
     if (picker_picked_count(app) == 0 && on_tile) picker_pick_alone(app, focus);
     picker_button(app, del ? PICKER_BTN_RECYCLE : mov ? PICKER_BTN_MOVE : PICKER_BTN_COPY);
     return true;
-}
-
-/* RV-229: the first of the path's crumbs drawn — the last ones kept between the arrows and the filter's chip (the star
-   after them, left out too when the last crumb would not fit beside it: Ctrl+D stars), a chip standing for those left
-   out before them. render.c and events.c lay them out alike. */
-size_t picker_crumbs_first(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double dpi, double win_w, bool *out_star) {
-    double widths[RUBRAVIEW_PICKER_MAX_CRUMBS];
-    for (size_t i = 0; i < crumbs->count; ++i) widths[i] = picker_chip_width(crumbs->items[i].label, dpi);
-    char buf[200];
-    proven_u8str_view_t label;
-    double room = picker_filter_chip(app, win_w, dpi, &label, buf, sizeof(buf)).x - 6.0 * dpi - PICKER_CRUMB_START * dpi;
-    double gap = 4.0 * dpi, more_w = picker_chip_width(PROVEN_LIT(PICKER_CRUMBS_MORE), dpi);
-    proven_u8str_view_t star = picker_star_label(app);
-    double star_w = star.size > 0 ? picker_chip_width(star, dpi) + gap : 0.0;
-    double least = crumbs->count == 0 ? 0.0 : widths[crumbs->count - 1] + gap + (crumbs->count > 1 ? more_w + gap : 0.0);
-    *out_star = star.size > 0 && room - star_w >= least;
-    if (*out_star) room -= star_w;
-    return rubraview_picker_crumbs_first(widths, crumbs->count, gap, room, more_w);
 }
 
 /* A tile's check box: its top left corner (a row's left end in the details view). */
