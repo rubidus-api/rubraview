@@ -310,6 +310,18 @@ typedef enum rubraview_media_backend {
     RUBRAVIEW_BACKEND_FFMPEG,
 } rubraview_media_backend_t;
 
+typedef enum rubraview_decoder_mode {
+    RUBRAVIEW_DECODER_WINDOWS_FFMPEG = 0, /* Windows first, FFmpeg fallback when Windows cannot open */
+    RUBRAVIEW_DECODER_WINDOWS_ONLY,       /* Windows Media Foundation only (never FFmpeg) */
+    RUBRAVIEW_DECODER_FFMPEG_WINDOWS,     /* FFmpeg first, Windows fallback when FFmpeg unavailable or fails */
+    RUBRAVIEW_DECODER_FFMPEG_ONLY,        /* FFmpeg only (never Windows) */
+} rubraview_decoder_mode_t;
+
+rubraview_decoder_mode_t rubraview_decoder_mode_from_name(proven_u8str_view_t name);
+const char *rubraview_decoder_mode_name(rubraview_decoder_mode_t mode);
+size_t rubraview_media_decoder_order(rubraview_decoder_mode_t mode, bool ffmpeg_available,
+                                     rubraview_media_backend_t out_order[2]);
+
 /**
  * D-9: the preferred backend first, then the other one — so a file the
  * preferred backend cannot open is retried automatically. FFmpeg is
@@ -326,6 +338,7 @@ typedef enum rubraview_media_failure {
     RUBRAVIEW_MEDIA_FAIL_HEVC,        /* ...and that stream is HEVC (D-9: name both remedies) */
     RUBRAVIEW_MEDIA_FAIL_STATION,     /* RV-157: an internet radio address that did not answer with sound */
     RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG,   /* RV-157: a station, and no FFmpeg to play it with */
+    RUBRAVIEW_MEDIA_FAIL_FFMPEG_MISSING,         /* decoder=ffmpeg_only, and FFmpeg 9.0 DLLs were not loaded */
 } rubraview_media_failure_t;
 
 /** Four-character codes as backends report them, first byte in the low bits. */

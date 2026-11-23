@@ -42,15 +42,14 @@ void report_startup_failure(void) {
     }
 }
 
-/* §3.22 [video] decoder (D-9): the backend a file is offered to first.
-   The other one still gets its turn when this one cannot open it. */
-rubraview_media_backend_t preferred_backend(proven_arena_t *arena) {
-    proven_u8str_view_t text = rubraview_pal_fs_read_file(arena, PROVEN_LIT("settings.ini"), 256u * 1024u);
-    if (text.size == 0) return RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+/* §3.22 [video] decoder (D-9, D-391): read from the resolved settings.ini path. */
+rubraview_decoder_mode_t decoder_mode_from_ini(proven_arena_t *arena, proven_u8str_view_t settings_path) {
+    proven_u8str_view_t text = settings_path.size > 0
+        ? rubraview_pal_fs_read_file(arena, settings_path, 256u * 1024u) : PROVEN_LIT("");
+    if (text.size == 0) return RUBRAVIEW_DECODER_WINDOWS_FFMPEG;
     rubraview_ini_doc_t doc = rubraview_ini_parse(arena, text);
     const proven_u8str_view_t *decoder = rubraview_ini_get(&doc, PROVEN_LIT("video"), PROVEN_LIT("decoder"));
-    return (decoder && proven_u8str_view_eq(*decoder, PROVEN_LIT("ffmpeg")))
-        ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+    return decoder ? rubraview_decoder_mode_from_name(*decoder) : RUBRAVIEW_DECODER_WINDOWS_FFMPEG;
 }
 
 /* `--probe-media`: open a file with each backend in turn and say what
@@ -71,44 +70,81 @@ int probe_media_file(proven_arena_t *arena, proven_u8str_view_t path) {
     proven_u8str_view_t settings = rubraview_config_path(arena, mode, beside,
                                              got > 0 && got < sizeof(appdata) ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)appdata, .size = got } : PROVEN_LIT("."),
                                              PROVEN_LIT("settings.ini"));
-    proven_u8str_view_t ini = rubraview_pal_fs_read_file(arena, PROVEN_LIT("settings.ini"), 256u * 1024u);
+    proven_u8str_view_t ini = rubraview_pal_fs_read_file(arena, settings, 256u * 1024u);
+    bool isolated = true;
+    rubraview_decoder_mode_t dec_mode = RUBRAVIEW_DECODER_WINDOWS_FFMPEG;
     if (ini.size > 0) {
         rubraview_ini_doc_t doc = rubraview_ini_parse(arena, ini);
         const proven_u8str_view_t *dir = rubraview_ini_get(&doc, PROVEN_LIT("video"), PROVEN_LIT("ffmpeg_dir"));
         if (dir) chosen = rubraview_pal_fs_expand_env(arena, rubraview_path_typed_folder(*dir));
         const proven_u8str_view_t *apart = rubraview_ini_get(&doc, PROVEN_LIT("video"), PROVEN_LIT("ffmpeg_isolated"));
-        if (apart) rubraview_pal_ffmpeg_set_isolated(!proven_u8str_view_eq(*apart, PROVEN_LIT("false")));   /* RV-176 */
+        if (apart) {
+            isolated = !proven_u8str_view_eq(*apart, PROVEN_LIT("false"));
+            rubraview_pal_ffmpeg_set_isolated(isolated);   /* RV-176 */
+        }
+        const proven_u8str_view_t *decoder = rubraview_ini_get(&doc, PROVEN_LIT("video"), PROVEN_LIT("decoder"));
+        if (decoder) dec_mode = rubraview_decoder_mode_from_name(*decoder);
     }
+    rubraview_fmt(line, sizeof(line), "Settings ({}): {}{}",
+                  PROVEN_ARG(mode == RUBRAVIEW_CONFIG_PORTABLE ? "portable" : "AppData"),
+                  PROVEN_ARG(rubraview_bytes_view(settings.ptr, (int)settings.size)),
+                  PROVEN_ARG(ini.size > 0 ? "" : " (not found - defaults)"));
+    console_line(line);
+    if (chosen.size > 0) {
+        rubraview_fmt(line, sizeof(line), "FFmpeg folder setting: {}", PROVEN_ARG(rubraview_bytes_view(chosen.ptr, (int)chosen.size)));
+        console_line(line);
+    }
+    rubraview_fmt(line, sizeof(line), "FFmpeg isolated: {}", PROVEN_ARG(isolated ? "on" : "off"));
+    console_line(line);
+
     rubraview_pal_ffmpeg_set_folders(rubraview_path_join(arena, rubraview_path_dirname(settings), PROVEN_LIT("ffmpeg")), chosen);
     bool ffmpeg_here = rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
+    int ff_place = ffmpeg_here ? rubraview_pal_ffmpeg_place() : 0;
+    rubraview_ffmpeg_refusal_t ff_ref = rubraview_pal_ffmpeg_refused();
+    const char *probe_why = (!ffmpeg_here && rubraview_pal_ffmpeg_remote()) ? rubraview_pal_media_host_probe_why() : "";
     console_line(ffmpeg_here
-        ? "FFmpeg: its DLLs are here, at a version these headers know"
-        : rubraview_pal_ffmpeg_refused() == RUBRAVIEW_FFMPEG_OTHER_VERSION
-            ? "FFmpeg: DLLs are beside the program but not 9.0 (avcodec-63): not loaded (Media Foundation alone)"
-        : rubraview_pal_ffmpeg_refused() == RUBRAVIEW_FFMPEG_NOT_WHOLE
-            ? "FFmpeg: avcodec-63.dll is beside the program but the set could not be loaded — avformat-63, avutil-61, swscale-10 and swresample-7 are needed with it (Media Foundation alone)"
-            : "FFmpeg: no usable DLLs beside the program (Media Foundation alone)");
+        ? (ff_place == 3 ? "FFmpeg: loaded from FFmpeg folder, at a version these headers know"
+           : ff_place == 2 ? "FFmpeg: loaded from imported settings folder, at a version these headers know"
+           : "FFmpeg: DLLs beside program are loaded, at a version these headers know")
+        : ff_ref == RUBRAVIEW_FFMPEG_OTHER_VERSION
+            ? "FFmpeg: DLLs found but not 9.0 (avcodec-63): not loaded (Media Foundation alone)"
+        : ff_ref == RUBRAVIEW_FFMPEG_NOT_WHOLE
+            ? "FFmpeg: avcodec-63.dll found but the set could not be loaded — avformat-63, avutil-61, swscale-10 and swresample-7 are needed with it (Media Foundation alone)"
+            : "FFmpeg: no usable DLLs found");
+    if (probe_why && probe_why[0]) {
+        rubraview_fmt(line, sizeof(line), "FFmpeg probe detail: {}", PROVEN_ARG(probe_why));
+        console_line(line);
+    }
     if (ffmpeg_here) {
         console_line(rubraview_pal_ffmpeg_jxl_state() == 2
             ? "FFmpeg: it has a JPEG XL decoder (libjxl) — .jxl pictures are read through it"
             : "FFmpeg: it has no JPEG XL decoder — .jxl pictures need a codec in Windows");
     }
 
-    rubraview_media_backend_t preferred = preferred_backend(arena);
-    console_line(preferred == RUBRAVIEW_BACKEND_FFMPEG
-        ? "settings.ini [video] decoder = ffmpeg — FFmpeg is tried first"
-        : "settings.ini [video] decoder = windows (or unset) — Media Foundation is tried first");
+    rubraview_fmt(line, sizeof(line), "settings.ini [video] decoder = {}", PROVEN_ARG(rubraview_decoder_mode_name(dec_mode)));
+    console_line(line);
 
     rubraview_media_backend_t order[2];
-    size_t count = rubraview_media_backend_order(preferred, ffmpeg_here, order);
+    size_t count = rubraview_media_decoder_order(dec_mode, ffmpeg_here, order);
+    if (count == 0) {
+        proven_u8str_view_t why = rubraview_media_failure_text_with(RUBRAVIEW_MEDIA_FAIL_FFMPEG_MISSING, ff_ref);
+        rubraview_fmt(line, sizeof(line), "{}", PROVEN_ARG(rubraview_bytes_view(why.ptr, (int)why.size)));
+        console_line(line);
+    }
     for (size_t i = 0; i < count; ++i) {
         const char *name = order[i] == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation";
         rubraview_media_open_result_t opened = rubraview_pal_media_open(path, order[i], NULL);
         if (!opened.media) {
-            proven_u8str_view_t why = rubraview_media_failure_text_with(opened.failure, rubraview_pal_ffmpeg_refused());
+            proven_u8str_view_t why = rubraview_media_failure_text_with(opened.failure, ff_ref);
             rubraview_fmt(line, sizeof(line), "{}: cannot open — {}", PROVEN_ARG(name), PROVEN_ARG(rubraview_bytes_view(why.ptr, (int)why.size)));
             console_line(line);
-            if (order[i] == RUBRAVIEW_BACKEND_FFMPEG && rubraview_pal_ffmpeg_remote() && rubraview_pal_media_host_why()[0]) {
+            const char *detail = rubraview_pal_media_last_error(order[i]);
+            if (detail && detail[0]) {
+                rubraview_fmt(line, sizeof(line), "{}: detail — {}", PROVEN_ARG(name), PROVEN_ARG(detail));
+                console_line(line);
+            }
+            if (order[i] == RUBRAVIEW_BACKEND_FFMPEG && rubraview_pal_ffmpeg_remote() && rubraview_pal_media_host_why()[0] &&
+                (!detail || rubraview_cstr_cmp(detail, rubraview_pal_media_host_why()) != 0)) {
                 rubraview_fmt(line, sizeof(line), "FFmpeg's process (RV-176): {}", PROVEN_ARG(rubraview_pal_media_host_why()));   /* why, for a report */
                 console_line(line);
             }

@@ -858,8 +858,9 @@ void bgm_tick(app_state_t *app) {
     }
 }
 
+typedef struct film_open film_open_t;
 static void media_adopt(app_state_t *app, int32_t index, proven_u8str_view_t path, rubraview_media_open_result_t opened,
-                        rubraview_media_failure_t why);
+                        rubraview_media_failure_t why, const film_open_t *fo);
 
 /* ---- RV-157: a station connected to off the main thread ----
    A station that does not answer holds FFmpeg for up to its time limit; the window does not wait with it. The
@@ -1003,7 +1004,7 @@ static void station_job_start(app_state_t *app, int32_t index, proven_u8str_view
     if (!job || !job->thread) {
         rubraview_free(job);
         media_adopt(app, index, path, (rubraview_media_open_result_t){ .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_STATION },
-                    RUBRAVIEW_MEDIA_FAIL_STATION);
+                    RUBRAVIEW_MEDIA_FAIL_STATION, NULL);
         return;
     }
     app->station_job = job;
@@ -1030,7 +1031,7 @@ void station_job_poll(app_state_t *app) {
         if (opened.media) rubraview_pal_media_close(opened.media);
         return;
     }
-    media_adopt(app, page, app->source.pages[page].path, opened, RUBRAVIEW_MEDIA_FAIL_STATION);
+    media_adopt(app, page, app->source.pages[page].path, opened, RUBRAVIEW_MEDIA_FAIL_STATION, NULL);
     update_window_title(app);
 }
 
@@ -1048,9 +1049,17 @@ void station_title_poll(app_state_t *app) {
 typedef struct film_open {
     char path[MAX_PATH * 4];
     size_t path_size;
+    rubraview_decoder_mode_t decoder_mode;
     rubraview_media_backend_t order[2];
     size_t count;
-    bool no_ffmpeg, ffmpeg_here;
+    bool no_ffmpeg, ffmpeg_here, ffmpeg_remote;
+    int ffmpeg_place;
+    rubraview_ffmpeg_refusal_t ffmpeg_refused;
+    size_t tried;
+    rubraview_media_backend_t tried_backend[2];
+    bool tried_ok[2];
+    rubraview_media_failure_t tried_failure[2];
+    char tried_detail[2][256];
     rubraview_media_gpu_t gpu;
     /* what came of it */
     rubraview_media_open_result_t opened;
@@ -1058,16 +1067,31 @@ typedef struct film_open {
     int32_t hdr_handed;
 } film_open_t;
 
+static void media_fourcc_str(uint32_t fourcc, char out[16]) {
+    if (!fourcc) { rubraview_fmt(out, 16, "none"); return; }
+    char c[4] = { (char)(fourcc & 0xFFu), (char)((fourcc >> 8) & 0xFFu),
+                  (char)((fourcc >> 16) & 0xFFu), (char)((fourcc >> 24) & 0xFFu) };
+    bool ascii = true;
+    for (int i = 0; i < 4; ++i) if (c[i] < 0x20 || c[i] > 0x7E) ascii = false;
+    if (ascii) { proven_sys_mem_copy(out, c, 4); out[4] = '\0'; }
+    else rubraview_fmt(out, 16, "0x{:08X}", PROVEN_ARG((unsigned long)fourcc));
+}
+
 /* What the open needs from the viewer's state, taken on the UI thread. */
 static void film_open_make(app_state_t *app, int32_t index, proven_u8str_view_t path, film_open_t *fo) {
     *fo = (film_open_t){ .opened = { .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_FILE }, .why = RUBRAVIEW_MEDIA_FAIL_FILE };
     fo->path_size = path.size < sizeof fo->path - 1 ? path.size : 0;
     proven_sys_mem_copy(fo->path, path.ptr, fo->path_size);
-    /* D-9: the preferred backend first, the other one when it cannot. */
+    /* D-9, D-391: decoder mode and optional fallback. */
     fo->no_ffmpeg = app->media_no_ffmpeg_page == index + 1;   /* RV-176: it stopped on this one */
-    fo->ffmpeg_here = !fo->no_ffmpeg && rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
-    fo->count = rubraview_media_backend_order(fo->no_ffmpeg ? RUBRAVIEW_BACKEND_MEDIA_FOUNDATION : app->media_preferred,
-                                              fo->ffmpeg_here, fo->order);
+    fo->decoder_mode = fo->no_ffmpeg ? RUBRAVIEW_DECODER_WINDOWS_ONLY : app->media_decoder;
+    fo->ffmpeg_remote = rubraview_pal_ffmpeg_remote();
+    fo->ffmpeg_here = !fo->no_ffmpeg && fo->decoder_mode != RUBRAVIEW_DECODER_WINDOWS_ONLY &&
+                      rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG);
+    fo->ffmpeg_place = fo->ffmpeg_here ? rubraview_pal_ffmpeg_place() : 0;
+    fo->ffmpeg_refused = fo->ffmpeg_here ? RUBRAVIEW_FFMPEG_NOT_REFUSED : rubraview_pal_ffmpeg_refused();
+    fo->count = rubraview_media_decoder_order(fo->decoder_mode, fo->ffmpeg_here, fo->order);
+    if (fo->count == 0) fo->why = RUBRAVIEW_MEDIA_FAIL_FFMPEG_MISSING;
     /* RV-062: decoding on the graphics card, as [video] hardware_decode
        says — off (the default until it has been measured on a real card),
        on where the card offers decoders, or always (diagnostic). */
@@ -1103,6 +1127,16 @@ static void film_open_run(film_open_t *fo) {
         rubraview_pal_media_log("app: open {} by {}", PROVEN_ARG(path), PROVEN_ARG(fo->order[i] == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation"));
         fo->opened = rubraview_pal_media_open(path, fo->order[i], &fo->gpu);
         rubraview_pal_media_log("app: open returned, {}", PROVEN_ARG(fo->opened.media ? "opened" : "failed"));
+        if (fo->tried < 2) {
+            size_t k = fo->tried++;
+            fo->tried_backend[k] = fo->order[i];
+            fo->tried_ok[k] = fo->opened.media != NULL;
+            fo->tried_failure[k] = fo->opened.media ? RUBRAVIEW_MEDIA_OPENED : fo->opened.failure;
+            if (!fo->opened.media) {
+                const char *err = rubraview_pal_media_last_error(fo->order[i]);
+                if (err && err[0]) rubraview_fmt(fo->tried_detail[k], sizeof(fo->tried_detail[k]), "{}", PROVEN_ARG(err));
+            }
+        }
         if (fo->opened.media) break;
         fo->why = i == 0 ? fo->opened.failure : rubraview_media_failure_pick(fo->why, fo->opened.failure);
     }
@@ -1110,6 +1144,7 @@ static void film_open_run(film_open_t *fo) {
     fo->hdr_handed = 0;
     rubraview_media_open_result_t opened = fo->opened;
     if (opened.media && opened.info.backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION &&
+        fo->decoder_mode != RUBRAVIEW_DECODER_WINDOWS_ONLY &&
         rubraview_media_hdr_ask_ffmpeg(opened.info.hdr_transfer, opened.info.video_fourcc) &&
         fo->gpu.tone_mapping > 0 && fo->ffmpeg_here) {
         rubraview_media_open_result_t other = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_FFMPEG, &fo->gpu);
@@ -1210,7 +1245,7 @@ static bool film_ahead_take(app_state_t *app, int32_t index, proven_u8str_view_t
     rubraview_pal_media_set_paused(fo.opened.media, false);
     rubraview_pal_media_read_limit(fo.opened.media, UINT64_MAX);   /* its page has come: memory reads on to the end */
     app->media_hdr_handed = fo.hdr_handed;
-    media_adopt(app, index, path, fo.opened, fo.why);
+    media_adopt(app, index, path, fo.opened, fo.why, &fo);
     return true;
 }
 
@@ -1282,7 +1317,7 @@ void media_prepare(app_state_t *app) {
     if (is_station_path(path)) {
         if (!rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG)) {   /* (this also loads FFmpeg here, not on the job's thread) */
             media_adopt(app, index, path, (rubraview_media_open_result_t){ .media = NULL, .failure = RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG },
-                        RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG);
+                        RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG, NULL);
             return;
         }
         station_job_start(app, index, path);
@@ -1295,15 +1330,68 @@ void media_prepare(app_state_t *app) {
     film_open_make(app, index, path, &fo);
     film_open_run(&fo);
     app->media_hdr_handed = fo.hdr_handed;
-    media_adopt(app, index, path, fo.opened, fo.why);
+    media_adopt(app, index, path, fo.opened, fo.why, &fo);
+}
+
+static void media_log_open(app_state_t *app, proven_u8str_view_t path, const film_open_t *fo,
+                           const rubraview_media_open_result_t *opened, rubraview_media_failure_t why) {
+    char line[512];
+    const char *mode_name = rubraview_decoder_mode_name(fo ? fo->decoder_mode : app->media_decoder);
+    if (opened && opened->media) {
+        const char *bname = opened->info.backend == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation";
+        char fcc[16];
+        media_fourcc_str(opened->info.video_fourcc, fcc);
+        int n = rubraview_fmt(line, sizeof(line), "opened by {} [mode={}, {}x{}, fourcc={}{}{}] {}",
+                              PROVEN_ARG(bname), PROVEN_ARG(mode_name),
+                              PROVEN_ARG((int)opened->info.width), PROVEN_ARG((int)opened->info.height),
+                              PROVEN_ARG(fcc),
+                              PROVEN_ARG(opened->info.hardware_decode ? ", gpu" : ""),
+                              PROVEN_ARG(fo && fo->hdr_handed ? ", hdr->ffmpeg" : ""),
+                              PROVEN_ARG(rubraview_path_basename(path)));
+        if (n > 0) app_log(app, "media", rubraview_bytes_view(line, (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1));
+        if (fo && fo->tried > 1 && !fo->tried_ok[0]) {
+            const char *first = fo->tried_backend[0] == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation";
+            n = rubraview_fmt(line, sizeof(line), "  fallback after {} failed: {}",
+                              PROVEN_ARG(first), PROVEN_ARG(fo->tried_detail[0][0] ? fo->tried_detail[0] : "open failed"));
+            if (n > 0) app_log(app, "media", rubraview_bytes_view(line, (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1));
+        }
+        return;
+    }
+    const char *ff_state = !fo ? "unknown"
+        : fo->ffmpeg_here ? (fo->ffmpeg_place == 3 ? "chosen-folder" : fo->ffmpeg_place == 1 ? "beside-exe" : "imported")
+        : fo->ffmpeg_refused == RUBRAVIEW_FFMPEG_OTHER_VERSION ? "wrong-version"
+        : fo->ffmpeg_refused == RUBRAVIEW_FFMPEG_NOT_WHOLE ? "incomplete-set" : "not-found";
+    const char *pwhy = (!fo || fo->ffmpeg_here || !fo->ffmpeg_remote) ? "" : rubraview_pal_media_host_probe_why();
+    int n = rubraview_fmt(line, sizeof(line), "failed [mode={}, ffmpeg={}{}{} (isolated={})] {}",
+                          PROVEN_ARG(mode_name), PROVEN_ARG(ff_state),
+                          PROVEN_ARG(pwhy[0] ? ": " : ""),
+                          PROVEN_ARG(pwhy[0] ? pwhy : ""),
+                          PROVEN_ARG(fo && fo->ffmpeg_remote ? "on" : "off"),
+                          PROVEN_ARG(rubraview_path_basename(path)));
+    if (n > 0) app_log(app, "media", rubraview_bytes_view(line, (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1));
+    if (fo && fo->count == 0) {
+        app_log(app, "media", PROVEN_LIT("  skipped Media Foundation (decoder=ffmpeg_only)"));
+    }
+    for (size_t i = 0; fo && i < fo->tried; ++i) {
+        if (fo->tried_ok[i]) continue;
+        const char *bname = fo->tried_backend[i] == RUBRAVIEW_BACKEND_FFMPEG ? "FFmpeg" : "Media Foundation";
+        proven_u8str_view_t reason = fo->tried_detail[i][0]
+            ? rubraview_bytes_view(fo->tried_detail[i], proven_cstr_len(fo->tried_detail[i]))
+            : rubraview_media_failure_text(fo->tried_failure[i]);
+        n = rubraview_fmt(line, sizeof(line), "  {} failed: {}", PROVEN_ARG(bname), PROVEN_ARG(reason));
+        if (n > 0) app_log(app, "media", rubraview_bytes_view(line, (size_t)n < sizeof(line) ? (size_t)n : sizeof(line) - 1));
+    }
+    (void)why;
 }
 
 /* What was opened for page `index` becomes the page's player; nothing opened, and it is said why and passed. */
 static void media_adopt(app_state_t *app, int32_t index, proven_u8str_view_t path, rubraview_media_open_result_t opened,
-                        rubraview_media_failure_t why) {
+                        rubraview_media_failure_t why, const film_open_t *fo) {
+    media_log_open(app, path, fo, &opened, why);
     if (!opened.media) {
-        osd_say(app, why >= RUBRAVIEW_MEDIA_FAIL_STATION ? rubraview_media_failure_text(why)
-                                                          : rubraview_media_failure_text_with(why, rubraview_pal_ffmpeg_refused()));
+        osd_say(app, (why == RUBRAVIEW_MEDIA_FAIL_STATION || why == RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG)
+                     ? rubraview_media_failure_text(why)
+                     : rubraview_media_failure_text_with(why, rubraview_pal_ffmpeg_refused()));
         app->notice_seconds = MEDIA_NOTICE_SECONDS;   /* long enough to read the HEVC line */
         app->pages[index].failed = true;
         app->media_skip_pending = true;   /* D-9: say so, then move on */
@@ -1947,7 +2035,7 @@ static void music_transition_tick(app_state_t *app) {
     } else if (plan.open_next && !app->next_media && next >= 0) {
         proven_u8str_view_t path = app->source.pages[next].path;
         rubraview_media_backend_t order[2];
-        size_t count = rubraview_media_backend_order(app->media_preferred,
+        size_t count = rubraview_media_decoder_order(app->media_decoder,
                                                      rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
                                                      order);
         for (size_t i = 0; i < count; ++i) {

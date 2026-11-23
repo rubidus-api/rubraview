@@ -145,7 +145,12 @@ typedef struct ff_media {
     SRWLOCK icy_lock;
     char icy_title[256];
     ULONGLONG icy_looked_ms;                 /* the decode thread's */
+    char open_why[256];                      /* technical failure reason, for logs and --probe-media */
 } ff_media_t;
+
+static _Thread_local char g_ff_open_why[256];
+
+const char *rubraview_ffmpeg_local_last_error(void) { return g_ff_open_why; }
 
 /* ---- the DLLs ---- */
 
@@ -205,6 +210,7 @@ typedef struct ff_api {
     void (*av_channel_layout_default)(AVChannelLayout*, int);
     AVDictionaryEntry *(*av_dict_get)(const AVDictionary*, const char*, const AVDictionaryEntry*, int);
     const char *(*avcodec_get_name)(enum AVCodecID);
+    int (*av_strerror)(int, char*, size_t);
     /* For the information window only; any of these may be missing. */
     const char *(*avcodec_profile_name)(enum AVCodecID, int);
     const AVCodecDescriptor *(*avcodec_descriptor_get)(enum AVCodecID);
@@ -335,6 +341,7 @@ static bool bind_all(HMODULE fmt, HMODULE codec, HMODULE util, HMODULE sws, HMOD
     BIND(util, av_frame_unref); BIND(util, av_log_set_level); BIND(util, av_channel_layout_default);
     BIND(util, av_dict_get); BIND(codec, avcodec_get_name);
 #define BIND_OPTIONAL(module, name) g_ff.name = (void*)GetProcAddress(module, #name)
+    BIND_OPTIONAL(util, av_strerror);
     BIND_OPTIONAL(codec, avcodec_profile_name); BIND_OPTIONAL(codec, avcodec_descriptor_get);
     BIND_OPTIONAL(util, av_get_pix_fmt_name); BIND_OPTIONAL(util, av_get_sample_fmt_name);
     BIND_OPTIONAL(util, av_color_range_name); BIND_OPTIONAL(util, av_color_primaries_name);
@@ -384,12 +391,32 @@ static bool ff_load_from(const WCHAR *dir) {
     return false;
 }
 
+/* Resolve `dir` or its `\bin` subfolder when all five DLLs live there (e.g. an unpacked zip folder). */
+static bool folder_resolve(const WCHAR *dir, WCHAR out[MAX_PATH]) {
+    if (!dir || !dir[0]) return false;
+    size_t n = rubraview_wlen(dir);
+    if (n == 0 || n >= MAX_PATH) return false;
+    if (folder_has_all(dir)) {
+        proven_sys_mem_copy(out, dir, (n + 1) * sizeof(WCHAR));
+        return true;
+    }
+    if (n + 4 >= MAX_PATH) return false;
+    proven_sys_mem_copy(out, dir, n * sizeof(WCHAR));
+    out[n] = L'\\';
+    out[n + 1] = L'b';
+    out[n + 2] = L'i';
+    out[n + 3] = L'n';
+    out[n + 4] = L'\0';
+    return folder_has_all(out);
+}
+
 /* RFC-0009 (owner 2026-10-22: "위치 지정 방법으로 통일"): the folder the
    user named first, then beside the program, then the settings folder's
    copy an Import of an older version made (none is made any more). */
 static bool ff_load_once(void) {
     int place = 0;
-    if (g_ff_dirs[1][0] && folder_has_all(g_ff_dirs[1]) && ff_load_from(g_ff_dirs[1])) place = 3;
+    WCHAR resolved[MAX_PATH];
+    if (folder_resolve(g_ff_dirs[1], resolved) && ff_load_from(resolved)) place = 3;
     if (!place && ff_load_from(NULL)) place = 1;
     if (!place && g_ff_dirs[0][0] && folder_has_all(g_ff_dirs[0]) && ff_load_from(g_ff_dirs[0])) place = 2;
     if (!place) return false;
@@ -469,7 +496,7 @@ rubraview_ffmpeg_refusal_t rubraview_ffmpeg_local_refused(void) {
     if (ff_load()) return RUBRAVIEW_FFMPEG_NOT_REFUSED;
     WCHAR path[MAX_PATH + 32];
     rubraview_ffmpeg_refusal_t state = RUBRAVIEW_FFMPEG_NOT_REFUSED;
-    /* In the order they are loaded from: the chosen folder, beside the program, an older Import's copy. */
+    /* In the order they are loaded from: the chosen folder (and its \bin), beside the program, an older Import's copy. */
     static const int ORDER[3] = { 1, -1, 0 };
     for (int k = 0; k < 3 && state == RUBRAVIEW_FFMPEG_NOT_REFUSED; k++) {
         size_t d = 0;
@@ -484,7 +511,14 @@ rubraview_ffmpeg_refusal_t rubraview_ffmpeg_local_refused(void) {
             else d = 0;
             ReleaseSRWLockShared(&g_ff_lock);
         }
-        if (d) state = refusal_in(path, d);
+        if (d) {
+            state = refusal_in(path, d);
+            if (state == RUBRAVIEW_FFMPEG_NOT_REFUSED && ORDER[k] == 1 && d + 4 < MAX_PATH) {
+                static const WCHAR BIN_DIR[] = L"bin\\";
+                proven_sys_mem_copy(path + d, BIN_DIR, 4 * sizeof(WCHAR));
+                state = refusal_in(path, d + 4);
+            }
+        }
     }
     return state;
 }
@@ -1108,18 +1142,38 @@ int64_t rubraview_pal_ffmpeg_fetch(proven_u8str_view_t address, uint8_t *out, si
     return (int64_t)got;
 }
 
+static void ff_err_text(int err, char buf[96]) {
+    buf[0] = '\0';
+    if (g_ff.av_strerror && g_ff.av_strerror(err, buf, 96) == 0 && buf[0]) return;
+    rubraview_fmt(buf, 96, "err {}", PROVEN_ARG(err));
+}
+
 static bool open_input(ff_media_t *m, ff_decode_t *d) {
     if (m->station) {
-        if (!open_station(m, d)) return false;
+        if (!open_station(m, d)) {
+            rubraview_fmt(m->open_why, sizeof(m->open_why), "station open failed");
+            return false;
+        }
     } else {
         rubraview_pal_media_log("ffmpeg: format opening");   /* RV-261 step 1 */
-        if (!open_cached(m, d) && (g_ff.avformat_open_input(&d->format, m->path, NULL, NULL) < 0 || !d->format)) {
-            m->failure = GetFileAttributesA(m->path) != INVALID_FILE_ATTRIBUTES
-                ? RUBRAVIEW_MEDIA_FAIL_CONTAINER : RUBRAVIEW_MEDIA_FAIL_FILE;
+        bool from_cache = open_cached(m, d);
+        int err = 0;
+        if (!from_cache && ((err = g_ff.avformat_open_input(&d->format, m->path, NULL, NULL)) < 0 || !d->format)) {
+            WCHAR wide[MAX_PATH * 4];
+            bool exists = MultiByteToWideChar(CP_UTF8, 0, m->path, -1, wide, MAX_PATH * 4) > 0 &&
+                          GetFileAttributesW(wide) != INVALID_FILE_ATTRIBUTES;
+            char eb[96];
+            ff_err_text(err, eb);
+            rubraview_fmt(m->open_why, sizeof(m->open_why), "avformat_open_input failed ({}, exists={})",
+                          PROVEN_ARG(eb), PROVEN_ARG(exists ? "yes" : "no"));
+            m->failure = exists ? RUBRAVIEW_MEDIA_FAIL_CONTAINER : RUBRAVIEW_MEDIA_FAIL_FILE;
             return false;
         }
         rubraview_pal_media_log("ffmpeg: format open, streams probing");
-        if (g_ff.avformat_find_stream_info(d->format, NULL) < 0) {
+        if ((err = g_ff.avformat_find_stream_info(d->format, NULL)) < 0) {
+            char eb[96];
+            ff_err_text(err, eb);
+            rubraview_fmt(m->open_why, sizeof(m->open_why), "avformat_find_stream_info failed ({})", PROVEN_ARG(eb));
             m->failure = RUBRAVIEW_MEDIA_FAIL_CONTAINER;
             return false;
         }
@@ -1136,6 +1190,7 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         if (par->codec_type == AVMEDIA_TYPE_AUDIO && g_ff.avcodec_find_decoder(par->codec_id)) m->audio_stream = (int)i;
     }
     if (m->video_stream < 0 && m->audio_stream < 0) {
+        rubraview_fmt(m->open_why, sizeof(m->open_why), "no decodable video or audio stream");
         m->failure = RUBRAVIEW_MEDIA_FAIL_CODEC;
         return false;
     }
@@ -1145,10 +1200,15 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
     if (m->video_stream >= 0) {
         AVCodecParameters *par = d->format->streams[m->video_stream]->codecpar;
         const AVCodec *decoder = g_ff.avcodec_find_decoder(par->codec_id);
+        const char *cname = g_ff.avcodec_get_name ? g_ff.avcodec_get_name(par->codec_id) : "unknown";
         uint32_t fourcc = par->codec_tag ? (uint32_t)par->codec_tag
                         : (par->codec_id == AV_CODEC_ID_HEVC ? RUBRAVIEW_FOURCC('H', 'E', 'V', 'C') : 0);
         if (!decoder || par->width <= 0 || par->height <= 0 ||
             par->width > MAX_DIMENSION || par->height > MAX_DIMENSION) {
+            rubraview_fmt(m->open_why, sizeof(m->open_why), "{} for codec {} ({}x{})",
+                          PROVEN_ARG(!decoder ? "no FFmpeg decoder" : "invalid video size"),
+                          PROVEN_ARG(cname ? cname : "unknown"),
+                          PROVEN_ARG((int)par->width), PROVEN_ARG((int)par->height));
             m->failure = rubraview_media_classify(true, true, false, fourcc);
             return false;
         }
@@ -1183,8 +1243,13 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
                 d->video->thread_count = 0;
                 d->video->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
             }
-            if (!d->video || g_ff.avcodec_parameters_to_context(d->video, par) < 0 ||
-                g_ff.avcodec_open2(d->video, decoder, NULL) < 0) {
+            int v_err = (!d->video || g_ff.avcodec_parameters_to_context(d->video, par) < 0)
+                      ? AVERROR(ENOMEM) : g_ff.avcodec_open2(d->video, decoder, NULL);
+            if (v_err < 0) {
+                char eb[96];
+                ff_err_text(v_err, eb);
+                rubraview_fmt(m->open_why, sizeof(m->open_why), "avcodec_open2 failed for {} ({})",
+                              PROVEN_ARG(cname ? cname : "unknown"), PROVEN_ARG(eb));
                 m->failure = rubraview_media_classify(true, true, false, fourcc);
                 return false;
             }
@@ -1195,13 +1260,21 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
         if (m->hosted && m->host.pixels) {   /* RV-176: the four pictures in memory the viewer maps too */
             size_t each = 0;
             uint8_t *base = rubraview_size_product(&each, (size_t)m->width, (size_t)m->height, 4u) ? m->host.pixels(m->host.context, each) : NULL;
-            if (!base) { m->failure = RUBRAVIEW_MEDIA_FAIL_FILE; return false; }
+            if (!base) {
+                rubraview_fmt(m->open_why, sizeof(m->open_why), "shared frame memory allocation failed ({}x{})", PROVEN_ARG((int)m->width), PROVEN_ARG((int)m->height));
+                m->failure = RUBRAVIEW_MEDIA_FAIL_FILE;
+                return false;
+            }
             for (int i = 0; i < SLOT_COUNT; ++i) m->slots[i].pixels = base + (size_t)i * each;
             m->pixels_shared = true;
         }
         for (int i = 0; i < SLOT_COUNT && !m->pixels_shared; ++i) {
             m->slots[i].pixels = (uint8_t*)rubraview_malloc_product((size_t)m->width, (size_t)m->height, 4u);
-            if (!m->slots[i].pixels) { m->failure = RUBRAVIEW_MEDIA_FAIL_FILE; return false; }
+            if (!m->slots[i].pixels) {
+                rubraview_fmt(m->open_why, sizeof(m->open_why), "out of memory allocating frame buffers ({}x{})", PROVEN_ARG((int)m->width), PROVEN_ARG((int)m->height));
+                m->failure = RUBRAVIEW_MEDIA_FAIL_FILE;
+                return false;
+            }
         }
     }
 
@@ -1224,12 +1297,18 @@ static bool open_input(ff_media_t *m, ff_decode_t *d) {
 
     AVRational rate = m->video_stream >= 0 ? d->format->streams[m->video_stream]->avg_frame_rate
                                            : (AVRational){0, 1};
+    double fps = (m->video_stream >= 0 && rate.den > 0) ? av_q2d(rate) : 0.0;
+    if (!(isfinite(fps) && fps >= 0.0 && fps <= 1000.0)) {
+        AVRational r = m->video_stream >= 0 ? d->format->streams[m->video_stream]->r_frame_rate : (AVRational){0, 1};
+        double rfps = r.den > 0 ? av_q2d(r) : 0.0;
+        fps = (isfinite(rfps) && rfps >= 0.0 && rfps <= 1000.0) ? rfps : 0.0;
+    }
     m->ok = true;
     m->failure = RUBRAVIEW_MEDIA_OPENED;
     m->info = (rubraview_media_info_t){
         .backend = RUBRAVIEW_BACKEND_FFMPEG,
         .duration_seconds = d->format->duration > 0 ? (double)d->format->duration / AV_TIME_BASE : 0.0,
-        .frame_rate = rate.den > 0 ? av_q2d(rate) : 0.0,
+        .frame_rate = fps,
         .width = m->width,
         .height = m->height,
         .has_video = m->video_stream >= 0,
@@ -2356,7 +2435,15 @@ static void ff_close(void *handle) {
 static void *ff_open_with(proven_u8str_view_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
                           const rubraview_media_gpu_t *gpu, const rubraview_ffmpeg_hosting_t *hosting) {
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
-    if (!ff_load() || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
+    g_ff_open_why[0] = '\0';
+    if (!ff_load()) {
+        rubraview_fmt(g_ff_open_why, sizeof(g_ff_open_why), "FFmpeg DLLs not loaded");
+        return NULL;
+    }
+    if (path.size == 0 || path.size >= MAX_PATH * 4) {
+        rubraview_fmt(g_ff_open_why, sizeof(g_ff_open_why), "path empty or too long");
+        return NULL;
+    }
 
     ff_media_t *m = (ff_media_t*)rubraview_alloc_zero(1, sizeof(*m));
     if (m) {
@@ -2396,11 +2483,13 @@ static void *ff_open_with(proven_u8str_view_t path, rubraview_media_failure_t *o
     m->opened = CreateEventW(NULL, TRUE, FALSE, NULL);
     m->thread = m->opened ? CreateThread(NULL, 0, decode_thread, m, 0, NULL) : NULL;
     if (!m->thread || WaitForSingleObject(m->opened, OPEN_TIMEOUT_MS) != WAIT_OBJECT_0) {
+        rubraview_fmt(g_ff_open_why, sizeof(g_ff_open_why), "{}", PROVEN_ARG(m->thread ? "FFmpeg open timed out (15 s)" : "FFmpeg decode thread could not be started"));
         ff_close(m);
         return NULL;
     }
     *out_failure = m->failure;
     if (!m->ok) {
+        rubraview_fmt(g_ff_open_why, sizeof(g_ff_open_why), "{}", PROVEN_ARG(m->open_why[0] ? m->open_why : "FFmpeg failed"));
         ff_close(m);
         return NULL;
     }

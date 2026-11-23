@@ -90,6 +90,13 @@ rubraview_media_open_result_t rubraview_pal_media_open(proven_u8str_view_t path,
     return result;
 }
 
+const char *rubraview_pal_media_last_error(rubraview_media_backend_t backend) {
+    if (backend == RUBRAVIEW_BACKEND_FFMPEG) {
+        return rubraview_pal_ffmpeg_remote() ? rubraview_pal_media_host_why() : rubraview_ffmpeg_local_last_error();
+    }
+    return rubraview_mf_last_error();
+}
+
 void rubraview_pal_media_close(rubraview_media_t *media) {
     if (!media) return;
     media->api->close(media->impl);

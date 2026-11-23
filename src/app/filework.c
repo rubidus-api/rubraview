@@ -349,7 +349,11 @@ void rename_text(app_state_t *app, const rubraview_window_event_t *event) {
    on screen, all of it selected so typing replaces it. */
 void picker_path_begin(app_state_t *app) {
     if (!app->picker_open || app->rename_active) return;
-    proven_u8str_view_t here = rubraview_picker_is_places(app->picker_dir) ? PROVEN_LIT("") : app->picker_dir;
+    proven_u8str_view_t here = (rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir))
+                             ? PROVEN_LIT("")
+                             : rubraview_picker_is_desktop(app->picker_dir)
+                             ? rubraview_pal_fs_desktop_dir(app->arena)
+                             : app->picker_dir;
     rename_field_begin(app);
     rubraview_textedit_set(&app->rename_ec.te, here.size < sizeof(app->rename_buffer) ? here : PROVEN_LIT(""));
     rubraview_textedit_select_all(&app->rename_ec.te);
@@ -364,7 +368,10 @@ void picker_path_begin(app_state_t *app) {
 static void picker_path_commit(app_state_t *app) {
     rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     app->rename_composing_length = 0;
-    proven_u8str_view_t path = rubraview_picker_typed_path(app->arena, rubraview_textedit_text(&app->rename_ec.te), app->picker_dir);
+    proven_u8str_view_t base = rubraview_picker_is_desktop(app->picker_dir)
+                             ? rubraview_pal_fs_desktop_dir(app->arena)
+                             : app->picker_dir;
+    proven_u8str_view_t path = rubraview_picker_typed_path(app->arena, rubraview_textedit_text(&app->rename_ec.te), base);
     if (path.size == 0) { rename_end(app); return; }
     rubraview_fs_entry_t found;
     if (!rubraview_pal_fs_stat(app->arena, path, &found)) {
@@ -416,7 +423,8 @@ void target_begin(app_state_t *app, bool moving, bool from_picker) {
    open-file screen's or the file on screen's, when it is a real folder; "" lets the dialog choose (its last). */
 const char *browse_start_dir(app_state_t *app, bool from_picker) {
     proven_u8str_view_t here = from_picker ? app->picker_dir : rubraview_path_dirname(current_file_path(app));
-    if (here.size == 0 || rubraview_picker_is_places(here)) return "";
+    if (from_picker && rubraview_picker_is_desktop(here)) here = rubraview_pal_fs_desktop_dir(app->arena);
+    if (here.size == 0 || rubraview_picker_is_places(here) || rubraview_picker_is_recent(here)) return "";
     rubraview_fs_entry_t st;
     if (!rubraview_pal_fs_stat(app->arena, here, &st) || !st.is_directory) return "";   /* inside an archive, gone */
     proven_result_mem_mut_t m = proven_arena_alloc(app->arena, here.size + 1);
@@ -448,6 +456,7 @@ void target_commit(app_state_t *app) {
     app->rename_composing_length = 0;
     proven_u8str_view_t typed = rubraview_target_folder_trim(rubraview_textedit_text(&app->rename_ec.te));
     proven_u8str_view_t base = app->target_from_picker ? app->picker_dir : rubraview_path_dirname(current_file_path(app));
+    if (app->target_from_picker && rubraview_picker_is_desktop(base)) base = rubraview_pal_fs_desktop_dir(app->arena);
     proven_u8str_view_t path = typed.size ? rubraview_picker_typed_path(app->arena, typed, base) : typed;
     rubraview_fs_entry_t found;
     bool exists = path.size > 0 && rubraview_pal_fs_stat(app->arena, path, &found);

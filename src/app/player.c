@@ -534,7 +534,7 @@ static void mini_go_to(app_state_t *app, int32_t index) {
     }
     proven_u8str_view_t path = app->source.pages[index].path;
     rubraview_media_backend_t order[2];
-    size_t count = rubraview_media_backend_order(app->media_preferred,
+    size_t count = rubraview_media_decoder_order(app->media_decoder,
                                                  rubraview_pal_media_backend_available(RUBRAVIEW_BACKEND_FFMPEG),
                                                  order);
     for (size_t i = 0; i < count; ++i) {

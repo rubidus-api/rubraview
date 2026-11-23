@@ -6,20 +6,27 @@
 
 /* ---- startup ---- */
 
+static void open_desktop_picker(app_state_t *app) {
+    app->picker_dir = PROVEN_LIT(RUBRAVIEW_PICKER_DESKTOP);
+    picker_open(app);
+}
+
 /* Settings › General › On startup (owner, 2026-09-30), when no file was
-   given: nothing (the picker's PC page, as before), the last thing read,
-   or the picker in the folder it was in. */
+   given: nothing (blank), the last thing read, the picker in the folder
+   it was in, the picker where it was left, or the merged Desktop. */
 void startup_without_file(app_state_t *app, bool no_file) {
     if (!no_file) return;
     int mode = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("startup")));
-    if (mode == 3) { picker_open(app); return; }   /* RV-207: the open-file screen, where it was left (or the PC page) */
-    if (mode == 0 || app->history.count == 0) return;
+    if (mode == 0) return;
+    if (mode == 4) { open_desktop_picker(app); return; }   /* R343: Desktop as default */
+    if (mode == 3) { picker_open(app); return; }           /* RV-207: the open-file screen, where it was left (or the PC page) */
+    if (app->history.count == 0) { open_desktop_picker(app); return; }
     const rubraview_history_entry_t *last = &app->history.entries[0];
     for (size_t i = 1; i < app->history.count; ++i) {
         if (app->history.entries[i].timestamp > last->timestamp) last = &app->history.entries[i];
     }
     rubraview_fs_entry_t entry;
-    if (!rubraview_pal_fs_stat(app->arena, last->path, &entry)) return;   /* gone since: start as blank does */
+    if (!rubraview_pal_fs_stat(app->arena, last->path, &entry)) { open_desktop_picker(app); return; }
     if (mode == 1) {
         open_path(app, last->path);
     } else {

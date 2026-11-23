@@ -173,6 +173,10 @@ static bool real_folder(app_state_t *app, proven_u8str_view_t dir) {
            rubraview_pal_fs_stat(app->arena, dir, &st) && st.is_directory;
 }
 
+static proven_u8str_view_t choose_real_dir(app_state_t *app, proven_u8str_view_t dir) {
+    return rubraview_picker_is_desktop(dir) ? rubraview_pal_fs_desktop_dir(app->arena) : dir;
+}
+
 static void name_set(proven_u8str_view_t text) {
     rubraview_textedit_set(&C.name_ec.te, text.size < sizeof C.name_buf ? text : PROVEN_LIT(""));
     rubraview_textedit_select_all(&C.name_ec.te);
@@ -200,11 +204,12 @@ static void commit(app_state_t *app) {
     size_t n = app->picker_listing.count, picked = 0;
     for (size_t i = 0; app->picker_selected && i < n; ++i) if (app->picker_selected[i] && !picker_is_up(app, i)) picked++;
     if (C.req.mode == RUBRAVIEW_CHOOSE_SAVE) {
-        if (!real_folder(app, dir)) { osd_say(app, TU8("open the folder to save in first")); return; }
+        proven_u8str_view_t save_dir = choose_real_dir(app, dir);
+        if (!real_folder(app, save_dir)) { osd_say(app, TU8("open the folder to save in first")); return; }
         char name[1024];
         size_t k = rubraview_choose_save_name(rubraview_textedit_text(&C.name_ec.te), kind_pattern(), name, sizeof name);
         if (k == 0) { osd_say(app, TU8("type a name a file can have")); C.name_focus = true; return; }
-        proven_u8str_view_t path = rubraview_path_join(app->arena, dir, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = k });
+        proven_u8str_view_t path = rubraview_path_join(app->arena, save_dir, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = k });
         rubraview_fs_entry_t st;
         if (rubraview_pal_fs_stat(app->arena, path, &st)) {
             if (st.is_directory) { osd_say(app, TU8("a folder has that name")); return; }
@@ -220,7 +225,7 @@ static void commit(app_state_t *app) {
         return;
     }
     if (C.req.mode == RUBRAVIEW_CHOOSE_FOLDER) {
-        proven_u8str_view_t chosen = dir;
+        proven_u8str_view_t chosen = choose_real_dir(app, dir);
         for (size_t i = 0; app->picker_selected && i < n; ++i)   /* a folder picked: that one */
             if (app->picker_selected[i] && !picker_is_up(app, i) && app->picker_listing.entries[i].is_directory) { chosen = app->picker_listing.entries[i].path; break; }
         if (!real_folder(app, chosen)) { osd_say(app, TU8("open a folder of the disk first")); return; }
@@ -252,7 +257,8 @@ static void windows_window(app_state_t *app) {
     size_t k = C.req.mode == RUBRAVIEW_CHOOSE_SAVE ? rubraview_choose_save_name(rubraview_textedit_text(&C.name_ec.te), kind_pattern(), name, sizeof name) : 0;
     name[k] = '\0';
     char here[2048] = "";
-    if (real_folder(app, app->picker_dir) && app->picker_dir.size < sizeof here) { proven_sys_mem_copy(here, app->picker_dir.ptr, app->picker_dir.size); here[app->picker_dir.size] = '\0'; }
+    proven_u8str_view_t here_dir = choose_real_dir(app, app->picker_dir);
+    if (real_folder(app, here_dir) && here_dir.size < sizeof here) { proven_sys_mem_copy(here, here_dir.ptr, here_dir.size); here[here_dir.size] = '\0'; }
     rubraview_file_dialog_opts_t opts = {
         .title = C.req.title.size ? (const char *)C.req.title.ptr : NULL, .default_dir = here[0] ? here : NULL,
         .filters = C.req.filter_count ? filters : NULL, .filter_count = C.req.filter_count,

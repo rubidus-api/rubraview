@@ -64,6 +64,8 @@ typedef struct rubraview_media_backend_api {
 
 const rubraview_media_backend_api_t *rubraview_media_backend_mf(void);
 const rubraview_media_backend_api_t *rubraview_media_backend_ffmpeg(void);
+const char *rubraview_mf_last_error(void);
+const char *rubraview_ffmpeg_local_last_error(void);
 
 #ifdef __cplusplus
 }

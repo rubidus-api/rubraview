@@ -177,6 +177,7 @@ void layout_load(app_state_t *app) {
     rubraview_fs_entry_t entry;
     if (last && last->size > 0 &&
         (rubraview_picker_is_places(*last) || rubraview_picker_is_recent(*last) ||
+         rubraview_picker_is_desktop(*last) ||
          (rubraview_pal_fs_stat(app->arena, *last, &entry) && entry.is_directory)))
         app->picker_last = app_keep(app, *last);
 }

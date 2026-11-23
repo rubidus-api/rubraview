@@ -18,11 +18,15 @@ bool rubraview_picker_is_recent(proven_u8str_view_t dir) {
     return proven_u8str_view_eq(dir, proven_u8str_view_from_cstr(RUBRAVIEW_PICKER_RECENT));
 }
 
+bool rubraview_picker_is_desktop(proven_u8str_view_t dir) {
+    return proven_u8str_view_eq(dir, proven_u8str_view_from_cstr(RUBRAVIEW_PICKER_DESKTOP));
+}
+
 proven_u8str_view_t rubraview_picker_parent(proven_u8str_view_t dir) {
     const proven_u8str_view_t none = PROVEN_LIT("");
     const proven_u8str_view_t places = PROVEN_LIT(RUBRAVIEW_PICKER_PLACES);
     if (!dir.ptr || dir.size == 0 || rubraview_picker_is_places(dir)) return none;
-    if (rubraview_picker_is_recent(dir)) return places;
+    if (rubraview_picker_is_recent(dir) || rubraview_picker_is_desktop(dir)) return places;
 
     size_t len = dir.size;
     while (len > 0 && rubraview_path_is_sep(dir.ptr[len - 1])) --len;
@@ -152,7 +156,8 @@ proven_u8str_view_t rubraview_picker_typed_path(proven_arena_t *arena, proven_u8
 
     proven_u8str_view_t cleaned = { .ptr = (const proven_byte_t *)p, .size = n };
     if (drive && n == 2) cleaned = rubraview_path_join(arena, cleaned, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)"/", .size = 1 });
-    else if (!drive && !rubraview_path_is_sep(p[0]) && current.size > 0 && !rubraview_picker_is_places(current)) {
+    else if (!drive && !rubraview_path_is_sep(p[0]) && current.size > 0 && !rubraview_picker_is_places(current) &&
+             !rubraview_picker_is_recent(current) && !rubraview_picker_is_desktop(current)) {
         cleaned = rubraview_path_join(arena, current, cleaned);
     }
     if ((const char *)cleaned.ptr == p) {
@@ -348,6 +353,12 @@ rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(proven_u8str_view_t path) {
     if (rubraview_picker_is_recent(path)) {
         crumbs.items[1].label = proven_u8str_view_from_bytes(T("Recent"), proven_cstr_len(T("Recent")));
         crumbs.items[1].prefix = PROVEN_LIT(RUBRAVIEW_PICKER_RECENT);
+        crumbs.count = 2;
+        return crumbs;
+    }
+    if (rubraview_picker_is_desktop(path)) {
+        crumbs.items[1].label = proven_u8str_view_from_bytes(T("Desktop"), proven_cstr_len(T("Desktop")));
+        crumbs.items[1].prefix = PROVEN_LIT(RUBRAVIEW_PICKER_DESKTOP);
         crumbs.count = 2;
         return crumbs;
     }

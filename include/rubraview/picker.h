@@ -57,6 +57,16 @@ bool rubraview_picker_is_places(proven_u8str_view_t dir);
 bool rubraview_picker_is_recent(proven_u8str_view_t dir);
 
 /**
+ * Special merged Desktop place (R343, D-390): lists filesystem items shown
+ * on the Desktop (user Desktop, Public Desktop, and other filesystem Desktop
+ * folders), each keeping its real path on disk. Navigating to an absolute
+ * folder path lists only that directory.
+ */
+#define RUBRAVIEW_PICKER_DESKTOP "::desktop"
+
+bool rubraview_picker_is_desktop(proven_u8str_view_t dir);
+
+/**
  * The folder `..` opens: the parent, or the PC page from a root ("C:",
  * "C:/", "/", "//server/share") or a bare relative name. Empty for the
  * PC page itself and for an empty path.

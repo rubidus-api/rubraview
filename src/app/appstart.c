@@ -54,9 +54,8 @@ bool app_start(app_state_t *app, rubraview_mem_t *mem) {
        without one and precache_decode queues pages for the main loop. */
     app->jobs = NULL;
     app->media_page = -1;
-    /* §3.22 [video] decoder (D-9): which backend opens a file first. The
-       other one still gets its turn when this one cannot. */
-    app->media_preferred = preferred_backend(arena);
+    /* §3.22 [video] decoder (D-9, D-391): resolved via settings_took_effect right after history_load. */
+    app->media_decoder = RUBRAVIEW_DECODER_WINDOWS_FFMPEG;
     history_load(app);
     app_log_start(app);   /* RV-256: this window's log, its cap from the settings just read */
     if (!choose_mode_on()) jobnotes_check(app);   /* RV-292: a job left unfinished since the last time (the viewer's to say) */

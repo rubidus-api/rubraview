@@ -15,6 +15,7 @@
 #include <time.h>
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/path.h"
+#include "rubraview/picker.h"
 
 /* Copies `n` bytes into the arena as len + 1 with a trailing NUL, per the
    null-terminated allocation invariant (§7.2.3). */
@@ -99,6 +100,19 @@ static void push_place(proven_arena_t *arena, entry_buf_t *buf, const char *name
     entry_buf_push(arena, buf, entry);
 }
 
+proven_u8str_view_t rubraview_pal_fs_desktop_dir(proven_arena_t *arena) {
+    if (!arena) return PROVEN_LIT("");
+    const char *home = getenv("HOME");
+    if (!home || !home[0]) return PROVEN_LIT("");
+    proven_u8str_view_t home_path = arena_dup(arena, rubraview_bytes_view(home, proven_cstr_len(home)));
+    proven_u8str_view_t desk_path = rubraview_path_join(arena, home_path, PROVEN_LIT("Desktop"));
+    struct stat st;
+    if (desk_path.size == 0 || stat((const char * restrict)desk_path.ptr, &st) != 0 || !S_ISDIR(st.st_mode)) {
+        return PROVEN_LIT("");
+    }
+    return desk_path;
+}
+
 rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
     rubraview_fs_listing_t listing = {0};
     if (!arena) return listing;
@@ -111,7 +125,20 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
         static const char *const FOLDERS[] = { "Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music" };
         for (size_t i = 0; i < sizeof(FOLDERS) / sizeof(FOLDERS[0]); ++i) {
             proven_u8str_view_t name = { .ptr = (const proven_byte_t *)FOLDERS[i], .size = proven_cstr_len(FOLDERS[i]) };
-            push_place(arena, &buf, FOLDERS[i], rubraview_path_join(arena, home_path, name));
+            proven_u8str_view_t target = rubraview_path_join(arena, home_path, name);
+            if (i == 0) {
+                struct stat st;
+                if (target.size > 0 && stat((const char * restrict)target.ptr, &st) == 0 && S_ISDIR(st.st_mode)) {
+                    rubraview_fs_entry_t entry = {
+                        .name = arena_dup(arena, rubraview_bytes_view(FOLDERS[i], proven_cstr_len(FOLDERS[i]))),
+                        .path = arena_dup(arena, PROVEN_LIT(RUBRAVIEW_PICKER_DESKTOP)),
+                    };
+                    fill_from_stat(&entry, &st);
+                    entry_buf_push(arena, &buf, entry);
+                }
+            } else {
+                push_place(arena, &buf, FOLDERS[i], target);
+            }
         }
     }
     push_place(arena, &buf, "/", arena_dup(arena, rubraview_bytes_view("/", 1)));
@@ -119,6 +146,13 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
     listing.entries = buf.data;
     listing.count = buf.count;
     return listing;
+}
+
+rubraview_fs_listing_t rubraview_pal_fs_list_desktop(proven_arena_t *arena) {
+    proven_u8str_view_t dir = rubraview_pal_fs_desktop_dir(arena);
+    if (dir.size == 0) return (rubraview_fs_listing_t){0};
+    rubraview_fs_listing_t raw = rubraview_pal_fs_list_dir(arena, dir);
+    return rubraview_fs_merge_listings(arena, &raw, NULL, true);
 }
 
 /* The host has no %VARIABLES% to put in. */

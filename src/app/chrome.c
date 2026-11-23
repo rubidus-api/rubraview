@@ -337,8 +337,12 @@ void draw_titlebar(app_state_t *app, double win_w) {
             rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ lx, mr.y + bh * 0.5 + (double)k * bh * 0.17 - th * 0.5, lw, th }, COLOR_TEXT, th * 0.5);
     }
     /* the name: the folder in the open-file screen, else the file on screen; a press opens the open-file screen */
-    proven_u8str_view_t name = app->picker_open ? (app->picker_dir.size > 0 ? app->picker_dir : PROVEN_LIT("Rubraview"))
-                 : page >= 0 && (size_t)page < page_count(app) ? page_display_name(app, (size_t)page) : PROVEN_LIT("");
+    proven_u8str_view_t name = app->picker_open
+        ? (rubraview_picker_is_places(app->picker_dir) ? TU8("PC")
+         : rubraview_picker_is_recent(app->picker_dir) ? TU8("Recent")
+         : rubraview_picker_is_desktop(app->picker_dir) ? TU8("Desktop")
+         : app->picker_dir.size > 0 ? app->picker_dir : PROVEN_LIT("Rubraview"))
+        : page >= 0 && (size_t)page < page_count(app) ? page_display_name(app, (size_t)page) : PROVEN_LIT("");
     double tk = 1.0;
     int before_font = place_font_begin(app, PF_TITLE, &tk);   /* 1.25.0: the title bar's name in its own face and size */
     double font = bh * 0.38 * tk, name_w = 0.0;

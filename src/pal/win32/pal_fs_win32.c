@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shlwapi.h>
 #include <wchar.h>
 #include <knownfolders.h>
 #include <stdio.h>
@@ -12,6 +13,7 @@
 #include "rubraview/lang.h"
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/path.h"
+#include "rubraview/picker.h"
 
 /* Windows FILETIME counts 100-nanosecond intervals since 1601-01-01;
    the Unix epoch is 11644473600 seconds later. */
@@ -135,6 +137,24 @@ static void push_place(proven_arena_t *arena, entry_buf_t *buf, proven_u8str_vie
     entry_buf_push(arena, buf, entry);
 }
 
+static proven_u8str_view_t known_folder_dir(proven_arena_t *arena, const KNOWNFOLDERID *id) {
+    proven_u8str_view_t out = PROVEN_LIT("");
+    if (!arena || !id) return out;
+    PWSTR wide = NULL;
+    if (SUCCEEDED(SHGetKnownFolderPath(id, KF_FLAG_DONT_VERIFY, NULL, &wide)) && wide) {
+        DWORD attrs = GetFileAttributesW(wide);
+        if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+            out = wide_to_u8str(arena, wide);
+        }
+    }
+    CoTaskMemFree(wide);
+    return out;
+}
+
+proven_u8str_view_t rubraview_pal_fs_desktop_dir(proven_arena_t *arena) {
+    return arena ? known_folder_dir(arena, &FOLDERID_Desktop) : PROVEN_LIT("");
+}
+
 rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
     rubraview_fs_listing_t listing = {0};
     if (!arena) return listing;
@@ -152,15 +172,18 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
         { &FOLDERID_Music,     N_("Music") },
     };
     for (size_t i = 0; i < sizeof(FOLDERS) / sizeof(FOLDERS[0]); ++i) {
-        PWSTR wide = NULL;
-        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERS[i].id, KF_FLAG_DONT_VERIFY, NULL, &wide)) && wide) {
-            DWORD attrs = GetFileAttributesW(wide);
-            if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        if (FOLDERS[i].id == &FOLDERID_Desktop) {
+            if (known_folder_dir(arena, &FOLDERID_Desktop).size > 0 ||
+                known_folder_dir(arena, &FOLDERID_PublicDesktop).size > 0) {
                 push_place(arena, &buf, arena_dup(arena, rubraview_bytes_view(FOLDERS[i].name, proven_cstr_len(FOLDERS[i].name))),
-                           wide_to_u8str(arena, wide));
+                           arena_dup(arena, PROVEN_LIT(RUBRAVIEW_PICKER_DESKTOP)));
             }
+            continue;
         }
-        CoTaskMemFree(wide);
+        proven_u8str_view_t dir = known_folder_dir(arena, FOLDERS[i].id);
+        if (dir.size > 0) {
+            push_place(arena, &buf, arena_dup(arena, rubraview_bytes_view(FOLDERS[i].name, proven_cstr_len(FOLDERS[i].name))), dir);
+        }
     }
 
     /* Then every drive. Only a fixed disk is asked for its label: asking
@@ -193,6 +216,80 @@ rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena) {
     listing.entries = buf.data;
     listing.count = buf.count;
     return listing;
+}
+
+rubraview_fs_listing_t rubraview_pal_fs_list_desktop(proven_arena_t *arena) {
+    rubraview_fs_listing_t listing = {0};
+    if (!arena) return listing;
+
+    proven_u8str_view_t user_dir = known_folder_dir(arena, &FOLDERID_Desktop);
+    proven_u8str_view_t pub_dir = known_folder_dir(arena, &FOLDERID_PublicDesktop);
+
+    IShellFolder *desktop = NULL;
+    if (SUCCEEDED(SHGetDesktopFolder(&desktop)) && desktop) {
+        IEnumIDList *en = NULL;
+        HRESULT hr = desktop->lpVtbl->EnumObjects(desktop, NULL, SHCONTF_FOLDERS | SHCONTF_NONFOLDERS, &en);
+        if (SUCCEEDED(hr)) {
+            entry_buf_t buf = {0};
+            PITEMID_CHILD pidl = NULL;
+            while (en && en->lpVtbl->Next(en, 1, &pidl, NULL) == S_OK && pidl) {
+                SFGAOF attrs = SFGAO_FILESYSTEM;
+                PCUITEMID_CHILD child = pidl;
+                if (SUCCEEDED(desktop->lpVtbl->GetAttributesOf(desktop, 1, &child, &attrs)) && (attrs & SFGAO_FILESYSTEM)) {
+                    STRRET sr = {0};
+                    WCHAR path_w[4096];
+                    if (SUCCEEDED(desktop->lpVtbl->GetDisplayNameOf(desktop, child, SHGDN_FORPARSING, &sr)) &&
+                        SUCCEEDED(StrRetToBufW(&sr, child, path_w, (UINT)RUBRAVIEW_COUNT_OF(path_w))) &&
+                        path_w[0] && !(path_w[0] == L':' && path_w[1] == L':')) {
+                        size_t plen = rubraview_wlen(path_w);
+                        while (plen > 3 && (path_w[plen - 1] == L'\\' || path_w[plen - 1] == L'/')) path_w[--plen] = L'\0';
+
+                        WIN32_FILE_ATTRIBUTE_DATA fad;
+                        if (GetFileAttributesExW(path_w, GetFileExInfoStandard, &fad)) {
+                            proven_u8str_view_t path_u8 = wide_to_u8str(arena, path_w);
+                            proven_u8str_view_t name = rubraview_path_basename(path_u8);
+                            if (name.size == 0) name = path_u8;
+                            /* Stat attributes determine directory vs file: Windows marks .zip with SFGAO_FOLDER. */
+                            bool is_dir = (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                            bool skip = (!is_dir && rubraview_fs_is_desktop_ini(name)) || path_u8.size == 0 ||
+                                        (is_dir && ((user_dir.size > 0 && rubraview_path_same(path_u8, user_dir)) ||
+                                                    (pub_dir.size > 0 && rubraview_path_same(path_u8, pub_dir))));
+                            for (size_t k = 0; !skip && k < buf.count; ++k) {
+                                if (rubraview_path_same(buf.data[k].path, path_u8)) skip = true;
+                            }
+                            if (!skip) {
+                                ULARGE_INTEGER sz;
+                                sz.LowPart = fad.nFileSizeLow;
+                                sz.HighPart = fad.nFileSizeHigh;
+                                rubraview_fs_entry_t entry = {
+                                    .name = name,
+                                    .path = path_u8,
+                                    .size_bytes = (uint64_t)sz.QuadPart,
+                                    .mtime = filetime_to_unix_seconds(fad.ftLastWriteTime),
+                                    .ctime = filetime_to_unix_seconds(fad.ftCreationTime),
+                                    .is_directory = is_dir,
+                                };
+                                entry_buf_push(arena, &buf, entry);
+                            }
+                        }
+                    }
+                }
+                CoTaskMemFree(pidl);
+                pidl = NULL;
+            }
+            if (en) en->lpVtbl->Release(en);
+            desktop->lpVtbl->Release(desktop);
+            listing.entries = buf.data;
+            listing.count = buf.count;
+            return listing;
+        }
+        desktop->lpVtbl->Release(desktop);
+    }
+
+    /* Fallback if Shell enumeration fails: merge User Desktop and Public Desktop directories. */
+    rubraview_fs_listing_t user_list = user_dir.size > 0 ? rubraview_pal_fs_list_dir(arena, user_dir) : (rubraview_fs_listing_t){0};
+    rubraview_fs_listing_t pub_list = pub_dir.size > 0 ? rubraview_pal_fs_list_dir(arena, pub_dir) : (rubraview_fs_listing_t){0};
+    return rubraview_fs_merge_listings(arena, &user_list, &pub_list, true);
 }
 
 proven_u8str_view_t rubraview_pal_fs_absolute(proven_arena_t *arena, proven_u8str_view_t path) {

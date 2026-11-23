@@ -265,7 +265,7 @@ bool rubraview_mhost_opened_take(const rubraview_mhost_block_t *b, rubraview_mho
     proven_sys_mem_copy(details, b->details, sizeof details);
     proven_sys_mem_copy(map, b->frame_map, sizeof map);
 
-    if (failure < RUBRAVIEW_MEDIA_OPENED || failure > RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG) { out->why = "its failure"; return false; }
+    if (failure < RUBRAVIEW_MEDIA_OPENED || failure > RUBRAVIEW_MEDIA_FAIL_FFMPEG_MISSING) { out->why = "its failure"; return false; }
     out->failure = (rubraview_media_failure_t)failure;
     if (failure != RUBRAVIEW_MEDIA_OPENED) { out->why = "not opened"; return false; }
     if (!rubraview_mhost_info_take(&info, &out->info)) { out->why = "what it said of the file"; return false; }

@@ -27,6 +27,8 @@ int rubraview_pal_media_host_main(const wchar_t *mapping, const wchar_t *request
 
 /** Why the last film handed to a child was not opened there, for --diag; empty when it was. */
 const char *rubraview_pal_media_host_why(void);
+/** Why the service child failed to probe or start FFmpeg; empty when available or normally absent. */
+const char *rubraview_pal_media_host_probe_why(void);
 
 /** The backend that plays through a child. */
 const rubraview_media_backend_api_t *rubraview_media_backend_remote(void);

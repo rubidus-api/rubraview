@@ -86,7 +86,8 @@ bool favpop_place_item(const app_state_t *app, size_t index, picker_bar_item_t *
 /* Can the current folder be starred / unstarred? */
 bool picker_can_favorite_current(const app_state_t *app) {
     return !app->picker_in_book && app->picker_dir.size > 0 &&
-           !rubraview_picker_is_places(app->picker_dir) && !rubraview_picker_is_recent(app->picker_dir);
+           !rubraview_picker_is_places(app->picker_dir) && !rubraview_picker_is_recent(app->picker_dir) &&
+           !rubraview_picker_is_desktop(app->picker_dir);
 }
 
 void osd_say(app_state_t *app, proven_u8str_view_t text);

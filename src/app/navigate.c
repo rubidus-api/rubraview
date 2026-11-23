@@ -274,7 +274,8 @@ void update_window_title(app_state_t *app) {
     size_t used = 0;
     if (app->picker_open) {   /* 1.24.0 (owner, 2026-10-19): "Rubraview - <the folder>" */
         proven_u8str_view_t name = rubraview_picker_is_places(app->picker_dir) ? TU8("PC")
-                     : rubraview_picker_is_recent(app->picker_dir) ? TU8("Recent") : rubraview_path_basename(app->picker_dir);
+                     : rubraview_picker_is_recent(app->picker_dir) ? TU8("Recent")
+                     : rubraview_picker_is_desktop(app->picker_dir) ? TU8("Desktop") : rubraview_path_basename(app->picker_dir);
         if (name.size == 0) name = app->picker_dir;
         rubraview_fmt(title, sizeof(title), "Rubraview - {}", PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 600 ? name.size : 600))));
         rubraview_pal_window_set_title(app->window, title);

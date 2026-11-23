@@ -390,11 +390,16 @@ static bool folder_at(app_state_t *app, double x, double y, proven_u8str_view_t 
     if (column >= columns || index >= app->picker_listing.count) return false;
     if (picker_is_up(app, index)) {   /* "..": the folder above */
         *dir = rubraview_picker_parent(app->picker_dir);
+    } else {
+        const rubraview_fs_entry_t *e = &app->picker_listing.entries[index];
+        if (!e->is_directory) return false;
+        *dir = e->path;
+    }
+    if (dir->size == 0 || rubraview_picker_is_places(*dir) || rubraview_picker_is_recent(*dir)) return false;
+    if (rubraview_picker_is_desktop(*dir)) {
+        *dir = rubraview_pal_fs_desktop_dir(app->arena);
         return dir->size > 0;
     }
-    const rubraview_fs_entry_t *e = &app->picker_listing.entries[index];
-    if (!e->is_directory) return false;
-    *dir = e->path;
     return true;
 }
 

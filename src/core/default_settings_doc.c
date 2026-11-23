@@ -19,7 +19,7 @@ static const char *const PARTS[] = {
 "\n",
 "page general \"General\"\n"
 "  section \"Window\"\n"
-"  choice general.startup          \"On startup\"              blank | last_file | last_folder | file_screen = last_folder wired\n"
+"  choice general.startup          \"On startup\"              blank | last_file | last_folder | file_screen | desktop = desktop wired\n"
 "  toggle general.always_on_top    \"Always on top\"           = false wired\n"
 "  toggle general.frameless        \"Frameless window\"        = true wired\n"
 "  section \"Opening a file from Explorer\"\n"
@@ -327,7 +327,8 @@ static const char *const PARTS[] = {
 "\n",
 "page video \"Video\"\n"
 "  section \"Decoding\"\n"
-"  choice video.decoder            \"Decoder\"                 windows | ffmpeg = windows wired\n"
+"  choice video.decoder            \"Decoder\"                 windows_ffmpeg | windows_only | ffmpeg | ffmpeg_only = windows_ffmpeg wired\n"
+"  note   \"windows_ffmpeg: Windows first, FFmpeg only when Windows cannot play it.  windows_only: Windows only.  ffmpeg: FFmpeg first, then Windows.  ffmpeg_only: FFmpeg only.\"\n"
 "  choice video.hardware_decode    \"GPU decoding\"            off | on | always = on wired\n"
 "  note   \"off: the processor decodes.  on: the graphics card does, where it\"\n"
 "  note   \"offers decoders - this is the one to use.  always: hand it to the\"\n"
@@ -581,7 +582,7 @@ static const char *const PARTS[] = {
 "help audio.night_mode \"Quiet parts louder and loud parts quieter (dynamic range compression), for listening at night without waking anyone.\"\n"
 "help audio.wasapi_latency_ms \"How far ahead sound is prepared. Lower answers faster; raise it if the sound crackles or stutters.\"\n"
 "help audio.bgm_pause_on_video \"On: background music pauses while a film with its own sound plays, and goes on after it.\"\n"
-"help video.decoder \"Which decoder tries a film first: Windows' own (Media Foundation) or FFmpeg, when its DLLs are there. The other is tried if the first cannot.\"\n"
+"help video.decoder \"Which decoder opens a video. windows_ffmpeg uses Windows' own (Media Foundation) and falls back to FFmpeg only when Windows cannot decode the file (e.g. HEVC without the Store extension, MKV). windows_only uses Windows alone. ffmpeg tries FFmpeg first and falls back to Windows. ffmpeg_only uses FFmpeg alone and reports directly when FFmpeg 9.0 DLLs are missing.\"\n"
 "help video.ffmpeg_isolated \"FFmpeg, the user's own program, reads files that may be damaged or made to do harm. With this on it runs as a second rubraview.exe that ends with the viewer: a film or a station each in one, the pictures and filters in another. If it breaks on a file, only that process ends; a film is opened again with Windows' decoder at the same place where Windows can play it. Off: FFmpeg is loaded into Rubraview itself, as before 1.39.31.\"\n"
 "help video.scaling \"The filter a film is drawn with when the window shows it larger or smaller than it is; pictures keep Viewer › Scaling filter. bilinear draws each frame in one light pass; bicubic smooths a film made smaller more finely, at several times the work.\"\n"
 "help video.hardware_decode \"Lets the graphics card decode films, which saves the processor — with either decoder, Windows' or FFmpeg's (FFmpeg decodes an HDR film on the card only while HDR tone mapping is on). Off if films show wrong colours or freeze on this computer.\"\n"

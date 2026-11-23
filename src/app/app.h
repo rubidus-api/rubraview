@@ -544,7 +544,7 @@ typedef struct app_state {
     bool                   media_sought;      /* the picture awaited is a seek's, not the film's first */
     int64_t                media_title_tenth; /* the tenth of a second the title last showed */
     rubraview_clock_master_t media_master;    /* §5.3: the sound when it is heard, else the wall clock */
-    rubraview_media_backend_t media_preferred; /* §3.22 [video] decoder — the one tried first (D-9) */
+    rubraview_decoder_mode_t media_decoder;   /* §3.22 [video] decoder (D-9, D-391) */
 
     /* §3.6: an anchor is a button and a handle at once; which one a press
        turns out to be is known only when it is released. */
@@ -2630,6 +2630,7 @@ void picker_make_playlist(app_state_t *app);
 rubraview_pal_rect_t picker_nav_rect(const app_state_t *app, double dpi, int which);
 void picker_navigate(app_state_t *app, proven_u8str_view_t dir);
 void picker_new_folder(app_state_t *app);
+proven_u8str_view_t picker_write_dir(app_state_t *app);
 void picker_clip_put(app_state_t *app, bool moving);
 void picker_clip_paste(app_state_t *app);
 void picker_open(app_state_t *app);
@@ -2674,7 +2675,7 @@ bool point_in_curve_widget(const app_state_t *app, double px, double py);
 rubraview_pointer_context_t pointer_context(const app_state_t *app);
 bool popups_key(app_state_t *app, rubraview_key_combo_t combo);
 bool popups_press(app_state_t *app, double x, double y, bool right);
-rubraview_media_backend_t preferred_backend(proven_arena_t *arena);
+rubraview_decoder_mode_t decoder_mode_from_ini(proven_arena_t *arena, proven_u8str_view_t settings_path);
 void prev_spread(app_state_t *app);
 void print_archive_page(app_state_t *app);
 void print_now(app_state_t *app);

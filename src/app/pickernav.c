@@ -355,14 +355,15 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
        viewer was started in). */
     bool places = rubraview_picker_is_places(dir);
     bool recent = rubraview_picker_is_recent(dir);
+    bool desktop = rubraview_picker_is_desktop(dir);
     /* Inside the book being read (owner, 2026-09-28): its own folders and
        pages, a level at a time, in the order they are read. */
     /* RV-207: inside the archive looked into, its whole tree; out of it, it is let go */
-    bool in_arc = !places && !recent && app->picker_arc_path &&
+    bool in_arc = !places && !recent && !desktop && app->picker_arc_path &&
                   rubraview_picker_inside_archive(dir, proven_u8str_view_from_cstr(app->picker_arc_path), NULL);
     if (!in_arc && app->picker_arc_path) picker_leave_archive(app);
     proven_u8str_view_t inner = PROVEN_LIT("");
-    bool in_book = !in_arc && !places && !recent && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER &&
+    bool in_book = !in_arc && !places && !recent && !desktop && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER &&
                    rubraview_picker_inside_archive(dir, app->source.archive_path, &inner);
     rubraview_archive_level_t level = {0};
     if (in_book) {
@@ -371,12 +372,25 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
     }
     /* "." has no parent by name, which kept the reader below the folder the
        viewer was run from (owner, 2026-09-28): every folder is made whole. */
-    if (!places && !in_book && !recent && !in_arc) dir = rubraview_pal_fs_absolute(pa, dir);
+    if (places)       dir = PROVEN_LIT(RUBRAVIEW_PICKER_PLACES);
+    else if (recent)  dir = PROVEN_LIT(RUBRAVIEW_PICKER_RECENT);
+    else if (desktop) dir = PROVEN_LIT(RUBRAVIEW_PICKER_DESKTOP);
+    else if (in_book || in_arc) {
+        proven_result_mem_mut_t dmem = proven_arena_alloc(pa, dir.size + 1);
+        if (proven_is_ok(dmem.err)) {
+            if (dir.size) proven_sys_mem_copy(dmem.value.ptr, dir.ptr, dir.size);
+            dmem.value.ptr[dir.size] = '\0';
+            dir = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)dmem.value.ptr, .size = dir.size };
+        }
+    } else {
+        dir = rubraview_pal_fs_absolute(pa, dir);
+    }
     rubraview_fs_listing_t listing = in_arc ? archive_listing(app, pa, dir)
                                    : in_book ? level.listing
                                    : places ? rubraview_pal_fs_list_places(pa)
                                    : recent ? recent_listing(app, pa)
-                                            : rubraview_pal_fs_list_dir(pa, dir);
+                                   : desktop ? rubraview_pal_fs_list_desktop(pa)
+                                             : rubraview_pal_fs_list_dir(pa, dir);
     /* The reader's favourites first on the PC page, every one of them (owner,
        2026-10-17: the places bar shows as many as fit; the list shows all). */
     if (places && app->favorites.count > 0) {
@@ -565,6 +579,15 @@ size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out) {
     return n;
 }
 
+proven_u8str_view_t picker_write_dir(app_state_t *app) {
+    if (app->picker_dir.size == 0 || rubraview_picker_is_places(app->picker_dir) ||
+        rubraview_picker_is_recent(app->picker_dir) || app->picker_in_book || picker_in_archive(app))
+        return PROVEN_LIT("");
+    if (rubraview_picker_is_desktop(app->picker_dir))
+        return rubraview_pal_fs_desktop_dir(app->arena);
+    return app->picker_dir;
+}
+
 /* The picked files as a playlist of their own, then opened (owner,
    2026-09-23, who preferred this to opening them loose). The file is
    `PlaylistNNNN.m3u8` in this folder — the first number not taken. */
@@ -573,6 +596,9 @@ void picker_make_playlist(app_state_t *app) {
     size_t n = picker_picked_entries(app, &entries);
     if (n == 0) { osd_say(app, TU8("pick some files first")); return; }
 
+    proven_u8str_view_t target_dir = picker_write_dir(app);
+    if (target_dir.size == 0) { osd_say(app, TU8("could not write the playlist")); return; }
+
     rubraview_playlist_t list = {0};
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n, sizeof(rubraview_playlist_entry_t));
     if (!proven_is_ok(res.err)) return;
@@ -580,7 +606,10 @@ void picker_make_playlist(app_state_t *app) {
     size_t files = 0;
     for (size_t i = 0; i < n; ++i) {
         if (entries[i].is_directory) continue;   /* 1.22.0: a folder picked is not a song */
-        list.entries[files] = (rubraview_playlist_entry_t){ .path = entries[i].name };   /* beside the file */
+        proven_u8str_view_t entry_dir = rubraview_path_dirname(entries[i].path);
+        list.entries[files] = (rubraview_playlist_entry_t){
+            .path = rubraview_path_same(entry_dir, target_dir) ? entries[i].name : entries[i].path
+        };
         entries[files++] = entries[i];
     }
     if (files == 0) { osd_say(app, TU8("pick some files first")); return; }
@@ -595,7 +624,7 @@ void picker_make_playlist(app_state_t *app) {
     for (int number = 1; number <= 9999; ++number) {
         int written = rubraview_fmt(name, sizeof(name), "Playlist{:04}.m3u8", PROVEN_ARG((int)number));
         if (written <= 0) return;
-        proven_u8str_view_t candidate = rubraview_path_join(app->arena, app->picker_dir,
+        proven_u8str_view_t candidate = rubraview_path_join(app->arena, target_dir,
                                                 (proven_u8str_view_t){ .ptr = (const proven_byte_t *)name, .size = (size_t)written });
         rubraview_fs_entry_t taken;
         if (!rubraview_pal_fs_stat(app->arena, candidate, &taken)) { target = candidate; break; }
@@ -612,12 +641,12 @@ void picker_make_playlist(app_state_t *app) {
 /* RV-207 (owner, 2026-11-01): a new folder in the folder on screen ("New folder", or New folder-1 when that is
    there), its name then typed in the rename box. */
 void picker_new_folder(app_state_t *app) {
-    if (app->picker_dir.size == 0 || rubraview_picker_is_places(app->picker_dir) || rubraview_picker_is_recent(app->picker_dir) ||
-        app->picker_in_book || picker_in_archive(app)) {
+    proven_u8str_view_t dir = picker_write_dir(app);
+    if (dir.size == 0) {
         osd_say(app, TU8("no new folder can be made here"));
         return;
     }
-    proven_u8str_view_t want = rubraview_path_join(app->arena, app->picker_dir, proven_u8str_view_from_cstr(T("New folder")));
+    proven_u8str_view_t want = rubraview_path_join(app->arena, dir, proven_u8str_view_from_cstr(T("New folder")));
     char made[RUBRAVIEW_ARCHIVE_PATH];
     if (want.size == 0 || !rubraview_archive_free_folder_name(want, rubraview_pal_fs_exists, made, sizeof(made)) ||
         !rubraview_pal_fs_make_dirs(proven_u8str_view_from_cstr(made))) {
@@ -698,9 +727,9 @@ void picker_clip_put(app_state_t *app, bool moving) {
 
 
 void picker_clip_paste(app_state_t *app) {
-    proven_u8str_view_t dir = app->picker_dir;
     bool into_archive = picker_in_archive(app);   /* RV-260: into the archive shown (D-312) */
-    if (dir.size == 0 || rubraview_picker_is_places(dir) || rubraview_picker_is_recent(dir) || app->picker_in_book) {
+    proven_u8str_view_t dir = into_archive ? app->picker_dir : picker_write_dir(app);
+    if (dir.size == 0) {
         osd_say(app, TU8("nothing can be pasted here"));
         return;
     }
@@ -779,8 +808,7 @@ void basket_add_picked(app_state_t *app, double x, double y, double above_y) {
 
 /* The arrow: a basket's files into the folder on screen. */
 void basket_put_open(app_state_t *app, double x, double y, double above_y) {
-    proven_u8str_view_t dir = app->picker_dir;
-    if (dir.size == 0 || rubraview_picker_is_places(dir) || rubraview_picker_is_recent(dir) || picker_in_archive(app)) {
+    if (picker_write_dir(app).size == 0) {
         osd_say(app, TU8("go to the folder they go into, then the arrow"));
         return;
     }
@@ -812,7 +840,8 @@ void basket_chosen(app_state_t *app, int which) {
     bool *moved = (bool*)(void*)mres.value.ptr;
     for (size_t i = 0; i < n; ++i) sources[i] = app_keep(app, rubraview_basket_path(&app->baskets, which, i));
     bool moving = app->basket_moving;
-    proven_u8str_view_t dir = app->picker_dir;
+    proven_u8str_view_t dir = picker_write_dir(app);
+    if (dir.size == 0) return;
     (void)moved;
     /* RV-258 (D-310): through the job; what moved leaves the basket when it ends */
     (void)filejob_start(app, dir, sources, n, moving, which, false);

@@ -271,15 +271,41 @@ double rubraview_audio_heard_media_seconds(double base_seconds, double source_fr
 
 /* ---- backends ---- */
 
-size_t rubraview_media_backend_order(rubraview_media_backend_t preferred, bool ffmpeg_available,
+rubraview_decoder_mode_t rubraview_decoder_mode_from_name(proven_u8str_view_t name) {
+    if (proven_u8str_view_eq_ascii_ci(name, PROVEN_LIT("windows_only"))) return RUBRAVIEW_DECODER_WINDOWS_ONLY;
+    if (proven_u8str_view_eq_ascii_ci(name, PROVEN_LIT("ffmpeg"))) return RUBRAVIEW_DECODER_FFMPEG_WINDOWS;
+    if (proven_u8str_view_eq_ascii_ci(name, PROVEN_LIT("ffmpeg_only"))) return RUBRAVIEW_DECODER_FFMPEG_ONLY;
+    return RUBRAVIEW_DECODER_WINDOWS_FFMPEG;
+}
+
+const char *rubraview_decoder_mode_name(rubraview_decoder_mode_t mode) {
+    switch (mode) {
+        case RUBRAVIEW_DECODER_WINDOWS_ONLY:   return "windows_only";
+        case RUBRAVIEW_DECODER_FFMPEG_WINDOWS: return "ffmpeg";
+        case RUBRAVIEW_DECODER_FFMPEG_ONLY:    return "ffmpeg_only";
+        case RUBRAVIEW_DECODER_WINDOWS_FFMPEG:
+        default:                               return "windows_ffmpeg";
+    }
+}
+
+size_t rubraview_media_decoder_order(rubraview_decoder_mode_t mode, bool ffmpeg_available,
                                      rubraview_media_backend_t out_order[2]) {
     if (!out_order) return 0;
+    if (mode == RUBRAVIEW_DECODER_WINDOWS_ONLY) {
+        out_order[0] = RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+        return 1;
+    }
+    if (mode == RUBRAVIEW_DECODER_FFMPEG_ONLY) {
+        if (!ffmpeg_available) return 0;
+        out_order[0] = RUBRAVIEW_BACKEND_FFMPEG;
+        return 1;
+    }
     if (!ffmpeg_available) {
         /* Media Foundation is part of Windows; it is always there to try. */
         out_order[0] = RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
         return 1;
     }
-    if (preferred == RUBRAVIEW_BACKEND_FFMPEG) {
+    if (mode == RUBRAVIEW_DECODER_FFMPEG_WINDOWS) {
         out_order[0] = RUBRAVIEW_BACKEND_FFMPEG;
         out_order[1] = RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
     } else {
@@ -287,6 +313,13 @@ size_t rubraview_media_backend_order(rubraview_media_backend_t preferred, bool f
         out_order[1] = RUBRAVIEW_BACKEND_FFMPEG;
     }
     return 2;
+}
+
+size_t rubraview_media_backend_order(rubraview_media_backend_t preferred, bool ffmpeg_available,
+                                     rubraview_media_backend_t out_order[2]) {
+    rubraview_decoder_mode_t mode = preferred == RUBRAVIEW_BACKEND_FFMPEG
+        ? RUBRAVIEW_DECODER_FFMPEG_WINDOWS : RUBRAVIEW_DECODER_WINDOWS_FFMPEG;
+    return rubraview_media_decoder_order(mode, ffmpeg_available, out_order);
 }
 
 bool rubraview_media_is_hevc(uint32_t fourcc) {
@@ -318,6 +351,8 @@ proven_u8str_view_t rubraview_media_failure_text_with(rubraview_media_failure_t 
             case RUBRAVIEW_MEDIA_FAIL_HEVC:
                 return TU8("HEVC video needs the \"HEVC Video Extensions\" ($0.99, Microsoft Store) "
                           "or FFmpeg 9.0 DLLs — the ones beside rubraview could not be loaded (all five are needed)");
+            case RUBRAVIEW_MEDIA_FAIL_FFMPEG_MISSING:
+                return TU8("decoder is set to FFmpeg only — the FFmpeg 9.0 DLLs could not be loaded (all five are needed)");
             default:
                 return rubraview_media_failure_text(failure);
         }
@@ -330,6 +365,8 @@ proven_u8str_view_t rubraview_media_failure_text_with(rubraview_media_failure_t 
         case RUBRAVIEW_MEDIA_FAIL_HEVC:
             return TU8("HEVC video needs the \"HEVC Video Extensions\" ($0.99, Microsoft Store) "
                       "or FFmpeg 9.0 DLLs — the ones beside rubraview are another version and were not loaded");
+        case RUBRAVIEW_MEDIA_FAIL_FFMPEG_MISSING:
+            return TU8("decoder is set to FFmpeg only — the FFmpeg DLLs found are not 9.0 (avcodec-63) and were not loaded");
         default:
             return rubraview_media_failure_text(failure);
     }
@@ -358,6 +395,8 @@ proven_u8str_view_t rubraview_media_failure_text(rubraview_media_failure_t failu
             return TU8("the station did not answer — the address, the network, or a station that has closed");
         case RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG:
             return TU8("internet radio is played by FFmpeg, which is not here (Settings › External)");
+        case RUBRAVIEW_MEDIA_FAIL_FFMPEG_MISSING:
+            return TU8("decoder is set to FFmpeg only, and FFmpeg 9.0 DLLs were not found (Settings › External)");
         case RUBRAVIEW_MEDIA_OPENED:
         default:
             return PROVEN_LIT("");
@@ -366,6 +405,7 @@ proven_u8str_view_t rubraview_media_failure_text(rubraview_media_failure_t failu
 
 static int failure_rank(rubraview_media_failure_t f) {
     switch (f) {
+        case RUBRAVIEW_MEDIA_FAIL_FFMPEG_MISSING:
         case RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG: return 6;
         case RUBRAVIEW_MEDIA_FAIL_STATION:   return 5;
         case RUBRAVIEW_MEDIA_FAIL_HEVC:      return 4;

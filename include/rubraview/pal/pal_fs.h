@@ -53,6 +53,34 @@ rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, proven_u
 rubraview_fs_listing_t rubraview_pal_fs_list_places(proven_arena_t *arena);
 
 /**
+ * R343: The real folder where the user's Desktop files live (FOLDERID_Desktop
+ * on Windows, $HOME/Desktop on POSIX), used as the write target when the open-file
+ * screen shows the merged special Desktop view (`RUBRAVIEW_PICKER_DESKTOP`).
+ * Empty when unavailable. NUL-terminated, in `arena`.
+ */
+proven_u8str_view_t rubraview_pal_fs_desktop_dir(proven_arena_t *arena);
+
+/**
+ * R343: The merged special Desktop view (`RUBRAVIEW_PICKER_DESKTOP`), combining
+ * filesystem items shown on Windows' Shell Desktop (User Desktop, Public Desktop,
+ * and other filesystem folders visible on the Desktop) while omitting `desktop.ini`
+ * and virtual non-filesystem CLSIDs. Each entry keeps its real path on disk.
+ */
+rubraview_fs_listing_t rubraview_pal_fs_list_desktop(proven_arena_t *arena);
+
+/** True for "desktop.ini" in any ASCII letter case. */
+bool rubraview_fs_is_desktop_ini(proven_u8str_view_t name);
+
+/**
+ * Merge two listings in `arena`, deduplicating entries with identical normalized
+ * paths (`rubraview_path_same`) and optionally omitting `desktop.ini` files.
+ */
+rubraview_fs_listing_t rubraview_fs_merge_listings(proven_arena_t *arena,
+                                                   const rubraview_fs_listing_t *a,
+                                                   const rubraview_fs_listing_t *b,
+                                                   bool skip_desktop_ini);
+
+/**
  * The full path of a folder or file that exists ("." becomes the folder
  * the viewer runs in), so the picker can climb above it. What cannot be
  * resolved is given back as it was. NUL-terminated, in `arena`.

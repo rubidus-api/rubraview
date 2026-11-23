@@ -59,9 +59,11 @@ void rubraview_pal_media_host_fault(int32_t kind, int32_t after) {
 
 static _Thread_local char g_why[256];
 static char g_service_why[256];   /* the service's last words, kept past the calling thread (a save's job) */
-static char g_open_why[512];   /* the last remote open's refusal (the UI thread's) */
+static char g_open_why[512];      /* the last remote open's refusal (the UI thread's) */
+static char g_probe_why[256];     /* why the service probe itself could not run */
 
 const char *rubraview_pal_media_host_why(void) { return g_open_why; }
+const char *rubraview_pal_media_host_probe_why(void) { return g_probe_why; }
 
 
 /* ---- the folders FFmpeg is looked for in, handed to each child ---- */
@@ -209,6 +211,7 @@ typedef struct mh_child {
     HANDLE room;                 /* RV-274: set as a picture is taken; the child's decoder waits on it */
     rubraview_mhost_block_t *block;
     bool dead;
+    uint32_t folders_serial;
     uint64_t beat;               /* the heartbeat last seen, and when it moved */
     double beat_at;
 } mh_child_t;
@@ -385,6 +388,7 @@ static bool child_start(mh_child_t *c, rubraview_mhost_mode_t mode, const rubrav
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
     c->process = pi.hProcess;
+    c->folders_serial = atomic_load(&g_folders_serial);
     live_note(c->process, c->block, true);
     c->beat_at = now_seconds();
     return true;
@@ -525,8 +529,9 @@ static bool pool_same(const mh_child_t *c, const rubraview_media_gpu_t *gpu) {
 static bool pool_take(mh_child_t *out, const rubraview_media_gpu_t *gpu) {
     AcquireSRWLockExclusive(&g_pool_lock);
     bool got = false;
+    uint32_t folders = atomic_load(&g_folders_serial);
     if (g_pool.process) {
-        if (child_alive(&g_pool) && now_seconds() - g_pool_at < POOL_SECONDS && pool_same(&g_pool, gpu)) {
+        if (child_alive(&g_pool) && g_pool.folders_serial == folders && now_seconds() - g_pool_at < POOL_SECONDS && pool_same(&g_pool, gpu)) {
             *out = g_pool;
             got = true;
         } else {
@@ -606,7 +611,11 @@ static void *remote_open(proven_u8str_view_t path, rubraview_media_failure_t *ou
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
     g_open_why[0] = g_why[0] = '\0';
     if (path.size == 0 || path.size >= RUBRAVIEW_MHOST_INLINE - 1) { rubraview_fmt(g_open_why, sizeof g_open_why, "its name is too long"); return NULL; }
-    if (!rubraview_mhost_remote_available()) { rubraview_fmt(g_open_why, sizeof g_open_why, "the service process found no FFmpeg"); return NULL; }
+    if (!rubraview_mhost_remote_available()) {
+        if (g_probe_why[0]) rubraview_fmt(g_open_why, sizeof g_open_why, "the service process found no FFmpeg ({})", PROVEN_ARG(g_probe_why));
+        else rubraview_fmt(g_open_why, sizeof g_open_why, "the service process found no FFmpeg");
+        return NULL;
+    }
     mh_play_t *p = (mh_play_t *)rubraview_alloc_zero(1, sizeof(*p));
     if (!p) return NULL;
     bool pooled = pool_take(&p->child, gpu);
@@ -639,7 +648,7 @@ static void *remote_open(proven_u8str_view_t path, rubraview_media_failure_t *ou
         open_refused(&p->child, status != RUBRAVIEW_MHOST_OK ? "the process did not answer the open"
                               : p->opened.why ? p->opened.why : "refused");
         int32_t said = b->open_failure;
-        if (status == RUBRAVIEW_MHOST_OK && said > RUBRAVIEW_MEDIA_OPENED && said <= RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG)
+        if (status == RUBRAVIEW_MHOST_OK && said > RUBRAVIEW_MEDIA_OPENED && said <= RUBRAVIEW_MEDIA_FAIL_FFMPEG_MISSING)
             *out_failure = (rubraview_media_failure_t)said;
         remote_close(p);
         return NULL;
@@ -936,6 +945,8 @@ static mh_probe_t probe(void) {
     AcquireSRWLockExclusive(&g_service_lock);
     if (!g_probe.done || g_probe.folders != folders) {
         mh_probe_t got = { .done = true, .folders = folders };
+        g_probe_why[0] = '\0';
+        g_why[0] = '\0';
         if (service_ready() && child_call(&g_service, RUBRAVIEW_MHOST_REQ_PROBE, PROBE_WAIT_MS) == RUBRAVIEW_MHOST_OK) {
             const int64_t *a = g_service.block->reply_args;
             int64_t v[6];
@@ -952,7 +963,11 @@ static mh_probe_t probe(void) {
                 proven_sys_mem_copy(said, g_service.block->inline_data, sizeof said - 1);
                 said[sizeof said - 1] = 0;
                 rubraview_mhost_text_take(got.names, sizeof got.names, said, sizeof said);
+            } else {
+                rubraview_fmt(g_probe_why, sizeof g_probe_why, "unexpected probe reply from service child");
             }
+        } else if (g_why[0]) {
+            rubraview_fmt(g_probe_why, sizeof g_probe_why, "{}", PROVEN_ARG(g_why));
         }
         AcquireSRWLockExclusive(&g_probe_lock);
         g_probe = got;   /* a child that could not say is no FFmpeg, until the folders change */
@@ -1339,7 +1354,11 @@ static int32_t child_open(child_play_t *cp) {
     rubraview_media_info_t info = { 0 };
     cp->media = rubraview_ffmpeg_host_open(path, &gpu, &hosting, &failure, &info);
     b->open_failure = cp->media ? RUBRAVIEW_MEDIA_OPENED : (int32_t)failure;
-    if (!cp->media) return RUBRAVIEW_MHOST_OK;   /* said, in open_failure */
+    if (!cp->media) {
+        const char *why = rubraview_ffmpeg_local_last_error();
+        if (why && why[0]) rubraview_mhost_log(b, why);
+        return RUBRAVIEW_MHOST_OK;   /* said, in open_failure */
+    }
     rubraview_mhost_info_put(&b->info, &info);
     const rubraview_media_backend_api_t *api = rubraview_media_backend_ffmpeg();
     rubraview_track_set_t tracks = rubraview_tracks_create();

@@ -191,6 +191,9 @@ bool rubraview_pal_ffmpeg_jxl_frames(proven_mem_view_t data_view, int32_t max_si
 rubraview_media_open_result_t rubraview_pal_media_open(proven_u8str_view_t path, rubraview_media_backend_t backend,
                                                        const rubraview_media_gpu_t *gpu);
 
+/** Technical reason the last open failed for `backend` (for logs and `--probe-media`), or empty. */
+const char *rubraview_pal_media_last_error(rubraview_media_backend_t backend);
+
 /** Stops the decode thread and frees everything. NULL is ignored. */
 void rubraview_pal_media_close(rubraview_media_t *media);
 

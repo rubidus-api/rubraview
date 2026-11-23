@@ -164,11 +164,14 @@ static size_t settings_info(void *user, proven_u8str_view_t source, char *buffer
                      : T("from the zip or the installer: register below")));
     } else if (proven_u8str_view_eq(source, PROVEN_LIT("media.ffmpeg"))) {
         int place = rubraview_pal_ffmpeg_place();
+        rubraview_ffmpeg_refusal_t ref = place == 0 ? rubraview_pal_ffmpeg_refused() : RUBRAVIEW_FFMPEG_NOT_REFUSED;
         /* RFC-0009: found where it is named, else beside the program, else where an older Import put it. */
         n = rubraview_fmt(buffer, capacity, "{}",
                      PROVEN_ARG(place == 3 ? T("its DLLs are in the FFmpeg folder")
                      : place == 1 ? T("its DLLs are beside the program")
                      : place == 2 ? T("its DLLs are where an older version's Import put them")
+                     : ref == RUBRAVIEW_FFMPEG_OTHER_VERSION ? T("found, but not 9.0 (avcodec-63) - Media Foundation only")
+                     : ref == RUBRAVIEW_FFMPEG_NOT_WHOLE ? T("avcodec-63 found, but all five 9.0 DLLs could not be loaded - Media Foundation only")
                      : T("not found (or not 9.x) - Media Foundation only")));
         char encoders[96];   /* RV-139: what it can write pictures with */
         if (place > 0 && n > 0 && (size_t)n < capacity && rubraview_pal_ffmpeg_image_encoders(rubraview_mem_mut(encoders, sizeof(encoders))) && encoders[0]) {
@@ -855,6 +858,18 @@ static void ap_keymap_file(app_state_t *app, bool first) {
     if (!first) load_keymap(app);
 }
 
+static void ap_decoder_retry(app_state_t *app, bool first) {
+    if (first || app->media || app->picker_open) return;
+    int32_t cur = current_page_index(app);
+    if (cur >= 0 && (size_t)cur < page_count(app) && app->pages[cur].failed &&
+        is_media_path(app->source.pages[cur].path)) {
+        app->pages[cur].failed = false;
+        app->media_skip_pending = false;
+        app->media_no_ffmpeg_page = 0;
+        media_prepare(app);
+    }
+}
+
 typedef struct apply_row {
     const char *keys;   /* the settings it watches, "section.key ..." */
     void (*run)(app_state_t *app, bool first);
@@ -874,6 +889,7 @@ static const apply_row_t APPLY[] = {
     { "display.color_management", ap_color_management },
     { "cache.privacy_clean cache.keep_details", ap_export },
     { "keys.use_keymap_file", ap_keymap_file },
+    { "video.decoder video.ffmpeg_dir video.ffmpeg_isolated", ap_decoder_retry },
 };
 
 /* What the program keeps a copy of, every pass (several follow the screen's scale too). */
@@ -951,8 +967,9 @@ void settings_took_effect(app_state_t *app) {
         if (app->settings_window && g_plugin_count != before) skip_dirs_table_rows(app);
     }
     gmic_from_settings(app);   /* RFC-0009 C */
-    app->media_preferred = rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("decoder")) > 0.5
-        ? RUBRAVIEW_BACKEND_FFMPEG : RUBRAVIEW_BACKEND_MEDIA_FOUNDATION;
+    int dec = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("video"), PROVEN_LIT("decoder")));
+    app->media_decoder = (dec >= 0 && dec <= (int)RUBRAVIEW_DECODER_FFMPEG_ONLY)
+        ? (rubraview_decoder_mode_t)dec : RUBRAVIEW_DECODER_WINDOWS_FFMPEG;
     /* Owner, 2026-09-15: always on top follows the setting, whichever way it was changed. */
     rubraview_pal_window_set_topmost(app->window,
                                      rubraview_settings_get(&app->settings, PROVEN_LIT("general"), PROVEN_LIT("always_on_top")) > 0.5);

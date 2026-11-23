@@ -158,6 +158,13 @@ void media_stopped_tick(app_state_t *app) {
         osd_say(app, TU8("FFmpeg stopped on this station"));
         return;
     }
+    if (app->media_decoder == RUBRAVIEW_DECODER_FFMPEG_ONLY) {
+        media_close(app);
+        if (page >= 0 && (size_t)page < page_count(app)) app->pages[page].failed = true;
+        app_log(app, "media", PROVEN_LIT("FFmpeg stopped on this file (decoder=ffmpeg_only, no Windows fallback)"));
+        osd_say(app, TU8("FFmpeg stopped on this file"));
+        return;
+    }
     app->media_no_ffmpeg_page = page + 1;
     media_reopen(app);
     osd_say(app, app->media ? TU8("FFmpeg stopped on this file: it was opened with Windows' decoder") : TU8("FFmpeg stopped on this file"));

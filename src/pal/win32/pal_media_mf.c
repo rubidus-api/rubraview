@@ -118,7 +118,12 @@ typedef struct mf_media {
     rubraview_track_set_t tracks;
     char track_text[RUBRAVIEW_MAX_TRACKS][3][64];   /* language, title, codec */
     rubraview_details_t details;            /* written before `opened`, read-only afterwards */
+    char open_why[256];                     /* technical reason open failed, for logs and --probe-media */
 } mf_media_t;
+
+static _Thread_local char g_mf_open_why[256];
+
+const char *rubraview_mf_last_error(void) { return g_mf_open_why; }
 
 /*
  * Media Foundation is loaded at run time, not linked. A Windows "N"
@@ -186,6 +191,19 @@ static bool mf_available(void) {
 static void fail(mf_media_t *m, rubraview_media_failure_t failure) {
     m->ok = false;
     m->failure = failure;
+}
+
+static void mf_format_fourcc(uint32_t fourcc, char out[16]) {
+    char c[4] = { (char)(fourcc & 0xFFu), (char)((fourcc >> 8) & 0xFFu),
+                  (char)((fourcc >> 16) & 0xFFu), (char)((fourcc >> 24) & 0xFFu) };
+    bool ascii = true;
+    for (int i = 0; i < 4; ++i) if (c[i] < 0x20 || c[i] > 0x7E) ascii = false;
+    if (ascii) {
+        proven_sys_mem_copy(out, c, 4);
+        out[4] = '\0';
+    } else {
+        rubraview_fmt(out, 16, "0x{:08X}", PROVEN_ARG((unsigned long)fourcc));
+    }
 }
 
 /* ---- what the container holds (§3.16.2) ---- */
@@ -530,7 +548,11 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
     *out_reader = NULL;
 
     IMFAttributes *attrs = NULL;
-    if (FAILED(g_mf.create_attributes(&attrs, 3)) || !attrs) { fail(m, RUBRAVIEW_MEDIA_FAIL_FILE); return false; }
+    if (FAILED(g_mf.create_attributes(&attrs, 3)) || !attrs) {
+        rubraview_fmt(m->open_why, sizeof(m->open_why), "MFCreateAttributes failed");
+        fail(m, RUBRAVIEW_MEDIA_FAIL_FILE);
+        return false;
+    }
     if (on_gpu) {
         /* RV-062: decode on the card, and let the reader's video processor
            turn the picture into BGRA there too. */
@@ -586,6 +608,8 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
     IMFAttributes_Release(attrs);
     if (FAILED(hr) || !reader) {
         bool readable = GetFileAttributesW(m->path) != INVALID_FILE_ATTRIBUTES;
+        rubraview_fmt(m->open_why, sizeof(m->open_why), "MFCreateSourceReader failed (hr=0x{:08X}, readable={})",
+                      PROVEN_ARG((unsigned long)hr), PROVEN_ARG(readable ? "yes" : "no"));
         fail(m, rubraview_media_classify(readable, false, false, 0));
         return false;
     }
@@ -653,6 +677,7 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
     bool has_audio = audio_stream != NO_STREAM;
     if (video_stream == NO_STREAM && !has_audio) {
         IMFSourceReader_Release(reader);
+        rubraview_fmt(m->open_why, sizeof(m->open_why), "no video or audio stream found");
         fail(m, RUBRAVIEW_MEDIA_FAIL_CODEC);
         return false;
     }
@@ -664,17 +689,23 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
     if (video_stream != NO_STREAM) {
         IMFSourceReader_SetStreamSelection(reader, video_stream, TRUE);
         IMFMediaType *want = NULL;
+        HRESULT hr_set = E_FAIL;
         bool decodable = false;
         if (SUCCEEDED(g_mf.create_media_type(&want)) && want) {
             IMFMediaType_SetGUID(want, &MF_MT_MAJOR_TYPE, &MFMediaType_Video);
             /* On the card, ARGB32 is B8G8R8A8 — the format Direct2D's
                bitmaps take, so a frame can be copied into one as it is. */
             IMFMediaType_SetGUID(want, &MF_MT_SUBTYPE, on_gpu ? &MFVideoFormat_ARGB32 : &MFVideoFormat_RGB32);
-            decodable = SUCCEEDED(IMFSourceReader_SetCurrentMediaType(reader, video_stream, NULL, want));
+            hr_set = IMFSourceReader_SetCurrentMediaType(reader, video_stream, NULL, want);
+            decodable = SUCCEEDED(hr_set);
             IMFMediaType_Release(want);
         }
         if (!decodable) {
+            char cc[16];
+            mf_format_fourcc(fourcc, cc);
             IMFSourceReader_Release(reader);
+            rubraview_fmt(m->open_why, sizeof(m->open_why), "SetCurrentMediaType failed for video codec {} (hr=0x{:08X})",
+                          PROVEN_ARG(cc), PROVEN_ARG((unsigned long)hr_set));
             fail(m, rubraview_media_classify(true, true, false, fourcc));
             return false;
         }
@@ -693,6 +724,7 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
         height = (int32_t)(frame_size & 0xFFFFFFFFu);
         if (width <= 0 || height <= 0 || width > MAX_DIMENSION || height > MAX_DIMENSION) {
             IMFSourceReader_Release(reader);
+            rubraview_fmt(m->open_why, sizeof(m->open_why), "invalid video frame size {}x{}", PROVEN_ARG((int)width), PROVEN_ARG((int)height));
             fail(m, RUBRAVIEW_MEDIA_FAIL_CODEC);
             return false;
         }
@@ -700,6 +732,7 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
             m->slots[i].pixels = (uint8_t*)rubraview_malloc_product((size_t)width, (size_t)height, 4u);
             if (!m->slots[i].pixels) {
                 IMFSourceReader_Release(reader);
+                rubraview_fmt(m->open_why, sizeof(m->open_why), "out of memory allocating video slots ({}x{})", PROVEN_ARG((int)width), PROVEN_ARG((int)height));
                 fail(m, RUBRAVIEW_MEDIA_FAIL_FILE);
                 return false;
             }
@@ -1437,6 +1470,7 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
                 IMFSourceReader_Release(reader);
                 reader = NULL;
                 undo_open(m);
+                rubraview_fmt(m->open_why, sizeof(m->open_why), "first video frame refused by decoder");
                 fail(m, RUBRAVIEW_MEDIA_FAIL_CODEC);
                 opened = false;
             } else if (!rewound) {
@@ -1449,7 +1483,10 @@ static DWORD WINAPI decode_thread(LPVOID arg) {
             }
         }
     }
-    if (!mf) fail(m, RUBRAVIEW_MEDIA_FAIL_FILE);
+    if (!mf) {
+        rubraview_fmt(m->open_why, sizeof(m->open_why), "MFStartup failed");
+        fail(m, RUBRAVIEW_MEDIA_FAIL_FILE);
+    }
     /* 1.25.1: the way to the screen, for the information window */
     if (opened && m->video_stream != NO_STREAM) {
         rubraview_media_info_t *in = &m->info;
@@ -1509,7 +1546,15 @@ static void mf_close(void *handle) {
 static void *mf_open(proven_u8str_view_t path, rubraview_media_failure_t *out_failure, rubraview_media_info_t *out_info,
                      const rubraview_media_gpu_t *gpu) {
     *out_failure = RUBRAVIEW_MEDIA_FAIL_FILE;
-    if (!mf_load() || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
+    g_mf_open_why[0] = '\0';
+    if (!mf_load()) {
+        rubraview_fmt(g_mf_open_why, sizeof(g_mf_open_why), "Media Foundation DLLs unavailable");
+        return NULL;
+    }
+    if (path.size == 0 || path.size >= MAX_PATH * 4) {
+        rubraview_fmt(g_mf_open_why, sizeof(g_mf_open_why), "path empty or too long");
+        return NULL;
+    }
 
     mf_media_t *m = (mf_media_t*)rubraview_alloc_zero(1, sizeof(*m));
     if (m) InitializeSRWLock(&m->audio_lock);
@@ -1521,6 +1566,7 @@ static void *mf_open(proven_u8str_view_t path, rubraview_media_failure_t *out_fa
     proven_sys_mem_copy(narrow, path.ptr, path.size);
     narrow[path.size] = '\0';
     if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, m->path, (int)(sizeof(m->path) / sizeof(m->path[0]))) <= 0) {
+        rubraview_fmt(g_mf_open_why, sizeof(g_mf_open_why), "path conversion to UTF-16 failed");
         rubraview_free(m);
         return NULL;
     }
@@ -1543,12 +1589,14 @@ static void *mf_open(proven_u8str_view_t path, rubraview_media_failure_t *out_fa
     m->opened = CreateEventW(NULL, TRUE, FALSE, NULL);
     m->thread = m->opened ? CreateThread(NULL, 0, decode_thread, m, 0, NULL) : NULL;
     if (!m->thread || WaitForSingleObject(m->opened, OPEN_TIMEOUT_MS) != WAIT_OBJECT_0) {
+        rubraview_fmt(g_mf_open_why, sizeof(g_mf_open_why), "{}", PROVEN_ARG(m->thread ? "Media Foundation open timed out (15 s)" : "decode thread could not be started"));
         mf_close(m);
         return NULL;
     }
 
     *out_failure = m->failure;
     if (!m->ok) {
+        rubraview_fmt(g_mf_open_why, sizeof(g_mf_open_why), "{}", PROVEN_ARG(m->open_why[0] ? m->open_why : "Media Foundation failed"));
         mf_close(m);
         return NULL;
     }

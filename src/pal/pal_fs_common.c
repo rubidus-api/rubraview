@@ -82,3 +82,45 @@ rubraview_sibling_index_t rubraview_fs_index_siblings(proven_arena_t *arena,
 
     return result;
 }
+
+bool rubraview_fs_is_desktop_ini(proven_u8str_view_t name) {
+    return proven_u8str_view_eq_ascii_ci(name, PROVEN_LIT("desktop.ini"));
+}
+
+static bool listing_has_path(const rubraview_fs_entry_t *entries, size_t count, proven_u8str_view_t path) {
+    for (size_t i = 0; i < count; ++i) {
+        if (rubraview_path_same(entries[i].path, path)) return true;
+    }
+    return false;
+}
+
+rubraview_fs_listing_t rubraview_fs_merge_listings(proven_arena_t *arena,
+                                                   const rubraview_fs_listing_t *a,
+                                                   const rubraview_fs_listing_t *b,
+                                                   bool skip_desktop_ini) {
+    rubraview_fs_listing_t out = {0};
+    if (!arena) return out;
+    size_t ca = a ? a->count : 0;
+    size_t cb = b ? b->count : 0;
+    size_t cap = ca + cb;
+    if (cap == 0) return out;
+
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(arena, cap, sizeof(rubraview_fs_entry_t));
+    if (!proven_is_ok(res.err)) return out;
+    rubraview_fs_entry_t *dst = (rubraview_fs_entry_t *)(void *)res.value.ptr;
+
+    size_t count = 0;
+    const rubraview_fs_listing_t *srcs[2] = { a, b };
+    for (int s = 0; s < 2; ++s) {
+        if (!srcs[s] || !srcs[s]->entries) continue;
+        for (size_t i = 0; i < srcs[s]->count; ++i) {
+            const rubraview_fs_entry_t *e = &srcs[s]->entries[i];
+            if (skip_desktop_ini && !e->is_directory && rubraview_fs_is_desktop_ini(e->name)) continue;
+            if (e->path.size > 0 && listing_has_path(dst, count, e->path)) continue;
+            dst[count++] = *e;
+        }
+    }
+    out.entries = dst;
+    out.count = count;
+    return out;
+}

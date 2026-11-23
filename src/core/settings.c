@@ -112,6 +112,7 @@ static const struct { const char *section, *key, *old_word, *new_word; } CHOICE_
     /* RV-224 (D-279): the book is two pages with the first page alone; the load below turns that on */
     { "viewer", "layout", "book",      "dual" },
     { "viewer", "layout", "book-rtl",  "dual-rtl" },
+    { "video",  "decoder", "windows",  "windows_ffmpeg" },
 };
 
 static bool choice_index_exact(const rubraview_setting_def_t *def, proven_u8str_view_t word, double *out);
