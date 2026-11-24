@@ -3854,3 +3854,6 @@ menu "Apps' items (Windows 11)" = "موارد برنامه‌ها (ویندوز 
 "Open the breadcrumb folder right-clicked in Explorer" = "باز کردن پوشهٔ مسیرنمای راست‌کلیک‌شده در Explorer"
 menu "Open in new window" = "باز کردن در پنجرهٔ جدید"
 "View" = "نمایش"
+"  folders first" = "  پوشه‌ها اول"
+"Files first" = "پرونده‌ها اول"
+"Folders first" = "پوشه‌ها اول"

@@ -314,6 +314,63 @@ const char *rubraview_picker_sort_name(rubraview_picker_sort_key_t key);
 void rubraview_picker_sort_order(const rubraview_fs_listing_t *listing, const rubraview_picker_media_t *media,
                                  rubraview_picker_sort_key_t key, bool descending, size_t *order);
 
+/**
+ * Same as `rubraview_picker_sort_order`, with explicit control over whether
+ * folders come before files (`folders_first == true`) or files come before
+ * folders (`folders_first == false`). `".."` always stays first either way.
+ */
+void rubraview_picker_sort_order_ex(const rubraview_fs_listing_t *listing, const rubraview_picker_media_t *media,
+                                    rubraview_picker_sort_key_t key, bool descending, bool folders_first, size_t *order);
+
+/**
+ * Stably partition `listing` into `".."`, then folders/files (or files/folders
+ * when `folders_first` is false), preserving each group's existing order.
+ */
+void rubraview_picker_partition_order(const rubraview_fs_listing_t *listing, bool folders_first, size_t *order);
+
+#define RUBRAVIEW_PICKER_COL_MIN_W   40.0
+#define RUBRAVIEW_PICKER_COL_MAX_W   600.0
+#define RUBRAVIEW_PICKER_NAME_MIN_W  240.0
+#define RUBRAVIEW_PICKER_NAME_HARD_W 120.0
+
+typedef struct rubraview_picker_cols {
+    double name_x;
+    double x[RUBRAVIEW_PICKER_SORT_COUNT];      /* where each begins; Name's end is the first visible column after it */
+    double w[RUBRAVIEW_PICKER_SORT_COUNT];      /* how wide (scaled px), 0 when auto-dropped */
+} rubraview_picker_cols_t;
+
+/** Compute column x/w geometry (scaled pixels) from logical widths `col_w` and left-to-right `order`. */
+rubraview_picker_cols_t rubraview_picker_cols_layout(const double col_w[RUBRAVIEW_PICKER_SORT_COUNT],
+                                                     const int order[RUBRAVIEW_PICKER_SORT_COUNT - 1],
+                                                     double win_w, double dpi);
+
+/** Return the visible column immediately left of `edge_col` (0 for Name, or >0 for another column). */
+int rubraview_picker_cols_left_of(const rubraview_picker_cols_t *cols,
+                                  const int order[RUBRAVIEW_PICKER_SORT_COUNT - 1], int edge_col);
+
+/**
+ * Resize the single boundary between `left_col` and `right_col` by `dx_logical`
+ * without shifting any other boundary. `w_left0` and `w_right0` are logical px
+ * at drag start (`w_left0` for `left_col == 0` is `cols.w[0] / dpi`).
+ */
+void rubraview_picker_cols_resize(double col_w[RUBRAVIEW_PICKER_SORT_COUNT],
+                                  int left_col, int right_col,
+                                  double w_left0, double w_right0,
+                                  bool any_droppable_visible, double dx_logical);
+
+/**
+ * Compute the insertion slot among visible non-Name columns and its visual x
+ * coordinate when dragging `drag_col` to `x`. Returns false when no move occurs.
+ */
+bool rubraview_picker_cols_drop_slot(const rubraview_picker_cols_t *cols,
+                                     const int order[RUBRAVIEW_PICKER_SORT_COUNT - 1],
+                                     int drag_col, double x, int *out_slot, double *out_drop_x);
+
+/** Apply a completed column drag of `drag_col` released at `x` to `order`. Returns true if changed. */
+bool rubraview_picker_cols_reorder(const rubraview_picker_cols_t *cols,
+                                   int order[RUBRAVIEW_PICKER_SORT_COUNT - 1],
+                                   int drag_col, double x);
+
 
 /** §3.15.2: the bottom bar's "N files (M bytes)" metrics. */
 void rubraview_picker_selection_metrics(const rubraview_picker_t *picker,

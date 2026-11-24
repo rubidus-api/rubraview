@@ -26,6 +26,8 @@ static void tools_act(app_state_t *app, double x, double y, double dpi, double w
             case PICKER_TOOL_ALL:    favpop_close(app); picker_select_everything(app); break;
             case PICKER_TOOL_SELECT: favpop_close(app); chooser_open_picker_select(app, t.x, t.y + t.height, t.y); break;
             case PICKER_TOOL_SORT:   favpop_close(app); chooser_open_sort(app, t.x, t.y + t.height, t.y); break;
+            case PICKER_TOOL_SORT_DIR: favpop_close(app); picker_toggle_sort_dir(app); break;
+            case PICKER_TOOL_FOLDERS_FIRST: favpop_close(app); picker_toggle_folders_first(app); break;
             case PICKER_TOOL_VIEW:   favpop_close(app); chooser_open_picker_view(app, t.x, t.y + t.height, t.y); break;
             case PICKER_TOOL_FILTER: {
                 favpop_close(app);
@@ -190,7 +192,12 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 }
             }
             if (app->pagebar_dragging && !app->pagebar_detached) pagebar_drag(app, event->mouse.x, false);
-            if (app->picker_open && picker_details(app)) picker_columns_motion(app, event->mouse.x, event->mouse.y);   /* 1.25.0 */
+            if (app->picker_open && picker_columns_motion(app, event->mouse.x, event->mouse.y)) {   /* R346 */
+                app->pointer_inside = true;
+                app->pointer_x = event->mouse.x;
+                app->pointer_y = event->mouse.y;
+                break;
+            }
             if (app->picker_hold) {   /* 1.22.0: moved off: neither a tap nor a long press */
                 double dx = event->mouse.x - app->picker_hold_x, dy = event->mouse.y - app->picker_hold_y;
                 double slop = 10.0 * rubraview_pal_window_dpi_scale(app->window);
@@ -390,16 +397,30 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 }
                 if (event->mouse.y < grid_top) {
                     /* the columns' names: sort by the one pressed, again the other way round (owner, 2026-10-16) */
-                    if (event->mouse.y >= grid_top - PICKER_DETAIL_HEAD * dpi) {
+                    if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && event->mouse.y >= grid_top - PICKER_DETAIL_HEAD * dpi) {
                         picker_columns_t cols = picker_detail_columns((double)pw, dpi);
-                        /* 1.25.0: on a line between two heads its width is dragged; on a head, it is dragged to
+                        /* 1.25.0 / R346: on a line between two heads its width is dragged; on a head, it is dragged to
                            another place, or (not moved) sorts by it */
                         int edge = picker_column_edge(&cols, event->mouse.x, dpi);
                         int k = picker_column_at(&cols, event->mouse.x);
                         if (edge > 0) {
-                            app->col_drag = 1; app->col_drag_k = edge; app->col_drag_x0 = event->mouse.x; app->col_drag_w0 = g_col_w[edge];
+                            int left = picker_column_left_of(&cols, edge);
+                            bool any_drop = cols.w[RUBRAVIEW_PICKER_SORT_CREATED] > 0.0 ||
+                                            cols.w[RUBRAVIEW_PICKER_SORT_RESOLUTION] > 0.0 ||
+                                            cols.w[RUBRAVIEW_PICKER_SORT_LENGTH] > 0.0 ||
+                                            cols.w[RUBRAVIEW_PICKER_SORT_TYPE] > 0.0;
+                            app->col_drag = 1;
+                            app->col_drag_k = edge;
+                            app->col_drag_left = left;
+                            app->col_drag_x0 = event->mouse.x;
+                            app->col_drag_w0 = g_col_w[edge];
+                            app->col_drag_w_left0 = left > 0 ? g_col_w[left] : (cols.w[0] / dpi);
+                            app->col_drag_drop_guard = any_drop;
                         } else if (k >= 0) {
-                            app->col_drag = 2; app->col_drag_k = k; app->col_drag_x0 = event->mouse.x; app->col_drag_moved = false;
+                            app->col_drag = 2;
+                            app->col_drag_k = k;
+                            app->col_drag_x0 = event->mouse.x;
+                            app->col_drag_moved = false;
                         }
                     }
                     break;
@@ -592,7 +613,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 break;
             }
             if (scrollbar_release(app, app->window)) break;   /* RV-170 */
-            if (app->col_drag && picker_columns_release(app, event->mouse.x)) break;   /* 1.25.0 */
+            if (app->col_drag && event->mouse.button == RUBRAVIEW_MOUSE_LEFT && picker_columns_release(app, event->mouse.x)) break;   /* 1.25.0 */
             if (app->picker_hold && event->mouse.button == RUBRAVIEW_MOUSE_LEFT) {   /* 1.22.0: the tap, now it is one */
                 app->picker_hold = false;
                 size_t index = app->picker_hold_index;

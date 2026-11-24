@@ -703,25 +703,11 @@ static void picker_columns_write(app_state_t *app) {
     for (int j = 0; j < RUBRAVIEW_PICKER_SORT_COUNT - 1; ++j)
         n += (size_t)rubraview_fmt(buf + n, sizeof(buf) - n, "{}{}", PROVEN_ARG(j == 0 ? ";" : ","), PROVEN_ARG((int)g_col_order[j]));
     rubraview_settings_set_text(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_columns"), app_keep(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)buf, .size = n }));
+    settings_write_if_changed(app, false);
 }
 
 picker_columns_t picker_detail_columns(double win_w, double dpi) {
-    static const rubraview_picker_sort_key_t DROP[] = { RUBRAVIEW_PICKER_SORT_CREATED, RUBRAVIEW_PICKER_SORT_RESOLUTION,
-                                                        RUBRAVIEW_PICKER_SORT_LENGTH, RUBRAVIEW_PICKER_SORT_TYPE };
-    picker_columns_t c = { .name_x = 10.0 * dpi };
-    for (int k = 1; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) c.w[k] = g_col_w[k] * dpi;
-    double right = win_w - 8.0 * dpi;
-    for (size_t d = 0;; ++d) {
-        double used = 0.0;
-        for (int k = 1; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) used += c.w[k];
-        if (right - used - c.name_x >= 240.0 * dpi || d >= sizeof(DROP) / sizeof(DROP[0])) break;
-        c.w[DROP[d]] = 0.0;
-    }
-    double x = right;
-    for (int j = RUBRAVIEW_PICKER_SORT_COUNT - 2; j >= 0; --j) { int k = g_col_order[j]; x -= c.w[k]; c.x[k] = x; }
-    c.x[0] = c.name_x;
-    c.w[0] = x - c.name_x;   /* Name, up to the first column after it */
-    return c;
+    return rubraview_picker_cols_layout(g_col_w, g_col_order, win_w, dpi);
 }
 
 /* The column under `x` on the heads' line, or -1. */
@@ -735,49 +721,55 @@ int picker_column_at(const picker_columns_t *c, double x) {
 /* 1.25.0: the column whose left edge is within reach of `x` on the heads' line (its width is dragged there), or 0. */
 int picker_column_edge(const picker_columns_t *c, double x, double dpi) {
     for (int k = 1; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k)
-        if (c->w[k] > 0.0 && fabs(x - c->x[k]) <= 5.0 * dpi) return k;
+        if (c->w[k] > 0.0 && fabs(x - c->x[k]) <= 6.0 * dpi) return k;
     return 0;
 }
 
-void picker_columns_motion(app_state_t *app, double x, double y) {
+int picker_column_left_of(const picker_columns_t *c, int edge_col) {
+    return rubraview_picker_cols_left_of(c, g_col_order, edge_col);
+}
+
+bool picker_columns_motion(app_state_t *app, double x, double y) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
+    if (app->col_drag == 1) {
+        rubraview_picker_cols_resize(g_col_w, app->col_drag_left, app->col_drag_k,
+                                     app->col_drag_w_left0, app->col_drag_w0,
+                                     app->col_drag_drop_guard, (x - app->col_drag_x0) / dpi);
+        rubraview_pal_window_set_cursor_shape(app->window, RUBRAVIEW_CURSOR_SIZE_WE);
+        return true;
+    }
+    if (app->col_drag == 2) {
+        if (app->col_drag_k > 0 && fabs(x - app->col_drag_x0) > 6.0 * dpi) app->col_drag_moved = true;
+        rubraview_pal_window_set_cursor_shape(app->window, RUBRAVIEW_CURSOR_ARROW);
+        return true;
+    }
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->window, &w, &h);
     picker_columns_t cols = picker_detail_columns((double)w, dpi);
-    if (app->col_drag == 1) {   /* the left edge moved: wider to the left, as the columns stand from the right */
-        double nw = app->col_drag_w0 + (app->col_drag_x0 - x) / dpi;
-        g_col_w[app->col_drag_k] = nw < 40.0 ? 40.0 : nw > 600.0 ? 600.0 : nw;
-        return;
-    }
-    if (app->col_drag == 2 && fabs(x - app->col_drag_x0) > 8.0 * dpi) app->col_drag_moved = true;
     double top = picker_grid_top(app, dpi) - PICKER_DETAIL_HEAD * dpi;
     bool on_heads = y >= top && y < top + PICKER_DETAIL_HEAD * dpi;
-    rubraview_pal_window_set_cursor_shape(app->window, app->col_drag == 1 || (on_heads && picker_column_edge(&cols, x, dpi) > 0)
+    rubraview_pal_window_set_cursor_shape(app->window, (on_heads && picker_column_edge(&cols, x, dpi) > 0)
                                                        ? RUBRAVIEW_CURSOR_SIZE_WE : RUBRAVIEW_CURSOR_ARROW);
+    return false;
 }
 
 /* The press on the heads let go: a width kept, a column put where it was dropped, or a sort. */
 bool picker_columns_release(app_state_t *app, double x) {
     int kind = app->col_drag, k = app->col_drag_k;
+    bool moved = app->col_drag_moved;
     app->col_drag = 0;
+    app->col_drag_moved = false;
     rubraview_pal_window_set_cursor_shape(app->window, RUBRAVIEW_CURSOR_ARROW);
     if (kind == 1) { picker_columns_write(app); return true; }
     if (kind != 2) return false;
-    if (!app->col_drag_moved) { picker_sort_by(app, k); return true; }
+    if (!moved || k == 0) { picker_sort_by(app, k); return true; }
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->window, &w, &h);
     picker_columns_t cols = picker_detail_columns((double)w, dpi);
-    int to = picker_column_at(&cols, x);
-    if (k == 0 || to < 0 || to == k) return true;   /* Name stays first */
-    int a = -1, b = to == 0 ? 0 : -1;               /* let go over Name: the first after it */
-    for (int j = 0; j < RUBRAVIEW_PICKER_SORT_COUNT - 1; ++j) { if (g_col_order[j] == k) a = j; if (to > 0 && g_col_order[j] == to) b = j; }
-    if (a < 0 || b < 0) return true;
-    int moved = g_col_order[a];   /* taken out, put in where the other was */
-    if (a < b) for (int j = a; j < b; ++j) g_col_order[j] = g_col_order[j + 1];
-    else for (int j = a; j > b; --j) g_col_order[j] = g_col_order[j - 1];
-    g_col_order[b] = moved;
-    picker_columns_write(app);
+    if (rubraview_picker_cols_reorder(&cols, g_col_order, k, x)) {
+        picker_columns_write(app);
+    }
     return true;
 }
 
@@ -872,9 +864,10 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                     break;
                 default: break;
             }
-            double pad = align == RUBRAVIEW_TEXT_RIGHT ? 14.0 * dpi : 4.0 * dpi;
+            double x_pad = align == RUBRAVIEW_TEXT_LEFT ? 6.0 * dpi : 0.0;
+            double w_pad = align == RUBRAVIEW_TEXT_RIGHT ? 14.0 * dpi : 10.0 * dpi;
             rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)cellbuf, n },
-                                           (rubraview_pal_rect_t){ cols.x[k], y, cols.w[k] - pad, cell }, font, ink, align);
+                                           (rubraview_pal_rect_t){ cols.x[k] + x_pad, y, fmax(0.0, cols.w[k] - w_pad), cell }, font, ink, align);
         }
     }
 
@@ -952,20 +945,42 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         /* A click on a column's name sorts by it; again, the other way round (owner, 2026-10-16). */
         int sorted = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
         bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
+        bool on_heads = app->pointer_y >= hy && app->pointer_y < hy + hh;
+        int hover_edge = (app->col_drag == 0 && on_heads) ? picker_column_edge(&cols, app->pointer_x, dpi) : 0;
         for (int k = 0; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) {
             if (cols.w[k] <= 0.0) continue;
             char head[48];
             int n = rubraview_fmt(head, sizeof(head), "{}{}", PROVEN_ARG(rubraview_picker_sort_name((rubraview_picker_sort_key_t)k)),
                              PROVEN_ARG(k == sorted ? (desc ? " \xE2\x96\xBC" : " \xE2\x96\xB2") : ""));
             bool right = k == RUBRAVIEW_PICKER_SORT_SIZE;
-            double pad = right ? 14.0 * dpi : 4.0 * dpi;
-            double from = k == 0 ? cols.name_x + PICKER_HEAD_CHECK_ROOM * dpi : cols.x[k];
-            rubraview_pal_rect_t at = { from, hy, cols.x[k] + cols.w[k] - from - pad, hh };
-            if (app->pointer_y >= hy && app->pointer_y < hy + hh && app->pointer_x >= cols.x[k] && app->pointer_x < cols.x[k] + cols.w[k]) {
+            double right_pad = right ? 14.0 * dpi : 4.0 * dpi;
+            double from = k == 0 ? cols.name_x + PICKER_HEAD_CHECK_ROOM * dpi : (right ? cols.x[k] : cols.x[k] + 6.0 * dpi);
+            rubraview_pal_rect_t at = { from, hy, fmax(0.0, cols.x[k] + cols.w[k] - from - right_pad), hh };
+            bool dragging_this = app->col_drag == 2 && app->col_drag_moved && app->col_drag_k == k && k > 0;
+            if (dragging_this) {
+                rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cols.x[k], hy, cols.w[k], hh }, 0x45FFFFFFu, 0.0);
+                rubraview_pal_render_stroke_rect(app->renderer, (rubraview_pal_rect_t){ cols.x[k], hy, cols.w[k], hh }, COLOR_TILE_CURRENT, 1.5 * dpi, 0.0);
+            } else if (app->col_drag == 0 && hover_edge == 0 && on_heads &&
+                       app->pointer_x >= cols.x[k] && app->pointer_x < cols.x[k] + cols.w[k]) {
                 rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ cols.x[k], hy, cols.w[k], hh }, COLOR_TILE_FILL, 0.0);
             }
             if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)head, (size_t)n }, at, font,
                                                       COLOR_TEXT, right ? RUBRAVIEW_TEXT_RIGHT : RUBRAVIEW_TEXT_LEFT);   /* D-286: the sorted one has its arrow */
+        }
+        for (int k = 1; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) {
+            if (cols.w[k] <= 0.0) continue;
+            bool active_div = (app->col_drag == 1 && app->col_drag_k == k) || hover_edge == k;
+            rubraview_pal_rect_t div_r = active_div
+                ? (rubraview_pal_rect_t){ cols.x[k] - 1.0 * dpi, hy, 2.0 * dpi, hh }
+                : (rubraview_pal_rect_t){ cols.x[k], hy + 4.0 * dpi, 1.0 * dpi, hh - 8.0 * dpi };
+            rubraview_pal_render_fill_rect(app->renderer, div_r, active_div ? COLOR_TILE_CURRENT : 0x45FFFFFFu, 0.0);
+        }
+        if (app->col_drag == 2 && app->col_drag_moved && app->col_drag_k > 0) {
+            double drop_x = 0.0;
+            if (rubraview_picker_cols_drop_slot(&cols, g_col_order, app->col_drag_k, app->pointer_x, NULL, &drop_x)) {
+                rubraview_pal_render_fill_rect(app->renderer,
+                    (rubraview_pal_rect_t){ drop_x - 1.5 * dpi, hy, 3.0 * dpi, hh }, COLOR_TILE_CURRENT, 0.0);
+            }
         }
         /* RV-317: Row 2 compact touch toolbar */
     }
@@ -1859,6 +1874,14 @@ uint64_t scene_signature(const app_state_t *app) {
         SIG(&h, (int64_t)lround(app->picker_crumbs_scroll));
         SIG(&h, (int64_t)lround(app->picker_tools_scroll));
         SIG(&h, (int)app->picker.mode);
+        SIG(&h, (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))));
+        SIG(&h, rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5);
+        SIG(&h, picker_folders_first(app));
+        SIG(&h, picker_details(app));
+        SIG(&h, app->col_drag); SIG(&h, app->col_drag_k); SIG(&h, app->col_drag_moved);
+        for (int k = 1; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) SIG(&h, (int64_t)lround(g_col_w[k] * 10.0));
+        for (int j = 0; j < RUBRAVIEW_PICKER_SORT_COUNT - 1; ++j) SIG(&h, g_col_order[j]);
+        if (app->col_drag) SIG(&h, (int64_t)app->pointer_x);
     }
     SIG(&h, app->chrome_hidden); SIG(&h, (int64_t)app->picker.columns);
     SIG(&h, app->page_job != NULL); SIG(&h, app->resume_offer); SIG(&h, app->confirm_purge); SIG(&h, app->confirm_restart);

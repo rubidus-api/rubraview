@@ -656,6 +656,7 @@ typedef struct sort_ctx {
     const rubraview_picker_media_t *media;
     rubraview_picker_sort_key_t key;
     bool descending;
+    bool folders_first;
 } sort_ctx_t;
 
 static bool is_dotdot(const rubraview_fs_entry_t *e) {
@@ -666,7 +667,7 @@ static bool is_dotdot(const rubraview_fs_entry_t *e) {
 static int sort_cmp(const sort_ctx_t *c, size_t ia, size_t ib) {
     const rubraview_fs_entry_t *a = &c->listing->entries[ia], *b = &c->listing->entries[ib];
     if (is_dotdot(a) != is_dotdot(b)) return is_dotdot(a) ? -1 : 1;
-    if (a->is_directory != b->is_directory) return a->is_directory ? -1 : 1;
+    if (a->is_directory != b->is_directory) return (a->is_directory == c->folders_first) ? -1 : 1;
     int r = 0;
     bool unread_a = false, unread_b = false;
     switch (c->key) {
@@ -700,12 +701,12 @@ static int sort_cmp(const sort_ctx_t *c, size_t ia, size_t ib) {
     return r;
 }
 
-void rubraview_picker_sort_order(const rubraview_fs_listing_t *listing, const rubraview_picker_media_t *media,
-                                 rubraview_picker_sort_key_t key, bool descending, size_t *order) {
+void rubraview_picker_sort_order_ex(const rubraview_fs_listing_t *listing, const rubraview_picker_media_t *media,
+                                    rubraview_picker_sort_key_t key, bool descending, bool folders_first, size_t *order) {
     if (!listing || !order) return;
     size_t n = listing->count;
     for (size_t i = 0; i < n; ++i) order[i] = i;
-    sort_ctx_t c = { .listing = listing, .media = media, .key = key, .descending = descending };
+    sort_ctx_t c = { .listing = listing, .media = media, .key = key, .descending = descending, .folders_first = folders_first };
     size_t *tmp = n > 1 ? (size_t*)rubraview_alloc(n * sizeof(size_t)) : NULL;
     if (!tmp) {
         /* no room for the merge: insertion, stable too */
@@ -728,6 +729,179 @@ void rubraview_picker_sort_order(const rubraview_fs_listing_t *listing, const ru
         proven_sys_mem_copy(order, tmp, n * sizeof(size_t));
     }
     rubraview_free(tmp);
+}
+
+void rubraview_picker_sort_order(const rubraview_fs_listing_t *listing, const rubraview_picker_media_t *media,
+                                 rubraview_picker_sort_key_t key, bool descending, size_t *order) {
+    rubraview_picker_sort_order_ex(listing, media, key, descending, true, order);
+}
+
+void rubraview_picker_partition_order(const rubraview_fs_listing_t *listing, bool folders_first, size_t *order) {
+    if (!listing || !order) return;
+    size_t n = listing->count, out = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (is_dotdot(&listing->entries[i])) order[out++] = i;
+    }
+    for (int pass = 0; pass < 2; ++pass) {
+        bool want_dir = (pass == 0) ? folders_first : !folders_first;
+        for (size_t i = 0; i < n; ++i) {
+            const rubraview_fs_entry_t *e = &listing->entries[i];
+            if (is_dotdot(e) || e->is_directory != want_dir) continue;
+            order[out++] = i;
+        }
+    }
+}
+
+rubraview_picker_cols_t rubraview_picker_cols_layout(const double col_w[RUBRAVIEW_PICKER_SORT_COUNT],
+                                                     const int order[RUBRAVIEW_PICKER_SORT_COUNT - 1],
+                                                     double win_w, double dpi) {
+    static const rubraview_picker_sort_key_t DROP[] = {
+        RUBRAVIEW_PICKER_SORT_CREATED,
+        RUBRAVIEW_PICKER_SORT_RESOLUTION,
+        RUBRAVIEW_PICKER_SORT_LENGTH,
+        RUBRAVIEW_PICKER_SORT_TYPE,
+    };
+    rubraview_picker_cols_t c = { .name_x = 10.0 * dpi };
+    for (int k = 1; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) c.w[k] = col_w[k] * dpi;
+    double right = win_w - 8.0 * dpi;
+    for (size_t d = 0;; ++d) {
+        double used = 0.0;
+        for (int k = 1; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) used += c.w[k];
+        if (right - used - c.name_x >= RUBRAVIEW_PICKER_NAME_MIN_W * dpi || d >= sizeof(DROP) / sizeof(DROP[0])) break;
+        c.w[DROP[d]] = 0.0;
+    }
+    double x = right;
+    for (int j = RUBRAVIEW_PICKER_SORT_COUNT - 2; j >= 0; --j) {
+        int k = order[j];
+        if (k < 1 || k >= RUBRAVIEW_PICKER_SORT_COUNT) continue;
+        x -= c.w[k];
+        c.x[k] = x;
+    }
+    c.x[0] = c.name_x;
+    c.w[0] = fmax(0.0, x - c.name_x);
+    return c;
+}
+
+int rubraview_picker_cols_left_of(const rubraview_picker_cols_t *cols,
+                                  const int order[RUBRAVIEW_PICKER_SORT_COUNT - 1], int edge_col) {
+    if (!cols || !order || edge_col < 1 || edge_col >= RUBRAVIEW_PICKER_SORT_COUNT) return 0;
+    int prev = 0;
+    for (int j = 0; j < RUBRAVIEW_PICKER_SORT_COUNT - 1; ++j) {
+        int k = order[j];
+        if (k == edge_col) return prev;
+        if (k >= 1 && k < RUBRAVIEW_PICKER_SORT_COUNT && cols->w[k] > 0.0) prev = k;
+    }
+    return 0;
+}
+
+void rubraview_picker_cols_resize(double col_w[RUBRAVIEW_PICKER_SORT_COUNT],
+                                  int left_col, int right_col,
+                                  double w_left0, double w_right0,
+                                  bool any_droppable_visible, double dx_logical) {
+    if (!col_w || right_col < 1 || right_col >= RUBRAVIEW_PICKER_SORT_COUNT) return;
+    if (left_col < 0 || left_col >= RUBRAVIEW_PICKER_SORT_COUNT || left_col == right_col) return;
+    double dx = round(dx_logical);
+    if (left_col > 0) {
+        double dx_min = fmax(RUBRAVIEW_PICKER_COL_MIN_W - w_left0, w_right0 - RUBRAVIEW_PICKER_COL_MAX_W);
+        double dx_max = fmin(RUBRAVIEW_PICKER_COL_MAX_W - w_left0, w_right0 - RUBRAVIEW_PICKER_COL_MIN_W);
+        if (dx_min > dx_max) return;
+        if (dx < dx_min) dx = dx_min;
+        if (dx > dx_max) dx = dx_max;
+        col_w[left_col] = w_left0 + dx;
+        col_w[right_col] = w_right0 - dx;
+    } else {
+        double name_min = any_droppable_visible ? RUBRAVIEW_PICKER_NAME_MIN_W : RUBRAVIEW_PICKER_NAME_HARD_W;
+        if (w_left0 < name_min) name_min = w_left0;
+        double dx_min = fmax(name_min - w_left0, w_right0 - RUBRAVIEW_PICKER_COL_MAX_W);
+        double dx_max = w_right0 - RUBRAVIEW_PICKER_COL_MIN_W;
+        if (dx_min > dx_max) return;
+        if (dx < dx_min) dx = dx_min;
+        if (dx > dx_max) dx = dx_max;
+        col_w[right_col] = w_right0 - dx;
+    }
+}
+
+bool rubraview_picker_cols_drop_slot(const rubraview_picker_cols_t *cols,
+                                     const int order[RUBRAVIEW_PICKER_SORT_COUNT - 1],
+                                     int drag_col, double x, int *out_slot, double *out_drop_x) {
+    if (!cols || !order || drag_col < 1 || drag_col >= RUBRAVIEW_PICKER_SORT_COUNT) return false;
+    int vis[RUBRAVIEW_PICKER_SORT_COUNT - 1];
+    int m = 0, vis_idx = -1;
+    for (int j = 0; j < RUBRAVIEW_PICKER_SORT_COUNT - 1; ++j) {
+        int k = order[j];
+        if (k < 1 || k >= RUBRAVIEW_PICKER_SORT_COUNT || cols->w[k] <= 0.0) continue;
+        if (k == drag_col) vis_idx = m;
+        vis[m++] = k;
+    }
+    if (vis_idx < 0 || m < 2) return false;
+
+    double drag_l = cols->x[drag_col], drag_r = drag_l + cols->w[drag_col];
+    int slot = vis_idx;
+    if (x < drag_l) {
+        if (vis_idx == 0) return false;
+        slot = vis_idx - 1;
+        for (int i = 0; i < vis_idx; ++i) {
+            if (x < cols->x[vis[i]] + cols->w[vis[i]]) {
+                slot = i;
+                break;
+            }
+        }
+    } else if (x >= drag_r) {
+        if (vis_idx >= m - 1) return false;
+        slot = vis_idx + 2;
+        for (int i = m - 1; i > vis_idx; --i) {
+            if (x >= cols->x[vis[i]]) {
+                slot = i + 1;
+                break;
+            }
+        }
+    } else {
+        return false;
+    }
+    if (slot == vis_idx || slot == vis_idx + 1) return false;
+    if (out_slot) *out_slot = slot;
+    if (out_drop_x) {
+        *out_drop_x = slot < m ? cols->x[vis[slot]] : cols->x[vis[m - 1]] + cols->w[vis[m - 1]];
+    }
+    return true;
+}
+
+bool rubraview_picker_cols_reorder(const rubraview_picker_cols_t *cols,
+                                   int order[RUBRAVIEW_PICKER_SORT_COUNT - 1],
+                                   int drag_col, double x) {
+    int slot = -1;
+    if (!rubraview_picker_cols_drop_slot(cols, order, drag_col, x, &slot, NULL)) return false;
+
+    int vis[RUBRAVIEW_PICKER_SORT_COUNT - 1];
+    int m = 0;
+    for (int j = 0; j < RUBRAVIEW_PICKER_SORT_COUNT - 1; ++j) {
+        int k = order[j];
+        if (k >= 1 && k < RUBRAVIEW_PICKER_SORT_COUNT && cols->w[k] > 0.0) vis[m++] = k;
+    }
+
+    int rem[RUBRAVIEW_PICKER_SORT_COUNT - 2];
+    int r = 0;
+    for (int j = 0; j < RUBRAVIEW_PICKER_SORT_COUNT - 1; ++j) {
+        if (order[j] != drag_col && r < RUBRAVIEW_PICKER_SORT_COUNT - 2) rem[r++] = order[j];
+    }
+    if (r != RUBRAVIEW_PICKER_SORT_COUNT - 2) return false;
+
+    int ins = r;
+    if (slot < m) {
+        int anchor = vis[slot];
+        for (int i = 0; i < r; ++i) {
+            if (rem[i] == anchor) { ins = i; break; }
+        }
+    } else if (m > 0) {
+        int last_vis = vis[m - 1];
+        for (int i = 0; i < r; ++i) {
+            if (rem[i] == last_vis) { ins = i + 1; break; }
+        }
+    }
+    for (int i = 0; i < ins; ++i) order[i] = rem[i];
+    order[ins] = drag_col;
+    for (int i = ins; i < r; ++i) order[i + 1] = rem[i];
+    return true;
 }
 
 int32_t rubraview_folder_show_for(int32_t show, int32_t opened_kind, bool same_kind) {

@@ -870,6 +870,10 @@ static void ap_decoder_retry(app_state_t *app, bool first) {
     }
 }
 
+static void ap_picker_sort(app_state_t *app, bool first) {
+    if (!first && app->picker_open) picker_resort(app);
+}
+
 typedef struct apply_row {
     const char *keys;   /* the settings it watches, "section.key ..." */
     void (*run)(app_state_t *app, bool first);
@@ -883,6 +887,7 @@ static const apply_row_t APPLY[] = {
     { "viewer.pixel_grid", ap_pixel_grid },
     { "video.subtitle_font", ap_subtitle_face },
     { "files.pattern files.sort_mode files.sort_ascending files.subfolders files.show files.same_kind", ap_listing },
+    { "files.picker_sort files.picker_sort_desc files.picker_folders_first", ap_picker_sort },
     { "audio.output_device", ap_audio_device },
     { "general.font_settings general.size_settings general.settings_spacing", ap_settings_look },
     { "text.viewer", ap_text_on },

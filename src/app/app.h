@@ -1276,9 +1276,9 @@ typedef struct app_state {
     char                 (*picker_hist)[PICKER_HIST_PATH]; /* 1.24.0: the way back, then the way forward (PICKER_HIST each) */
     int32_t                picker_back_n, picker_fwd_n;
     size_t                 picker_anchor;        /* 1.24.0: where a Shift+click's range starts */
-    int32_t                col_drag, col_drag_k; /* 1.25.0: 1 a column's width, 2 a column's place; which column */
-    double                 col_drag_x0, col_drag_w0;
-    bool                   col_drag_moved;
+    int32_t                col_drag, col_drag_k, col_drag_left; /* 1.25.0: 1 a column's width, 2 a column's place; which column */
+    double                 col_drag_x0, col_drag_w0, col_drag_w_left0;
+    bool                   col_drag_moved, col_drag_drop_guard;
     uint64_t               title_key;            /* 1.24.0: what the window's title was last made for */
     uint32_t               undo_batch;   /* 1.23.0: the last batch number given to a move, copy or bin of many */
     rubraview_curation_t   curation;
@@ -1868,7 +1868,9 @@ static const picker_button_t PICKER_BOTTOM[] = { PICKER_BTN_PLAYLIST, PICKER_BTN
 enum { PICKER_TOOL_FAVS = 0,  /* RV-317: Favourites + Places 2-column popup */
        PICKER_TOOL_ALL,       /* All/None checkbox toggle */
        PICKER_TOOL_SELECT,    /* RV-317: 2-step selection chooser */
-       PICKER_TOOL_SORT,      /* RV-317: unified sort key + Rising/Falling chooser */
+       PICKER_TOOL_SORT,      /* RV-317 / R346: sort column chooser */
+       PICKER_TOOL_SORT_DIR,  /* R346: ascending/descending arrow toggle */
+       PICKER_TOOL_FOLDERS_FIRST, /* R346: Folders first / Files first toggle */
        PICKER_TOOL_VIEW,      /* RV-317: unified view layout + file filter chooser */
        PICKER_TOOL_FILTER,    /* RV-317: filter field (omitted inside a book) */
        PICKER_TOOL_COUNT };
@@ -1951,11 +1953,7 @@ extern bool           g_launch_whole;
 
 /* Moved from main.c: more than one file uses them (RV-163). */
 #define TITLEBAR_ON 0xFF2D4A6Eu   /* 1.25.0: the ground of a title bar or widget button that is on */
-typedef struct picker_columns {
-    double name_x;
-    double x[RUBRAVIEW_PICKER_SORT_COUNT];      /* where each begins; Name's end is x[TYPE] */
-    double w[RUBRAVIEW_PICKER_SORT_COUNT];      /* how wide, 0 when let go */
-} picker_columns_t;
+typedef rubraview_picker_cols_t picker_columns_t;
 #define SUBBOX_BUTTON 30.0
 #define SUBBOX_GAP 4.0
 
@@ -2576,8 +2574,9 @@ rubraview_pal_rect_t picker_check_rect(const app_state_t *app, size_t index, dou
 double picker_chip_width(proven_u8str_view_t label, double dpi);
 int picker_column_at(const picker_columns_t *c, double x);
 int picker_column_edge(const picker_columns_t *c, double x, double dpi);
+int picker_column_left_of(const picker_columns_t *c, int edge_col);
 int32_t picker_columns(const app_state_t *app);
-void picker_columns_motion(app_state_t *app, double x, double y);
+bool picker_columns_motion(app_state_t *app, double x, double y);
 void picker_columns_read(proven_u8str_view_t text);
 bool picker_columns_release(app_state_t *app, double x);
 void picker_context(app_state_t *app, size_t index, double x, double y);
@@ -2588,6 +2587,7 @@ void picker_curate(app_state_t *app, int32_t digit, bool moving);
 void picker_curate_to(app_state_t *app, proven_u8str_view_t target_dir, bool moving);
 picker_columns_t picker_detail_columns(double win_w, double dpi);
 bool picker_details(const app_state_t *app);
+bool picker_folders_first(const app_state_t *app);
 bool picker_enter_book(app_state_t *app, size_t index);
 bool picker_path_edit_labeled(double dpi, double win_w);
 rubraview_pal_rect_t picker_path_edit_rect(double dpi, double win_w, double top);
@@ -2660,6 +2660,8 @@ const char *shape_name(int32_t shape);
 bool shape_table(app_state_t *app, int32_t target, uint8_t **out_shapes, size_t **out_rows, size_t *out_n, bool **out_selected);
 void picker_sort_by(app_state_t *app, int key);
 void picker_sort_set(app_state_t *app, int key, bool desc);
+void picker_toggle_sort_dir(app_state_t *app);
+void picker_toggle_folders_first(app_state_t *app);
 void picker_resort(app_state_t *app);   /* RV-210 */
 bool picker_can_favorite_current(const app_state_t *app);
 void picker_thumbs_free(app_state_t *app);

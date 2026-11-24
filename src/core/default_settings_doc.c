@@ -221,6 +221,7 @@ static const char *const PARTS[] = {
 "  toggle files.picker_all         \"Open-file screen shows every file\" = true wired\n"
 "  choice files.picker_sort        \"  sorted by\"               as_folder | name | type | size | created | modified | resolution | length = as_folder wired\n"
 "  toggle files.picker_sort_desc   \"  the other way round\"     = false wired\n"
+"  toggle files.picker_folders_first \"  folders first\"         = true wired\n"
 "  choice files.list_paths         \"A saved list names its files\" relative | absolute = relative wired\n"
 "  choice files.archive_in_list    \"An archive (not a comic) in the list\" ask | book | skip = ask wired\n"
 "  section \"Reading history\"\n"

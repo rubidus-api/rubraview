@@ -69,27 +69,33 @@ static rubraview_fs_listing_t recent_listing(app_state_t *app, proven_arena_t *p
 static void picker_apply_sort(app_state_t *app) {
     int32_t choice = (int32_t)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort")));
     bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
+    bool folders_first = picker_folders_first(app);
     size_t n = app->picker_listing.count;
-    if (choice <= 0 || n < 2 || rubraview_picker_is_places(app->picker_dir)) return;   /* as the folder has it */
+    if (n < 2 || rubraview_picker_is_places(app->picker_dir)) return;
+    if (choice <= 0 && rubraview_picker_is_recent(app->picker_dir)) return;   /* recent stays newest first when as_folder */
     size_t *order = (size_t*)rubraview_alloc(n * sizeof(size_t));
-    rubraview_picker_media_t *media = (rubraview_picker_media_t*)rubraview_alloc_zero(n, sizeof(rubraview_picker_media_t));
+    rubraview_picker_media_t *media = choice > 0 ? (rubraview_picker_media_t*)rubraview_alloc_zero(n, sizeof(rubraview_picker_media_t)) : NULL;
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)rubraview_alloc(n * sizeof(rubraview_fs_entry_t));
     struct picker_thumb *thumbs = (struct picker_thumb*)rubraview_alloc(n * sizeof(struct picker_thumb));
     bool *picked = (bool*)rubraview_alloc(n * sizeof(bool));
-    if (order && media && entries && thumbs && picked) {
+    if (order && (choice <= 0 || media) && entries && thumbs && picked) {
         bool have_thumbs = app->picker_thumbs && app->picker_thumb_count == n;
-        for (size_t i = 0; i < n && have_thumbs; ++i) media[i] = app->picker_thumbs[i].media;
-        /* RV-202, RV-210: what the reader read stands in where no thumbnail has said it yet */
-        for (size_t i = 0; i < n; ++i) {
-            const rubraview_fs_entry_t *e = &app->picker_listing.entries[i];
-            if (e->is_directory) continue;
-            int32_t w = 0, h = 0;
-            double seconds = 0.0;
-            if (!rubraview_shape_cache_facts(&app->shape_cache, e->path, e->mtime, &w, &h, &seconds)) continue;
-            if (media[i].seconds <= 0.0 && seconds > 0.0) media[i].seconds = seconds;
-            if ((media[i].width <= 0 || media[i].height <= 0) && w > 0 && h > 0) { media[i].width = w; media[i].height = h; }
+        if (choice <= 0) {
+            rubraview_picker_partition_order(&app->picker_listing, folders_first, order);
+        } else {
+            for (size_t i = 0; i < n && have_thumbs; ++i) media[i] = app->picker_thumbs[i].media;
+            /* RV-202, RV-210: what the reader read stands in where no thumbnail has said it yet */
+            for (size_t i = 0; i < n; ++i) {
+                const rubraview_fs_entry_t *e = &app->picker_listing.entries[i];
+                if (e->is_directory) continue;
+                int32_t w = 0, h = 0;
+                double seconds = 0.0;
+                if (!rubraview_shape_cache_facts(&app->shape_cache, e->path, e->mtime, &w, &h, &seconds)) continue;
+                if (media[i].seconds <= 0.0 && seconds > 0.0) media[i].seconds = seconds;
+                if ((media[i].width <= 0 || media[i].height <= 0) && w > 0 && h > 0) { media[i].width = w; media[i].height = h; }
+            }
+            rubraview_picker_sort_order_ex(&app->picker_listing, media, (rubraview_picker_sort_key_t)(choice - 1), desc, folders_first, order);
         }
-        rubraview_picker_sort_order(&app->picker_listing, media, (rubraview_picker_sort_key_t)(choice - 1), desc, order);
         size_t focus = app->picker.focus;
         for (size_t i = 0; i < n; ++i) {
             entries[i] = app->picker_listing.entries[order[i]];
@@ -146,9 +152,9 @@ void picker_sort_set(app_state_t *app, int key, bool desc) {
     rubraview_settings_set(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc"), desc ? 1.0 : 0.0);
     settings_write_if_changed(app, false);
     picker_resort(app);
-    char line[64];
+    char line[128];
     int n = rubraview_fmt(line, sizeof(line), T("by {}, {}"), PROVEN_ARG(rubraview_picker_sort_name((rubraview_picker_sort_key_t)key)),
-                     PROVEN_ARG(desc ? "falling" : "rising"));
+                     PROVEN_ARG(desc ? T("Falling") : T("Rising")));
     if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
 }
 
@@ -156,6 +162,20 @@ void picker_sort_by(app_state_t *app, int key) {
     int now = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
     bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
     picker_sort_set(app, key, now == key ? !desc : false);
+}
+
+void picker_toggle_sort_dir(app_state_t *app) {
+    int key = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
+    bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
+    picker_sort_set(app, key < 0 ? 0 : key, !desc);
+}
+
+void picker_toggle_folders_first(app_state_t *app) {
+    bool next = !picker_folders_first(app);
+    rubraview_settings_set(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_folders_first"), next ? 1.0 : 0.0);
+    settings_write_if_changed(app, false);
+    picker_resort(app);
+    osd_say(app, next ? TU8("Folders first") : TU8("Files first"));
 }
 
 /* 1.24.0 (owner, 2026-10-19): the folders the open-file screen went through, for back and forward. (PICKER_HIST / PICKER_HIST_PATH in app.h) */
@@ -455,7 +475,9 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
         if (proven_is_ok(ordered_res.err)) {
             rubraview_fs_entry_t *ordered = (rubraview_fs_entry_t*)(void*)ordered_res.value.ptr;
             size_t out = 0;
-            for (int folder_pass = 1; folder_pass >= 0; --folder_pass) {
+            bool ff = picker_folders_first(app);
+            for (int p = 0; p < 2; ++p) {
+                int folder_pass = (p == 0) ? (ff ? 1 : 0) : (ff ? 0 : 1);
                 for (size_t i = 0; i < listing.count; ++i) {
                     const rubraview_fs_entry_t *e = &listing.entries[items[i].tag];
                     if ((int)e->is_directory != folder_pass) continue;

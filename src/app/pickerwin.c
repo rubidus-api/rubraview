@@ -16,6 +16,10 @@ bool picker_details(const app_state_t *app) {
     return rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_details")) > 0.5;
 }
 
+bool picker_folders_first(const app_state_t *app) {
+    return rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_folders_first")) > 0.5;
+}
+
 /* 1.24.0 (owner, 2026-10-19: "화면 좌우 폭에 따라 가로에 몇개씩 보여주는지가 적절하게"): as many tiles a row
    as are near PICKER_TILE_WIDE wide, at least two. */
 int32_t picker_tile_columns(const app_state_t *app) {
@@ -338,9 +342,15 @@ proven_u8str_view_t picker_tool_label(const app_state_t *app, int which, char *b
         case PICKER_TOOL_SORT: {
             const char *sname = key >= 0 && key < RUBRAVIEW_PICKER_SORT_COUNT
                               ? rubraview_picker_sort_name((rubraview_picker_sort_key_t)key) : T("Sort");
-            n = rubraview_fmt(buf, cap, "{} {} \xE2\x96\xBE", PROVEN_ARG(sname), PROVEN_ARG(desc ? "\xE2\x96\xBC" : "\xE2\x96\xB2"));
+            n = rubraview_fmt(buf, cap, "{} \xE2\x96\xBE", PROVEN_ARG(sname));
             break;
         }
+        case PICKER_TOOL_SORT_DIR:
+            n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(desc ? "\xE2\x96\xBC" : "\xE2\x96\xB2"));
+            break;
+        case PICKER_TOOL_FOLDERS_FIRST:
+            n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(picker_folders_first(app) ? T("Folders first") : T("Files first")));
+            break;
         case PICKER_TOOL_VIEW:
             n = rubraview_fmt(buf, cap, "{} \xE2\x96\xBE", PROVEN_ARG(T("View")));
             break;

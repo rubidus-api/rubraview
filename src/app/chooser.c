@@ -327,17 +327,14 @@ void chooser_open_setting(app_state_t *app) {
     chooser_show(app, CHOOSE_IN_SETTINGS, x, ry + app->settings_cell_h, ry);
 }
 
-/* The open-file screen's sorting: Rising / Falling and sort column in one chooser. */
+/* The open-file screen's sorting: sort column chooser (direction has its own Row 2 arrow button). */
 void chooser_open_sort(app_state_t *app, double x, double y, double above_y) {
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_SORT };
     int key = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
-    bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
     rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Sort")));
-    chooser_word(c, -1.0, "{}  {} \xE2\x96\xB2", PROVEN_ARG(!desc ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Rising")));
-    chooser_word(c, -2.0, "{}  {} \xE2\x96\xBC", PROVEN_ARG(desc ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Falling")));
     for (int k = 0; k < RUBRAVIEW_PICKER_SORT_COUNT; ++k) chooser_word(c, k, "{}", PROVEN_ARG(rubraview_picker_sort_name((rubraview_picker_sort_key_t)k)));
-    c->current = 2 + (key >= 0 ? key : 0);
+    c->current = key >= 0 && key < RUBRAVIEW_PICKER_SORT_COUNT ? key : 0;
     chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
 }
 
@@ -689,10 +686,8 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             break;
         case CHOOSE_SORT: {
             int val = (int)lround(c->values[index]);
-            int key = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort"))) - 1;
             bool desc = rubraview_settings_get(&app->settings, PROVEN_LIT("files"), PROVEN_LIT("picker_sort_desc")) > 0.5;
-            if (val == -1 || val == -2) picker_sort_set(app, key < 0 ? 0 : key, val == -2);
-            else picker_sort_set(app, val, desc);
+            picker_sort_set(app, val, desc);
             break;
         }
         case CHOOSE_PICKER_SELECT: {
