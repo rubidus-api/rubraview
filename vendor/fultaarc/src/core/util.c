@@ -492,7 +492,8 @@ static bool part_is_dots(const char *p, size_t len) {
 
 bool fa_sanitize_name(char *name) {
     /* split on '/' and '\\', drop empty and "." parts and a leading drive ("X:" or "X:part", which Windows reads
-     * as drive-relative), reject a part Windows reads as ".." (part_is_dots), rejoin with '/' */
+     * as drive-relative), reject a part Windows reads as ".." (part_is_dots), turn control bytes into '_', rejoin
+     * with '/' */
     size_t w = 0, i = 0, n = strlen(name);
     while (i < n) {
         size_t j = i;
@@ -511,6 +512,8 @@ bool fa_sanitize_name(char *name) {
         if (!skip) {
             if (w) name[w++] = '/';
             memmove(name + w, part, len);
+            for (size_t k = w; k < w + len; k++)   /* C0 controls and DEL: '_' (D-045); name_raw keeps them */
+                if ((unsigned char)name[k] < 0x20 || name[k] == 0x7F) name[k] = '_';
             w += len;
         }
         i = j + 1;

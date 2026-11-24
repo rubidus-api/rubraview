@@ -41,7 +41,7 @@ typedef struct iso_state {
     size_t n, cap;
     uint32_t blocksize;
     uint64_t records;               /* total records parsed (bomb guard) */
-    uint32_t *visited;              /* directory LBAs already walked (cycle guard) */
+    uint64_t *visited;              /* open-addressed set of (uint64_t)lba + 1 (0 = empty) */
     size_t nvis, capvis;
 } iso_state_t;
 
@@ -56,16 +56,37 @@ typedef struct rr_info {
 /* True if `lba` was already walked; otherwise remembers it. A directory cycle (a record pointing back at an
  * ancestor, or two directories referencing each other) is bounded by this, not just by the depth cap. */
 static bool iso_seen(iso_state_t *st, uint32_t lba) {
-    for (size_t i = 0; i < st->nvis; i++) if (st->visited[i] == lba) return true;
+    uint64_t key = (uint64_t)lba + 1;
+    if (st->visited) {
+        size_t mask = st->capvis - 1;
+        size_t i = (size_t)((key * UINT64_C(0x9E3779B97F4A7C15)) >> 32) & mask;
+        while (st->visited[i]) {
+            if (st->visited[i] == key) return true;
+            i = (i + 1) & mask;
+        }
+    }
     if (st->nvis < ISO_MAX_DIRS) {
-        if (st->nvis == st->capvis) {
+        if (!st->visited || (st->nvis + 1) * 2 > st->capvis) {
             size_t nc = st->capvis ? st->capvis * 2 : 64;
-            uint32_t *p = fa_resize(st->alloc, st->visited, st->capvis * sizeof *p, nc * sizeof *p);
+            uint64_t *p = fa_zalloc(st->alloc, nc, sizeof *p);
             if (!p) return true;    /* out of memory for the set: treat as seen, stop descending */
+            size_t nmask = nc - 1;
+            for (size_t j = 0; j < st->capvis; j++) {
+                uint64_t k = st->visited[j];
+                if (!k) continue;
+                size_t m = (size_t)((k * UINT64_C(0x9E3779B97F4A7C15)) >> 32) & nmask;
+                while (p[m]) m = (m + 1) & nmask;
+                p[m] = k;
+            }
+            fa_release(st->alloc, st->visited);
             st->visited = p;
             st->capvis = nc;
         }
-        st->visited[st->nvis++] = lba;
+        size_t mask = st->capvis - 1;
+        size_t i = (size_t)((key * UINT64_C(0x9E3779B97F4A7C15)) >> 32) & mask;
+        while (st->visited[i]) i = (i + 1) & mask;
+        st->visited[i] = key;
+        st->nvis++;
     }
     return false;
 }
@@ -284,7 +305,7 @@ static fulta_arc_err_t iso_walk(fulta_arc_t *arc, iso_state_t *st, uint32_t lba,
             if (!fa_sanitize_name(safe)) { fa_release(arc->alloc, safe); safe = NULL; }
             const char *use = safe && safe[0] ? safe : "data";
             fa_entry_t *en = fa_add_entry(arc, fa_bytes((const uint8_t *)path, strlen(path)), use, "store");
-            iso_item_t *it = iso_add(st);
+            iso_item_t *it = en ? iso_add(st) : NULL;
             fa_release(arc->alloc, safe);
             if (!en || !it) { e = FULTA_ARC_ERR_NOMEM; break; }
             uint8_t *tgt = fa_alloc(arc->alloc, rr.tlen ? rr.tlen : 1);
@@ -313,7 +334,7 @@ static fulta_arc_err_t iso_walk(fulta_arc_t *arc, iso_state_t *st, uint32_t lba,
                 if (!fa_sanitize_name(safe)) { fa_release(arc->alloc, safe); safe = NULL; }
                 const char *use = safe && safe[0] ? safe : "data";
                 fa_entry_t *en = fa_add_entry(arc, fa_bytes((const uint8_t *)path, strlen(path)), use, zf ? "zisofs" : "store");
-                iso_item_t *it = iso_add(st);
+                iso_item_t *it = en ? iso_add(st) : NULL;
                 fa_release(arc->alloc, safe);
                 if (!en || !it) { e = FULTA_ARC_ERR_NOMEM; break; }
                 en->pub.size = zf ? zusz : datalen;
@@ -418,15 +439,21 @@ static fulta_arc_err_t iso_zisofs_extract(fulta_arc_t *arc, iso_item_t *it, cons
     uint64_t tbl_bytes = (nblocks + 1) * 4;
     if (it->size < ISO_ZF_HDR || tbl_bytes > it->size - ISO_ZF_HDR) return FULTA_ARC_ERR_CORRUPT;   /* table in extent */
 
-    uint32_t *tbl = fa_alloc(arc->alloc, (size_t)tbl_bytes);
-    if (!tbl) return FULTA_ARC_ERR_NOMEM;
-    if (fa_source_read_exact(src, it->off + ISO_ZF_HDR, fa_bytes_mut((uint8_t *)tbl, (size_t)tbl_bytes))) { fa_release(arc->alloc, tbl); return FULTA_ARC_ERR_TRUNCATED; }
+    fa_budget_arm(&arc->budget);
+    proven_allocator_t ba = fa_arc_budget(arc);
+    uint32_t *tbl = fa_alloc(ba, (size_t)tbl_bytes);
+    if (!tbl) return fa_arc_nomem(arc);
+    if (fa_source_read_exact(src, it->off + ISO_ZF_HDR, fa_bytes_mut((uint8_t *)tbl, (size_t)tbl_bytes))) {
+        fa_release(ba, tbl);
+        return FULTA_ARC_ERR_TRUNCATED;
+    }
 
-    uint8_t *obuf = fa_alloc(arc->alloc, bsize), *cbuf = NULL;
+    uint8_t *obuf = fa_alloc(ba, bsize), *cbuf = NULL;
     size_t ccap = 0;
-    fulta_arc_err_t e = obuf ? FULTA_ARC_OK : FULTA_ARC_ERR_NOMEM;
+    fulta_arc_err_t e = obuf ? FULTA_ARC_OK : fa_arc_nomem(arc);
     uint64_t produced = 0;
     for (uint64_t b = 0; b < nblocks && !e; b++) {
+        if (fa_cancelled(arc)) { e = FULTA_ARC_ERR_CANCELLED; break; }
         uint32_t start = fa_le32((uint8_t *)&tbl[b]), end = fa_le32((uint8_t *)&tbl[b + 1]);
         uint32_t want = (uint32_t)(it->usize - produced < bsize ? it->usize - produced : bsize);
         if (end < start || end > it->size) { e = FULTA_ARC_ERR_CORRUPT; break; }
@@ -436,7 +463,12 @@ static fulta_arc_err_t iso_zisofs_extract(fulta_arc_t *arc, iso_item_t *it, cons
         } else {
             uint32_t clen = end - start;
             if (clen < 2) { e = FULTA_ARC_ERR_CORRUPT; break; }
-            if (clen > ccap) { uint8_t *nc = fa_resize(arc->alloc, cbuf, ccap, clen); if (!nc) { e = FULTA_ARC_ERR_NOMEM; break; } cbuf = nc; ccap = clen; }
+            if (clen > ccap) {
+                fa_release(ba, cbuf);
+                cbuf = fa_alloc(ba, clen);
+                if (!cbuf) { ccap = 0; e = fa_arc_nomem(arc); break; }
+                ccap = clen;
+            }
             if (fa_source_read_exact(src, it->off + start, fa_bytes_mut(cbuf, clen))) { e = FULTA_ARC_ERR_TRUNCATED; break; }
             fa_stream_t *ms = NULL, *dec = NULL;            /* skip the 2-byte zlib header; Adler trailer is ignored */
             if ((e = fa_stream_memory(arc->alloc, cbuf + 2, clen - 2, &ms))) break;
@@ -446,8 +478,9 @@ static fulta_arc_err_t iso_zisofs_extract(fulta_arc_t *arc, iso_item_t *it, cons
             if (!e) e = sink->write(sink->ctx, obuf, want);
         }
         produced += want;
+        if (!e) fa_progress(arc, want);
     }
-    fa_release(arc->alloc, tbl); fa_release(arc->alloc, obuf); fa_release(arc->alloc, cbuf);
+    fa_release(ba, tbl); fa_release(ba, obuf); fa_release(ba, cbuf);
     return e;
 }
 

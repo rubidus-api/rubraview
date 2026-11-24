@@ -12,12 +12,14 @@
  * Licence: MIT (the project's, see LICENSE).
  */
 #include "alz.h"
+#include "../core/fa_once.h"
 #include <stdlib.h>
 #include <string.h>
 
 /* miniz for raw deflate and CRC-32, the cut-down bzip2 for method 1. Only
    this module includes the latter (RFC-0001 §8.1's one-module rule). */
 #include "miniz.h"
+#include "proven/hash.h"   /* CRC-32: proven's slicing-by-8, about 5x miniz's mz_crc32 */
 #define BZ_NO_STDIO
 #define BZ_EXPORT          /* plain functions, not a DLL's pointers, on Windows too */
 #include "alz_bzlib.h"   /* FultaArc: ALZ framing, ALZBZ2_* symbols (vendor/bzip2_alz) */
@@ -91,11 +93,22 @@ static uint64_t le_n(const uint8_t *p, unsigned n) {
 
 typedef struct zip_keys {
     uint32_t k0, k1, k2;
-    uint32_t table[256];
 } zip_keys_t;
 
+static uint32_t alz_crc_tab[256];
+static fa_once_t alz_crc_once;
+
+static void alz_crc_init(void) {
+    for (uint32_t n = 0; n < 256; ++n) {
+        uint32_t c = n;
+        for (int k = 0; k < 8; ++k) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+        alz_crc_tab[n] = c;
+    }
+}
+
 static uint32_t crc_step(const zip_keys_t *z, uint32_t k, uint8_t b) {
-    return z->table[(k ^ b) & 0xFF] ^ (k >> 8);
+    (void)z;
+    return alz_crc_tab[(k ^ b) & 0xFF] ^ (k >> 8);
 }
 
 static void keys_update(zip_keys_t *z, uint8_t b) {
@@ -105,11 +118,7 @@ static void keys_update(zip_keys_t *z, uint8_t b) {
 }
 
 static void keys_init(zip_keys_t *z, const uint8_t *password, size_t len) {
-    for (uint32_t n = 0; n < 256; ++n) {
-        uint32_t c = n;
-        for (int k = 0; k < 8; ++k) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : c >> 1;
-        z->table[n] = c;
-    }
+    fa_once(&alz_crc_once, alz_crc_init);
     z->k0 = 0x12345678u;
     z->k1 = 0x23456789u;
     z->k2 = 0x34567890u;
@@ -309,11 +318,11 @@ static fa_alz_err_t decode(const fa_alz_archive_t *a, const fa_alz_entry_t *e,
     }
     if (err == FA_ALZ_OK) {
         /* The one check the format keeps (spec 3): CRC-32 of the result. */
-        uint32_t crc = (uint32_t)MZ_CRC32_INIT;
+        uint32_t crc = 0;
         uint64_t done = 0;
         while (done < e->size) {
             size_t step = e->size - done > (1u << 30) ? (1u << 30) : (size_t)(e->size - done);
-            crc = (uint32_t)mz_crc32(crc, out + done, step);
+            crc = proven_crc32_update(crc, (proven_mem_view_t){.ptr = out + done, .size = step});
             done += step;
         }
         if (crc != e->crc32) err = FA_ALZ_ERR_CORRUPT_STREAM;
@@ -523,9 +532,17 @@ fa_alz_err_t fa_alz_set_password(fa_alz_archive_t *archive, proven_u8str_view_t 
 
     /* Then one of them decoded, and its CRC-32 compared (spec 4.2). */
     if (err == FA_ALZ_OK && smallest) {
-        uint8_t *out = fa_alloc(s->alloc, (size_t)smallest->size + 1);
-        if (!out) err = FA_ALZ_ERR_OUT_OF_MEMORY;
-        else {
+        uint64_t ratio = smallest->method == FA_ALZ_METHOD_STORED ? 1
+                       : smallest->method == FA_ALZ_METHOD_DEFLATE ? 1032 : 2000000;
+        if (smallest->packed_size > UINT64_MAX / ratio ||
+            smallest->size > smallest->packed_size * ratio + 65536) {
+            err = FA_ALZ_ERR_CORRUPT_STREAM;
+        } else if (archive->max_memory && smallest->size + 1 > archive->max_memory) {
+            err = FA_ALZ_ERR_TOO_LARGE;
+        }
+        uint8_t *out = (err == FA_ALZ_OK) ? fa_alloc(s->alloc, (size_t)smallest->size + 1) : NULL;
+        if (err == FA_ALZ_OK && !out) err = FA_ALZ_ERR_OUT_OF_MEMORY;
+        else if (out) {
             err = decode(archive, smallest, s->password, s->password_len, out);
             wipe(out, (size_t)smallest->size);
             fa_release(s->alloc, out);

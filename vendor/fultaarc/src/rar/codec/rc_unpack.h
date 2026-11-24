@@ -123,7 +123,7 @@ typedef struct rc_unpack {
     rc_filter_t *filters;
     size_t fcount, fcap;
     uint8_t *fbuf, *fbuf2;
-    size_t fbuf_cap;
+    size_t fbuf_cap, fbuf2_cap;
 
     /* which algorithm the stream is in, and whether it may continue */
     unsigned family;          /* 20, 29, 50; 0 none */

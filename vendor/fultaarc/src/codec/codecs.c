@@ -165,6 +165,7 @@ static fulta_arc_err_t bz_read(fa_stream_t *s, void *buf, size_t n, size_t *got)
         if (r != BZ_OK) return r == BZ_MEM_ERROR ? budget_mem_err(z->bptr) : FULTA_ARC_ERR_CORRUPT;
         if (before_in == z->bz.avail_in && before_out == z->bz.avail_out) {
             if (z->in.eof) return *got ? FULTA_ARC_OK : FULTA_ARC_ERR_TRUNCATED;
+            if (z->in.pos < z->in.len) return FULTA_ARC_ERR_CORRUPT;
         }
     }
     z->produced += *got;
@@ -225,7 +226,7 @@ static fulta_arc_err_t lzma_read(fa_stream_t *s, void *buf, size_t n, size_t *go
                                               fm, &st);
         z->in.pos += inlen;
         *got += outlen;
-        if (r != SZ_OK) return r == SZ_ERROR_MEM ? FULTA_ARC_ERR_NOMEM : FULTA_ARC_ERR_CORRUPT;
+        if (r != SZ_OK) return r == SZ_ERROR_MEM ? budget_mem_err(z->sz.b) : FULTA_ARC_ERR_CORRUPT;
         if (st == LZMA_STATUS_FINISHED_WITH_MARK) { z->finished = true; break; }
         if (inlen == 0 && outlen == 0) {
             if (z->in.eof) {
@@ -744,9 +745,12 @@ static fulta_arc_err_t zstd_read(fa_stream_t *s, void *buf, size_t n, size_t *go
          * size with input exhausted — that is a clean end, not a truncation, so key off frame_open, not pending. */
         if (r == 0) z->frame_open = false;
         else if (consumed) z->frame_open = true;
-        if (!moved && z->in.eof) {
-            if (*got || !z->frame_open) break;       /* end: output to hand back, or at a clean frame boundary */
-            return FULTA_ARC_ERR_TRUNCATED;          /* input ended in the middle of a frame */
+        if (!moved) {
+            if (z->in.eof) {
+                if (*got || !z->frame_open) break;       /* end: output to hand back, or at a clean frame boundary */
+                return FULTA_ARC_ERR_TRUNCATED;          /* input ended in the middle of a frame */
+            }
+            if (z->in.pos < z->in.len) return FULTA_ARC_ERR_CORRUPT;
         }
     }
     z->produced += *got;

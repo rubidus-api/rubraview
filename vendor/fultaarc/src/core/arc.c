@@ -55,6 +55,8 @@ const char *fulta_arc_strerror(fulta_arc_err_t e) {
     case FULTA_ARC_ERR_LIMIT: return "a limit was exceeded";
     case FULTA_ARC_ERR_CANCELLED: return "cancelled";
     case FULTA_ARC_ERR_BAD_NAME: return "name may not be stored";
+    case FULTA_ARC_ERR_EXISTS: return "file exists";
+    case FULTA_ARC_DAMAGED: return "output damaged";
     default: return "error";
     }
 }
@@ -136,8 +138,12 @@ static fulta_arc_err_t grow_write(void *ctx, const void *d, size_t n) {
        is checked here instead; past it, or past the cap, the wrapper simply stays a wrapper */
     if (n > FA_REPROBE_CAP - g->n || (g->limit && g->n + n > g->limit)) { g->over = true; return (fulta_arc_err_t)FA_SINK_STOP; }
     if (g->n + n > g->cap) {
+        size_t max_cap = (size_t)FA_REPROBE_CAP;
+        if (g->limit && g->limit < max_cap) max_cap = (size_t)g->limit;
+        size_t need = g->n + n;
         size_t nc = g->cap ? g->cap : 65536;
-        while (nc < g->n + n) nc *= 2;
+        if (nc > max_cap) nc = max_cap;
+        while (nc < need) nc = (nc > max_cap / 2) ? max_cap : (nc * 2);
         uint8_t *p = fa_resize(g->alloc, g->data, g->cap, nc);
         if (!p) return FULTA_ARC_ERR_NOMEM;
         g->data = p;
@@ -397,6 +403,7 @@ fa_entry_t *fa_add_entry(fulta_arc_t *arc, proven_mem_view_t raw, const char *ut
     const uint8_t *raw_name = raw.ptr;
     size_t raw_size = raw.size;
     if (arc->count == arc->cap) {
+        if (arc->cap > SIZE_MAX / (2 * sizeof *arc->entries)) return NULL;
         size_t cap = arc->cap ? arc->cap * 2 : 16;
         fa_entry_t *p = fa_resize(arc->alloc, arc->entries, arc->cap * sizeof *p, cap * sizeof *p);
         if (!p) return NULL;
@@ -443,6 +450,7 @@ fulta_arc_err_t fa_volume(fulta_arc_t *arc, uint32_t index, const char *name, co
     }
     if (arc->nvolumes == arc->capvolumes) {
         /* the array of pointers may move; the sources themselves never do */
+        if (arc->capvolumes > SIZE_MAX / (2 * sizeof *arc->volumes)) return FULTA_ARC_ERR_NOMEM;
         fulta_arc_source_t **p = fa_resize(arc->alloc, arc->volumes, arc->capvolumes * sizeof *p,
                                            2 * arc->capvolumes * sizeof *p);
         if (!p) return FULTA_ARC_ERR_NOMEM;

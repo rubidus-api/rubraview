@@ -295,6 +295,11 @@ rubraview_fs_listing_t rubraview_pal_fs_list_desktop(proven_arena_t *arena) {
 proven_u8str_view_t rubraview_pal_fs_absolute(proven_arena_t *arena, proven_u8str_view_t path) {
     if (!arena || path.size == 0) return path;
     proven_u8str_view_t path_z = arena_dup(arena, rubraview_bytes_view((const char *)path.ptr, path.size));
+    if (path_z.size == 2 && path_z.ptr[1] == ':' &&
+        ((path_z.ptr[0] >= 'A' && path_z.ptr[0] <= 'Z') || (path_z.ptr[0] >= 'a' && path_z.ptr[0] <= 'z'))) {
+        char root[4] = { (char)path_z.ptr[0], ':', '\\', '\0' };
+        path_z = arena_dup(arena, rubraview_bytes_view(root, 3));
+    }
     WCHAR *wide = utf8_to_wide(arena, path_z);
     if (!wide || GetFileAttributesW(wide) == INVALID_FILE_ATTRIBUTES) return path_z;
     WCHAR full[MAX_PATH * 2];

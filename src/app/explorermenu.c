@@ -103,6 +103,12 @@ static void targets_for_picker(app_state_t *app, size_t index) {
 
 void explorer_targets_page(app_state_t *app) { targets_for_page(app); }
 void explorer_targets_picker(app_state_t *app, size_t index) { targets_for_picker(app, index); }
+void explorer_targets_path(app_state_t *app, proven_u8str_view_t path) {
+    targets_clear(app);
+    bool folder = false;
+    if (path.size > 0) targets_add(app, path, &folder);
+    targets_read_verbs(app, folder);
+}
 
 void explorer_targets_list_row(app_state_t *app, size_t row) {
     targets_clear(app);
@@ -160,6 +166,14 @@ bool explorer_shift_click_row(app_state_t *app, size_t row, rubraview_window_t *
     explorer_targets_list_row(app, row);
     if (app->shell_target_count == 0) return false;
     show_menu(app, RUBRAVIEW_SHELLMENU_CLASSIC_EXTENDED, window, x, y);
+    return true;
+}
+
+bool explorer_shift_click_path(app_state_t *app, proven_u8str_view_t path, double x, double y) {
+    if (!rubraview_pal_shellmenu_shift_held()) return false;
+    explorer_targets_path(app, path);
+    if (app->shell_target_count == 0) return false;
+    show_menu(app, RUBRAVIEW_SHELLMENU_CLASSIC_EXTENDED, app->window, x, y);
     return true;
 }
 

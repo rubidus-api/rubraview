@@ -19,7 +19,7 @@ typedef struct gzip_state {
 } gzip_state_t;
 
 static bool gzip_probe(const uint8_t *head, size_t n, uint64_t *offset) {
-    if (n < 3 || head[0] != 0x1F || head[1] != 0x8B || head[2] != 8) return false;  /* ID1 ID2 CM=deflate */
+    if (n < 4 || head[0] != 0x1F || head[1] != 0x8B || head[2] != 8) return false;  /* ID1 ID2 CM=deflate */
     if (head[3] & GZ_RESERVED) return false;                                         /* reserved FLG bits: not gzip */
     *offset = 0;
     return true;
@@ -110,7 +110,7 @@ static fulta_arc_err_t gzip_open(fulta_arc_t *arc, uint64_t offset) {
     st->payload_off = off;
 
     uint64_t size_hint = UINT64_MAX;
-    if (src->size >= off + 8) {                                    /* single-member trailer: CRC-32 then ISIZE */
+    if (src->size >= off && src->size - off >= 8) {               /* single-member trailer: CRC-32 then ISIZE */
         uint8_t t[8];
         if (fa_source_read_exact(src, src->size - 8, fa_bytes_mut(t, 8))) { fa_release(arc->alloc, fname); fa_release(arc->alloc, st); return FULTA_ARC_ERR_TRUNCATED; }
         st->crc = fa_le32(t);

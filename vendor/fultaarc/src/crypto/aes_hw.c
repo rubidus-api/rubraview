@@ -88,6 +88,7 @@ HW static int expand_dec(const uint8_t *key, size_t keylen, uint8_t *rk) {
     for (int i = 1; i < nr; i++)
         store(rk, i, _mm_aesimc_si128(_mm_loadu_si128((const __m128i *)(enc + 16 * (nr - i)))));
     store(rk, nr, _mm_loadu_si128((const __m128i *)enc));
+    fa_wipe(enc, sizeof enc);
     return nr;
 }
 

@@ -8,22 +8,23 @@
  * what RAR 1.5x writes (0x0f), and the older container (rar15arc's `old_format`). Anything else - RAR 2.0 to 7.0,
  * and an archive mixing RAR 1.5 entries with later ones - is handed to rar_glue.c (fa_rar_ops) untouched.
  *
- * Encryption (owner, 2026-10-22): the older format's cipher, which the room read in full, is used - the password
- * callback is asked and the password handed to rar15_archive_set_password (D-030). A RAR 1.5 encrypted entry is
- * listed as encrypted and unsupported and no password is asked for: its cipher was not obtained (D-029). The older
- * format checks a file with a 16-bit sum only (rar15arc.h), so a wrong password is caught by that sum or by the
- * stream failing, not as surely as by a CRC-32. Format, algorithm, derivation and provenance: docs/provenance/rar15/
- * (the room's pages, FultaArc's edition). */
+ * Encryption (owner, 2026-10-22; 2026-11-24): the older format's cipher, which the rar15 room read in full, is used
+ * via rar15_archive_set_password (D-030); RAR 1.5's stream cipher is decoded via the fultaarc-cleanroom-rar15-enc3
+ * clean room's deliverable (src/rar/rar15_enc/rar15_cipher.c, byte-identical, D-048; provenance in
+ * docs/provenance/rar15/enc3/). The older format checks a file with a 16-bit sum only (rar15arc.h), so a wrong
+ * password is caught by that sum or by the stream failing, not as surely as by a CRC-32; RAR 1.5 checks with CRC-32.
+ * Format, algorithm, derivation and provenance: docs/provenance/rar15/ (the rooms' pages, FultaArc's edition). */
 #include "../core/internal.h"
 
 #include "rar.h"
 #include "rar15/rar15arc.h"
+#include "rar15_enc/rar15_cipher.h"
 
 typedef struct rar15_glue {
     proven_allocator_t alloc;   /* the archive's: the glue, its volume views and copies */
     fa_view_t *views;
     proven_mem_view_t *vols;
-    size_t nvol;
+    size_t nvol, cap_views, cap_vols;
     rar15_archive_t ar;
     bool open;
     char *password;           /* rar15arc borrows the password: this copy outlives every extraction */
@@ -36,12 +37,20 @@ static bool rar15_probe(const uint8_t *h, size_t n, uint64_t *off) {
 }
 
 static fulta_arc_err_t add_volume(rar15_glue_t *g, const fulta_arc_source_t *src) {
-    fa_view_t *v = fa_resize(g->alloc, g->views, g->nvol * sizeof *v, (g->nvol + 1) * sizeof *v);
-    if (!v) return FULTA_ARC_ERR_NOMEM;
-    g->views = v;
-    proven_mem_view_t *mv = fa_resize(g->alloc, g->vols, g->nvol * sizeof *mv, (g->nvol + 1) * sizeof *mv);
-    if (!mv) return FULTA_ARC_ERR_NOMEM;
-    g->vols = mv;
+    if (g->nvol == g->cap_views) {
+        size_t nc = g->cap_views ? g->cap_views * 2 : 4;
+        fa_view_t *v = fa_resize(g->alloc, g->views, g->cap_views * sizeof *v, nc * sizeof *v);
+        if (!v) return FULTA_ARC_ERR_NOMEM;
+        g->views = v;
+        g->cap_views = nc;
+    }
+    if (g->nvol == g->cap_vols) {
+        size_t nc = g->cap_vols ? g->cap_vols * 2 : 4;
+        proven_mem_view_t *mv = fa_resize(g->alloc, g->vols, g->cap_vols * sizeof *mv, nc * sizeof *mv);
+        if (!mv) return FULTA_ARC_ERR_NOMEM;
+        g->vols = mv;
+        g->cap_vols = nc;
+    }
     fulta_arc_err_t e = fa_view_open(g->alloc, src, &g->views[g->nvol]);
     if (e) return e;
     g->vols[g->nvol] = g->views[g->nvol].bytes;
@@ -100,7 +109,6 @@ static fulta_arc_err_t collect_volumes(fulta_arc_t *arc, rar15_glue_t *g) {
 }
 
 static bool entry_unsupported(const rar15_archive_t *a, const rar15_entry_t *e) {
-    if ((e->flags & RAR15_FILE_PASSWORD) && !a->old_format) return true;   /* RAR 1.5's cipher: not read */
     return a->old_format && e->version != 2;            /* rar15arc.h: 2 in the older format */
 }
 
@@ -163,6 +171,64 @@ static fulta_arc_err_t rar15_open(fulta_arc_t *arc, uint64_t search) {
     return e;
 }
 
+/* Decrypt one RAR 1.5 entry into an archive-budgeted buffer (when encrypted) and hand it to the pinned reader. */
+static rar15_extracted_t extract_one_15(rar15_glue_t *g, size_t idx, const char *pw) {
+    rar15_entry_t *re = &g->ar.entries[idx];
+    if (!(re->flags & RAR15_FILE_PASSWORD)) return rar15_archive_extract_alloc(&g->ar, idx);
+    if (!pw) { g->ar.usable = false; return (rar15_extracted_t){.err = RAR15_E_ENCRYPTED}; }
+    proven_size_t n = re->packed.size;
+    proven_byte_t *plain = NULL;
+    if (n > 0) {
+        if (!re->packed.ptr) { g->ar.usable = false; return (rar15_extracted_t){.err = RAR15_E_DATA}; }
+        plain = fa_alloc(g->ar.alloc, n);
+        if (!plain) { g->ar.usable = false; return (rar15_extracted_t){.err = PROVEN_ERR_NOMEM}; }
+        rar15_keystream(pw, plain, n);
+        (void)rar15_decrypt_block(plain, n, re->packed.ptr, n);
+    }
+    proven_mem_view_t saved_packed = re->packed;
+    proven_u16 saved_flags = re->flags;
+    if (plain) re->packed = (proven_mem_view_t){.ptr = plain, .size = n};
+    re->flags = (proven_u16)(saved_flags & ~RAR15_FILE_PASSWORD);
+    rar15_extracted_t x = rar15_archive_extract_alloc(&g->ar, idx);
+    re->packed = saved_packed;
+    re->flags = saved_flags;
+    if (plain) {
+        proven_mem_wipe((proven_mem_mut_t){.ptr = plain, .size = n});
+        fa_release(g->ar.alloc, plain);
+    }
+    return x;
+}
+
+/* Extract RAR 1.5 entry `index`, stepping through any preceding solid entries with per-entry decryption. */
+static rar15_extracted_t extract_entry_15(const fulta_arc_t *arc, rar15_glue_t *g, size_t index, const char *pw) {
+    if (g->ar.main_flags & RAR15_MAIN_SOLID) {
+        if (index < g->ar.next || !g->ar.usable) {
+            if (g->ar.state) rar15_init(g->ar.state);
+            g->ar.next = 0;
+            g->ar.usable = true;
+        }
+        while (g->ar.next < index) {
+            if (fa_cancelled(arc)) {
+                g->ar.usable = false;
+                return (rar15_extracted_t){.err = RAR15_E_DATA};
+            }
+            size_t step = g->ar.next;
+            rar15_extracted_t skip = extract_one_15(g, step, pw);
+            rar15_err_t serr = skip.err;
+            rar15_extracted_free(&g->ar, &skip);
+            if (serr == PROVEN_ERR_NOMEM || serr == PROVEN_ERR_OUT_OF_BOUNDS) {
+                g->ar.usable = false;
+                return (rar15_extracted_t){.err = serr};
+            }
+            if (serr != PROVEN_OK && (g->ar.entries[step].flags & RAR15_FILE_PASSWORD)) {
+                g->ar.usable = false;
+                return (rar15_extracted_t){.err = serr};
+            }
+        }
+    }
+    return extract_one_15(g, index, pw);
+}
+
 static fulta_arc_err_t rar15_extract(fulta_arc_t *arc, size_t index, const fulta_arc_sink_t *sink) {
     rar15_glue_t *g = arc->state;
     if (index >= g->ar.count) return FULTA_ARC_ERR_INVALID_ARG;
@@ -170,26 +236,37 @@ static fulta_arc_err_t rar15_extract(fulta_arc_t *arc, size_t index, const fulta
     if (flags & FULTA_ARC_ENTRY_DIR) return FULTA_ARC_OK;
     if (flags & FULTA_ARC_ENTRY_UNSUPPORTED) return FULTA_ARC_ERR_UNSUPPORTED;
     if (fa_cancelled(arc)) return FULTA_ARC_ERR_CANCELLED;
-    /* An encrypted entry of the older format: try the passwords the callback gives until one decodes it and passes
-     * its check; a wrong one shows as a failed sum or damaged data (rar15arc.h). */
+    /* An encrypted entry (or one following an encrypted entry in a RAR 1.5 solid stream): try the passwords the
+     * callback gives until one decodes it and passes its check; a wrong one shows as a failed check or damaged data. */
+    bool encrypted = (flags & FULTA_ARC_ENTRY_ENCRYPTED) != 0;
+    if (!encrypted && !g->ar.old_format && (g->ar.main_flags & RAR15_MAIN_SOLID)) {
+        for (size_t k = 0; k < index; k++)
+            if (g->ar.entries[k].flags & RAR15_FILE_PASSWORD) { encrypted = true; break; }
+    }
     rar15_extracted_t x;
     for (uint32_t attempt = 0;; attempt++) {
-        bool encrypted = (flags & FULTA_ARC_ENTRY_ENCRYPTED) != 0;
         const char *pw = NULL;
         if (encrypted) {
             fulta_arc_err_t pe = fa_password(arc, attempt, &pw);
             if (pe) return attempt ? FULTA_ARC_ERR_PASSWORD_WRONG : pe;
-            char *copy = fa_strndup_a(arc->alloc, pw, strlen(pw));
-            if (!copy) return FULTA_ARC_ERR_NOMEM;
-            fa_release(arc->alloc, g->password);
-            g->password = copy;
-            rar15_archive_set_password(&g->ar, proven_u8str_view_from_cstr(g->password));
+            if (g->ar.old_format) {
+                char *copy = fa_strndup_a(arc->alloc, pw, strlen(pw));
+                if (!copy) return FULTA_ARC_ERR_NOMEM;
+                if (g->password) {
+                    proven_mem_wipe((proven_mem_mut_t){.ptr = (proven_byte_t *)g->password, .size = strlen(g->password)});
+                    fa_release(arc->alloc, g->password);
+                }
+                g->password = copy;
+                rar15_archive_set_password(&g->ar, proven_u8str_view_from_cstr(g->password));
+            }
         }
         fa_budget_arm(&arc->budget);
-        x = rar15_archive_extract_alloc(&g->ar, index);
+        x = g->ar.old_format ? rar15_archive_extract_alloc(&g->ar, index) : extract_entry_15(arc, g, index, pw);
+        if (fa_cancelled(arc)) { rar15_extracted_free(&g->ar, &x); return FULTA_ARC_ERR_CANCELLED; }
         if (!encrypted) break;
         if (x.err == PROVEN_OK) { fa_password_ok(arc, pw); break; }
         if (x.err != RAR15_E_CRC && x.err != RAR15_E_DATA) break;
+        if (g->ar.main_flags & RAR15_MAIN_SOLID) g->ar.usable = false;
         rar15_extracted_free(&g->ar, &x);
         if (attempt >= 64) return FULTA_ARC_ERR_PASSWORD_WRONG;
     }
@@ -219,7 +296,10 @@ static void rar15_close(fulta_arc_t *arc) {
     rar15_glue_t *g = arc->state;
     if (!g) return;
     close_archive(g);
-    fa_release(arc->alloc, g->password);
+    if (g->password) {
+        proven_mem_wipe((proven_mem_mut_t){.ptr = (proven_byte_t *)g->password, .size = strlen(g->password)});
+        fa_release(arc->alloc, g->password);
+    }
     for (size_t i = 0; i < g->nvol; i++) fa_view_close(&g->views[i]);
     fa_release(arc->alloc, g->views);
     fa_release(arc->alloc, g->vols);

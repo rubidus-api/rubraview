@@ -24,20 +24,70 @@ static unsigned next_bit(coder_t *c) {
     return (c->d[p >> 3] >> (7 - (p & 7))) & 1;
 }
 
-static void normalize(coder_t *c) {
-    for (;;) {
-        uint64_t sub;
-        if (c->high < 0x80000000u) sub = 0;
-        else if (c->low >= 0x80000000u) sub = 0x80000000u;
-        else if (c->low >= 0x40000000u && c->high < 0xC0000000u) sub = 0x40000000u;
-        else return;
-        c->low = (c->low - sub) << 1;
-        c->high = ((c->high - sub) << 1) | 1;
-        c->value = ((c->value - sub) << 1) | next_bit(c);
+/* the next k bits (1..32), first bit highest: next_bit k times, a whole 64-bit load where the input allows */
+static uint32_t take(coder_t *c, unsigned k) {
+    uint64_t p = c->pos;
+    if ((p >> 3) + 8 <= c->nbits >> 3) {
+        const uint8_t *q = c->d + (p >> 3);
+        uint64_t w = (uint64_t)q[0] << 56 | (uint64_t)q[1] << 48 | (uint64_t)q[2] << 40 | (uint64_t)q[3] << 32 |
+                     (uint64_t)q[4] << 24 | (uint64_t)q[5] << 16 | (uint64_t)q[6] << 8 | q[7];
+        c->pos = p + k;
+        return (uint32_t)((w << (p & 7)) >> (64 - k));   /* (p & 7) + k <= 39 bits of the 64 */
     }
+    uint32_t r = 0;
+    for (unsigned i = 0; i < k; i++) r = (r << 1) | next_bit(c);
+    return r;
 }
 
-static unsigned bit(coder_t *c, uint32_t p, unsigned B) {
+static unsigned clz32(uint32_t x) {                    /* x != 0 */
+#if defined(__GNUC__) || defined(__clang__)
+    return (unsigned)__builtin_clz(x);
+#else
+    unsigned n = 0;
+    if (!(x & 0xFFFF0000u)) { n += 16; x <<= 16; }
+    if (!(x & 0xFF000000u)) { n += 8; x <<= 8; }
+    if (!(x & 0xF0000000u)) { n += 4; x <<= 4; }
+    if (!(x & 0xC0000000u)) { n += 2; x <<= 2; }
+    if (!(x & 0x80000000u)) n += 1;
+    return n;
+#endif
+}
+
+/* Renormalise (azo.md 2): while the interval lies in one half shift a bit out (E1: below 2^31, E2: above), and
+ * while it straddles the middle within the middle half, expand that (E3: subtract 2^30, shift). Done in two steps
+ * rather than one bit at a time: the k leading bits low and high agree on are shifted out together, then the run
+ * of E3 steps, the m bits after the top one where low has 1 and high 0, each of which drops bit 30 and keeps bit
+ * 31. low, high and value stay below 2^32 and value within [low, high] (bit() and uniform() check it first). */
+static void normalize_slow(coder_t *c) {
+    uint32_t lo = (uint32_t)c->low, hi = (uint32_t)c->high, v = (uint32_t)c->value;
+    uint32_t x = lo ^ hi;
+    if (!(x & 0x80000000u)) {
+        if (!x) { lo = 0; hi = 0xFFFFFFFFu; v = take(c, 32); }    /* low == high: all 32 bits out */
+        else {
+            unsigned k = clz32(x);
+            lo <<= k;
+            hi = (hi << k) | ((1u << k) - 1);
+            v = (v << k) | take(c, k);
+        }
+    }
+    if (lo & ~hi & 0x40000000u) {                    /* now low < 2^31 <= high */
+        unsigned m = clz32(~((lo & ~hi) << 1));
+        lo = (lo << m) & 0x7FFFFFFFu;
+        hi = 0x80000000u | ((hi << m) & 0x7FFFFFFFu) | ((1u << m) - 1);
+        v = (v & 0x80000000u) | ((v << m) & 0x7FFFFFFFu) | take(c, m);
+    }
+    c->low = lo;
+    c->high = hi;
+    c->value = v;
+}
+
+static inline void normalize(coder_t *c) {
+    uint64_t lo = c->low, hi = c->high;
+    if (((lo ^ hi) & 0x80000000u) && !(lo & ~hi & 0x40000000u)) return;   /* the usual case: nothing to shift */
+    normalize_slow(c);
+}
+
+static inline unsigned bit(coder_t *c, uint32_t p, unsigned B) {
     if (c->value < c->low || c->value > c->high) { c->bad = true; return 0; }
     uint64_t zero = ((c->high - c->low + 1) >> B) * p;
     if (zero == 0 || zero > c->high - c->low) { c->bad = true; return 0; }
@@ -109,11 +159,12 @@ static unsigned tree(model_t *m, uint16_t *probs, unsigned depth) {
 /* dual trees with a selector counter (azo.md 6); `local`/`group` hold nodes 1..2^depth-1 at index node-1 */
 static unsigned dual(model_t *m, uint16_t *local, uint16_t *group, int32_t *counter, unsigned depth) {
     int32_t cnt = *counter;
+    const uint16_t *sel = cnt > 0 ? group : local;
     unsigned node = 1;
     uint32_t sl = 1u << 20, sg = 1u << 20;         /* both scores start at 2^20 and stay below 2^32 */
     for (unsigned i = 0; i < depth; i++) {
         uint16_t *pl = &local[node - 1], *pg = &group[node - 1];
-        unsigned b = bit(&m->c, cnt > 0 ? *pg : *pl, 10);
+        unsigned b = bit(&m->c, sel[node - 1], 10);
         *pl = upd(*pl, b, 1024, 4);
         *pg = upd(*pg, b, 1024, 4);
         uint32_t ql = b == 0 ? *pl : 1024u - *pl, qg = b == 0 ? *pg : 1024u - *pg;
@@ -135,13 +186,28 @@ static uint64_t distance_from(model_t *m, unsigned g) {
     return 17 + 4 * ((UINT64_C(1) << n) - 1) + (uint64_t)j * (UINT64_C(1) << n) + uniform(&m->c, n);
 }
 
+static unsigned clz64(uint64_t x) {                    /* x != 0 */
+#if defined(__GNUC__) || defined(__clang__)
+    return (unsigned)__builtin_clzll(x);
+#else
+    unsigned n = 0;
+    if (!(x & 0xFFFFFFFF00000000ull)) { n += 32; x <<= 32; }
+    if (!(x & 0xFFFF000000000000ull)) { n += 16; x <<= 16; }
+    if (!(x & 0xFF00000000000000ull)) { n += 8; x <<= 8; }
+    if (!(x & 0xF000000000000000ull)) { n += 4; x <<= 4; }
+    if (!(x & 0xC000000000000000ull)) { n += 2; x <<= 2; }
+    if (!(x & 0x8000000000000000ull)) n += 1;
+    return n;
+#endif
+}
+
 static unsigned slot_of(uint64_t d) {
     uint64_t v = d - 1;
     if (v < 20) return (unsigned)v;
-    unsigned bl = 0;
-    for (uint64_t x = v - 12; x; x >>= 1) bl++;
+    uint64_t x = v - 12;                               /* v >= 20 => x >= 8 => bl >= 4 => n >= 1 */
+    unsigned bl = 64u - clz64(x);
     unsigned n = bl - 3;
-    uint64_t s = 16 + 4 * (uint64_t)n + ((v - 12) >> n) - 4;
+    uint64_t s = 16 + 4 * (uint64_t)n + (x >> n) - 4;
     return s > 127 ? 127 : (unsigned)s;
 }
 
@@ -155,11 +221,13 @@ static uint64_t length_from(model_t *m, unsigned g) {
 static fulta_arc_err_t decode_chunk(model_t *m, const uint8_t *data, size_t n, uint8_t *out, uint32_t size) {
     model_init(m);
     m->c = (coder_t){.d = data, .nbits = (uint64_t)n * 8, .low = 0, .high = 0xFFFFFFFFu};
-    for (int i = 0; i < 32; i++) m->c.value = (m->c.value << 1) | next_bit(&m->c);
+    m->c.value = take(&m->c, 32);
     unsigned th = 0, hh = 0, rh = 0, sh = 0;
     uint64_t dist[2] = {1, 2};
     unsigned idx[2] = {0, 1};
-    uint64_t esrc[128], elen[128];
+    /* the 128 most recent matches, most recent first: logical entry i is ring[(head + i) & 127] */
+    uint32_t esrc[128], elen[128];
+    unsigned head = 0;
     for (unsigned i = 0; i < 128; i++) { esrc[i] = 0; elen[i] = i + 2; }
     uint32_t pos = 0;
     while (pos < size) {
@@ -186,10 +254,13 @@ static fulta_arc_err_t decode_chunk(model_t *m, const uint8_t *data, size_t n, u
                 idx[1] = idx[0];
                 idx[0] = i;
             }
-            uint64_t s = esrc[i], l = elen[i];
-            for (unsigned k = i; k > 0; k--) { esrc[k] = esrc[k - 1]; elen[k] = elen[k - 1]; }
-            esrc[0] = s;
-            elen[0] = l;
+            uint32_t s = esrc[(head + i) & 127], l = elen[(head + i) & 127];   /* move entry i to the front */
+            for (unsigned k = i; k > 0; k--) {
+                esrc[(head + k) & 127] = esrc[(head + k - 1) & 127];
+                elen[(head + k) & 127] = elen[(head + k - 1) & 127];
+            }
+            esrc[head] = s;
+            elen[head] = l;
             d = pos - s;
             L = l;
             if (s > pos) return FULTA_ARC_ERR_CORRUPT;
@@ -208,12 +279,21 @@ static fulta_arc_err_t decode_chunk(model_t *m, const uint8_t *data, size_t n, u
                 dist[0] = d;
             }
             L = length_from(m, dual(m, m->len_local[slot], m->len_group[slot >> 4], &m->len_counter[slot], 7));
-            for (unsigned k = 127; k > 0; k--) { esrc[k] = esrc[k - 1]; elen[k] = elen[k - 1]; }
-            esrc[0] = pos;
-            elen[0] = L;
+            if (L > size - pos) return FULTA_ARC_ERR_CORRUPT;
+            head = (head - 1) & 127;                                    /* push front; the oldest falls off */
+            esrc[head] = pos;
+            elen[head] = (uint32_t)L;
         }
         if (m->c.bad || d < 1 || d > pos || L > size - pos) return FULTA_ARC_ERR_CORRUPT;
-        for (uint64_t k = 0; k < L; k++, pos++) out[pos] = out[pos - d];
+        if (d == 1) {
+            memset(out + pos, out[pos - 1], (size_t)L);
+            pos += (uint32_t)L;
+        } else if (d >= L) {
+            memcpy(out + pos, out + pos - d, (size_t)L);
+            pos += (uint32_t)L;
+        } else {
+            for (uint64_t k = 0; k < L; k++, pos++) out[pos] = out[pos - d];
+        }
     }
     return m->c.bad ? FULTA_ARC_ERR_CORRUPT : FULTA_ARC_OK;
 }
@@ -282,7 +362,10 @@ static fulta_arc_err_t next_chunk(azo_stream_t *z) {
     }
     if (!U || !C || (U ^ C) != X || U > CHUNK_MAX || C > CHUNK_MAX) return FULTA_ARC_ERR_CORRUPT;
     if (U > z->out_cap) {
-        uint8_t *p = fa_resize(z->ba, z->out, z->out_cap, U);
+        fa_release(z->ba, z->out);
+        z->out = NULL;
+        z->out_cap = 0;
+        uint8_t *p = fa_alloc(z->ba, U);
         if (!p) return azo_nomem(z);
         z->out = p;
         z->out_cap = U;

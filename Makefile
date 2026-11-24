@@ -28,7 +28,7 @@ FULTA_INCLUDES = -I$(FULTA)/include -I$(FULTA)/src -Ivendor/proven/include -Iven
 FULTA_MINIZ_DEF = -DMINIZ_NO_STDIO -DMINIZ_NO_TIME -DMINIZ_NO_ARCHIVE_APIS -DMINIZ_NO_ARCHIVE_WRITING_APIS -DMINIZ_NO_ZLIB_COMPATIBLE_NAMES
 FULTA_OWN_SRCS = $(wildcard $(FULTA)/src/core/*.c $(FULTA)/src/codec/*.c $(FULTA)/src/crypto/*.c $(FULTA)/src/text/*.c \
                    $(FULTA)/src/platform/*.c $(FULTA)/src/zip/*.c $(FULTA)/src/7z/*.c $(FULTA)/src/write/*.c \
-                   $(FULTA)/src/rar/*.c $(FULTA)/src/rar/codec/*.c $(FULTA)/src/rar/rar15/*.c \
+                   $(FULTA)/src/rar/*.c $(FULTA)/src/rar/codec/*.c $(FULTA)/src/rar/rar15/*.c $(FULTA)/src/rar/rar15_enc/*.c \
                    $(FULTA)/src/alz/*.c $(FULTA)/src/egg/*.c $(FULTA)/src/azo/*.c $(FULTA)/src/filter/*.c \
                    $(FULTA)/src/tar/*.c $(FULTA)/src/ar/*.c $(FULTA)/src/cpio/*.c $(FULTA)/src/iso/*.c \
                    $(FULTA)/src/cab/*.c $(FULTA)/src/udf/*.c $(FULTA)/src/lha/*.c $(FULTA)/src/lha/lhadec/src/*.c)

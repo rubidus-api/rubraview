@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.55.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.55.0/rubraview-v1.55.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.55.0/rubraview-v1.55.0.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.55.0/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.56.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.56.0/rubraview-v1.56.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.56.0/rubraview-v1.56.0.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.56.0/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -295,6 +295,11 @@
 | 오른쪽 클릭 `Make a playlist of them` | 고른 것으로 재생목록 만들기 |
 | 오른쪽 클릭 `Pick none` | 탐색기에서 고른 것 모두 해제 |
 | 오른쪽 클릭 `Paste` | 클립보드의 파일(여기나 탐색기에서 넣은)을 지금 폴더에 복사 또는 이동 (Ctrl+V) |
+| 오른쪽 클릭 `Open` | 파일 화면을 우클릭한 경로 조각 폴더로 이동 |
+| 오른쪽 클릭 `Open in new window` | 우클릭한 경로 조각 폴더를 새 창에서 열기 |
+| 오른쪽 클릭 `Copy the whole path` | 우클릭한 경로 조각 폴더의 전체 경로 복사 |
+| 오른쪽 클릭 `Show in Explorer` | 우클릭한 경로 조각 폴더를 탐색기에서 열기 |
+| 오른쪽 클릭 `Favourite (in or out)` | 우클릭한 경로 조각 폴더를 즐겨찾기에 넣거나 빼기 |
 | 오른쪽 클릭 `Open` | 목록의 파일 우클릭: 열기 |
 | 오른쪽 클릭 `Copy the whole path` | 목록의 파일 우클릭: 전체 경로를 클립보드로 |
 | 오른쪽 클릭 `Show in Explorer` | 목록의 파일 우클릭: 탐색기에서 선택해 보여 주기 |

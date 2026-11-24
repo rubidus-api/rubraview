@@ -253,6 +253,8 @@ extern double g_gutter;
 #define RECENT_KEPT 30          /* D-104: files in recent.ini; the menu shows the newest ten */
 #define RECENT_SKIP_DIRS 264   /* the list, as many as wanted, and the eight of before (owner, 2026-10-16) */
 #define MENU_MAX_TILES 16   /* 4 x 4; the owner chose a larger grid over splitting File (2026-09-21) */
+#define PICKER_HIST 24
+#define PICKER_HIST_PATH 1024
 
 /* Metro palette (§3.6.4): flat, high-contrast, no gradients. */
 #define COLOR_CANVAS      g_canvas
@@ -1271,7 +1273,7 @@ typedef struct app_state {
     /* §3.18: triage. The undo stack is what makes Delete safe to press
        quickly, which is the point of the whole section. */
     rubraview_undo_stack_t undo;
-    char                 (*picker_hist)[1024];   /* 1.24.0: the way back, then the way forward (PICKER_HIST each) */
+    char                 (*picker_hist)[PICKER_HIST_PATH]; /* 1.24.0: the way back, then the way forward (PICKER_HIST each) */
     int32_t                picker_back_n, picker_fwd_n;
     size_t                 picker_anchor;        /* 1.24.0: where a Shift+click's range starts */
     int32_t                col_drag, col_drag_k; /* 1.25.0: 1 a column's width, 2 a column's place; which column */
@@ -1568,6 +1570,8 @@ typedef struct app_state {
     rubraview_fs_entry_t  *picker_filtered;          /* the rows shown under a filter */
     bool                  *picker_filtered_selected;
     size_t                 picker_ctx_index;         /* the tile a right click was on */
+    char                   picker_ctx_crumb[PICKER_HIST_PATH]; /* path behind right-clicked crumb */
+    char                   picker_ctx_disk[PICKER_HIST_PATH];  /* resolved disk path (empty for PC/Recent) */
     bool                   picker_hold;              /* a left press on a tile, not yet a tap or a long press */
     size_t                 picker_hold_index;
     double                 picker_hold_x, picker_hold_y, picker_hold_at;
@@ -1791,6 +1795,7 @@ size_t gmic_list_progress(char *buffer, size_t capacity, const app_state_t *app)
 /* RV-186: the list made, as text beside the settings, opened in a viewer of its own */
 void gmic_list_show(app_state_t *app);
 void new_window_open(app_state_t *app, proven_u8str_view_t path);
+void new_window_browse(app_state_t *app, proven_u8str_view_t dir);
 #define PANEL_FFMPEG_ROWS 24   /* options shown; the rest keep FFmpeg's defaults */
 typedef struct batch_tokens {
     const char *v[64];
@@ -2345,6 +2350,7 @@ bool picker_in_archive(const app_state_t *app);
 /* RV-279: Explorer's menu inside Rubraview (explorermenu.c) */
 void explorer_targets_page(app_state_t *app);
 void explorer_targets_picker(app_state_t *app, size_t index);
+void explorer_targets_path(app_state_t *app, proven_u8str_view_t path);
 void explorer_targets_list_row(app_state_t *app, size_t row);
 bool explorer_rows_shown(const app_state_t *app);
 void explorer_apps_begin(app_state_t *app);          /* RV-308: the apps' Windows 11 items asked of the child (once a type) */
@@ -2354,6 +2360,7 @@ void explorer_menu_from_list(app_state_t *app, bool classic, rubraview_window_t 
 void explorer_menu_action(app_state_t *app, bool classic);
 bool explorer_shift_click_page(app_state_t *app, double x, double y);
 bool explorer_shift_click_picker(app_state_t *app, size_t index, double x, double y);
+bool explorer_shift_click_path(app_state_t *app, proven_u8str_view_t path, double x, double y);
 bool explorer_shift_click_row(app_state_t *app, size_t row, rubraview_window_t *window, double x, double y);
 void explorer_verb_run(app_state_t *app, size_t verb);
 /* RV-281: the properties window (propswin.c); where it was asked from, for its Rename */
@@ -2575,15 +2582,18 @@ void picker_columns_read(proven_u8str_view_t text);
 bool picker_columns_release(app_state_t *app, double x);
 void picker_context(app_state_t *app, size_t index, double x, double y);
 void picker_context_here(app_state_t *app, double x, double y);
+void picker_context_crumb(app_state_t *app, proven_u8str_view_t crumb_path, double x, double y);
 void picker_copy_paths(app_state_t *app);
 void picker_curate(app_state_t *app, int32_t digit, bool moving);
 void picker_curate_to(app_state_t *app, proven_u8str_view_t target_dir, bool moving);
 picker_columns_t picker_detail_columns(double win_w, double dpi);
 bool picker_details(const app_state_t *app);
 bool picker_enter_book(app_state_t *app, size_t index);
+bool picker_path_edit_labeled(double dpi, double win_w);
 rubraview_pal_rect_t picker_path_edit_rect(double dpi, double win_w, double top);
 rubraview_hstrip_t picker_crumbs_strip(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double dpi, double win_w);
 rubraview_pal_rect_t picker_crumb_rect(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, size_t index, double dpi, double win_w);
+int32_t picker_crumb_at(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double x, double y, double dpi, double win_w);
 void picker_filter_begin(app_state_t *app);
 bool picker_filter_clear_rect(const app_state_t *app, double dpi, rubraview_pal_rect_t tool_rect, rubraview_pal_rect_t *out);
 /* RV-227, D-286: the basket's two icons at the tool row's right end — 0 both, 1 the basket (put in, see), 2 the arrow (put here) */

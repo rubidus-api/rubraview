@@ -1,7 +1,8 @@
-/* fulta/arc.h - FultaArc: read 7z, ZIP, RAR, ALZ and EGG archives; write ZIP and 7z.
+/* fulta/arc.h - FultaArc: read ZIP, 7z, RAR (1.4-7.0), ALZ, EGG/AZO, LHA/LZH, CAB, TAR, cpio, ar, ISO 9660, UDF,
+ * and compressed streams; write and edit ZIP and 7z.
  *
- * MIT licence (see LICENSE). C23. Formats are described in the project's format documents; how each decoder was
- * made is recorded in its provenance document.
+ * MIT licence (see LICENSE). C23. Formats and clean-room derivations are documented in docs/manual/ and
+ * docs/provenance/.
  *
  * Reading in four steps:
  *
@@ -30,7 +31,7 @@ extern "C" {
 
 #define FULTA_ARC_VERSION_MAJOR 0
 #define FULTA_ARC_VERSION_MINOR 1
-#define FULTA_ARC_VERSION_PATCH 0
+#define FULTA_ARC_VERSION_PATCH 4
 
 /* ---- errors ------------------------------------------------------------------------------------------------- */
 
@@ -197,15 +198,16 @@ typedef struct fulta_arc_options {
 #define FULTA_ARC_ENTRY_UNKNOWN_SIZE 0x0100u /* the stored size is "unknown": decode to the stream's end */
 #define FULTA_ARC_ENTRY_NAME_NOT_UNICODE 0x0200u /* the name was not stored as Unicode; it was decoded through a code page (see name_raw, options.auto_codepage) */
 #define FULTA_ARC_ENTRY_MTIME_LOCAL 0x0400u /* mtime is the local wall clock counted as if UTC (a ZIP DOS time with no
-                                                UTC extra field, ALZ, RAR 1.5, EGG, LHA level 0/1): convert with the
+                                                UTC extra field, ALZ, RAR 1.4-4, CAB, EGG, LHA level 0/1): convert with the
                                                 zone of the machine that made the archive, usually the reader's */
 
 typedef struct fulta_arc_entry {
     const char *name;                 /* UTF-8, '/' between folders, NUL-terminated; never absolute, no drive
                                          ("C:", "C:x"), no ".." part, also as Windows reads one (".. ", ". .");
-                                         "_" when nothing safe remains. It may still hold characters a file system
-                                         refuses (':' '*' '?' on Windows) or a device name (CON, NUL): the caller
-                                         who writes files maps those. See also FULTA_ARC_ENTRY_SYMLINK. */
+                                         "_" when nothing safe remains; a control character (0x01-0x1F, 0x7F)
+                                         becomes "_" (name_raw keeps it). It may still hold characters a file
+                                         system refuses (':' '*' '?' on Windows) or a device name (CON, NUL): the
+                                         caller who writes files maps those. See also FULTA_ARC_ENTRY_SYMLINK. */
     const uint8_t *name_raw;          /* the name's bytes as stored */
     size_t name_raw_size;
     uint64_t size;                    /* unpacked size */

@@ -641,6 +641,22 @@ void new_window_open(app_state_t *app, proven_u8str_view_t path) {
     }
 }
 
+void new_window_browse(app_state_t *app, proven_u8str_view_t dir) {
+    proven_u8str_view_t exe = rubraview_pal_process_executable(app->arena);
+    char line[4096];
+    size_t pos = 0;
+    line[0] = '\0';
+    if (exe.size > 0 && dir.size > 0) {
+        append_arg(line, sizeof(line), &pos, exe);
+        append_arg_cstr(line, sizeof(line), &pos, "--new-instance");
+        append_arg_cstr(line, sizeof(line), &pos, "--browse");
+        append_arg(line, sizeof(line), &pos, dir);
+    }
+    if (pos == 0 || !rubraview_pal_process_start((proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = pos })) {
+        osd_say(app, TU8("a new window could not be started"));
+    }
+}
+
 /* The chosen files as a list file in the user's temporary folder, which
    the batch run reads and removes (--paths-temp). Empty when it could not
    be written. */

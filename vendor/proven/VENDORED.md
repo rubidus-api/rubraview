@@ -3,11 +3,13 @@
 This directory is a copied vendor snapshot of proven_c_lib.
 
 - Upstream source: `proven_c_lib`
-- Snapshot commit: `bbabaf2a` (tag `v0.119.1`), taken with
-  `git archive v0.119.1 include src platform crypto LICENSE THIRD_PARTY_NOTICES.md` into an emptied copy; every file
-  matches the tag (D-336, D-371, D-381)
-- Snapshot date: `2026-11-20`
-- v0.119.1 (five files): the ChaCha generator's counter stepped once at its low word's wrap with the reseed every MiB
+- Snapshot commit: `47b6ec70` (tag `v0.119.3`), taken with
+  `git archive v0.119.3 include src platform crypto LICENSE THIRD_PARTY_NOTICES.md` into an emptied copy; every file
+  matches the tag (D-336, D-371, D-381, D-393)
+- Snapshot date: `2026-11-24`
+- v0.119.3 (`73fd567b`, `47b6ec70`): Zstandard and Brotli decoder speed optimizations in `codec/` (not taken here) and `version.h` bump.
+- v0.119.2 (`5aac3ef8`, B-046): reject overlapping input/output buffers in fixed-buffer UTF converters and bound lossy writes (`include/proven/utf.h`, `src/proven/utf.c`, `version.h`).
+- v0.119.1 (`bbabaf2a`, five files): the ChaCha generator's counter stepped once at its low word's wrap with the reseed every MiB
   on eight lanes, the `%e`/`%g` digits' room check one byte larger, the vector keystream's state wiped as
   `secure_zero` does. Rubraview seeds no generator; its formatting calls `{:g}` nowhere (its own %g is
   `rubraview_g_text`).
@@ -26,10 +28,10 @@ This directory is a copied vendor snapshot of proven_c_lib.
   `PROVEN_INCLUDES` in the Makefile); `crypto/include` is on the viewer's include path.
 - Not taken: `codec/` (DEFLATE, Zstandard, Brotli; FultaArc has its own decoders and Rubraview calls none) and `net/`
   (event loop, TLS, QUIC, HTTP, WebSocket); Rubraview calls neither.
-- FultaArc (`vendor/fultaarc`) is built on this copy too: one copy for both. Its own upstream vendored
-  v0.113.0 (since `0dccf16`) and includes `proven/sha2.h` itself; it is compiled with
+- FultaArc (`vendor/fultaarc`, `v0.1.4`, `e1af87da`) is built on this copy too: one copy for both. Its own upstream vendored
+  v0.119.3 and includes `proven/sha2.h` itself; it is compiled with
   `-Ivendor/proven/crypto/include`, its sources unchanged, and the gate's archive tests read and write with it.
-- Previous snapshots: `eb852acf` (`v0.119.0`, 2026-11-19, D-371); `5236974e` (`v0.114.0`, 2026-11-13, D-336); `bd93f44d` (`v0.113.0`, 2026-11-11, D-328); `f4002aca` (`v0.112.4`, 2026-11-10, D-320); `cbbaf08d` (`v0.110.0`, 2026-11-03, D-273); `1d9989c4` (`v0.108.0`, 2026-11-03, D-264); `2e5a35f` (`v0.76.0`, 2026-10-22, RV-160, D-194); `981911b` (`v0.6.0` + 3, 2026-10-08); `v0.6.0` (`e62cee2`, 2026-10-01); `v0.1.1` (2026-09-22)
+- Previous snapshots: `bbabaf2a` (`v0.119.1`, 2026-11-20, D-381); `eb852acf` (`v0.119.0`, 2026-11-19, D-371); `5236974e` (`v0.114.0`, 2026-11-13, D-336); `bd93f44d` (`v0.113.0`, 2026-11-11, D-328); `f4002aca` (`v0.112.4`, 2026-11-10, D-320); `cbbaf08d` (`v0.110.0`, 2026-11-03, D-273); `1d9989c4` (`v0.108.0`, 2026-11-03, D-264); `2e5a35f` (`v0.76.0`, 2026-10-22, RV-160, D-194); `981911b` (`v0.6.0` + 3, 2026-10-08); `v0.6.0` (`e62cee2`, 2026-10-01); `v0.1.1` (2026-09-22)
 - Upstream license: MIT (see LICENSE)
 
 Do not modify the original sibling checkout from this project. If a proven defect is

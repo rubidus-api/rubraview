@@ -19,7 +19,7 @@ typedef struct rar_glue {
     void *backing;
     fa_view_t *views;
     fa_rar_volume_t *vols;
-    size_t nvol;
+    size_t nvol, cap_views, cap_vols;
     fa_rar_archive_t ar;
     bool open;
     size_t *map;              /* FultaArc entry index -> rar.c entry index */
@@ -53,12 +53,20 @@ static fulta_arc_err_t map_err(fa_rar_err_t e) {
 }
 
 static fulta_arc_err_t add_volume(rar_glue_t *g, const fulta_arc_source_t *src) {
-    fa_view_t *v = fa_resize(g->alloc, g->views, g->nvol * sizeof *v, (g->nvol + 1) * sizeof *v);
-    if (!v) return FULTA_ARC_ERR_NOMEM;
-    g->views = v;
-    fa_rar_volume_t *rv = fa_resize(g->alloc, g->vols, g->nvol * sizeof *rv, (g->nvol + 1) * sizeof *rv);
-    if (!rv) return FULTA_ARC_ERR_NOMEM;
-    g->vols = rv;
+    if (g->nvol == g->cap_views) {
+        size_t nc = g->cap_views ? g->cap_views * 2 : 4;
+        fa_view_t *v = fa_resize(g->alloc, g->views, g->cap_views * sizeof *v, nc * sizeof *v);
+        if (!v) return FULTA_ARC_ERR_NOMEM;
+        g->views = v;
+        g->cap_views = nc;
+    }
+    if (g->nvol == g->cap_vols) {
+        size_t nc = g->cap_vols ? g->cap_vols * 2 : 4;
+        fa_rar_volume_t *rv = fa_resize(g->alloc, g->vols, g->cap_vols * sizeof *rv, nc * sizeof *rv);
+        if (!rv) return FULTA_ARC_ERR_NOMEM;
+        g->vols = rv;
+        g->cap_vols = nc;
+    }
     fulta_arc_err_t e = fa_view_open(g->alloc, src, &g->views[g->nvol]);
     if (e) return e;
     g->vols[g->nvol] = (fa_rar_volume_t){g->views[g->nvol].bytes.ptr, g->views[g->nvol].bytes.size};
@@ -125,6 +133,7 @@ static fulta_arc_err_t rar_open(fulta_arc_t *arc, uint64_t search) {
         proven_arena_reset(&g->arena);
         fa_rar_result_t r = fa_rar_open_volumes(g->alloc, &g->arena, g->vols, g->nvol, proven_u8str_view_from_cstr(pw));
         if (r.err == FA_RAR_ERR_OUT_OF_MEMORY && arena_size < ((size_t)1 << 30)) {
+            if (arc->opt.max_memory && arena_size * 4 > arc->opt.max_memory) return FULTA_ARC_ERR_LIMIT;
             arena_size *= 4;
             if ((e = make_arena(g, arena_size))) return e;
             continue;
@@ -161,6 +170,13 @@ static fulta_arc_err_t rar_open(fulta_arc_t *arc, uint64_t search) {
         if (re->size == FA_RAR_SIZE_UNKNOWN) en->pub.flags |= FULTA_ARC_ENTRY_UNKNOWN_SIZE;
         if (re->has_crc && !re->hash_mac && re->piece_count) { en->pub.crc32 = re->crc32; en->pub.flags |= FULTA_ARC_ENTRY_HAS_CRC32; }
         if (re->encrypted) en->pub.flags |= FULTA_ARC_ENTRY_ENCRYPTED;
+        if (re->has_mtime && re->mtime_dos) {   /* RAR 2-4: a DOS time, the local wall clock */
+            en->pub.mtime = fa_dos_time_ns((uint16_t)(re->dos_time >> 16), (uint16_t)re->dos_time) + re->mtime_ns;
+            en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME | FULTA_ARC_ENTRY_MTIME_LOCAL;
+        } else if (re->has_mtime) {             /* RAR 5: UTC */
+            en->pub.mtime = re->mtime_ns;
+            en->pub.flags |= FULTA_ARC_ENTRY_HAS_MTIME;
+        }
         if (re->solid) en->pub.flags |= FULTA_ARC_ENTRY_SOLID;
         else rar_group++;   /* a non-solid entry starts a new solid group */
         en->pub.solid_group = rar_group;

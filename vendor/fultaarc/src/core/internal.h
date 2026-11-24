@@ -5,6 +5,7 @@
 #include "fulta/arc.h"
 
 #include "proven/hash.h"
+#include "proven/memory.h"
 #include "proven/sha2.h"
 #include "proven/allocator.h"
 #include "proven/heap.h"
@@ -38,15 +39,20 @@ static inline proven_mem_view_t fa_bytes(const void *p, size_t n) {
 static inline proven_mem_mut_t fa_bytes_mut(void *p, size_t n) {
     return (proven_mem_mut_t){.ptr = (proven_byte_t *)p, .size = n};
 }
+static inline void fa_wipe(void *p, size_t n) {
+    if (p && n) proven_mem_wipe(fa_bytes_mut(p, n));
+}
+static inline bool fa_ct_eq(const void *a, const void *b, size_t n) {
+    const uint8_t *x = (const uint8_t *)a, *y = (const uint8_t *)b;
+    uint8_t d = 0;
+    for (size_t i = 0; i < n; i++) d |= (uint8_t)(x[i] ^ y[i]);
+    return d == 0;
+}
 
 /* ---- memory ------------------------------------------------------------------------------------------------- */
 
 
 #include "fa_alloc.h"
-
-/* The allocator a caller's fulta_arc_allocator_t (all three functions, or none) stands for: the bridge, else
- * proven's heap. INVALID_ARG when one or two of the functions are set. */
-fulta_arc_err_t fa_allocator_pick(const fulta_arc_allocator_t *ua, proven_allocator_t *out);
 
 /* The allocator a caller's fulta_arc_allocator_t (all three functions, or none) stands for: the bridge, else
  * proven's heap. INVALID_ARG when one or two of the functions are set. */
@@ -405,6 +411,8 @@ typedef struct fa_zip_copy {
     size_t name_raw_len;
     int64_t mtime;                                       /* seconds since 1970, 0 if none */
     bool is_dir;
+    bool has_ntfs;                                       /* the source's NTFS 0x000a times, copied as they are */
+    uint64_t ntfs[3];                                    /* modification, access, creation (FILETIME) */
 } fa_zip_copy_t;
 /* Fill *out for ZIP entry `index`; reads the entry's local header to find the data offset. */
 fulta_arc_err_t fa_zip_copy_info(fulta_arc_t *arc, size_t index, fa_zip_copy_t *out);

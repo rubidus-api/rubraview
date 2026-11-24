@@ -267,6 +267,74 @@ static fulta_arc_err_t inflate_read(fa_stream_t *s, void *buf, size_t n, size_t 
             z->stored_left--;
             continue;
         }
+        /* the hot loop: codes from the fast tables while 32 bits are buffered, written to `out` only; a match is
+         * copied from `out` itself, or from the window for bytes from before this call. The window gets this
+         * call's bytes in one copy on the way out. Anything else (a long code, an end of block, the input running
+         * low, the output nearly full) falls through to the general path below, as before. */
+        {
+            fa_bytes_t *in = &z->in;
+            uint64_t bb = z->bitbuf;
+            int bc = z->bitcnt;
+            const uint32_t m = (1u << FAST_BITS) - 1;
+            const size_t start = done;
+            const uint64_t base = z->wtotal - start;   /* logical position of out[0] */
+            while (n - done >= 258 + 8) {                    /* a match and its 8-byte over-copy fit */
+                if (bc < 32) {
+                    while (bc <= 56 && in->pos < in->len) { bb |= (uint64_t)in->buf[in->pos++] << bc; bc += 8; }
+                    if (bc < 32) break;
+                }
+                uint16_t f = z->lit.fast[bb & m];
+                int l = f >> 9;
+                if (!l) break;
+                int sym = f & 511;
+                if (sym < 256) {
+                    bb >>= l; bc -= l;
+                    out[done++] = (uint8_t)sym;
+                    continue;
+                }
+                if (sym == 256 || sym >= 257 + 28) break;   /* end of block, and length 258 / Deflate64's 16 bits */
+                int ls = sym - 257, le = LEXTRA[ls];         /* length: at most 5 extra bits, then the distance code */
+                if (l + le + FAST_BITS > bc) break;
+                uint16_t g = z->dist.fast[(bb >> (l + le)) & m];
+                int dl = g >> 9;
+                if (!dl) break;
+                int dsym = g & 511;
+                if (dsym >= (z->d64 ? 32 : 30)) break;       /* the general path reports it */
+                int de = DEXTRA[dsym];
+                if (l + le + dl + de > bc) break;            /* 10 + 5 + 10 + 14 bits; 32 are not always enough */
+                uint32_t len = LBASE[ls] + (uint32_t)((bb >> l) & ((1u << le) - 1));
+                uint32_t dist = DBASE[dsym] + (uint32_t)((bb >> (l + le + dl)) & ((1u << de) - 1));
+                uint64_t have = base + done;                 /* bytes of history, this call's included */
+                if (dist > have || dist > z->wmask + 1) { e = FULTA_ARC_ERR_CORRUPT; break; }
+                bb >>= l + le + dl + de; bc -= l + le + dl + de;
+                uint8_t *o = out + done;
+                if (dist <= done) {                          /* the source is in `out` */
+                    const uint8_t *src = o - dist;
+                    if (dist >= 8) {                         /* 8 at a time, never reading what it writes */
+                        for (uint32_t k = 0; k < len; k += 8) memcpy(o + k, src + k, 8);
+                    } else {
+                        for (uint32_t k = 0; k < len; k++) o[k] = src[k];
+                    }
+                } else {                                     /* starts before this call: the window, then `out` */
+                    uint64_t p = have - dist;
+                    for (uint32_t k = 0; k < len; k++, p++)
+                        o[k] = p < base ? z->window[p & z->wmask] : out[p - base];
+                }
+                done += len;
+            }
+            z->bitbuf = bb;
+            z->bitcnt = bc;
+            size_t k = done - start;                         /* the window takes this call's new bytes */
+            const uint8_t *src = out + start;
+            if (k > z->wmask + 1u) { src += k - (z->wmask + 1u); z->wtotal += k - (z->wmask + 1u); k = z->wmask + 1u; }
+            while (k) {
+                size_t ti = (size_t)(z->wtotal & z->wmask), c = z->wmask + 1u - ti;
+                if (c > k) c = k;
+                memcpy(z->window + ti, src, c);
+                z->wtotal += c; src += c; k -= c;
+            }
+            if (e) break;
+        }
         int sym;
         if ((e = decode(z, &z->lit, &sym))) break;
         if (sym < 256) {

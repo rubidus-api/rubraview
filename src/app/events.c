@@ -211,12 +211,19 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 app->pointer_inside = true; app->pointer_x = event->mouse.x; app->pointer_y = event->mouse.y;
                 break;
             }
-            if (app->strip_press) {   /* RV-313 / RV-317: breadcrumb (1) or tool strip (2) slides sideways */
+            if (app->strip_press) {   /* RV-313 / RV-317 / R345: overflowing breadcrumb (1) or tool strip (2) slides sideways */
                 double sdpi = rubraview_pal_window_dpi_scale(app->window), dx = event->mouse.x - app->strip_press_x;
-                if (fabs(dx) >= 6.0 * sdpi) app->strip_moved = true;
+                int32_t sw = 0, sh = 0;
+                rubraview_pal_window_get_size(app->window, &sw, &sh);
+                bool overflow = false;
+                if (app->strip_press == 1) {
+                    rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
+                    overflow = picker_crumbs_strip(app, &crumbs, sdpi, (double)sw).overflow;
+                } else {
+                    overflow = picker_tools_strip(app, sdpi, (double)sw).overflow;
+                }
+                if (overflow && fabs(dx) >= 8.0 * sdpi) app->strip_moved = true;
                 if (app->strip_moved) {
-                    int32_t sw = 0, sh = 0;
-                    rubraview_pal_window_get_size(app->window, &sw, &sh);
                     picker_strip_slide(app, app->strip_press, app->strip_scroll0 - dx, sdpi, (double)sw);
                 }
             }
@@ -306,22 +313,29 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 if (titlebar_click(app, event->mouse.x, event->mouse.y)) break;
                 if (event->mouse.y < top) break;   /* the band holds nothing to press */
                 if (event->mouse.y < crumb_h) {
-                    /* RV-317: Row 1 (Back/Up/Forward, scrollable breadcrumbs with ‹ ›, always-present Edit Path icon) */
-                    int nav = -1;
-                    for (int k = 0; k < 3; ++k) if (pal_rect_has(picker_nav_rect(app, dpi, k), event->mouse.x, event->mouse.y)) nav = k;
-                    if (nav >= 0) {
-                        favpop_close(app);
-                        if (app->rename_active) rename_end(app);
-                        if (nav == 1) { if (!app->picker_in_book) picker_go_up(app); }
-                        else picker_history_go(app, nav == 2);
-                        break;
-                    }
-                    if (pal_rect_has(picker_path_edit_rect(dpi, (double)pw, top), event->mouse.x, event->mouse.y)) {
-                        favpop_close(app);
-                        if (!app->rename_active) picker_path_begin(app);
-                        break;
+                    /* RV-317 / R345: Row 1 (Back/Up/Forward, scrollable breadcrumbs with ‹ ›, standalone Edit Path button) */
+                    if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT) {
+                        int nav = -1;
+                        for (int k = 0; k < 3; ++k) if (pal_rect_has(picker_nav_rect(app, dpi, k), event->mouse.x, event->mouse.y)) nav = k;
+                        if (nav >= 0) {
+                            favpop_close(app);
+                            if (app->rename_active) rename_end(app);
+                            if (nav == 1) { if (!app->picker_in_book) picker_go_up(app); }
+                            else picker_history_go(app, nav == 2);
+                            break;
+                        }
+                        if (pal_rect_has(picker_path_edit_rect(dpi, (double)pw, top), event->mouse.x, event->mouse.y)) {
+                            favpop_close(app);
+                            if (!app->rename_active) picker_path_begin(app);
+                            break;
+                        }
                     }
                     rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
+                    if (event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {
+                        int32_t ci = picker_crumb_at(app, &crumbs, event->mouse.x, event->mouse.y, dpi, (double)pw);
+                        if (ci >= 0) picker_context_crumb(app, crumbs.items[ci].prefix, event->mouse.x, event->mouse.y);
+                        break;
+                    }
                     rubraview_hstrip_t cs = picker_crumbs_strip(app, &crumbs, dpi, (double)pw);
                     int dir = rubraview_hstrip_hit_arrow(&cs, event->mouse.x, event->mouse.y);
                     if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && dir != 0) {
@@ -623,7 +637,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             speed_tile_release(app, false);
             app->titlebar_held = RUBRAVIEW_TITLEBAR_NONE;
             if (favpop_release(app)) break;
-            if (app->strip_press) {   /* RV-313 / RV-317: not dragged: breadcrumb (1) or tool strip (2) acts now */
+            if (app->strip_press && event->mouse.button == RUBRAVIEW_MOUSE_LEFT) {   /* RV-313 / RV-317 / R345: not dragged: crumb (1) or tool strip (2) acts now */
                 int which = app->strip_press;
                 app->strip_press = 0;
                 if (!app->strip_moved && app->picker_open) {
@@ -631,26 +645,14 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                     int32_t sw = 0, sh = 0;
                     rubraview_pal_window_get_size(app->window, &sw, &sh);
                     if (which == 2) tools_act(app, app->strip_press_x, app->strip_press_y, sdpi, (double)sw);
-                    else {
+                    else if (fabs(event->mouse.y - app->strip_press_y) < 36.0 * sdpi) {
                         rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
-                        rubraview_hstrip_t cs = picker_crumbs_strip(app, &crumbs, sdpi, (double)sw);
-                        bool hit = false;
-                        if (app->strip_press_x >= cs.view_x && app->strip_press_x < cs.view_x + cs.view_w) {
-                            for (size_t i = 0; i < crumbs.count; ++i) {
-                                rubraview_pal_rect_t r = picker_crumb_rect(app, &crumbs, i, sdpi, (double)sw);
-                                if (app->strip_press_x >= r.x && app->strip_press_x < r.x + r.width) {
-                                    favpop_close(app);
-                                    if (app->rename_active) rename_end(app);
-                                    picker_navigate(app, crumbs.items[i].prefix);
-                                    app->picker.focus = 0;
-                                    hit = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!hit && !app->rename_active) {
+                        int32_t ci = picker_crumb_at(app, &crumbs, app->strip_press_x, app->strip_press_y, sdpi, (double)sw);
+                        if (ci >= 0) {
                             favpop_close(app);
-                            picker_path_begin(app);
+                            if (app->rename_active) rename_end(app);
+                            picker_navigate(app, crumbs.items[ci].prefix);
+                            app->picker.focus = 0;
                         }
                     }
                 }

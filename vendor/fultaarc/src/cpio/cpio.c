@@ -82,19 +82,22 @@ static fulta_arc_err_t cpio_open(fulta_arc_t *arc, uint64_t offset) {
     fulta_arc_err_t e = FULTA_ARC_OK;
     uint64_t pos = 0;
     for (;;) {
-        if (pos + hdr > src->size) break;
+        if (pos > src->size || src->size - pos < hdr) break;
         uint8_t h[110];
         if (fa_source_read_exact(src, pos, fa_bytes_mut(h, hdr))) break;
 
         uint64_t namesize, filesize, mode;
         if (fmt == CPIO_NEWC || fmt == CPIO_CRC) {
+            if (memcmp(h, fmt == CPIO_NEWC ? "070701" : "070702", 6) != 0) break;
             if (!cpio_num(h + 14, 8, 16, &mode) || !cpio_num(h + 54, 8, 16, &filesize) ||
                 !cpio_num(h + 94, 8, 16, &namesize)) break;
         } else if (fmt == CPIO_ODC) {
+            if (memcmp(h, "070707", 6) != 0) break;
             if (!cpio_num(h + 18, 6, 8, &mode) || !cpio_num(h + 59, 6, 8, &namesize) ||
                 !cpio_num(h + 65, 11, 8, &filesize)) break;
         } else {
             bool be = fmt == CPIO_BIN_BE;
+            if (h[0] != (be ? 0x71 : 0xC7) || h[1] != (be ? 0xC7 : 0x71)) break;
             mode = cpio_u16(h + 6, be);
             namesize = cpio_u16(h + 20, be);
             filesize = ((uint64_t)cpio_u16(h + 22, be) << 16) | cpio_u16(h + 24, be);   /* high word first */
@@ -132,7 +135,7 @@ static fulta_arc_err_t cpio_open(fulta_arc_t *arc, uint64_t offset) {
         const char *use = safe && safe[0] ? safe : "data";
 
         fa_entry_t *en = fa_add_entry(arc, fa_bytes((const uint8_t *)name, nlen), use, "store");
-        cpio_item_t *it = cpio_add(st);
+        cpio_item_t *it = en ? cpio_add(st) : NULL;
         fa_release(arc->alloc, safe);
         fa_release(arc->alloc, name);
         if (!en || !it) { e = FULTA_ARC_ERR_NOMEM; break; }

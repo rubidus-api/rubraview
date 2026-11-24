@@ -127,8 +127,13 @@ double picker_tools_end(const app_state_t *app, double dpi, double win_w) {
 }
 
 /* RV-317: always-accessible Edit Path button at Row 1 right. */
+bool picker_path_edit_labeled(double dpi, double win_w) {
+    return win_w >= 540.0 * dpi;
+}
+
 rubraview_pal_rect_t picker_path_edit_rect(double dpi, double win_w, double top) {
-    double w = PICKER_PATH_EDIT_W * dpi, crumb_h = PICKER_CRUMB_HEIGHT * dpi;
+    double w = picker_path_edit_labeled(dpi, win_w) ? picker_chip_width(TU8("Edit path"), dpi) + 18.0 * dpi : PICKER_PATH_EDIT_W * dpi;
+    double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
     double x = fmax(PICKER_CRUMB_START * dpi, win_w - 8.0 * dpi - w);
     return (rubraview_pal_rect_t){ x, top + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
 }
@@ -169,6 +174,19 @@ rubraview_pal_rect_t picker_crumb_rect(const app_state_t *app, const rubraview_b
         x += w + gap;
     }
     return (rubraview_pal_rect_t){ 0 };
+}
+
+int32_t picker_crumb_at(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double x, double y, double dpi, double win_w) {
+    if (!app || !crumbs) return -1;
+    double top = picker_top(app);
+    if (y < top || y >= top + PICKER_CRUMB_HEIGHT * dpi) return -1;
+    rubraview_hstrip_t cs = picker_crumbs_strip(app, crumbs, dpi, win_w);
+    if (x < cs.view_x || x >= cs.view_x + cs.view_w) return -1;
+    for (size_t i = 0; i < crumbs->count; ++i) {
+        rubraview_pal_rect_t r = picker_crumb_rect(app, crumbs, i, dpi, win_w);
+        if (x >= r.x && x < r.x + r.width) return (int32_t)i;
+    }
+    return -1;
 }
 
 rubraview_hstrip_t picker_tools_strip(const app_state_t *app, double dpi, double win_w) {
@@ -932,6 +950,35 @@ void picker_context_here(app_state_t *app, double x, double y) {
     app->ctx_x = x;
     app->ctx_y = y;
     app->picker_ctx_index = app->picker_listing.count;   /* no tile */
+}
+
+void picker_context_crumb(app_state_t *app, proven_u8str_view_t crumb_path, double x, double y) {
+    if (!app || crumb_path.size == 0) return;
+    (void)rubraview_fmt(app->picker_ctx_crumb, sizeof(app->picker_ctx_crumb), "{}",
+                        PROVEN_ARG(rubraview_bytes_view(crumb_path.ptr, (int)crumb_path.size)));
+    proven_u8str_view_t disk = PROVEN_LIT("");
+    if (!rubraview_picker_is_places(crumb_path) && !rubraview_picker_is_recent(crumb_path)) {
+        disk = rubraview_picker_is_desktop(crumb_path) ? rubraview_pal_fs_desktop_dir(app->arena) : crumb_path;
+    }
+    if (disk.size > 0) {
+        (void)rubraview_fmt(app->picker_ctx_disk, sizeof(app->picker_ctx_disk), "{}",
+                            PROVEN_ARG(rubraview_bytes_view(disk.ptr, (int)disk.size)));
+    } else {
+        app->picker_ctx_disk[0] = '\0';
+    }
+    favpop_close(app);
+    ctx_close(app);
+    slidepop_close(app);
+    if (app->picker_ctx_disk[0] && explorer_shift_click_path(app, cstr(app->picker_ctx_disk), x, y)) return;
+    const rubraview_toolbox_profile_t *list = rubraview_boxes_context(rubraview_boxes_document(), PROVEN_LIT("pickercrumb"));
+    if (!list || list->tile_count <= 0) return;
+    app->ctx_open = true;
+    app->ctx_in_files = false;
+    app->ctx_list = list;
+    app->ctx_x = x;
+    app->ctx_y = y;
+    app->picker_ctx_index = app->picker_listing.count;
+    explorer_targets_path(app, cstr(app->picker_ctx_disk));
 }
 
 /* A press held still on a tile is a right click (owner: "손가락 오래 누르는건 우클릭"). */

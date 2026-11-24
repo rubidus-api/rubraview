@@ -373,7 +373,8 @@ rubraview_breadcrumbs_t rubraview_picker_breadcrumbs(proven_u8str_view_t path) {
             crumbs.items[crumbs.count].label = (proven_u8str_view_t){ .ptr = path.ptr + start, .size = i - start };
             /* The prefix runs from the start of the path through this
                segment, so tapping a crumb navigates straight there. */
-            crumbs.items[crumbs.count].prefix = (proven_u8str_view_t){ .ptr = path.ptr, .size = i };
+            bool drive_root = (start == 0 && i == 2 && path.ptr[1] == ':' && !at_end);
+            crumbs.items[crumbs.count].prefix = (proven_u8str_view_t){ .ptr = path.ptr, .size = drive_root ? i + 1 : i };
             crumbs.count++;
         }
         start = i + 1;

@@ -78,6 +78,11 @@ typedef struct fa_rar_entry {
     bool     solid;         /* continues the previous file's stream */
     bool     encrypted;
     bool     split;         /* a piece of it is in a volume that is not there */
+    /* modification time (spec 2.5, 3.5, 3.6), when `has_mtime`: RAR 4 gives `dos_time` (FTIME, the local wall
+       clock) plus `mtime_ns` nanoseconds from EXT_TIME; RAR 5 gives `mtime_ns` since 1970-01-01 UTC */
+    bool     has_mtime, mtime_dos;
+    uint32_t dos_time;
+    int64_t  mtime_ns;
     /* how it is encrypted */
     fa_rar_crypt_t crypt;
     bool     salt_set, psw_check_set, hash_mac;

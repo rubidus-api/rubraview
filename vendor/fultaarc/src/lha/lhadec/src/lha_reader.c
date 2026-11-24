@@ -17,24 +17,35 @@
 /* ------------------------------------------------------------------------------------------------
  * CRC-16, reflected polynomial 0xA001, initial value 0 (spec container §5.1).
  */
-static uint16_t crc_table[256];
+static uint16_t crc_table[8][256];   /* [0]: one byte; [k]: a byte followed by k zero bytes (slicing-by-8) */
 static fa_once_t crc_once;
 
 static void crc_init(void)
 {
-    unsigned i, j;
+    unsigned i, j, k;
     for (i = 0; i < 256; i++) {
         unsigned r = i;
         for (j = 0; j < 8; j++) r = (r & 1) ? (r >> 1) ^ 0xA001u : r >> 1;
-        crc_table[i] = (uint16_t)r;
+        crc_table[0][i] = (uint16_t)r;
     }
+    for (k = 1; k < 8; k++)
+        for (i = 0; i < 256; i++) {
+            unsigned r = crc_table[k - 1][i];
+            crc_table[k][i] = (uint16_t)((r >> 8) ^ crc_table[0][r & 0xFF]);
+        }
 }
 
 uint16_t lha_crc16(uint16_t crc, const void *data, size_t n)
 {
     const unsigned char *p = (const unsigned char *)data;
     fa_once(&crc_once, crc_init);
-    while (n--) crc = (uint16_t)(crc_table[(crc ^ *p++) & 0xFF] ^ (crc >> 8));
+    for (; n >= 8; n -= 8, p += 8) {     /* eight bytes at a time: the same value as the byte loop below */
+        unsigned v = crc ^ (p[0] | (unsigned)p[1] << 8);
+        crc = (uint16_t)(crc_table[7][v & 0xFF] ^ crc_table[6][v >> 8] ^ crc_table[5][p[2]] ^
+                         crc_table[4][p[3]] ^ crc_table[3][p[4]] ^ crc_table[2][p[5]] ^ crc_table[1][p[6]] ^
+                         crc_table[0][p[7]]);
+    }
+    while (n--) crc = (uint16_t)(crc_table[0][(crc ^ *p++) & 0xFF] ^ (crc >> 8));
     return crc;
 }
 

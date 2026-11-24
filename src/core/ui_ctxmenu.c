@@ -160,6 +160,7 @@ static const struct { const char *action; int category; } MENUCAT_OF[] = {
     { "new_window", RUBRAVIEW_MENUCAT_OPEN }, { "open_picker", RUBRAVIEW_MENUCAT_OPEN }, { "open_folder", RUBRAVIEW_MENUCAT_OPEN },
     { "open_recent_list", RUBRAVIEW_MENUCAT_OPEN }, { "open_favorites", RUBRAVIEW_MENUCAT_OPEN }, { "toggle_playlist", RUBRAVIEW_MENUCAT_OPEN },
     { "toggle_favorite", RUBRAVIEW_MENUCAT_OPEN }, { "picker_favorite", RUBRAVIEW_MENUCAT_OPEN }, { "picker_open_item", RUBRAVIEW_MENUCAT_OPEN },
+    { "picker_crumb_open", RUBRAVIEW_MENUCAT_OPEN }, { "picker_crumb_new_window", RUBRAVIEW_MENUCAT_OPEN }, { "picker_crumb_favorite", RUBRAVIEW_MENUCAT_OPEN },
     { "picker_add_to_list", RUBRAVIEW_MENUCAT_OPEN }, { "picker_make_playlist", RUBRAVIEW_MENUCAT_OPEN }, { "list_open", RUBRAVIEW_MENUCAT_OPEN },
     { "list_take_out", RUBRAVIEW_MENUCAT_OPEN }, { "recent_clear", RUBRAVIEW_MENUCAT_OPEN },
     { "next_page", RUBRAVIEW_MENUCAT_MOVE }, { "prev_page", RUBRAVIEW_MENUCAT_MOVE }, { "first_page", RUBRAVIEW_MENUCAT_MOVE },

@@ -121,6 +121,16 @@ void tick_timers(app_state_t *app, double dt) {
             const char *said = item ? rubraview_action_hint(item->action) : NULL;
             if (item) hint = hint_with_keys(app, item->action, said, hint_scratch, sizeof(hint_scratch));
         }
+        if (hint.size == 0 && app->picker_open && app->pointer_inside && !app->ctx_open && !app->favpop_open && !app->rename_active) {
+            int32_t pw = 0, ph = 0;
+            rubraview_pal_window_get_size(app->window, &pw, &ph);
+            double dpi = rubraview_pal_window_dpi_scale(app->window);
+            rubraview_pal_rect_t edit_r = picker_path_edit_rect(dpi, (double)pw, picker_top(app));
+            if (pal_rect_has(edit_r, app->pointer_x, app->pointer_y)) {
+                int n = rubraview_fmt(hint_scratch, sizeof(hint_scratch), "{} (Ctrl+L)", PROVEN_ARG(T("Edit path")));
+                if (n > 0) hint = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)hint_scratch, .size = (size_t)n };
+            }
+        }
         /* Kept in the app's own buffer, so it is the same text however it was made. */
         if (hint.size >= sizeof(app->hint_text)) hint.size = sizeof(app->hint_text) - 1;
         if (hint.size != app->hint.size || proven_sys_mem_cmp(hint.ptr, app->hint_text, hint.size) != 0) {

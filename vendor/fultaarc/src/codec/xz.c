@@ -83,18 +83,25 @@ static fulta_arc_err_t parse(xz_stream_t *z, uint64_t off, uint64_t len) {
         if (!uns || !unc) { fa_release(z->base.alloc, ix); fa_release(z->base.alloc, uns); fa_release(z->base.alloc, unc); return FULTA_ARC_ERR_NOMEM; }
         for (uint64_t i = 0; i < nrec; i++) {
             if (!vli(ix, (size_t)isize, &p, &uns[i]) || !vli(ix, (size_t)isize, &p, &unc[i]) || !uns[i]) { e = FULTA_ARC_ERR_CORRUPT; break; }
-            if (uns[i] > end || total > end - uns[i]) { e = FULTA_ARC_ERR_CORRUPT; break; }   /* no block past the stream */
-            total += (uns[i] + 3) & ~(uint64_t)3;
+            if (uns[i] > UINT64_MAX - 3) { e = FULTA_ARC_ERR_CORRUPT; break; }
+            uint64_t padded = (uns[i] + 3) & ~(uint64_t)3;
+            if (off > ipos || ipos - off < 12 || total > ipos - off - 12 || padded > ipos - off - 12 - total) {
+                e = FULTA_ARC_ERR_CORRUPT;
+                break;
+            }
+            total += padded;
         }
         fa_release(z->base.alloc, ix);
-        if (!e && ipos < off + 12 + total) e = FULTA_ARC_ERR_CORRUPT;
-        uint64_t sstart = ipos - total - 12;
+        if (!e && (off > ipos || ipos - off < 12 || total > ipos - off - 12)) e = FULTA_ARC_ERR_CORRUPT;
+        uint64_t sstart = e ? 0 : (ipos - total - 12);
         uint8_t sh[12];
         if (!e) e = fa_range_read_exact(&z->range, sstart, fa_bytes_mut(sh, 12));
         if (!e && (memcmp(sh, "\xFD" "7zXZ\0", 6) != 0 || memcmp(sh + 6, ft + 8, 2) != 0 || fa_crc32(0, fa_bytes(sh + 6, 2)) != fa_le32(sh + 8)))
             e = FULTA_ARC_ERR_CORRUPT;
         /* blocks of this stream go in front of those of later streams */
-        xz_blk_t *nb = e ? NULL : fa_resize(z->base.alloc, z->blk, z->nblk * sizeof *nb, (z->nblk + nrec) * sizeof *nb);
+        if (!e && (nrec > SIZE_MAX / sizeof *z->blk || z->nblk > SIZE_MAX / sizeof *z->blk - (size_t)nrec))
+            e = FULTA_ARC_ERR_CORRUPT;
+        xz_blk_t *nb = e ? NULL : fa_resize(z->base.alloc, z->blk, z->nblk * sizeof *nb, (z->nblk + (size_t)nrec) * sizeof *nb);
         if (!e && !nb) e = FULTA_ARC_ERR_NOMEM;
         if (e) { fa_release(z->base.alloc, uns); fa_release(z->base.alloc, unc); return e; }
         memmove(nb + nrec, nb, z->nblk * sizeof *nb);

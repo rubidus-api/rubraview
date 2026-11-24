@@ -81,6 +81,7 @@ typedef struct fa_alz_archive {
     bool damaged;           /* the listing stopped at damage, before the end record */
     void *state;            /* the password, while one is set; in `alloc` */
     proven_allocator_t alloc;   /* the archive's (D-038): state, password and decode buffers */
+    uint64_t max_memory;    /* optional cap on password-check buffer allocation (0 = unlimited) */
 } fa_alz_archive_t;
 
 typedef struct fa_alz_result {

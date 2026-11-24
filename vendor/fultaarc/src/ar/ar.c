@@ -60,7 +60,7 @@ static fulta_arc_err_t ar_emit(fulta_arc_t *arc, ar_state_t *st, const char *nam
     if (!fa_sanitize_name(safe)) { fa_release(arc->alloc, safe); safe = NULL; }
     const char *use = safe && safe[0] ? safe : "data";
     fa_entry_t *e = fa_add_entry(arc, fa_bytes((const uint8_t *)name, nlen), use, "store");
-    ar_item_t *it = ar_add(st);
+    ar_item_t *it = e ? ar_add(st) : NULL;
     fa_release(arc->alloc, safe);
     if (!e || !it) return FULTA_ARC_ERR_NOMEM;
     e->pub.size = size;
@@ -94,7 +94,7 @@ static fulta_arc_err_t ar_open(fulta_arc_t *arc, uint64_t offset) {
      * Only out-of-memory is a hard failure. This keeps a slightly damaged archive (e.g. a truncated .deb) listing
      * what is intact instead of flapping between "N entries" and "corrupt" on a one-byte change. */
     uint64_t pos = 8;
-    while (pos + AR_HDR <= src->size) {
+    while (pos <= src->size && src->size - pos >= AR_HDR) {
         uint8_t h[AR_HDR];
         if (fa_source_read_exact(src, pos, fa_bytes_mut(h, AR_HDR))) break;
         if (h[58] != 0x60 || h[59] != 0x0A) break;        /* no "`\n" terminator */
@@ -122,7 +122,7 @@ static fulta_arc_err_t ar_open(fulta_arc_t *arc, uint64_t offset) {
         if (nm[0] == '/' && nm[1] >= '0' && nm[1] <= '9') {   /* GNU "/<offset>" into the long-name table */
             uint64_t ofs = 0;
             for (size_t i = 1; i < 16 && nm[i] >= '0' && nm[i] <= '9'; i++) ofs = ofs * 10 + (uint64_t)(nm[i] - '0');
-            if (ofs >= st->nametab_len) break;            /* missing or short "//" table */
+            if (!st->nametab || ofs >= st->nametab_len) break;   /* missing or short "//" table */
             const char *p = st->nametab + ofs;
             size_t maxn = st->nametab_len - (size_t)ofs, nlen = 0;
             while (nlen < maxn && p[nlen] != '/' && p[nlen] != '\n') nlen++;   /* GNU ends a name with "/\n" */

@@ -55,8 +55,10 @@ static bool read_filter(rc_unpack_t *u) {
     }
     rc_filter_t f = {0};
     f.rar5 = true;
+    if (v[0] > UINT64_MAX - rc_file_pos(u) || v[0] > UINT64_MAX - u->pos) return false;
     f.file_off = rc_file_pos(u) + v[0];
     f.start = u->pos + v[0];
+    if (v[1] > UINT64_MAX - f.start) return false;
     f.length = v[1];
     unsigned type = rc_get(b, 3);
     if (type == 0) { f.type = RC_F_DELTA; f.r[0] = rc_get(b, 5) + 1; }

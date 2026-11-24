@@ -1,12 +1,12 @@
 # Vendored FultaArc
 
 - Upstream: `fultaarc_c_lib` (sibling checkout), MIT (see `LICENSE`); third-party parts in `THIRD_PARTY_NOTICES.md`
-- Snapshot: commit `0dccf16` (v0.1.0 and one commit, untagged), taken on 2026-11-11 with
-  `git archive 0dccf16 LICENSE THIRD_PARTY_NOTICES.md include src vendor/lzma vendor/miniz vendor/bzip2 vendor/bzip2_alz vendor/zstd`
-  (owner, 2026-11-11: "proven c lib 와 fultaarc 버젼 비교해서 새 버젼 있으면 벤더링"; D-329). Since `24cd434`
-  (v0.1.0, 2026-11-10, D-325): proven v0.113.0 with proven_crypto, `src/core/internal.h` including `proven/sha2.h`
-  (asked by Rubraview, D-328), and a Zip64 end record with disk number 0xFFFFFFFF no longer read past its disk table
-  (its D-043). Since `f41b3a0`, in v0.1.0: FultaArc's security review (its
+- Snapshot: commit `e1af87da` (tag `v0.1.4`), taken on 2026-11-24 with
+  `git archive v0.1.4 LICENSE THIRD_PARTY_NOTICES.md include src vendor/lzma vendor/miniz vendor/bzip2 vendor/bzip2_alz vendor/zstd`
+  (owner, 2026-11-24; D-393). Changes since `0dccf16` (`v0.1.1`..`v0.1.4`):
+  - **v0.1.4** (`e1af87da`, 2026-11-24): RAR 1.5 password decryption (`src/rar/rar15_enc/rar15_cipher.c`, clean-room MIT, compiled by `Makefile` via `FULTA_OWN_SRCS`); memory-safety and security hardening (`d0d0664d`: `fa_wipe`/`proven_mem_wipe` on keys/passwords/plaintext, constant-time `fa_ct_eq` checks, `max_memory` bounds and overflow guards across ZIP/7z/RAR/ALZ/EGG/XZ/CAB/TAR/AR/CPIO/UDF/write, `gzip_probe` short-input guard, EGG OOM cleanup fix, zero-progress guards in bzip2/zstd, cancellation checks); performance improvements (8-block AES-NI CTR batching, static `fa_once` CRC tables, `proven_crc32_update` in RAR, `clz64` and run-copy fast paths in AZO, CAB hoisted folder buffer, O(1) ISO/UDF hash sets, 32 KiB UDF extraction buffer); `proven_c_lib v0.119.3` (D-048, D-049).
+  - **v0.1.2 / v0.1.3** (2026-11-13): CAB LZX block look-ahead fix and modification times on RAR 2-5 & CAB (`FULTA_ARC_ENTRY_MTIME_LOCAL`); entry-name control characters sanitized to `_`; faster Deflate (~1.6x), LZH (~1.7x), AZO (~1.1x), and ALZ CRC-32; ZIP edit NTFS `0x000a` preservation.
+  - Previous snapshot: `0dccf16` (2026-11-11, D-329). Since `24cd434` (v0.1.0, 2026-11-10, D-325): proven v0.113.0 with proven_crypto, `src/core/internal.h` including `proven/sha2.h` (asked by Rubraview, D-328), and a Zip64 end record with disk number 0xFFFFFFFF no longer read past its disk table (its D-043). Since `f41b3a0`, in v0.1.0: FultaArc's security review (its D-041)...
   D-041): double frees and a heap over-read fixed, header injection and unsafe names refused (an entry's name never
   holds a drive or a ".." part as Windows reads one, "_" when nothing safe remains), one memory budget with a RAR
   window and an ALZ entry checked against it before they are allocated, 7z folders grown as parsed, exclusive and
@@ -30,7 +30,7 @@
 - Built as FultaArc's own Makefile builds it: `vendor/bzip2_alz` is ALZ's altered bzip2 decoder, compiled with
   `-include vendor/bzip2_alz/alz_bzip2_rename.h` so that it stands beside the ordinary one; `src/lha/lhadec/src` with
   `-include src/lha/lhadec_shim.h`; Zstandard is the whole `zstd.c` (FultaArc reads `.zst` and writes none).
-- Not taken: its tests, tools and documents, and its `vendor/proven` — v0.112.3; FultaArc is built
-  here on Rubraview's `vendor/proven` (v0.113.0 since D-328, the same as its own), with
+- Not taken: its tests, tools and documents, and its `vendor/proven` — FultaArc `v0.1.4` is built
+  here on Rubraview's `vendor/proven` (`v0.119.3`, the same version as its own), with
   `-Ivendor/proven/crypto/include`, unchanged, its tests passing.
 - Unmodified. Never edit it here; report defects upstream and resync.

@@ -31,6 +31,7 @@ typedef struct egg_file {
 typedef struct egg_state {
     fa_range_t range;
     egg_file_t *files;
+    size_t nfiles;
     bool solid;
     egg_block_t solid_block;
     /* sequential solid reading */
@@ -82,6 +83,7 @@ static fulta_arc_err_t read_sub(cur_t *c, sub_t *s, bool *end) {
         if (len != want) return FULTA_ARC_ERR_CORRUPT;
     }
     s->len = len;
+    if (c->pos > c->r->size || len > c->r->size - c->pos) return FULTA_ARC_ERR_TRUNCATED;
     if (len <= sizeof s->data) {
         if (!c->err) c->err = fa_range_read_exact(c->r, c->pos, fa_bytes_mut(s->data, len));
     }
@@ -97,8 +99,8 @@ static fulta_arc_err_t read_block(cur_t *c, egg_block_t *b) {
     b->crc = c_u32(c);
     if (c_u32(c) != SIG_END && !c->err) return FULTA_ARC_ERR_CORRUPT;
     b->data = c->pos;
+    if (c->pos > c->r->size || b->in > c->r->size - c->pos) return FULTA_ARC_ERR_TRUNCATED;
     c->pos += b->in;
-    if (c->pos > c->r->size) return FULTA_ARC_ERR_TRUNCATED;
     return c->err;
 }
 
@@ -159,6 +161,7 @@ static fulta_arc_err_t join_volumes(fulta_arc_t *arc, egg_state_t *st, uint64_t 
         if (!p) return FULTA_ARC_ERR_NOMEM;
         st->range.pieces = p;
         p[st->range.count++] = (fa_piece_t){src, 33, src->size - 33};
+        if (src->size - 33 > UINT64_MAX - st->range.size) return FULTA_ARC_ERR_CORRUPT;
         st->range.size += src->size - 33;
         prev_id = fa_le32(v + 6);
         next = fa_le32(v + 25);
@@ -242,6 +245,7 @@ static fulta_arc_err_t egg_open(fulta_arc_t *arc, uint64_t search) {
             }
             if (got != size) { fa_release(arc->alloc, f.blocks); return FULTA_ARC_ERR_CORRUPT; }
         } else {
+            if (size > UINT64_MAX - solid_total) { fa_release(arc->alloc, f.blocks); return FULTA_ARC_ERR_CORRUPT; }
             solid_total += size;
         }
         name = fa_codepage_to_utf8(arc->alloc, fa_bytes(namebuf, nlen), FULTA_ARC_CP_UTF8, FULTA_ARC_CP_UTF8);
@@ -284,7 +288,7 @@ static fulta_arc_err_t egg_open(fulta_arc_t *arc, uint64_t search) {
             st->files = nf;
             cap = nc;
         }
-        st->files[arc->count - 1] = f;
+        st->files[st->nfiles++] = f;
     }
     if (st->solid && solid_total && !st->solid_block.in && !st->solid_block.out) return FULTA_ARC_ERR_CORRUPT;
     if (st->solid && st->solid_block.method > 4) {
@@ -330,34 +334,47 @@ static fulta_arc_err_t decrypt_open(fulta_arc_t *arc, const egg_file_t *f, const
                 uint8_t h[12];
                 memcpy(h, f->cdata, 12);
                 fa_zipcrypto_decrypt(&k, h, 12);
-                if (h[11] != (uint8_t)(fa_le32(f->cdata + 12) >> 24)) continue;
+                if (h[11] != (uint8_t)(fa_le32(f->cdata + 12) >> 24)) { fa_wipe(&k, sizeof k); continue; }
                 fa_password_ok(arc, pw);
-                fa_release(arc->alloc, cp949);
+                if (cp949) { fa_wipe(cp949, strlen(cp949)); fa_release(arc->alloc, cp949); cp949 = NULL; }
                 *handed = true;
-                return fa_dec_zipcrypto(*s, &k, s);
+                e = fa_dec_zipcrypto(*s, &k, s);
+                fa_wipe(&k, sizeof k);
+                return e;
             }
             size_t kl = (f->crypt == 1 || f->crypt == 5) ? 16 : 32, sl = kl == 16 ? 8 : 16;
             uint8_t key[66];
             fa_pbkdf2_sha1(pwb, pl, f->cdata, sl, 1000, key, 2 * kl + 2);
-            if (key[2 * kl] != f->cdata[sl] || key[2 * kl + 1] != f->cdata[sl + 1]) continue;
+            if (key[2 * kl] != f->cdata[sl] || key[2 * kl + 1] != f->cdata[sl + 1]) { fa_wipe(key, sizeof key); continue; }
             fa_password_ok(arc, pw);
-            fa_release(arc->alloc, cp949);
+            if (cp949) { fa_wipe(cp949, strlen(cp949)); fa_release(arc->alloc, cp949); cp949 = NULL; }
             /* MAC over the ciphertext, checked in a pass before decoding */
             fa_hmac_sha1_t mac;
             fa_hmac_sha1_init(&mac, key + kl, kl);
             fa_stream_t *t;
-            if ((e = fa_stream_range(arc->alloc, &((egg_state_t *)arc->state)->range, b->data, b->in, &t))) return e;
-            if ((e = fa_stream_hmac_tap(t, &mac, &t))) return e;
+            if ((e = fa_stream_range(arc->alloc, &((egg_state_t *)arc->state)->range, b->data, b->in, &t))) {
+                fa_wipe(key, sizeof key); fa_wipe(&mac, sizeof mac); return e;
+            }
+            if ((e = fa_stream_hmac_tap(t, &mac, &t))) {
+                fa_wipe(key, sizeof key); fa_wipe(&mac, sizeof mac); return e;
+            }
             e = fa_pump(t, b->in, false, 0, NULL, arc, false);
             fa_stream_destroy(t);
-            if (e) return e;
+            if (e) { fa_wipe(key, sizeof key); fa_wipe(&mac, sizeof mac); return e; }
             uint8_t m[20];
             fa_hmac_sha1_final(&mac, m);
-            if (memcmp(m, f->cdata + sl + 2, 10) != 0) return FULTA_ARC_ERR_CHECKSUM;
+            fa_wipe(&mac, sizeof mac);
+            if (!fa_ct_eq(m, f->cdata + sl + 2, 10)) {
+                fa_wipe(key, sizeof key); fa_wipe(m, sizeof m);
+                return FULTA_ARC_ERR_CHECKSUM;
+            }
+            fa_wipe(m, sizeof m);
             *handed = true;
-            return fa_dec_ctr(*s, f->crypt <= 2 ? FA_CTR_AES_LE1 : FA_CTR_LEA_BE0, key, kl, s);
+            e = fa_dec_ctr(*s, f->crypt <= 2 ? FA_CTR_AES_LE1 : FA_CTR_LEA_BE0, key, kl, s);
+            fa_wipe(key, sizeof key);
+            return e;
         }
-        fa_release(arc->alloc, cp949);
+        if (cp949) { fa_wipe(cp949, strlen(cp949)); fa_release(arc->alloc, cp949); }
     }
 }
 
@@ -439,7 +456,7 @@ static void egg_close(fulta_arc_t *arc) {
     egg_state_t *st = arc->state;
     if (!st) return;
     fa_stream_destroy(st->cur);
-    for (size_t i = 0; i < arc->count && st->files; i++) fa_release(arc->alloc, st->files[i].blocks);
+    for (size_t i = 0; i < st->nfiles && st->files; i++) fa_release(arc->alloc, st->files[i].blocks);
     fa_release(arc->alloc, st->files);
     fa_release(arc->alloc, st->range.pieces);
     fa_release(arc->alloc, st);

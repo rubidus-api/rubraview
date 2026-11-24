@@ -961,48 +961,73 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         if (on) app->strip_peek_until = 0.0;   /* one up now goes */
         osd_say(app, on ? TU8("no thumbnails while the wheel turns pages") : TU8("thumbnails while the wheel turns pages"));
     } else if (proven_u8str_view_starts_with(action, PROVEN_LIT("picker_")) && app->picker_open) {   /* 1.22.0: a tile's right click */
-        size_t at = app->picker_ctx_index;
-        bool inside = picker_in_archive(app);   /* RV-207: what is listed inside an archive is read and written out, nothing more */
-        if (inside && !proven_u8str_view_eq(action, PROVEN_LIT("picker_open_item")) && !proven_u8str_view_eq(action, PROVEN_LIT("picker_deselect_all")) &&
-            !proven_u8str_view_eq(action, PROVEN_LIT("picker_copy_paths")) && !proven_u8str_view_starts_with(action, PROVEN_LIT("picker_extract_"))) {
-            osd_say(app, TU8("inside an archive: extract what you need first"));
-        }
-        else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_folder"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_FOLDER, false);
-        else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_smart"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_SMART, false);
-        else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_to"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_FOLDER, true);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_new_folder"))) picker_new_folder(app);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_clip_copy"))) picker_clip_put(app, false);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_clip_cut"))) picker_clip_put(app, true);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_paste"))) picker_clip_paste(app);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_open_item"))) { if (at < app->picker_listing.count) picker_activate(app, at); }
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_look_inside"))) { if (!picker_enter_book(app, at)) osd_say(app, TU8("that is not an archive")); }
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_add_to_list"))) picker_add_to_list(app);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_make_playlist"))) picker_make_playlist(app);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_copy_paths"))) picker_copy_paths(app);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_reveal"))) {
-            if (at < app->picker_listing.count) (void)rubraview_pal_shell_reveal(app->picker_listing.entries[at].path);
-        }
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_rename"))) rename_picker_begin(app, at);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_change_ext"))) picker_button(app, PICKER_BTN_EXTENSION);   /* 1.24.0: off the bottom */
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_favorite"))) {   /* 1.24.0: a file or a folder in or out of the favourites */
-            if (at < app->picker_listing.count) { (void)favorite_toggle_path(app, app->picker_listing.entries[at].path); if (app->favwin.open) favwin_build(app); }
-        }
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_copy_to"))) picker_button(app, PICKER_BTN_COPY);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_move_to"))) picker_button(app, PICKER_BTN_MOVE);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_recycle"))) {
-            /* asked on the list (a second click); here it goes */
-            rubraview_confirm_press(&app->picker_confirm, PICKER_BTN_RECYCLE, rubraview_pal_time_now_seconds());
-            picker_recycle(app);
-        }
-        /* RV-207 (D-252): the picked archives written out, or the picked files packed */
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_folder"))) archwork_extract(app, RUBRAVIEW_EXTRACT_FOLDER, false);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_smart"))) archwork_extract(app, RUBRAVIEW_EXTRACT_SMART, false);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_to"))) archwork_extract(app, RUBRAVIEW_EXTRACT_FOLDER, true);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_compress_zip"))) archwork_compress_quick(app);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_compress"))) archwork_compress_ask(app);
-        else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_deselect_all"))) {
-            for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i) app->picker_selected[i] = false;
-            osd_say(app, TU8("nothing picked"));
+        if (proven_u8str_view_eq(action, PROVEN_LIT("picker_crumb_open"))) {
+            char dst[PICKER_HIST_PATH];
+            rubraview_fmt(dst, sizeof(dst), "{}", PROVEN_ARG(app->picker_ctx_crumb));
+            if (dst[0]) {
+                favpop_close(app);
+                if (app->rename_active) rename_end(app);
+                picker_navigate(app, cstr(dst));
+                app->picker.focus = 0;
+            }
+        } else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_crumb_new_window"))) {
+            if (app->picker_ctx_disk[0]) new_window_browse(app, cstr(app->picker_ctx_disk));
+        } else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_crumb_copy_path"))) {
+            if (app->picker_ctx_disk[0]) {
+                bool ok = rubraview_pal_clipboard_set_text(app->window, cstr(app->picker_ctx_disk));
+                osd_say(app, ok ? TU8("its whole path is on the clipboard") : TU8("the clipboard would not take it"));
+            }
+        } else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_crumb_reveal"))) {
+            if (app->picker_ctx_disk[0]) (void)rubraview_pal_shell_open_folder(cstr(app->picker_ctx_disk), false);
+        } else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_crumb_favorite"))) {
+            if (app->picker_ctx_disk[0]) {
+                (void)favorite_toggle_path(app, cstr(app->picker_ctx_disk));
+                if (app->favwin.open) favwin_build(app);
+            }
+        } else {
+            size_t at = app->picker_ctx_index;
+            bool inside = picker_in_archive(app);   /* RV-207: what is listed inside an archive is read and written out, nothing more */
+            if (inside && !proven_u8str_view_eq(action, PROVEN_LIT("picker_open_item")) && !proven_u8str_view_eq(action, PROVEN_LIT("picker_deselect_all")) &&
+                !proven_u8str_view_eq(action, PROVEN_LIT("picker_copy_paths")) && !proven_u8str_view_starts_with(action, PROVEN_LIT("picker_extract_"))) {
+                osd_say(app, TU8("inside an archive: extract what you need first"));
+            }
+            else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_folder"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_FOLDER, false);
+            else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_smart"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_SMART, false);
+            else if (inside && proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_to"))) archwork_extract_inside(app, RUBRAVIEW_EXTRACT_FOLDER, true);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_new_folder"))) picker_new_folder(app);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_clip_copy"))) picker_clip_put(app, false);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_clip_cut"))) picker_clip_put(app, true);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_paste"))) picker_clip_paste(app);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_open_item"))) { if (at < app->picker_listing.count) picker_activate(app, at); }
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_look_inside"))) { if (!picker_enter_book(app, at)) osd_say(app, TU8("that is not an archive")); }
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_add_to_list"))) picker_add_to_list(app);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_make_playlist"))) picker_make_playlist(app);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_copy_paths"))) picker_copy_paths(app);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_reveal"))) {
+                if (at < app->picker_listing.count) (void)rubraview_pal_shell_reveal(app->picker_listing.entries[at].path);
+            }
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_rename"))) rename_picker_begin(app, at);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_change_ext"))) picker_button(app, PICKER_BTN_EXTENSION);   /* 1.24.0: off the bottom */
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_favorite"))) {   /* 1.24.0: a file or a folder in or out of the favourites */
+                if (at < app->picker_listing.count) { (void)favorite_toggle_path(app, app->picker_listing.entries[at].path); if (app->favwin.open) favwin_build(app); }
+            }
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_copy_to"))) picker_button(app, PICKER_BTN_COPY);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_move_to"))) picker_button(app, PICKER_BTN_MOVE);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_recycle"))) {
+                /* asked on the list (a second click); here it goes */
+                rubraview_confirm_press(&app->picker_confirm, PICKER_BTN_RECYCLE, rubraview_pal_time_now_seconds());
+                picker_recycle(app);
+            }
+            /* RV-207 (D-252): the picked archives written out, or the picked files packed */
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_folder"))) archwork_extract(app, RUBRAVIEW_EXTRACT_FOLDER, false);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_smart"))) archwork_extract(app, RUBRAVIEW_EXTRACT_SMART, false);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_extract_to"))) archwork_extract(app, RUBRAVIEW_EXTRACT_FOLDER, true);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_compress_zip"))) archwork_compress_quick(app);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_compress"))) archwork_compress_ask(app);
+            else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_deselect_all"))) {
+                for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i) app->picker_selected[i] = false;
+                osd_say(app, TU8("nothing picked"));
+            }
         }
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("toggle_titlebar_pin"))) {
         /* 1.20.0 (owner, 2026-10-18: "툴바에 상단 타이틀바 자체를 고정하는 pin"): the title bar stays */

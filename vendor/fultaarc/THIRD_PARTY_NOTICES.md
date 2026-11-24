@@ -4,7 +4,7 @@ FultaArc is MIT-licensed (`LICENSE`). It contains or derives data from the follo
 
 | Component | Where | Licence |
 |---|---|---|
-| proven_c_lib v0.113.0 (proven_base and proven_crypto) | `vendor/proven/` | MIT (`vendor/proven/LICENSE`; its own notices in `vendor/proven/THIRD_PARTY_NOTICES.md`) |
+| proven_c_lib v0.119.3 (proven_base and proven_crypto) | `vendor/proven/` | MIT (`vendor/proven/LICENSE`; its own notices in `vendor/proven/THIRD_PARTY_NOTICES.md`) |
 | LZMA SDK 26.05 (Igor Pavlov; PPMd var.H by Dmitry Shkarin) | `vendor/lzma/` | public domain (`vendor/lzma/LICENSE.txt`) |
 | miniz 3.1.2 | `vendor/miniz/` | MIT (`vendor/miniz/LICENSE`) |
 | bzip2 1.0.8 (Julian Seward) | `vendor/bzip2/`, `vendor/bzip2_alz/` (altered, marked) | bzip2 licence (`vendor/bzip2/LICENSE`) |
@@ -24,7 +24,7 @@ terms, is set out per format in `docs/provenance/`.
 | UNLHA32.DLL 3.00 (Micco; compression routines by Haruyasu Yoshizaki and Haruhiko Okumura) | freeware, under its package's terms | run as a black box by the LHA clean room, at the project owner's instruction, to observe `-lh2-`/`-lh3-`; not redistributed; its source was not read |
 | Yoshihiko Mino, PMarc 2.00 and PMext 2.22 | freeware, no use for profit | run privately as a black box by the LHA clean room to observe `-pm2-`; not redistributed; no PMarc source or format description was read |
 | RunCPM (Mockba the Borg) | MIT | built and run by the LHA clean room as the CP/M runtime for the PMarc programs; nothing of it is in FultaArc |
-| RAR 1.55 for DOS | shareware for evaluation (as recorded when the room was set up; the licence screen was not kept) | run by the RAR 1.5 clean room as a black box (archives written from the room's inputs, and extracted); its `RAR.DOC` read for commands and switches only; never disassembled or inspected; not redistributed. Its output from the room's inputs is FultaArc's private test data (`tests/manifests/rar15.txt`) |
+| RAR 1.55 for DOS | shareware for evaluation (as recorded when the room was set up; the licence screen was not kept) | run by the `fultaarc-cleanroom-rar15` and `fultaarc-cleanroom-rar15-enc3` clean rooms as a black box (archives written from the rooms' inputs, and extracted); its `RAR.DOC` read for commands and switches only; never disassembled or inspected; not redistributed. Its output from the rooms' inputs is private test data (`tests/manifests/rar15.txt`) |
 | RAR 1.40.2 beta for DOS | no licence text in the bundle at hand | run the same way, for the older RAR 1.4 format; `RAR.DOC` read as a manual; not redistributed |
 | RAR 2.50 / 2.02 / 2.00 for DOS | not recorded | run by the RAR 1.5 clean room only to test archives (an Ok/Failed verdict, nothing else); not redistributed |
 | DOSBox 0.74-3, SDL | GPL-2 / LGPL-2+ | run by the RAR 1.5 clean room to execute the DOS programs; nothing of them is in FultaArc |
@@ -32,8 +32,8 @@ terms, is set out per format in `docs/provenance/`.
 `src/lha/lhadec/` itself is FultaArc's own code under MIT: `src/lha/lhadec/LICENSE`, the clean room's copy, is the
 MIT text of `LICENSE` with the same copyright line, without `LICENSE`'s paragraph on vendored components.
 
-`src/rar/rar15/` is likewise FultaArc's own code under MIT: its files carry the clean room's SPDX header and MIT
-text (`unpack15.h`).
+`src/rar/rar15/` and `src/rar/rar15_enc/` are likewise FultaArc's own code under MIT: their files carry the clean
+rooms' SPDX headers and MIT text (`src/rar/rar15/unpack15.h`, `src/rar/rar15_enc/rar15_cipher.c`).
 
 If FultaArc ever publishes its LHA test archives (the lhasa corpus, kept in the private fixtures), lhasa's ISC
 copyright and permission notice must go with them.

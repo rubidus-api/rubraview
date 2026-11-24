@@ -152,7 +152,10 @@ typedef struct {
     uint16_t first[17];    /* first code of each length */
     uint16_t offset[17];   /* index into sorted[] of the first symbol of each length */
     uint16_t sorted[MAXSYM];
+    uint16_t fast[1 << 12];  /* by the next 12 bits: (length << 9) | symbol of a code up to 12 bits; 0: search */
 } pcode;
+
+#define PC_FAST 12
 
 static int pcode_build(pcode *pc, const unsigned char *len, int nsym)
 {
@@ -180,6 +183,15 @@ static int pcode_build(pcode *pc, const unsigned char *len, int nsym)
         for (s = 0; s < nsym; s++)
             if (len[s]) pc->sorted[fill[len[s]]++] = (uint16_t)s;
     }
+    /* the lookup table: each code of l <= PC_FAST bits fills the 2^(PC_FAST-l) entries it is a prefix of; the
+     * codes are canonical and the Kraft sum at most 1, so no two overlap and every code fits in its length */
+    memset(pc->fast, 0, sizeof pc->fast);
+    for (l = 1; l <= PC_FAST; l++)
+        for (s = 0; s < pc->count[l]; s++) {
+            unsigned start = (unsigned)(pc->first[l] + s) << (PC_FAST - l), span = 1u << (PC_FAST - l), k;
+            uint16_t e = (uint16_t)(l << 9 | pc->sorted[pc->offset[l] + s]);
+            for (k = 0; k < span; k++) pc->fast[start + k] = e;
+        }
     return LHA_OK;
 }
 
@@ -189,7 +201,14 @@ static int pcode_read(pcode *pc, bitin *b)
     int l;
     if (pc->constant >= 0) return pc->constant;
     bits = bi_peek(b, 16);
-    for (l = 1; l <= 16; l++) {
+    {
+        unsigned e = pc->fast[bits >> (16 - PC_FAST)];
+        if (e) {
+            if (bi_drop(b, (int)(e >> 9)) < 0) return -1;
+            return (int)(e & 511);
+        }
+    }
+    for (l = 1; l <= 16; l++) {   /* a longer code, or none (an unassigned code is an error) */
         code = bits >> (16 - l);
         if (pc->count[l] && code >= pc->first[l] && code - pc->first[l] < pc->count[l]) {
             if (bi_drop(b, l) < 0) return -1;
@@ -354,10 +373,24 @@ static int decode_huf(lha_src *src, lha_sink *sink, uint64_t osize, const huf_pa
             }
             if (b.err) { rc = b.err; goto done; }
             if ((uint64_t)dist > h.total || (uint64_t)dist > p->window) { rc = LHA_ERR_DATA; goto done; }
-            while (len-- > 0 && h.total < osize) {
-                unsigned char v = h.ring[(size_t)((h.total - (uint64_t)dist) & h.mask)];
-                rc = hist_put(&h, v);
-                if (rc != LHA_OK) goto done;
+            while (len > 0 && h.total < osize) {
+                /* a run of byte copies, forward, in the same order as hist_put one at a time; it ends before
+                 * the ring or the source wraps and before the write after which hist_put hands the ring over */
+                size_t i = (size_t)(h.total & h.mask), from = (size_t)((h.total - (uint64_t)dist) & h.mask);
+                size_t run = (size_t)len, k;
+                if (run > osize - h.total) run = (size_t)(osize - h.total);
+                if (run > h.mask + 1 - i) run = h.mask + 1 - i;
+                if (run > h.mask + 1 - from) run = h.mask + 1 - from;
+                if (run > ((h.flushed - i - 1) & h.mask)) run = (h.flushed - i - 1) & h.mask;
+                if (run == 0) {
+                    rc = hist_put(&h, h.ring[from]);
+                    if (rc != LHA_OK) goto done;
+                    len--;
+                    continue;
+                }
+                for (k = 0; k < run; k++) h.ring[i + k] = h.ring[from + k];
+                h.total += run;
+                len -= (int)run;
             }
         }
     }

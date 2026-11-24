@@ -157,8 +157,14 @@ static status_t read_filter(rc_unpack_t *u, bool ppm) {
         u->v29.last_num = num;
     } else num = u->v29.last_num;
     if (num > u->v29.prog_count) goto out;
-    uint64_t rel = (uint64_t)vmnum(&m) + rc_file_pos(u);
-    if (flags & 0x40) rel += 258;
+    uint32_t vrel = vmnum(&m);
+    uint64_t rpos = rc_file_pos(u);
+    if (vrel > UINT64_MAX - rpos) goto out;
+    uint64_t rel = (uint64_t)vrel + rpos;
+    if (flags & 0x40) {
+        if (rel > UINT64_MAX - 258) goto out;
+        rel += 258;
+    }
     uint32_t length = (flags & 0x20) ? vmnum(&m) : (num < u->v29.prog_count ? u->v29.prog[num].last_length : 0);
     uint32_t R[7] = {0};
     R[3] = 0x3C000; R[4] = length; R[5] = num < u->v29.prog_count ? u->v29.prog[num].uses : 0;
@@ -204,7 +210,9 @@ static status_t read_filter(rc_unpack_t *u, bool ppm) {
     rc_filter_t f = {0};
     f.type = type;
     f.rar5 = false;
+    if (u->file_start > UINT64_MAX - rel) goto out;
     f.start = u->file_start + rel;
+    if (length > UINT64_MAX - f.start) goto out;
     f.length = length;
     f.file_off = rel;
     memcpy(f.r, R, sizeof(f.r));

@@ -90,18 +90,24 @@ typedef struct {
     const uint8_t *p, *end;
     uint32_t buf;    /* valid bits occupy the high `cnt` bits */
     int cnt;
-    bool oob;        /* ran past the end of this chunk's payload */
+    int fill;        /* of those, the low `fill` are zeros put in past the payload's end (a lookahead, not data) */
+    bool oob;        /* a bit past the end of this chunk's payload was consumed */
 } lzx_bits_t;
 
 static void lzx_bits_init(lzx_bits_t *b, const uint8_t *p, size_t n) {
-    b->p = p; b->end = p + n; b->buf = 0; b->cnt = 0; b->oob = false;
+    b->p = p; b->end = p + n; b->buf = 0; b->cnt = 0; b->fill = 0; b->oob = false;
+}
+/* A read may look ahead past the payload (the Huffman fast table wants LZX_FAST_BITS); only consuming such a bit is
+ * an error: a chunk's last code may end in its last word with fewer bits left (makecab writes such chunks). */
+static inline void lzx_consumed(lzx_bits_t *b) {
+    if (b->cnt < b->fill) b->oob = true;
 }
 static inline void lzx_ensure(lzx_bits_t *b, int n) {               /* n <= 17 */
     while (b->cnt < n) {
         uint32_t w;
         if (b->p + 2 <= b->end) { w = (uint32_t)b->p[0] | ((uint32_t)b->p[1] << 8); b->p += 2; }
         else if (b->p < b->end) { w = (uint32_t)b->p[0]; b->p += 1; }            /* odd tail (not expected) */
-        else { w = 0; b->oob = true; }                                          /* out of input: inject zeros */
+        else { w = 0; b->fill += 16; }                                         /* out of input: zeros */
         b->buf |= w << (16 - b->cnt);
         b->cnt += 16;
     }
@@ -112,6 +118,7 @@ static inline uint32_t lzx_get(lzx_bits_t *b, int n) {
     uint32_t v = b->buf >> (32 - n);
     b->buf <<= n;
     b->cnt -= n;
+    lzx_consumed(b);
     return v;
 }
 /* Discard 0..15 padding bits so the next read is on a 16-bit boundary, and hand back the raw byte cursor (the
@@ -120,8 +127,9 @@ static const uint8_t *lzx_byte_align(lzx_bits_t *b) {
     int pad = b->cnt & 15;
     b->buf <<= pad;
     b->cnt -= pad;                                   /* now a multiple of 16 */
-    b->p -= (b->cnt >> 3);
-    b->cnt = 0; b->buf = 0;
+    if (b->cnt < b->fill) b->oob = true;             /* the padding itself ran past the end */
+    else b->p -= ((b->cnt - b->fill) >> 3);          /* look-ahead zeros never moved the cursor */
+    b->cnt = 0; b->buf = 0; b->fill = 0;
     return b->p;
 }
 
@@ -131,7 +139,7 @@ static int lzx_decode(lzx_bits_t *b, const lzx_huff_t *h) {
     if (b->cnt >= LZX_FAST_BITS) {
         uint16_t f = h->fast[b->buf >> (32 - LZX_FAST_BITS)];
         int l = f >> LZX_FAST_BITS;
-        if (l) { b->buf <<= l; b->cnt -= l; return f & ((1 << LZX_FAST_BITS) - 1); }
+        if (l) { b->buf <<= l; b->cnt -= l; lzx_consumed(b); return f & ((1 << LZX_FAST_BITS) - 1); }
     }
     uint32_t code = 0;                                               /* long code: walk bit by bit, MSB-first */
     for (int l = 1; l < 17; l++) {

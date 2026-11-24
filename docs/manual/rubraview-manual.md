@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.55.0.exe              the viewer, as built
-dist/rubraview-v1.55.0/                 the release bundle
-dist/rubraview-v1.55.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.56.0.exe              the viewer, as built
+dist/rubraview-v1.56.0/                 the release bundle
+dist/rubraview-v1.56.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -2528,6 +2528,11 @@ listed under a later heading only means that while that is on screen.
 | Right click `Make a playlist of them` | Make a playlist of what is picked |
 | Right click `Pick none` | Pick nothing in the open-file screen |
 | Right click `Paste` | The files on the clipboard, from here or Explorer, copied or moved into the folder on screen (Ctrl+V) |
+| Right click `Open` | Navigate the open-file screen to the breadcrumb folder right-clicked |
+| Right click `Open in new window` | Open the breadcrumb folder right-clicked in a new window |
+| Right click `Copy the whole path` | Copy the path of the breadcrumb folder right-clicked |
+| Right click `Show in Explorer` | Open the breadcrumb folder right-clicked in Explorer |
+| Right click `Favourite (in or out)` | Make the breadcrumb folder right-clicked a favourite, or no longer one |
 | Right click `Open` | A file of a list, right-clicked: open it |
 | Right click `Copy the whole path` | A file of a list, right-clicked: its whole path to the clipboard |
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |

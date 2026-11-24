@@ -95,11 +95,22 @@ static size_t ctx_rows(const app_state_t *app, int32_t *groups, bool *enabled) {
     ctx_row_t rows[CTX_ROWS];
     size_t n = ctx_row_list(app, rows);
     rubraview_action_facts_t facts = action_facts(app);
+    bool crumb_no_disk = app->ctx_list == rubraview_boxes_context(rubraview_boxes_document(), PROVEN_LIT("pickercrumb")) && !app->picker_ctx_disk[0];
     for (size_t i = 0; i < n; ++i) {
         groups[i] = rows[i].group;
-        if (enabled) enabled[i] = rows[i].verb >= CTX_PKG_BASE ? app->pkg_cmds[rows[i].verb - CTX_PKG_BASE].enabled
-                                : rows[i].verb == CTX_NOTE ? false
-                                : rows[i].verb >= 0 || rubraview_action_state(rows[i].action, &facts).enabled;
+        if (enabled) {
+            bool on = rows[i].verb >= CTX_PKG_BASE ? app->pkg_cmds[rows[i].verb - CTX_PKG_BASE].enabled
+                    : rows[i].verb == CTX_NOTE ? false
+                    : rows[i].verb >= 0 || rubraview_action_state(rows[i].action, &facts).enabled;
+            if (crumb_no_disk && (proven_u8str_view_eq(rows[i].action, PROVEN_LIT("picker_crumb_new_window")) ||
+                                  proven_u8str_view_eq(rows[i].action, PROVEN_LIT("picker_crumb_copy_path")) ||
+                                  proven_u8str_view_eq(rows[i].action, PROVEN_LIT("picker_crumb_reveal")) ||
+                                  proven_u8str_view_eq(rows[i].action, PROVEN_LIT("file_properties")) ||
+                                  proven_u8str_view_eq(rows[i].action, PROVEN_LIT("picker_crumb_favorite")))) {
+                on = false;
+            }
+            enabled[i] = on;
+        }
     }
     return n;
 }
@@ -194,8 +205,9 @@ static void ctx_choose(app_state_t *app, int32_t row) {
     }
     if (proven_u8str_view_eq(rows[row].action, PROVEN_LIT("file_properties"))) {   /* RV-281: the files the list is about */
         bool row_of_list = app->ctx_list == rubraview_boxes_context(rubraview_boxes_document(), PROVEN_LIT("listrow"));
-        int32_t origin = row_of_list ? PROPS_FROM_LIST : app->picker_open ? PROPS_FROM_PICKER : PROPS_FROM_PAGE;
-        size_t index = app->picker_open ? app->picker_ctx_index : app->list_ctx_row;
+        bool crumb_menu = app->ctx_list == rubraview_boxes_context(rubraview_boxes_document(), PROVEN_LIT("pickercrumb"));
+        int32_t origin = row_of_list ? PROPS_FROM_LIST : crumb_menu ? PROPS_FROM_NONE : app->picker_open ? PROPS_FROM_PICKER : PROPS_FROM_PAGE;
+        size_t index = app->picker_open && !crumb_menu ? app->picker_ctx_index : app->list_ctx_row;
         ctx_close(app);
         props_from_list(app, origin, index);
         return;

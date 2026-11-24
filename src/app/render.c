@@ -998,7 +998,15 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         bool over = pal_rect_has(edit_r, app->pointer_x, app->pointer_y);
         rubraview_pal_render_fill_rect(app->renderer, edit_r, app->rename_is_path ? COLOR_TILE_CURRENT : over ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, edit_r, COLOR_BOX_BORDER, 1.0, 3.0);
-        draw_sign(app->renderer, 0xE70Fu, "\xE2\x9C\x8E", edit_r, edit_r.height * 0.46, COLOR_TEXT);
+        if (picker_path_edit_labeled(dpi, win_w)) {
+            double icon_w = 26.0 * dpi;
+            rubraview_pal_rect_t ir = { edit_r.x + 2.0 * dpi, edit_r.y, icon_w, edit_r.height };
+            rubraview_pal_rect_t lr = { edit_r.x + icon_w, edit_r.y, fmax(0.0, edit_r.width - icon_w - 6.0 * dpi), edit_r.height };
+            draw_sign(app->renderer, 0xE70Fu, "\xE2\x9C\x8E", ir, edit_r.height * 0.44, COLOR_TEXT);
+            rubraview_pal_render_draw_text(app->renderer, TU8("Edit path"), lr, crumb_h * 0.30, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        } else {
+            draw_sign(app->renderer, 0xE70Fu, "\xE2\x9C\x8E", edit_r, edit_r.height * 0.46, COLOR_TEXT);
+        }
     }
     {
         rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);
@@ -1027,10 +1035,6 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
             rubraview_pal_render_stroke_rect(app->renderer, chip, COLOR_BOX_BORDER, 1.0, 2.0);
             rubraview_pal_render_draw_text(app->renderer, crumbs.items[i].label, chip, crumb_h * 0.34, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
             cx += w + 4.0 * dpi;
-        }
-        if (!cs.overflow && !app->rename_is_path && cx + 130.0 * dpi < cs.view_x + cs.view_w) {
-            rubraview_pal_rect_t hint = { cx + 8.0 * dpi, cs.y, cs.view_x + cs.view_w - cx - 12.0 * dpi, cs.height };
-            rubraview_pal_render_draw_text(app->renderer, TU8("tap here or Ctrl+L to type a path"), hint, crumb_h * 0.28, COLOR_BOX_BORDER, RUBRAVIEW_TEXT_LEFT);
         }
         rubraview_pal_render_pop_clip(app->renderer);
     }

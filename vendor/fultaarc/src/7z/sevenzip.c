@@ -330,9 +330,9 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
                     uint64_t v = t2 == 0x09 ? rd_num(r) : 0;
                     if (t2 != 0x09) return FULTA_ARC_ERR_CORRUPT;
                     s->sub_sizes[k] = v;
+                    if (v > fsize - sum) return FULTA_ARC_ERR_CORRUPT;
                     sum += v;
                 } else {
-                    if (sum > fsize) return FULTA_ARC_ERR_CORRUPT;
                     s->sub_sizes[k] = fsize - sum;
                 }
             }
@@ -340,7 +340,6 @@ static fulta_arc_err_t parse_streams(rd_t *r, sz_streams_t *s) {
         sizes_read = true;
         if (t2 == 0x09) t2 = rd_num(r);
         /* CRCs of the substreams whose CRC is not the folder's */
-        k = 0;
         uint64_t need = 0;
         for (uint32_t i = 0; i < s->nfolders; i++)
             need += (s->nsub[i] == 1 && s->folders[i].has_crc) ? 0 : s->nsub[i];
@@ -411,7 +410,7 @@ fulta_arc_err_t fa_7z_derive_key(proven_allocator_t a, const char *pw, const uin
             fa_put_le16(t, (uint16_t)cp);
             e = fa_buf_append(&u, fa_bytes(t, 2));
         }
-        if (e) { fa_buf_free(&u); return e; }
+        if (e) { fa_wipe(u.data, u.size); fa_buf_free(&u); return e; }
     }
     if (power == 0x3F) {
         memset(key, 0, 32);
@@ -422,7 +421,7 @@ fulta_arc_err_t fa_7z_derive_key(proven_allocator_t a, const char *pw, const uin
         fa_sha256_t h;
         fa_sha256_init(&h);
         uint8_t *blk = fa_alloc(a, salt_len + u.size + 8);
-        if (!blk) { fa_buf_free(&u); return FULTA_ARC_ERR_NOMEM; }
+        if (!blk) { fa_wipe(u.data, u.size); fa_buf_free(&u); return FULTA_ARC_ERR_NOMEM; }
         if (salt_len) memcpy(blk, salt, salt_len);
         if (u.size) memcpy(blk + salt_len, u.data, u.size);
         size_t bl = salt_len + u.size;
@@ -430,9 +429,12 @@ fulta_arc_err_t fa_7z_derive_key(proven_allocator_t a, const char *pw, const uin
             fa_put_le64(blk + bl, i);
             fa_sha256_update(&h, blk, bl + 8);
         }
+        fa_wipe(blk, salt_len + u.size + 8);
         fa_release(a, blk);
         fa_sha256_final(&h, key);
+        fa_wipe(&h, sizeof h);
     }
+    fa_wipe(u.data, u.size);
     fa_buf_free(&u);
     return FULTA_ARC_OK;
 }
@@ -462,10 +464,13 @@ static fulta_arc_err_t get_key(fulta_arc_t *arc, const sz_coder_t *c, uint32_t a
     fulta_arc_err_t e = fa_password(arc, attempt, &pw);
     if (e) return e;
     if (!st->key_pw || strcmp(st->key_pw, pw) != 0) {      /* remember which password this key came from */
-        char *c = fa_strndup_a(arc->alloc, pw, strlen(pw));
-        if (!c) return FULTA_ARC_ERR_NOMEM;
-        fa_release(arc->alloc, st->key_pw);
-        st->key_pw = c;
+        char *pw_copy = fa_strndup_a(arc->alloc, pw, strlen(pw));
+        if (!pw_copy) return FULTA_ARC_ERR_NOMEM;
+        if (st->key_pw) {
+            fa_wipe(st->key_pw, strlen(st->key_pw));
+            fa_release(arc->alloc, st->key_pw);
+        }
+        st->key_pw = pw_copy;
     }
     /* cache by (password, properties) */
     fa_sha256_t h;
@@ -558,9 +563,10 @@ static fulta_arc_err_t open_coder(fulta_arc_t *arc, const sz_streams_t *ss, uint
     }
     if (coder_is(c, 0x06F10701)) {
         uint8_t key[32], iv[16];
-        if ((e = get_key(arc, c, attempt, key, iv))) { fa_stream_destroy(in); return e; }
-        if ((e = fa_dec_aes_cbc(in, key, 32, iv, &in))) return e;
-        memset(key, 0, sizeof key);
+        if ((e = get_key(arc, c, attempt, key, iv))) { fa_wipe(key, sizeof key); fa_stream_destroy(in); return e; }
+        e = fa_dec_aes_cbc(in, key, 32, iv, &in);
+        fa_wipe(key, sizeof key);
+        if (e) return e;
         return fa_stream_limit(in, size, out);
     }
     fa_stream_destroy(in);
@@ -571,12 +577,19 @@ static fulta_arc_err_t open_folder(fulta_arc_t *arc, const sz_streams_t *ss, uin
                                    fa_stream_t **out) {
     sz_state_t *st = arc->state;
     const sz_folder_t *f = &ss->folders[fi];
+    if (st->base > st->range.size || 32 > st->range.size - st->base ||
+        ss->pack_pos > st->range.size - st->base - 32)
+        return FULTA_ARC_ERR_TRUNCATED;
     uint64_t pos = st->base + 32 + ss->pack_pos;
-    for (uint32_t k = 0; k < f->first_pack; k++) pos += ss->pack_sizes[k];
+    for (uint32_t k = 0; k < f->first_pack; k++) {
+        if (ss->pack_sizes[k] > st->range.size - pos) return FULTA_ARC_ERR_TRUNCATED;
+        pos += ss->pack_sizes[k];
+    }
     fa_stream_t *packs[MAX_CODERS] = {0};
     fulta_arc_err_t e = FULTA_ARC_OK;
     for (uint32_t k = 0; k < f->npacked && !e; k++) {
         uint64_t n = ss->pack_sizes[f->first_pack + k];
+        if (n > st->range.size - pos) { e = FULTA_ARC_ERR_TRUNCATED; break; }
         e = fa_stream_range(arc->alloc, &st->range, pos, n, &packs[k]);
         pos += n;
     }
@@ -590,7 +603,7 @@ static fulta_arc_err_t folder_to_memory(fulta_arc_t *arc, const sz_streams_t *ss
                                         uint8_t **out, size_t *outlen) {
     const sz_folder_t *f = &ss->folders[fi];
     uint64_t size = f->sizes[f->main];
-    if (size > MAX_HEADER) return FULTA_ARC_ERR_LIMIT;
+    if (size > MAX_HEADER || (arc->opt.max_memory && size > arc->opt.max_memory)) return FULTA_ARC_ERR_LIMIT;
     fa_stream_t *s;
     fulta_arc_err_t e = open_folder(arc, ss, fi, attempt, &s);
     if (e) return e;
@@ -652,11 +665,13 @@ static fulta_arc_err_t parse_files(fulta_arc_t *arc, rd_t *r) {
             if (!d) { e = FULTA_ARC_ERR_NOMEM; goto done; }
             if (rd_byte(&sub) != 0) { fa_release(arc->alloc, d); e = FULTA_ARC_ERR_UNSUPPORTED; goto done; }
             if (t == 0x14) {
+                fa_release(arc->alloc, mt);
                 mt = fa_zalloc(arc->alloc, nfiles ? (size_t)nfiles : 1, sizeof *mt);
                 for (uint64_t i = 0; mt && i < nfiles; i++) if (d[i]) mt[i] = rd_u64(&sub);
                 fa_release(arc->alloc, mdef);
                 mdef = d;
             } else {
+                fa_release(arc->alloc, at);
                 at = fa_zalloc(arc->alloc, nfiles ? (size_t)nfiles : 1, sizeof *at);
                 for (uint64_t i = 0; at && i < nfiles; i++) if (d[i]) at[i] = rd_u32(&sub);
                 fa_release(arc->alloc, adef);
@@ -804,7 +819,11 @@ static fulta_arc_err_t sz_open(fulta_arc_t *arc, uint64_t search) {
     uint64_t nho = fa_le64(sh + 12), nhs = fa_le64(sh + 20);
     uint32_t nhc = fa_le32(sh + 28);
     if (nhs == 0) return FULTA_ARC_OK;   /* empty archive */
-    if (nhs > MAX_HEADER || nho > st->range.size || st->base + 32 + nho + nhs > st->range.size) return FULTA_ARC_ERR_TRUNCATED;
+    if (nhs > MAX_HEADER) return FULTA_ARC_ERR_LIMIT;
+    if (arc->opt.max_memory && nhs > arc->opt.max_memory) return FULTA_ARC_ERR_LIMIT;
+    if (st->base > st->range.size || 32 > st->range.size - st->base ||
+        nho > st->range.size - st->base - 32 || nhs > st->range.size - st->base - 32 - nho)
+        return FULTA_ARC_ERR_TRUNCATED;
     uint8_t *hdr = fa_alloc(arc->alloc, (size_t)nhs);
     if (!hdr) return FULTA_ARC_ERR_NOMEM;
     size_t hlen = (size_t)nhs;
@@ -825,12 +844,17 @@ static fulta_arc_err_t sz_open(fulta_arc_t *arc, uint64_t search) {
             for (uint32_t attempt = 0;; attempt++) {
                 st->key_valid = false;
                 e = folder_to_memory(arc, &ss, 0, attempt, &plain, &plen);
-                if (!enc || e == FULTA_ARC_OK || e == FULTA_ARC_ERR_PASSWORD_NEEDED || e == FULTA_ARC_ERR_NOMEM) break;
+                if (!enc || e == FULTA_ARC_OK || e == FULTA_ARC_ERR_PASSWORD_NEEDED ||
+                    e == FULTA_ARC_ERR_NOMEM || e == FULTA_ARC_ERR_LIMIT ||
+                    e == FULTA_ARC_ERR_CANCELLED || e == FULTA_ARC_ERR_IO)
+                    break;
                 if (attempt > 64) break;
                 /* a wrong password shows up as bad data or a CRC mismatch: ask again */
                 if (!arc->opt.password) { e = FULTA_ARC_ERR_PASSWORD_WRONG; break; }
             }
-            if (e && enc && e != FULTA_ARC_ERR_PASSWORD_NEEDED && e != FULTA_ARC_ERR_NOMEM) e = FULTA_ARC_ERR_PASSWORD_WRONG;
+            if (e && enc && e != FULTA_ARC_ERR_PASSWORD_NEEDED && e != FULTA_ARC_ERR_NOMEM &&
+                e != FULTA_ARC_ERR_LIMIT && e != FULTA_ARC_ERR_CANCELLED && e != FULTA_ARC_ERR_IO)
+                e = FULTA_ARC_ERR_PASSWORD_WRONG;
             if (!e && enc && st->key_pw) fa_password_ok(arc, st->key_pw);
         }
         free_streams(&ss);
@@ -883,6 +907,7 @@ static fulta_arc_err_t sz_extract(fulta_arc_t *arc, size_t index, const fulta_ar
     }
     /* skip in steps so a progress callback sees the solid prefix being decoded */
     for (uint64_t left = sf->offset - st->cur_pos; left && !e;) {
+        if (fa_cancelled(arc)) { e = FULTA_ARC_ERR_CANCELLED; break; }
         uint64_t step = left < (UINT64_C(1) << 20) ? left : (UINT64_C(1) << 20);
         e = fa_stream_skip(st->cur, step);
         if (!e) { fa_progress(arc, step); left -= step; }
@@ -915,8 +940,8 @@ static void sz_close(fulta_arc_t *arc) {
     free_streams(&st->main);
     fa_release(arc->alloc, st->files);
     fa_release(arc->alloc, st->range.pieces);
-    memset(st->key, 0, sizeof st->key);
-    if (st->key_pw) { memset(st->key_pw, 0, strlen(st->key_pw)); fa_release(arc->alloc, st->key_pw); }
+    fa_wipe(st->key, sizeof st->key);
+    if (st->key_pw) { fa_wipe(st->key_pw, strlen(st->key_pw)); fa_release(arc->alloc, st->key_pw); }
     fa_release(arc->alloc, st);
     arc->state = NULL;
 }

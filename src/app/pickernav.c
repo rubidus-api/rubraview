@@ -158,9 +158,7 @@ void picker_sort_by(app_state_t *app, int key) {
     picker_sort_set(app, key, now == key ? !desc : false);
 }
 
-/* 1.24.0 (owner, 2026-10-19): the folders the open-file screen went through, for back and forward. */
-#define PICKER_HIST 24
-#define PICKER_HIST_PATH 1024
+/* 1.24.0 (owner, 2026-10-19): the folders the open-file screen went through, for back and forward. (PICKER_HIST / PICKER_HIST_PATH in app.h) */
 
 static void picker_hist_push(app_state_t *app, bool forward, proven_u8str_view_t dir) {
     if (dir.size == 0 || dir.size >= PICKER_HIST_PATH) return;

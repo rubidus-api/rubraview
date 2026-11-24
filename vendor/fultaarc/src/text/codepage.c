@@ -108,8 +108,8 @@ char *fa_utf8_to_codepage(proven_allocator_t a, const char *utf8, fulta_arc_code
             for (int k = 0; k < 128 && !found; k++)
                 if (hi[k] == c) { e = fa_buf_byte(&b, (uint8_t)(0x80 + k)); found = true; }
         }
-        if (e || !found) { fa_buf_free(&b); return NULL; }
+        if (e || !found) { fa_wipe(b.data, b.size); fa_buf_free(&b); return NULL; }
     }
-    if (fa_buf_byte(&b, 0)) { fa_buf_free(&b); return NULL; }
+    if (fa_buf_byte(&b, 0)) { fa_wipe(b.data, b.size); fa_buf_free(&b); return NULL; }
     return (char *)b.data;
 }

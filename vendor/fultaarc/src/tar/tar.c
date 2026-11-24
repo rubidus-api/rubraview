@@ -158,7 +158,7 @@ static fulta_arc_err_t tar_open(fulta_arc_t *arc, uint64_t offset) {
     int zero_run = 0;
 
     for (;;) {
-        if (pos + BLK > src->size) break;                /* no room for another header: end */
+        if (pos > src->size || src->size - pos < BLK) break;   /* no room for another header: end */
         if (fa_source_read_exact(src, pos, fa_bytes_mut(h, BLK))) { e = FULTA_ARC_ERR_TRUNCATED; break; }
         if (tar_all_zero(h)) { if (++zero_run >= 2) break; pos += BLK; continue; }
         zero_run = 0;
@@ -243,7 +243,7 @@ static fulta_arc_err_t tar_open(fulta_arc_t *arc, uint64_t offset) {
         }
 
         fa_entry_t *en = fa_add_entry(arc, fa_bytes((const uint8_t *)name_src, name_len), use, "store");
-        tar_item_t *it = tar_add_item(st);
+        tar_item_t *it = en ? tar_add_item(st) : NULL;
         fa_release(arc->alloc, safe);
         if (!en || !it) { e = FULTA_ARC_ERR_NOMEM; break; }
 
@@ -251,7 +251,11 @@ static fulta_arc_err_t tar_open(fulta_arc_t *arc, uint64_t offset) {
             en->pub.flags |= FULTA_ARC_ENTRY_DIR;
         } else if (type == '2') {
             en->pub.flags |= FULTA_ARC_ENTRY_SYMLINK;
-            if (link) { it->link = fa_strndup_a(arc->alloc, link, strlen(link)); esize = it->link ? strlen(it->link) : 0; }
+            if (link) {
+                it->link = fa_strndup_a(arc->alloc, link, strlen(link));
+                if (!it->link) { e = FULTA_ARC_ERR_NOMEM; break; }
+                esize = strlen(it->link);
+            }
         } else if (type == 'S') {
             en->pub.flags |= FULTA_ARC_ENTRY_UNSUPPORTED;   /* GNU sparse: layout needs the sparse map */
         }

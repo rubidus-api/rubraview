@@ -142,7 +142,29 @@ void fa_aes_ctr_le1_begin(fa_aes_ctr_t *c, const uint8_t *key, size_t keylen) {
     c->used = 16;                                           /* no keystream block yet */
 }
 
+static void inc16le(uint8_t c[16]);
+
 void fa_aes_ctr_xor(fa_aes_ctr_t *c, uint8_t *buf, size_t n) {
+    if (c->a.hw) {
+        while (n && c->used < 16) {
+            buf[0] ^= c->ks[c->used++];
+            buf++;
+            n--;
+        }
+        while (n >= 32) {
+            unsigned nb = n / 16 < 8 ? (unsigned)(n / 16) : 8;
+            uint8_t ks[128], ctr0[16];
+            memcpy(ctr0, c->ctr, 16);
+            inc16le(ctr0);
+            fa_aes_hw_ctr8(c->a.hwenc, c->a.rounds, ctr0, nb, ks);
+            for (unsigned k = 0; k < 16u * nb; k++) buf[k] ^= ks[k];
+            for (unsigned j = 0; j < nb; j++) inc16le(c->ctr);
+            fa_wipe(ks, sizeof ks);
+            fa_wipe(ctr0, sizeof ctr0);
+            buf += 16u * nb;
+            n -= 16u * nb;
+        }
+    }
     while (n) {
         if (c->used == 16) {
             for (int k = 0; k < 16; k++) if (++c->ctr[k]) break;   /* little-endian increment, before use */
@@ -155,7 +177,7 @@ void fa_aes_ctr_xor(fa_aes_ctr_t *c, uint8_t *buf, size_t n) {
     }
 }
 
-void fa_aes_ctr_end(fa_aes_ctr_t *c) { memset(c, 0, sizeof *c); }
+void fa_aes_ctr_end(fa_aes_ctr_t *c) { fa_wipe(c, sizeof *c); }
 
 void fa_aes_ctr_le1_xor(const uint8_t *key, size_t keylen, uint8_t *buf, size_t n) {
     fa_aes_ctr_t c;
@@ -181,7 +203,8 @@ void fa_aes_cbc_encrypt(const uint8_t *key, size_t keylen, uint8_t iv[16], uint8
         memcpy(prev, buf + off, 16);
     }
     memcpy(iv, prev, 16);
-    memset(&a, 0, sizeof a);
+    fa_wipe(prev, sizeof prev);
+    fa_wipe(&a, sizeof a);
 }
 
 void fa_aes_decrypt(const fa_aes_t *a, const uint8_t in[16], uint8_t out[16]) {
@@ -277,7 +300,7 @@ void fa_sha256_final(fa_sha256_t *c, uint8_t out[32]) { proven_sha256_final(&c->
 
 void fa_hmac_sha1(const uint8_t *key, size_t keylen, const uint8_t *msg, size_t n, uint8_t out[20]) {
     uint8_t k[64] = {0}, pad[64];
-    if (keylen > 64) { fa_sha1_t c; fa_sha1_init(&c); fa_sha1_update(&c, key, keylen); fa_sha1_final(&c, k); }
+    if (keylen > 64) { fa_sha1_t c; fa_sha1_init(&c); fa_sha1_update(&c, key, keylen); fa_sha1_final(&c, k); fa_wipe(&c, sizeof c); }
     else if (keylen) memcpy(k, key, keylen);
     fa_sha1_t c;
     for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x36;
@@ -287,11 +310,15 @@ void fa_hmac_sha1(const uint8_t *key, size_t keylen, const uint8_t *msg, size_t 
     for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x5C;
     fa_sha1_init(&c); fa_sha1_update(&c, pad, 64); fa_sha1_update(&c, inner, 20);
     fa_sha1_final(&c, out);
+    fa_wipe(k, sizeof k);
+    fa_wipe(pad, sizeof pad);
+    fa_wipe(inner, sizeof inner);
+    fa_wipe(&c, sizeof c);
 }
 
 void fa_hmac_sha256(const uint8_t *key, size_t keylen, const uint8_t *msg, size_t n, uint8_t out[32]) {
     uint8_t k[64] = {0}, pad[64];
-    if (keylen > 64) { fa_sha256_t c; fa_sha256_init(&c); fa_sha256_update(&c, key, keylen); fa_sha256_final(&c, k); }
+    if (keylen > 64) { fa_sha256_t c; fa_sha256_init(&c); fa_sha256_update(&c, key, keylen); fa_sha256_final(&c, k); fa_wipe(&c, sizeof c); }
     else if (keylen) memcpy(k, key, keylen);
     fa_sha256_t c;
     for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x36;
@@ -301,18 +328,24 @@ void fa_hmac_sha256(const uint8_t *key, size_t keylen, const uint8_t *msg, size_
     for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x5C;
     fa_sha256_init(&c); fa_sha256_update(&c, pad, 64); fa_sha256_update(&c, inner, 32);
     fa_sha256_final(&c, out);
+    fa_wipe(k, sizeof k);
+    fa_wipe(pad, sizeof pad);
+    fa_wipe(inner, sizeof inner);
+    fa_wipe(&c, sizeof c);
 }
 
 /* Precomputed HMAC: the inner and outer contexts after the key block, so each iteration costs two blocks. */
 typedef struct hmac1 { fa_sha1_t in, out; } hmac1_t;
 static void hmac1_init(hmac1_t *h, const uint8_t *key, size_t keylen) {
     uint8_t k[64] = {0}, pad[64];
-    if (keylen > 64) { fa_sha1_t c; fa_sha1_init(&c); fa_sha1_update(&c, key, keylen); fa_sha1_final(&c, k); }
+    if (keylen > 64) { fa_sha1_t c; fa_sha1_init(&c); fa_sha1_update(&c, key, keylen); fa_sha1_final(&c, k); fa_wipe(&c, sizeof c); }
     else if (keylen) memcpy(k, key, keylen);
     for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x36;
     fa_sha1_init(&h->in); fa_sha1_update(&h->in, pad, 64);
     for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x5C;
     fa_sha1_init(&h->out); fa_sha1_update(&h->out, pad, 64);
+    fa_wipe(k, sizeof k);
+    fa_wipe(pad, sizeof pad);
 }
 static void hmac1_run(const hmac1_t *h, const uint8_t *msg, size_t n, uint8_t out[20]) {
     fa_sha1_t c = h->in;
@@ -320,17 +353,21 @@ static void hmac1_run(const hmac1_t *h, const uint8_t *msg, size_t n, uint8_t ou
     fa_sha1_update(&c, msg, n); fa_sha1_final(&c, inner);
     c = h->out;
     fa_sha1_update(&c, inner, 20); fa_sha1_final(&c, out);
+    fa_wipe(inner, sizeof inner);
+    fa_wipe(&c, sizeof c);
 }
 
 typedef struct hmac256 { fa_sha256_t in, out; } hmac256_t;
 static void hmac256_init(hmac256_t *h, const uint8_t *key, size_t keylen) {
     uint8_t k[64] = {0}, pad[64];
-    if (keylen > 64) { fa_sha256_t c; fa_sha256_init(&c); fa_sha256_update(&c, key, keylen); fa_sha256_final(&c, k); }
+    if (keylen > 64) { fa_sha256_t c; fa_sha256_init(&c); fa_sha256_update(&c, key, keylen); fa_sha256_final(&c, k); fa_wipe(&c, sizeof c); }
     else if (keylen) memcpy(k, key, keylen);
     for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x36;
     fa_sha256_init(&h->in); fa_sha256_update(&h->in, pad, 64);
     for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x5C;
     fa_sha256_init(&h->out); fa_sha256_update(&h->out, pad, 64);
+    fa_wipe(k, sizeof k);
+    fa_wipe(pad, sizeof pad);
 }
 static void hmac256_run(const hmac256_t *h, const uint8_t *msg, size_t n, uint8_t out[32]) {
     fa_sha256_t c = h->in;
@@ -338,6 +375,8 @@ static void hmac256_run(const hmac256_t *h, const uint8_t *msg, size_t n, uint8_
     fa_sha256_update(&c, msg, n); fa_sha256_final(&c, inner);
     c = h->out;
     fa_sha256_update(&c, inner, 32); fa_sha256_final(&c, out);
+    fa_wipe(inner, sizeof inner);
+    fa_wipe(&c, sizeof c);
 }
 
 void fa_pbkdf2_sha1(const uint8_t *pw, size_t pwlen, const uint8_t *salt, size_t saltlen, uint32_t iter,
@@ -359,9 +398,12 @@ void fa_pbkdf2_sha1(const uint8_t *pw, size_t pwlen, const uint8_t *salt, size_t
         }
         size_t k = outlen < 20 ? outlen : 20;
         memcpy(out, t, k);
+        fa_wipe(u, sizeof u);
+        fa_wipe(t, sizeof t);
         out += k;
         outlen -= k;
     }
+    fa_wipe(&h, sizeof h);
 }
 
 void fa_pbkdf2_sha256(const uint8_t *pw, size_t pwlen, const uint8_t *salt, size_t saltlen, uint32_t iter,
@@ -383,9 +425,12 @@ void fa_pbkdf2_sha256(const uint8_t *pw, size_t pwlen, const uint8_t *salt, size
         }
         size_t k = outlen < 32 ? outlen : 32;
         memcpy(out, t, k);
+        fa_wipe(u, sizeof u);
+        fa_wipe(t, sizeof t);
         out += k;
         outlen -= k;
     }
+    fa_wipe(&h, sizeof h);
 }
 
 /* ---- LEA (encryption direction) ----------------------------------------------------------------------------- */
@@ -397,7 +442,8 @@ static uint32_t rolx(uint32_t v, unsigned n) { n &= 31; return n ? (v << n) | (v
 
 void fa_lea_init(fa_lea_t *l, const uint8_t *key, size_t keylen) {
     static const unsigned R[6] = {1, 3, 6, 11, 13, 17};
-    uint32_t t[8];
+    if (keylen != 16 && keylen != 24 && keylen != 32) return;
+    uint32_t t[8] = {0};
     for (size_t i = 0; i < keylen / 4; i++) t[i] = fa_le32(key + 4 * i);
     if (keylen == 16) {
         l->rounds = 24;
@@ -426,6 +472,7 @@ void fa_lea_init(fa_lea_t *l, const uint8_t *key, size_t keylen) {
             for (unsigned j = 0; j < 6; j++) l->rk[i][j] = t[(6 * i + j) % 8];
         }
     }
+    fa_wipe(t, sizeof t);
 }
 
 void fa_lea_encrypt(const fa_lea_t *l, const uint8_t in[16], uint8_t out[16]) {
@@ -442,11 +489,20 @@ void fa_lea_encrypt(const fa_lea_t *l, const uint8_t in[16], uint8_t out[16]) {
 
 /* ---- traditional PKWARE encryption -------------------------------------------------------------------------- */
 
-static uint32_t crc_byte(uint32_t k, uint8_t b) {
+static uint32_t zc_crc_tab[256];
+static fa_once_t zc_crc_once;
+
+static void zc_crc_init(void) {
+    for (uint32_t i = 0; i < 256; i++) {
+        uint32_t c = i;
+        for (int k = 0; k < 8; k++) c = (c >> 1) ^ ((c & 1) ? 0xEDB88320u : 0);
+        zc_crc_tab[i] = c;
+    }
+}
+
+static inline uint32_t crc_byte(uint32_t k, uint8_t b) {
     /* one step of the reflected CRC-32 table update, no inversions */
-    uint32_t c = (k ^ b) & 0xFF;
-    for (int i = 0; i < 8; i++) c = (c >> 1) ^ ((c & 1) ? 0xEDB88320u : 0);
-    return c ^ (k >> 8);
+    return zc_crc_tab[(k ^ b) & 0xFF] ^ (k >> 8);
 }
 
 static void zc_update(fa_zipcrypto_t *z, uint8_t b) {
@@ -456,11 +512,13 @@ static void zc_update(fa_zipcrypto_t *z, uint8_t b) {
 }
 
 void fa_zipcrypto_init(fa_zipcrypto_t *z, const uint8_t *pw, size_t n) {
+    fa_once(&zc_crc_once, zc_crc_init);
     z->k[0] = 0x12345678; z->k[1] = 0x23456789; z->k[2] = 0x34567890;
     for (size_t i = 0; i < n; i++) zc_update(z, pw[i]);
 }
 
 void fa_zipcrypto_decrypt(fa_zipcrypto_t *z, uint8_t *data, size_t n) {
+    fa_once(&zc_crc_once, zc_crc_init);
     for (size_t i = 0; i < n; i++) {
         uint32_t t = (z->k[2] | 2) & 0xFFFF;
         uint8_t p = data[i] ^ (uint8_t)((t * (t ^ 1)) >> 8);
@@ -480,7 +538,12 @@ static fulta_arc_err_t zc_read(fa_stream_t *s, void *buf, size_t n, size_t *got)
     fa_zipcrypto_decrypt(&z->keys, buf, *got);
     return FULTA_ARC_OK;
 }
-static void zc_destroy(fa_stream_t *s) { zc_stream_t *z = (zc_stream_t *)s; fa_stream_destroy(z->in); fa_stream_release(s); }
+static void zc_destroy(fa_stream_t *s) {
+    zc_stream_t *z = (zc_stream_t *)s;
+    fa_stream_destroy(z->in);
+    fa_wipe(&z->keys, sizeof z->keys);
+    fa_stream_release(s);
+}
 
 fulta_arc_err_t fa_dec_zipcrypto(fa_stream_t *in, const fa_zipcrypto_t *keys, fa_stream_t **out) {
     proven_allocator_t a = in->alloc;
@@ -585,7 +648,7 @@ static void block_destroy(fa_stream_t *s) {
     block_stream_t *b = (block_stream_t *)s;
     fa_stream_destroy(b->in);
     proven_allocator_t a = s->alloc;   /* the wipe below clears it */
-    memset(b, 0, sizeof *b);
+    fa_wipe(b, sizeof *b);
     fa_release(a, b);
 }
 
@@ -624,12 +687,14 @@ fulta_arc_err_t fa_dec_ctr(fa_stream_t *in, fa_ctr_kind_t kind, const uint8_t *k
 
 void fa_hmac_sha1_init(fa_hmac_sha1_t *h, const uint8_t *key, size_t keylen) {
     uint8_t k[64] = {0}, pad[64];
-    if (keylen > 64) { fa_sha1_t c; fa_sha1_init(&c); fa_sha1_update(&c, key, keylen); fa_sha1_final(&c, k); }
+    if (keylen > 64) { fa_sha1_t c; fa_sha1_init(&c); fa_sha1_update(&c, key, keylen); fa_sha1_final(&c, k); fa_wipe(&c, sizeof c); }
     else if (keylen) memcpy(k, key, keylen);
     for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x36;
     fa_sha1_init(&h->in); fa_sha1_update(&h->in, pad, 64);
     for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x5C;
     fa_sha1_init(&h->out); fa_sha1_update(&h->out, pad, 64);
+    fa_wipe(k, sizeof k);
+    fa_wipe(pad, sizeof pad);
 }
 
 void fa_hmac_sha1_update(fa_hmac_sha1_t *h, const void *data, size_t n) { fa_sha1_update(&h->in, data, n); }
@@ -639,6 +704,7 @@ void fa_hmac_sha1_final(fa_hmac_sha1_t *h, uint8_t out[20]) {
     fa_sha1_final(&h->in, inner);
     fa_sha1_update(&h->out, inner, 20);
     fa_sha1_final(&h->out, out);
+    fa_wipe(inner, sizeof inner);
 }
 
 /* A stream that passes bytes through and feeds them to an HMAC-SHA1 (for MACs over ciphertext). */

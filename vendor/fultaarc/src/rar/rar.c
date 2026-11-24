@@ -5,6 +5,7 @@
  */
 #include "rar.h"
 #include "core/fa_once.h"
+#include "proven/hash.h"
 #include "rar_codec.h"
 
 #include <stdatomic.h>
@@ -25,22 +26,14 @@ const struct fa_rar_codec *fa_rar_codec(void) { return g_codec; }
 /* ------------------------------------------------------------------ */
 /* small helpers */
 
-static uint32_t crc_table[256];
-static fa_once_t crc_once;
-
-static void crc_init(void) {
-    for (uint32_t i = 0; i < 256; ++i) {
-        uint32_t c = i;
-        for (int k = 0; k < 8; ++k) c = (c >> 1) ^ ((c & 1) ? 0xEDB88320u : 0);
-        crc_table[i] = c;
-    }
+static uint32_t crc32_update(uint32_t crc, const uint8_t *p, size_t n) {
+    return proven_crc32_update(crc, (proven_mem_view_t){.ptr = p, .size = n});
 }
 
-static uint32_t crc32_update(uint32_t crc, const uint8_t *p, size_t n) {
-    fa_once(&crc_once, crc_init);
-    crc = ~crc;
-    while (n--) crc = (crc >> 8) ^ crc_table[(crc ^ *p++) & 0xFF];
-    return ~crc;
+static bool ct_eq(const uint8_t *a, const uint8_t *b, size_t n) {
+    uint8_t d = 0;
+    for (size_t i = 0; i < n; ++i) d |= (uint8_t)(a[i] ^ b[i]);
+    return d == 0;
 }
 
 static uint16_t rd16(const uint8_t *p) { return (uint16_t)(p[0] | p[1] << 8); }
@@ -380,7 +373,7 @@ static perr_t rar4_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
         size_t hsize, block_end;
         const uint8_t *h;
         if (enc) {
-            if (size - pos < 8 + 16 || pos > size) return P_END;
+            if (pos > size || size - pos < 8 + 16) return P_END;
             if (!g_codec) return P_NO_CODEC;
             const uint8_t *salt = d + pos;
             const key30_t *k = keys30(p->st, salt);
@@ -454,6 +447,7 @@ static perr_t rar4_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
             uint64_t pack = rd32(h + 7), unp = rd32(h + 11);
             uint8_t host = h[15];
             uint32_t fcrc = rd32(h + 16);
+            uint32_t ftime = rd32(h + 20);
             uint8_t unp_ver = h[24], method = h[25];
             size_t name_size = rd16(h + 26);
             uint32_t attr = rd32(h + 28);
@@ -477,6 +471,15 @@ static perr_t rar4_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
                 if (hsize - at < 8) return P_CORRUPT;
                 salt = h + at;
                 at += 8;
+            }
+            int64_t ext_ns = 0;   /* EXT_TIME (spec 2.5): only mtime's part is read, the base is FTIME */
+            if ((flags & 0x1000) && hsize - at >= 2) {
+                unsigned r = rd16(h + at) >> 12, c = r & 3;
+                if ((r & 8) && hsize - at - 2 >= c) {
+                    uint32_t frac = 0;
+                    for (unsigned k = 0; k < c; k++) frac |= (uint32_t)h[at + 2 + k] << (8 * (3 - c + k));
+                    ext_ns = (r & 4 ? 1000000000 : 0) + (int64_t)frac * 100;
+                }
             }
             if (pack > size - block_end) {
                 if (type == 0x7A) return P_END;
@@ -507,6 +510,9 @@ static perr_t rar4_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
             pt.crc = fcrc;
             pt.has_crc = true;
             proto.name_is_legacy = legacy;
+            proto.has_mtime = proto.mtime_dos = true;
+            proto.dos_time = ftime;
+            proto.mtime_ns = ext_ns;
             proto.size = unknown ? FA_RAR_SIZE_UNKNOWN : unp;
             proto.method = method == 0x30 ? 0 : unp_ver;
             proto.dict_size = (uint64_t)0x10000 << ((flags >> 5) & 7);
@@ -551,13 +557,40 @@ static uint64_t vint(rd5_t *r) {
 }
 
 static const uint8_t *bytes5(rd5_t *r, size_t n) {
-    if (r->n - r->at < n || r->at > r->n) { r->bad = true; return NULL; }
+    if (r->at > r->n || r->n - r->at < n) { r->bad = true; return NULL; }
     const uint8_t *q = r->p + r->at;
     r->at += n;
     return q;
 }
 
 /* Reads one header at `pos`: plain, or decrypted with the volume's header key (spec 6.2.4). */
+/* A file time record (spec 3.6, type 3): its mtime, if it has one, in ns since 1970 UTC. Unix seconds, with the
+ * nanoseconds that follow all the times (one per time present, mtime's first), or a Windows FILETIME. */
+static bool rar5_mtime(rd5_t *r, int64_t *out) {
+    uint64_t tf = vint(r);
+    if (r->bad || !(tf & 2)) return false;
+    bool unix_t = tf & 1;
+    size_t w = unix_t ? 4 : 8;
+    const uint8_t *m = bytes5(r, w);
+    if (tf & 4) (void)bytes5(r, w);
+    if (tf & 8) (void)bytes5(r, w);
+    const uint8_t *ns = (unix_t && (tf & 0x10)) ? bytes5(r, 4) : NULL;
+    if (r->bad) return false;
+    if (unix_t) {
+        int64_t v = (int64_t)rd32(m) * 1000000000;
+        uint32_t n = ns ? rd32(ns) & 0x3FFFFFFFu : 0;
+        if (n < 1000000000u) v += n;
+        *out = v;
+        return true;
+    }
+    uint64_t ft = rd32(m) | (uint64_t)rd32(m + 4) << 32;   /* 100 ns since 1601; clamped past int64 ns */
+    int64_t us = (int64_t)(ft / 10) - INT64_C(11644473600000000);
+    if (us >= INT64_MAX / 1000) *out = INT64_MAX;
+    else if (us <= INT64_MIN / 1000) *out = INT64_MIN;
+    else *out = us * 1000 + (int64_t)(ft % 10) * 100;
+    return true;
+}
+
 static perr_t rar5_header(parser_t *p, uint32_t vol, size_t pos, bool enc, const uint8_t **out, size_t *len, size_t *end) {
     const uint8_t *d = p->vols[vol].data;
     size_t size = p->vols[vol].size;
@@ -634,7 +667,7 @@ static perr_t rar5_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
             if (check) {
                 uint8_t sum[32];
                 g_codec->sha256(check, 8, sum);
-                if (memcmp(sum, check + 8, 4) == 0 && memcmp(check, k->check, 8) != 0) return P_BAD_PASSWORD;
+                if (ct_eq(sum, check + 8, 4) && !ct_eq(check, k->check, 8)) return P_BAD_PASSWORD;
             }
             memcpy(p->hkey, k->key, 32);
             enc = true;
@@ -657,7 +690,7 @@ static perr_t rar5_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
         /* spec 3.5 */
         uint64_t fflags = vint(&r), unp = vint(&r);
         (void)vint(&r);   /* attributes */
-        if (fflags & 2) (void)bytes5(&r, 4);
+        const uint8_t *mt = (fflags & 2) ? bytes5(&r, 4) : NULL;
         const uint8_t *crc = (fflags & 4) ? bytes5(&r, 4) : NULL;
         uint64_t ci = vint(&r);
         (void)vint(&r);   /* host OS */
@@ -667,6 +700,7 @@ static perr_t rar5_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
         if (r.bad) return P_CORRUPT;
         part_t pt = {0};
         fa_rar_entry_t proto = {0};
+        if (mt) { proto.has_mtime = true; proto.mtime_ns = (int64_t)rd32(mt) * 1000000000; }
         bool link = false;
         rd5_t x = { r.p, r.n, extra_at, false };
         while (x.at < x.n) {   /* spec 3.6 */
@@ -699,7 +733,8 @@ static perr_t rar5_volume(parser_t *p, uint32_t vol, size_t start, bool *more) {
                 uint64_t ht = vint(&rr);
                 const uint8_t *hv = bytes5(&rr, 32);
                 if (!rr.bad && ht == 0) { memcpy(pt.hash, hv, 32); pt.has_hash = true; }
-            } else if (rtype == 5) link = true;
+            } else if (rtype == 3 && rar5_mtime(&rr, &proto.mtime_ns)) proto.has_mtime = true;
+            else if (rtype == 5) link = true;
             x.at = rend;
         }
         if (fflags & 1) link = true;   /* a directory: not listed */
@@ -1018,10 +1053,10 @@ static fa_rar_err_t extract_one(fa_rar_archive_t *a, size_t index, bool check,
         } else {
             const key50_t *k = keys50(st, e->salt, e->lg2_count);
             if (!k) return FA_RAR_ERR_UNSUPPORTED;
-            if (e->psw_check_set && memcmp(k->check, e->psw_check, 8) != 0) {
+            if (e->psw_check_set && !ct_eq(k->check, e->psw_check, 8)) {
                 uint8_t sum[32];
                 g_codec->sha256(e->psw_check, 8, sum);
-                if (memcmp(sum, e->psw_check_sum, 4) == 0) return FA_RAR_ERR_BAD_PASSWORD;
+                if (ct_eq(sum, e->psw_check_sum, 4)) return FA_RAR_ERR_BAD_PASSWORD;
             }
             src.aes = g_codec->aes_create(st->alloc, k->key, 256, e->iv);
             const key50_t *m = memcmp(e->mac_salt, e->salt, 16) == 0 && e->mac_lg2 == e->lg2_count
@@ -1082,7 +1117,7 @@ static fa_rar_err_t extract_one(fa_rar_archive_t *a, size_t index, bool check,
         if (sink.b2) {
             uint8_t m[32];
             if (mac) g_codec->hmac_sha256(hash_key, 32, digest, 32, m);
-            if (memcmp(mac ? m : digest, e->hash, 32) != 0) err = FA_RAR_ERR_CORRUPT_STREAM;
+            if (!ct_eq(mac ? m : digest, e->hash, 32)) err = FA_RAR_ERR_CORRUPT_STREAM;
         }
     }
     wipe(hash_key, sizeof(hash_key));
@@ -1111,10 +1146,13 @@ typedef struct grow { proven_allocator_t alloc; uint8_t *p; size_t len, cap; uin
 
 static bool grow_write(void *ctx, const uint8_t *data, size_t size) {
     grow_t *g = (grow_t*)ctx;
-    if (size > g->max - g->len) { g->too_large = true; return false; }
+    if (g->len > g->max || size > g->max - g->len) { g->too_large = true; return false; }
     if (g->len + size > g->cap) {
+        size_t max_cap = g->max > SIZE_MAX ? SIZE_MAX : (size_t)g->max;
+        size_t need = g->len + size;
         size_t cap = g->cap ? g->cap : 65536;
-        while (cap < g->len + size) cap *= 2;
+        if (cap > max_cap) cap = max_cap;
+        while (cap < need) cap = (cap > max_cap / 2) ? max_cap : (cap * 2);
         uint8_t *p = fa_resize(g->alloc, g->p, g->cap, cap);
         if (!p) return false;
         g->p = p;
@@ -1178,10 +1216,10 @@ fa_rar_err_t fa_rar_set_password(fa_rar_archive_t *archive, proven_u8str_view_t 
         if (!e->encrypted || e->crypt != FA_RAR_CRYPT_50 || !e->psw_check_set) continue;
         uint8_t sum[32];
         g_codec->sha256(e->psw_check, 8, sum);
-        if (memcmp(sum, e->psw_check_sum, 4) != 0) continue;   /* damaged: says nothing */
+        if (!ct_eq(sum, e->psw_check_sum, 4)) continue;   /* damaged: says nothing */
         any_check = true;
         const key50_t *k = keys50(st, e->salt, e->lg2_count);
-        if (k && memcmp(k->check, e->psw_check, 8) == 0) return FA_RAR_OK;
+        if (k && ct_eq(k->check, e->psw_check, 8)) return FA_RAR_OK;
     }
     if (any_check) { state_clear_password(st); return FA_RAR_ERR_BAD_PASSWORD; }
     /* RAR 4: decode the smallest encrypted file that starts a stream. */

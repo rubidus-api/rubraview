@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.55.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.55.0/rubraview-v1.55.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.55.0/rubraview-v1.55.0.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.55.0/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.56.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.56.0/rubraview-v1.56.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.56.0/rubraview-v1.56.0.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.56.0/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -296,6 +296,11 @@ ships with, so it cannot drift from them.
 | Right click `Make a playlist of them` | Make a playlist of what is picked |
 | Right click `Pick none` | Pick nothing in the open-file screen |
 | Right click `Paste` | The files on the clipboard, from here or Explorer, copied or moved into the folder on screen (Ctrl+V) |
+| Right click `Open` | Navigate the open-file screen to the breadcrumb folder right-clicked |
+| Right click `Open in new window` | Open the breadcrumb folder right-clicked in a new window |
+| Right click `Copy the whole path` | Copy the path of the breadcrumb folder right-clicked |
+| Right click `Show in Explorer` | Open the breadcrumb folder right-clicked in Explorer |
+| Right click `Favourite (in or out)` | Make the breadcrumb folder right-clicked a favourite, or no longer one |
 | Right click `Open` | A file of a list, right-clicked: open it |
 | Right click `Copy the whole path` | A file of a list, right-clicked: its whole path to the clipboard |
 | Right click `Show in Explorer` | A file of a list, right-clicked: shown selected in Explorer |

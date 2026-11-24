@@ -214,11 +214,15 @@ bool rc_flush(rc_unpack_t *u, bool all) {
                 size_t n = (size_t)f->length;
                 if (u->fbuf_cap < n) {
                     uint8_t *a = fa_resize(u->alloc, u->fbuf, u->fbuf_cap, n);
-                    uint8_t *b2 = a ? fa_resize(u->alloc, u->fbuf2, u->fbuf_cap, n) : NULL;
-                    if (a) u->fbuf = a;
-                    if (b2) u->fbuf2 = b2;
-                    if (!a || !b2) return false;
+                    if (!a) return false;
+                    u->fbuf = a;
                     u->fbuf_cap = n;
+                }
+                if (u->fbuf2_cap < n) {
+                    uint8_t *b2 = fa_resize(u->alloc, u->fbuf2, u->fbuf2_cap, n);
+                    if (!b2) return false;
+                    u->fbuf2 = b2;
+                    u->fbuf2_cap = n;
                 }
                 copy_out(u, f->start, u->fbuf, n);
                 rc_run_filter(f, u->fbuf, u->fbuf2, n);

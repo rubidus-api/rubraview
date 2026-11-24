@@ -39,7 +39,7 @@ typedef struct udf_state {
     udf_item_t *items;
     size_t n, cap;
     uint64_t records;
-    uint32_t *visited; size_t nvis, capvis;   /* visited directory blocks (cycle guard) */
+    uint64_t *visited; size_t nvis, capvis;   /* open-addressed set of (uint64_t)blk + 1 (0 = empty) */
 } udf_state_t;
 
 /* CRC-ITU-T (CRC-16/CCITT, poly 0x1021, seed 0, no reflection) - ECMA-167 7.2.6. */
@@ -67,15 +67,37 @@ static uint16_t udf_tag(const uint8_t *d, size_t avail, uint16_t *out_id) {
 }
 
 static bool udf_seen(udf_state_t *st, uint32_t blk) {
-    for (size_t i = 0; i < st->nvis; i++) if (st->visited[i] == blk) return true;
-    if (st->nvis < UDF_MAX_DIRS) {
-        if (st->nvis == st->capvis) {
-            size_t nc = st->capvis ? st->capvis * 2 : 64;
-            uint32_t *p = fa_resize(st->alloc, st->visited, st->capvis * sizeof *p, nc * sizeof *p);
-            if (!p) return true;
-            st->visited = p; st->capvis = nc;
+    uint64_t key = (uint64_t)blk + 1;
+    if (st->visited) {
+        size_t mask = st->capvis - 1;
+        size_t i = (size_t)((key * UINT64_C(0x9E3779B97F4A7C15)) >> 32) & mask;
+        while (st->visited[i]) {
+            if (st->visited[i] == key) return true;
+            i = (i + 1) & mask;
         }
-        st->visited[st->nvis++] = blk;
+    }
+    if (st->nvis < UDF_MAX_DIRS) {
+        if (!st->visited || (st->nvis + 1) * 2 > st->capvis) {
+            size_t nc = st->capvis ? st->capvis * 2 : 64;
+            uint64_t *p = fa_zalloc(st->alloc, nc, sizeof *p);
+            if (!p) return true;
+            size_t nmask = nc - 1;
+            for (size_t j = 0; j < st->capvis; j++) {
+                uint64_t k = st->visited[j];
+                if (!k) continue;
+                size_t m = (size_t)((k * UINT64_C(0x9E3779B97F4A7C15)) >> 32) & nmask;
+                while (p[m]) m = (m + 1) & nmask;
+                p[m] = k;
+            }
+            fa_release(st->alloc, st->visited);
+            st->visited = p;
+            st->capvis = nc;
+        }
+        size_t mask = st->capvis - 1;
+        size_t i = (size_t)((key * UINT64_C(0x9E3779B97F4A7C15)) >> 32) & mask;
+        while (st->visited[i]) i = (i + 1) & mask;
+        st->visited[i] = key;
+        st->nvis++;
     }
     return false;
 }
@@ -184,7 +206,12 @@ static fulta_arc_err_t udf_walk(fulta_arc_t *arc, udf_state_t *st, uint32_t dir_
     uint64_t got = 0;
     for (size_t i = 0; i < dnp && got < dlen; i++) {
         uint32_t want = (uint32_t)(dlen - got < dpieces[i].len ? dlen - got : dpieces[i].len);
-        if (dpieces[i].off + want > src->size || fa_source_read_exact(src, dpieces[i].off, fa_bytes_mut(data + got, want))) break;
+        if (dpieces[i].off == UINT64_MAX) {
+            memset(data + got, 0, want);
+        } else if (dpieces[i].off > src->size || want > src->size - dpieces[i].off ||
+                   fa_source_read_exact(src, dpieces[i].off, fa_bytes_mut(data + got, want))) {
+            break;
+        }
         got += want;
     }
     fa_release(arc->alloc, dpieces);
@@ -245,7 +272,7 @@ static fulta_arc_err_t udf_file(fulta_arc_t *arc, udf_state_t *st, uint32_t fe_b
     if (safe && !fa_sanitize_name(safe)) { fa_release(arc->alloc, safe); safe = NULL; }
     const char *use = safe && safe[0] ? safe : "data";
     fa_entry_t *en = fa_add_entry(arc, fa_bytes((const uint8_t *)path, strlen(path)), use, "store");
-    udf_item_t *it = udf_add(st);
+    udf_item_t *it = en ? udf_add(st) : NULL;
     fa_release(arc->alloc, safe);
     if (!en || !it) { fa_release(arc->alloc, pieces); return FULTA_ARC_ERR_NOMEM; }
     en->pub.size = ilen;
@@ -331,21 +358,23 @@ static fulta_arc_err_t udf_extract(fulta_arc_t *arc, size_t index, const fulta_a
     udf_item_t *it = &st->items[index];
     const fulta_arc_source_t *src = arc->volumes[0];
     uint64_t remain = it->size;
-    uint8_t buf[UDF_SS];
+    uint8_t buf[32768];
     for (size_t i = 0; i < it->next && remain; i++) {
         uint64_t off = it->ext[i].off;
         uint32_t left = it->ext[i].len;
         bool hole = off == UINT64_MAX;          /* an unallocated extent: emit zeros */
         while (left && remain) {
+            if (fa_cancelled(arc)) return FULTA_ARC_ERR_CANCELLED;
             uint32_t n = left < sizeof buf ? left : (uint32_t)sizeof buf;
             if (n > remain) n = (uint32_t)remain;
             if (hole) {
                 memset(buf, 0, n);
-            } else if (off + n > src->size || fa_source_read_exact(src, off, fa_bytes_mut(buf, n))) {
+            } else if (off > src->size || n > src->size - off || fa_source_read_exact(src, off, fa_bytes_mut(buf, n))) {
                 return FULTA_ARC_ERR_TRUNCATED;
             }
             fulta_arc_err_t e = sink->write(sink->ctx, buf, n);
             if (e) return e;
+            fa_progress(arc, n);
             off += n; left -= n; remain -= n;
         }
     }

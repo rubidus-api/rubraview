@@ -14,14 +14,14 @@ came from is in its `vendor/<name>/VENDORED.md`.
   too.
 - Additional notices from that project: `vendor/proven/THIRD_PARTY_NOTICES.md`
 
-## FultaArc 0.1.0
+## FultaArc 0.1.4
 
 - Vendored snapshot at `vendor/fultaarc/` (see `vendor/fultaarc/VENDORED.md`)
 - Licence: MIT — see `vendor/fultaarc/LICENSE`
-- Used for: reading every archive (ZIP / CBZ, 7z / CB7, RAR / CBR 2.0 to
-  7.0, with their solid, split and password-protected forms) and writing
-  ZIP and 7z. Its RAR decoder was written in a clean room from a
-  specification; it contains no UnRAR code.
+- Used for: reading every archive (ZIP / CBZ, 7z / CB7, RAR / CBR 1.4 to
+  7.0, with their solid, split and password-protected forms incl. RAR 1.5
+  decryption) and writing ZIP and 7z. Its RAR decoders were written in a
+  clean room from a specification; it contains no UnRAR code.
 - It brings the parts below with it; its own list, with the Unicode
   licence's text, is `vendor/fultaarc/THIRD_PARTY_NOTICES.md`.
 
