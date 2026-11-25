@@ -47,6 +47,7 @@ typedef enum rubraview_listwin_part {
     RUBRAVIEW_LISTWIN_URL,        /* RV-158, the bar beside Add: a station's address typed joins the list */
     RUBRAVIEW_LISTWIN_SHAPE,      /* RV-192, the tools row after .ext: rows checked or not by shape (wide, tall, square) */
     RUBRAVIEW_LISTWIN_MAXIMIZE,   /* RV-197, next to Close (RV-218): the whole view, or back */
+    RUBRAVIEW_LISTWIN_VIEW,       /* RV-276: header toggle between outer Playlist and current Book pages */
 } rubraview_listwin_part_t;
 
 typedef struct rubraview_listwin {
@@ -73,6 +74,8 @@ typedef struct rubraview_listwin {
     bool   maximized;
     double restore_x, restore_y, restore_width, restore_height;
     double view_top;           /* the view starts here (below the viewer's own title bar): set by the viewer */
+    bool   has_view_toggle;    /* RV-276: a book read from a list: toggle button in the title row (Playlist <-> Book pages) */
+    double view_toggle_width;  /* measured width of the toggle button (0 -> default title_height * 2.6) */
 } rubraview_listwin_t;
 
 /** 1.25.0: one of the tools row's parts (EXT, FILTER, SORT, ORDER); empty without the row. */
@@ -95,6 +98,9 @@ rubraview_rect_t rubraview_listwin_maximize_rect(const rubraview_listwin_t *lw);
 
 /** Where the title's text ends: the left edge of its buttons. */
 double rubraview_listwin_title_text_right(const rubraview_listwin_t *lw);
+
+/** RV-276: the Playlist <-> Book pages toggle button in the title row; empty unless `has_view_toggle`. */
+rubraview_rect_t rubraview_listwin_view_rect(const rubraview_listwin_t *lw);
 
 /**
  * RV-197: maximized, back where it was; else the place kept and the whole `view_w` x `view_h` view taken, below
@@ -141,6 +147,13 @@ void rubraview_listwin_resize_to(rubraview_listwin_t *lw, double px, double py, 
  * when nothing moves.
  */
 bool rubraview_list_move(size_t *order, size_t count, const bool *moving, size_t to);
+
+/**
+ * RV-276: after an edit producing `n` rows where `order[i]` is the old index (or SIZE_MAX for a new row),
+ * return where `current` lands: its new index (`*stayed = true`) if it survives; otherwise (`*stayed = false`)
+ * the first surviving row whose old index was > `current`, else `n - 1` (SIZE_MAX when `n == 0`).
+ */
+size_t rubraview_list_track_index(const size_t *order, size_t n, size_t current, bool *stayed);
 
 /** RV-276: what a row of a list is read as: a file of its own, a comic (read as a book in its place), or another
  *  archive (a book when the reader says so: Settings > Files > An archive in the list). */

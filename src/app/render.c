@@ -1833,6 +1833,8 @@ uint64_t scene_signature(const app_state_t *app) {
         SIG(&h, (int64_t)app->listwin.width); SIG(&h, (int64_t)app->listwin.height);
         SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y);
         SIG(&h, app->list_row_dragging); SIG(&h, app->list_drop_at);
+        SIG(&h, app->book_active); SIG(&h, app->book_list_pages);
+        SIG(&h, app->book_row); SIG(&h, app->book_list_n);
         for (size_t i = 0; i < app->list_checked_count; ++i) if (app->list_checked[i]) SIG(&h, i);
         SIG(&h, list_saves_whole_paths(app));
     }

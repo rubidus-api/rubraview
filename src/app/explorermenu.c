@@ -113,7 +113,7 @@ void explorer_targets_path(app_state_t *app, proven_u8str_view_t path) {
 void explorer_targets_list_row(app_state_t *app, size_t row) {
     targets_clear(app);
     bool folder = false;
-    if (row < page_count(app)) targets_add(app, app->source.pages[row].path, &folder);
+    if (row < list_item_count(app)) targets_add(app, list_item_path(app, row), &folder);
     targets_read_verbs(app, folder);
 }
 

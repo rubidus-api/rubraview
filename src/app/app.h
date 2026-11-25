@@ -613,6 +613,7 @@ typedef struct app_state {
     size_t                 book_list_n;
     size_t                 book_row;             /* the book's row in them */
     bool                   book_active;          /* the book open is that row's: past its ends the list goes on */
+    bool                   book_list_pages;      /* RV-276: while book_active, true shows this book's pages in list windows */
     bool                   book_wanted;          /* that row's book being opened (its password may be asked) */
     bool                   book_back;            /* reached going back: it opens at its last page */
     bool                   book_restoring;       /* the list opened again, leaving a book */
@@ -996,11 +997,12 @@ typedef struct app_state {
     rubraview_rect_t           files_bar_rect[8];
     rubraview_rect_t           files_tool_rect[5];
     bool                       files_wrapped_bar;
-    const rubraview_page_ref_t *files_pages;       /* the list it was last drawn for: another one resets it */
+    const void                *files_pages;       /* the list it was last drawn for: another one resets it */
     size_t                     files_count;
     int32_t                    files_selected;     /* the row the keys moved to; -1: none */
     int32_t                    files_hover;        /* the row under the pointer; -1 */
     int32_t                    files_followed;     /* the file on screen it last scrolled to */
+    int32_t                    files_book_page;    /* RV-276: open book's page last reflected in outer playlist row */
     int32_t                    files_want;         /* the file whose preview is wanted */
     double                     files_want_since;
     bool                       files_want_now;     /* chosen by a key: no waiting for the pointer to rest */
@@ -1883,6 +1885,7 @@ enum {
     FILES_PREVIEW_FAILED,     /* it could not be read or is not a picture */
     FILES_PREVIEW_FAR,        /* deep in a solid archive: read only when it is opened */
     FILES_PREVIEW_MEDIA,      /* a film or a sound */
+    FILES_PREVIEW_BOOK,       /* a comic book or archive row in the list */
 };
 
 
@@ -2455,6 +2458,8 @@ void book_after_open(app_state_t *app);
 bool book_leave(app_state_t *app, bool forward);
 size_t book_pump(app_state_t *app);
 void book_forget(app_state_t *app);
+void book_jump(app_state_t *app, size_t row);
+void book_restore_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t n, size_t to, const char *said);
 bool book_add_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count);
 void book_ask_answer(app_state_t *app, int which);
 bool book_ask_press(app_state_t *app, double x, double y);
@@ -2471,6 +2476,14 @@ bool edge_press_release(app_state_t *app, double x, double y);
 void draw_navbox(app_state_t *app);
 bool list_del_press(app_state_t *app, double x, double y);
 bool list_editable(const app_state_t *app);
+bool list_showing_outer(const app_state_t *app);
+bool list_has_book_switch(const app_state_t *app);
+size_t list_item_count(const app_state_t *app);
+const void *list_item_identity(const app_state_t *app);
+proven_u8str_view_t list_item_path(const app_state_t *app, size_t index);
+proven_u8str_view_t list_item_name(const app_state_t *app, size_t index);
+int32_t list_current_item(const app_state_t *app);
+void list_toggle_book_view(app_state_t *app);
 bool list_ext_is_off(const app_state_t *app, proven_u8str_view_t ext);
 void list_filter_files_end(app_state_t *app);
 void list_filter_follow(app_state_t *app);

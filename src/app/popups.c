@@ -1788,12 +1788,23 @@ void draw_list_drop_line(app_state_t *app, rubraview_renderer_t *rr, const rubra
 /* 1.25.0 (owner, 2026-10-20: "재생목록 위에 커서를 대면 해당 파일의 썸네일이 보이게"): the row pointed at,
    as a picture beside the list — the page itself when it is in memory, else its strip thumbnail. */
 static void draw_list_tip(app_state_t *app, const rubraview_listwin_t *lw, size_t page, double win_w, double win_h) {
-    app->list_tip_page = page < page_count(app) ? (int32_t)page : -1;
-    if (app->list_tip_page < 0) return;
+    app->list_tip_page = -1;
     rubraview_texture_t *tex = NULL;
-    if (app->pages && app->pages[page].texture && app->pages[page].loaded) tex = app->pages[page].texture;
-    else if (page < app->strip_cell_count && app->strip_cells[page].texture) tex = app->strip_cells[page].texture;
-    if (!tex) return;
+    if (list_showing_outer(app)) {
+        int32_t cur = current_page_index(app);
+        if (page != app->book_row || cur < 0 || (size_t)cur >= page_count(app)) return;
+        size_t bp = (size_t)cur;
+        if (app->pages && app->pages[bp].texture && app->pages[bp].loaded) tex = app->pages[bp].texture;
+        else if (bp < app->strip_cell_count && app->strip_cells[bp].texture) tex = app->strip_cells[bp].texture;
+        if (!tex) return;
+        app->list_tip_page = (int32_t)page;
+    } else {
+        app->list_tip_page = page < page_count(app) ? (int32_t)page : -1;
+        if (app->list_tip_page < 0) return;
+        if (app->pages && app->pages[page].texture && app->pages[page].loaded) tex = app->pages[page].texture;
+        else if (page < app->strip_cell_count && app->strip_cells[page].texture) tex = app->strip_cells[page].texture;
+        if (!tex) return;
+    }
     int32_t tw = 0, th = 0;
     rubraview_pal_texture_size(tex, &tw, &th);
     if (tw <= 0 || th <= 0) return;
@@ -1826,9 +1837,10 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
     app->list_tip_page = -1;
     if (!lw->open) return;
     listwin_sync(app);
+    size_t total = list_item_count(app);
     size_t count = list_rows(app);   /* 1.25.0: the rows shown */
     listwin_place_clear(app, win_w, win_h);
-    int32_t current = current_page_index(app);
+    int32_t current = list_current_item(app);
     if (current != app->listwin_shown_page && current >= 0) {   /* follow the file on screen */
         size_t at = list_row_of(app, (size_t)current);
         if (at != SIZE_MAX) rubraview_listwin_reveal(lw, at, count);
@@ -1840,16 +1852,31 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
     rubraview_pal_render_fill_rect(app->renderer, body, rubraview_box_fade(COLOR_BOX_FILL, opacity * 0.75), 4.0);
     rubraview_pal_render_stroke_rect(app->renderer, body, COLOR_BOX_BORDER, 1.0, 4.0);
 
-    const char *what = app->list_is_set ? T("Playlist") : app->source.archive_path.size > 0 ? T("In this archive") : T("In this folder");
-    char title[96];
-    int n = current >= 0 ? rubraview_fmt(title, sizeof(title), "{}   {} / {}", PROVEN_ARG(what), PROVEN_ARG((int)(current + 1)), PROVEN_ARG((size_t)(page_count(app))))
-                         : rubraview_fmt(title, sizeof(title), "{}   {}", PROVEN_ARG(what), PROVEN_ARG((size_t)(page_count(app))));
+    bool outer = list_showing_outer(app);
+    const char *what = (app->list_is_set || outer) ? T("Playlist") : app->source.archive_path.size > 0 ? T("In this archive") : T("In this folder");
+    char title[96], tfit[96];
+    int n = current >= 0 ? rubraview_fmt(title, sizeof(title), "{}   {} / {}", PROVEN_ARG(what), PROVEN_ARG((int)(current + 1)), PROVEN_ARG((size_t)total))
+                         : rubraview_fmt(title, sizeof(title), "{}   {}", PROVEN_ARG(what), PROVEN_ARG((size_t)total));
     if (n > 0 && list_viewed(app) && (size_t)n < sizeof(title))
         n += rubraview_fmt(title + n, sizeof(title) - (size_t)n, T("   ({} shown)"), PROVEN_ARG((size_t)count));
     if (n >= (int)sizeof(title)) n = (int)sizeof(title) - 1;
-    rubraview_pal_rect_t head = { lw->x + lw->row_height * 0.4, lw->y, rubraview_listwin_title_text_right(lw) - lw->x - lw->row_height * 0.4, lw->title_height };
-    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n }, head, lw->title_height * 0.45,
-                                              COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    double title_left = lw->x + lw->row_height * 0.4, title_right = rubraview_listwin_title_text_right(lw);
+    rubraview_pal_rect_t head = { title_left, lw->y, title_right > title_left ? title_right - title_left : 0.0, lw->title_height };
+    if (n > 0 && head.width > 0.0) {
+        proven_u8str_view_t tview = fit_text_measured(app->renderer, tfit, sizeof(tfit), (proven_u8str_view_t){ (const proven_byte_t *)title, (size_t)n },
+                                                      head.width, lw->title_height * 0.45);
+        rubraview_pal_render_draw_text(app->renderer, tview, head, lw->title_height * 0.45, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    }
+    if (lw->has_view_toggle) {
+        rubraview_rect_t vr = rubraview_listwin_view_rect(lw);
+        if (vr.width > 0.0) {
+            list_button(app->renderer, app->pointer_x, app->pointer_y, vr,
+                        app->book_list_pages ? T("Playlist") : T("Book pages"),
+                        lw->title_height * 0.40, app->book_list_pages, COLOR_TEXT);
+            rubraview_pal_render_stroke_rect(app->renderer, (rubraview_pal_rect_t){ vr.x + 1.0, vr.y + 1.0, vr.width - 2.0, vr.height - 2.0 },
+                                             COLOR_BOX_BORDER, 1.0, 2.0);
+        }
+    }
     rubraview_rect_t cr = rubraview_listwin_close_rect(lw);
     rubraview_pal_rect_t close = { cr.x, cr.y, cr.width, cr.height };
     if (rubraview_rect_contains(cr, app->pointer_x, app->pointer_y)) {
@@ -1885,8 +1912,14 @@ static void draw_listwin_in(app_state_t *app, double win_w, double win_h) {
         else if (i == hovered) rubraview_pal_render_fill_rect(app->renderer, row, COLOR_TILE_FILL, 2.0);
         if (lw->editable) draw_list_row_parts(app, app->renderer, lw, i, count, app->pointer_x, app->pointer_y, page);
         char line[512], fit[512];
-        proven_u8str_view_t name = page_display_name(app, page);
-        int m = rubraview_fmt(line, sizeof(line), "{:4}   {}", PROVEN_ARG((size_t)(page + 1)), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 480 ? name.size : 480))));
+        proven_u8str_view_t name = list_item_name(app, page);
+        int32_t cur_bp = current_page_index(app);
+        int m = (outer && page == app->book_row && page_count(app) > 0 && cur_bp >= 0)
+            ? rubraview_fmt(line, sizeof(line), "{:4}   {}  [{} / {}]", PROVEN_ARG((size_t)(page + 1)),
+                            PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 440 ? name.size : 440))),
+                            PROVEN_ARG((size_t)(cur_bp + 1)), PROVEN_ARG((size_t)page_count(app)))
+            : rubraview_fmt(line, sizeof(line), "{:4}   {}", PROVEN_ARG((size_t)(page + 1)),
+                            PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 480 ? name.size : 480))));
         rubraview_pal_rect_t text = { text_x + lw->row_height * 0.3, row.y, lw->x + lw->width - text_x - lw->row_height * 0.6, row.height };
         if (m > 0) rubraview_pal_render_draw_text(app->renderer,
                                                   files_fit_text(fit, sizeof(fit), (proven_u8str_view_t){ (const proven_byte_t *)line, (size_t)(m < (int)sizeof(line) ? m : (int)sizeof(line) - 1) },

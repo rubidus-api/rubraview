@@ -44,7 +44,7 @@ static bool facts_kind_for(int32_t then, int key, proven_u8str_view_t path) {
 /* What a target holds: n items, the i-th's path and modified time (0 for a list's page). */
 static size_t shape_items(app_state_t *app, int32_t target) {
     if (target == SHAPE_FOR_PICKER) return app->picker_in_book || rubraview_picker_is_places(app->picker_dir) ? 0 : app->picker_listing.count;
-    return target == SHAPE_FOR_LIST ? page_count(app) : 0;
+    return target == SHAPE_FOR_LIST ? list_item_count(app) : 0;
 }
 
 static proven_u8str_view_t shape_item(app_state_t *app, int32_t target, size_t i, int64_t *mtime) {
@@ -55,12 +55,12 @@ static proven_u8str_view_t shape_item(app_state_t *app, int32_t target, size_t i
         *mtime = e->mtime;
         return e->path;
     }
-    return app->source.pages[i].path;
+    return list_item_path(app, i);
 }
 
 static bool shape_target_alive(app_state_t *app) {
     if (app->shape_for == SHAPE_FOR_PICKER) return app->picker_open && app->picker_generation == app->shape_generation;
-    if (app->shape_for == SHAPE_FOR_LIST) return app->source.pages == app->shape_pages && list_editable(app);
+    if (app->shape_for == SHAPE_FOR_LIST) return list_item_identity(app) == app->shape_pages && list_editable(app);
     return false;
 }
 
@@ -191,7 +191,7 @@ static bool facts_start(app_state_t *app, int32_t target, int32_t then, int key,
     app->shape_reader_mtime = mtimes;
     app->shape_for = target;
     app->shape_generation = app->picker_generation;
-    app->shape_pages = app->source.pages;
+    app->shape_pages = list_item_identity(app);
     app->shape_ahead = ahead;
     app->shape_said = 0.0;
     return true;
@@ -311,8 +311,8 @@ static void facts_ahead(app_state_t *app) {
         if (shape_items(app, SHAPE_FOR_PICKER) > 0 && facts_start(app, SHAPE_FOR_PICKER, FACTS_THEN_AHEAD, 0, true)) app->shape_then = FACTS_THEN_AHEAD;
         return;
     }
-    if (!app->picker_open && app->listwin.open && list_editable(app) && app->facts_ahead_pages != (const void *)app->source.pages) {
-        app->facts_ahead_pages = app->source.pages;
+    if (!app->picker_open && app->listwin.open && list_editable(app) && app->facts_ahead_pages != list_item_identity(app)) {
+        app->facts_ahead_pages = list_item_identity(app);
         if (facts_start(app, SHAPE_FOR_LIST, FACTS_THEN_AHEAD, 0, true)) app->shape_then = FACTS_THEN_AHEAD;
     }
 }

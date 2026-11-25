@@ -786,23 +786,20 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
                proven_u8str_view_eq(action, PROVEN_LIT("list_reveal")) || proven_u8str_view_eq(action, PROVEN_LIT("list_take_out")) ||
                proven_u8str_view_eq(action, PROVEN_LIT("list_delete_file"))) {
         /* RV-117: a file of a list, right-clicked on its row */
-        size_t row = app->list_ctx_row;
+        size_t row = app->list_ctx_row, count = list_item_count(app);
         rubraview_window_t *owner = app->ctx_in_files && app->files_window ? app->files_window : app->window;
-        if (row >= page_count(app)) {
+        if (row >= count) {
             osd_say(app, TU8("that file is no longer in the list"));
         } else if (proven_u8str_view_eq(action, PROVEN_LIT("list_open"))) {
-            if ((int32_t)row != current_page_index(app)) {
-                go_to_spread(app, spread_for_chosen_page(app, (int32_t)row));
-                update_precache(app);
-            }
+            files_go_to(app, (int32_t)row);
         } else if (proven_u8str_view_eq(action, PROVEN_LIT("list_copy_path"))) {
-            proven_u8str_view_t whole = rubraview_pal_fs_absolute(app->arena, app->source.pages[row].path);
+            proven_u8str_view_t whole = rubraview_pal_fs_absolute(app->arena, list_item_path(app, row));
             osd_say(app, rubraview_pal_clipboard_set_text(owner, whole) ? TU8("its whole path is on the clipboard")
                                                                          : TU8("the path could not be copied"));
         } else if (proven_u8str_view_eq(action, PROVEN_LIT("list_reveal"))) {
-            if (!rubraview_pal_shell_reveal(app->source.pages[row].path)) osd_say(app, TU8("Explorer could not show the file"));
+            if (!rubraview_pal_shell_reveal(list_item_path(app, row))) osd_say(app, TU8("Explorer could not show the file"));
         } else if (proven_u8str_view_eq(action, PROVEN_LIT("list_take_out"))) {
-            bool *one = (bool*)rubraview_alloc_zero(page_count(app), sizeof(bool));
+            bool *one = (bool*)rubraview_alloc_zero(count, sizeof(bool));
             if (one) { one[row] = true; list_remove(app, one); rubraview_free(one); }
         } else {
             list_delete_row(app, row, owner);

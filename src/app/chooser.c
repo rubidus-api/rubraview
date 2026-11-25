@@ -378,9 +378,9 @@ void chooser_open_listext(app_state_t *app, int where, double x, double y, doubl
     rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Extensions shown")));
     chooser_word(c, -1.0, "{}", PROVEN_ARG(T("All")));
     char seen[CHOOSE_MAX][16];
-    size_t counts[CHOOSE_MAX] = {0}, kinds = 0, count = page_count(app);
+    size_t counts[CHOOSE_MAX] = {0}, kinds = 0, count = list_item_count(app);
     for (size_t i = 0; i < count; ++i) {
-        proven_u8str_view_t e = rubraview_path_ext(app->source.pages[i].path);
+        proven_u8str_view_t e = rubraview_path_ext(list_item_path(app, i));
         if (e.size == 0 || e.size >= sizeof(seen[0])) e = PROVEN_LIT(".");
         size_t k = 0;
         for (; k < kinds; ++k) {
@@ -635,7 +635,7 @@ static int list_sort_cmp(const void *pa, const void *pb) {
 }
 
 void list_sort(app_state_t *app, int key, bool desc) {
-    size_t count = page_count(app);
+    size_t count = list_item_count(app);
     if (count < 2 || !list_editable(app)) return;
     /* RV-202: by length, the films' and songs' lengths read first (on the size reader's thread); sorted when they are */
     if (key == 6 && facts_read_for_sort(app, SHAPE_FOR_LIST, FACTS_THEN_LIST_SORT, key, desc)) return;
@@ -647,7 +647,7 @@ void list_sort(app_state_t *app, int key, bool desc) {
     rubraview_scratch_t sc;
     proven_arena_t *pa = scratch_begin(app, &sc, 4096u + count * 64u);
     for (size_t i = 0; i < count; ++i) {
-        proven_u8str_view_t path = app->source.pages[i].path;
+        proven_u8str_view_t path = list_item_path(app, i);
         keys[i] = (struct list_sort_key){ .name = rubraview_path_basename(path), .ext = rubraview_path_ext(path) };
         rubraview_fs_entry_t st;
         if (key >= 3 && key <= 5 && rubraview_pal_fs_stat(pa, path, &st)) { keys[i].size = st.size_bytes; keys[i].mtime = st.mtime; keys[i].ctime = st.ctime; }

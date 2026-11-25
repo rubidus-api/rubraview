@@ -896,7 +896,7 @@ void picker_add_to_list(app_state_t *app) {
     bool closing = app->picker_add_mode;
     if (closing) { app->picker_open = false; app->picker_add_mode = false; }
     listwin_sync(app);
-    list_insert_paths(app, paths, count, page_count(app));
+    list_insert_paths(app, paths, count, list_item_count(app));
     char line[64];
     int k = rubraview_fmt(line, sizeof(line), T("{} added to the list"), PROVEN_ARG((size_t)count));
     if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });

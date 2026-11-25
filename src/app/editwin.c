@@ -289,7 +289,7 @@ void apply_all_begin(app_state_t *app) {
     if (!edit_panel_open(app)) { osd_say(app, TU8("open Edit (E) and make the change first")); return; }
     edit_live_close(app);
     if (app->edit_steps.cursor == 0) { osd_say(app, TU8("make a change in Edit first: its steps are what is applied")); return; }
-    if (app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) { osd_say(app, TU8("the pictures of a folder or a list, not of an archive")); return; }
+    if (!list_showing_outer(app) && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) { osd_say(app, TU8("the pictures of a folder or a list, not of an archive")); return; }
     if (app->apply_job) { osd_say(app, TU8("still applying the last one")); return; }
     if (app->rename_active) rename_end(app);
     rename_field_begin(app);
@@ -408,14 +408,14 @@ void apply_all_typed(app_state_t *app) {
     char *star = rubraview_cstr_chr(pattern, '*');
     bool bad = !star || rubraview_cstr_chr(star + 1, '*') || n == 1 || strpbrk(pattern, "\\/:\"<>|?");
     if (bad) { osd_say(app, TU8("the name needs one * for the picture's own name and something beside it: *_edit")); return; }
-    if (app->apply_job || app->edit_steps.cursor == 0 || app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER) return;
+    if (app->apply_job || app->edit_steps.cursor == 0 || (!list_showing_outer(app) && app->source.kind != RUBRAVIEW_PAGE_SOURCE_FOLDER)) return;
     rubraview_settings_set_text(&app->settings, PROVEN_LIT("edit"), PROVEN_LIT("copy_name"), app_keep(app, cstr(pattern)));
     apply_all_job_t *job = (apply_all_job_t*)rubraview_alloc_zero(1, sizeof(*job));
     if (!job) return;
-    size_t count = page_count(app);
+    size_t count = list_item_count(app);
     job->paths = (char**)rubraview_alloc_zero(count ? count : 1, sizeof(char*));
     for (size_t i = 0; job->paths && i < count; ++i) {
-        proven_u8str_view_t p = app->source.pages[i].path;
+        proven_u8str_view_t p = list_item_path(app, i);
         if (p.size == 0 || !rubraview_glob_match_list(rubraview_path_basename(p), PROVEN_LIT(IMAGE_FILTER))) continue;   /* pictures only */
         if (edit_is_copy_name(p, cstr(pattern))) continue;                                                    /* not a copy made before */
         char *copy = (char*)rubraview_alloc(p.size + 1);

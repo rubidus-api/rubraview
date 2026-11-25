@@ -5,17 +5,27 @@
 
 void draw_files_window(app_state_t *app) {
     if (!app->files_open) return;
-    size_t count = page_count(app);
-    int32_t current = current_page_index(app);
+    listwin_sync(app);
+    size_t count = list_item_count(app);
+    int32_t current = list_current_item(app);
+    const void *ident = list_item_identity(app);
+    int32_t bp = list_showing_outer(app) ? current_page_index(app) : -1;
     /* Another archive, folder or playlist: its list starts afresh. */
-    if (app->files_pages != app->source.pages || app->files_count != count) {
-        app->files_pages = app->source.pages;
+    if (app->files_pages != ident || app->files_count != count) {
+        app->files_pages = ident;
         app->files_count = count;
         app->files_list.first = 0;
         app->files_selected = app->files_hover = -1;
         app->files_followed = -1;
+        app->files_book_page = bp;
         app->files_want = -1;
         files_preview_drop(app);
+        app->files_dirty = true;
+    }
+    if (bp != app->files_book_page) {
+        app->files_book_page = bp;
+        if (list_showing_outer(app) && app->files_preview_page == (int32_t)app->book_row)
+            files_preview_drop(app);
         app->files_dirty = true;
     }
     if (current != app->files_followed && current >= 0) {     /* follow the file on screen */
@@ -39,19 +49,32 @@ void draw_files_window(app_state_t *app) {
     rubraview_pal_render_begin(r, FILES_BACKGROUND);
 
     /* The header: what the list is, and where the file on screen is in it. */
-    bool in_archive = app->source.archive_path.size > 0 && !app->list_is_set;
+    bool outer = list_showing_outer(app);
+    bool in_archive = app->source.archive_path.size > 0 && !app->list_is_set && !outer;
     char head[640], cut[640];
-    proven_u8str_view_t what = app->list_is_set ? TU8("Playlist")
+    proven_u8str_view_t what = (app->list_is_set || outer) ? TU8("Playlist")
                  : in_archive ? rubraview_path_basename(app->source.archive_path)
                  : rubraview_path_basename(app->source_dir);
     int hn = current >= 0 ? rubraview_fmt(head, sizeof(head), "{} / {}   {}", PROVEN_ARG((int)(current + 1)), PROVEN_ARG((size_t)count), PROVEN_ARG(rubraview_bytes_view(what.ptr, (int)(what.size < 560 ? what.size : 560))))
                           : rubraview_fmt(head, sizeof(head), "{}   {}", PROVEN_ARG((size_t)count), PROVEN_ARG(rubraview_bytes_view(what.ptr, (int)(what.size < 560 ? what.size : 560))));
     rubraview_pal_rect_t head_box = { lw->x, lw->y, lw->width, title_h };
     rubraview_pal_render_fill_rect(r, head_box, COLOR_TILE_FILL, 0.0);
-    rubraview_pal_rect_t head_text = { lw->x + lw->row_height * 0.4, lw->y, lw->width - lw->row_height * 0.8, title_h };
+    double title_left = lw->x + lw->row_height * 0.4;
+    double title_right = rubraview_listwin_title_text_right(lw);
+    double head_w = title_right > title_left ? title_right - title_left : 0.0;
+    rubraview_pal_rect_t head_text = { title_left, lw->y, head_w, title_h };
     if (hn > 0 && head_text.width > 0.0)
         rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), (proven_u8str_view_t){ (const proven_byte_t *)head, (size_t)hn }, head_text.width, font),
                                        head_text, font, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+    if (lw->has_view_toggle) {
+        rubraview_rect_t vr = rubraview_listwin_view_rect(lw);
+        if (vr.width > 0.0) {
+            list_button(r, app->files_px, app->files_py, vr, app->book_list_pages ? T("Playlist") : T("Book pages"),
+                        lw->row_height * 0.44, app->book_list_pages, COLOR_TEXT);
+            rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ vr.x + 1.0, vr.y + 1.0, vr.width - 2.0, vr.height - 2.0 },
+                                             COLOR_BOX_BORDER, 1.0, 2.0);
+        }
+    }
     if (lw->editable) {
         draw_list_bar(app, r, lw, app->files_px, app->files_py);
         draw_list_tools(app, r, lw, app->files_px, app->files_py, true);
@@ -80,7 +103,7 @@ void draw_files_window(app_state_t *app) {
 
         /* its size at the right (an archive knows it; a folder's files are not asked), its name in what is left */
         char size_text[32];
-        uint64_t bytes = rubraview_page_source_entry_size(&app->source, i);
+        uint64_t bytes = outer ? (i < app->book_list_n ? app->book_list[i].size_bytes : 0) : rubraview_page_source_entry_size(&app->source, i);
         double size_w = 0.0;
         if (bytes > 0) {
             int sn = files_size_text(size_text, sizeof(size_text), bytes);
@@ -92,8 +115,14 @@ void draw_files_window(app_state_t *app) {
             }
         }
         char line[640];
-        proven_u8str_view_t name = page_display_name(app, i);
-        int m = rubraview_fmt(line, sizeof(line), "{:4}   {}", PROVEN_ARG((size_t)(i + 1)), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 600 ? name.size : 600))));
+        proven_u8str_view_t name = list_item_name(app, i);
+        int32_t cur_bp = current_page_index(app);
+        int m = (outer && i == app->book_row && page_count(app) > 0 && cur_bp >= 0)
+            ? rubraview_fmt(line, sizeof(line), "{:4}   {}  [{} / {}]", PROVEN_ARG((size_t)(i + 1)),
+                            PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 560 ? name.size : 560))),
+                            PROVEN_ARG((size_t)(cur_bp + 1)), PROVEN_ARG((size_t)page_count(app)))
+            : rubraview_fmt(line, sizeof(line), "{:4}   {}", PROVEN_ARG((size_t)(i + 1)),
+                            PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 600 ? name.size : 600))));
         double tw = row.x + row.width - text_left - lw->row_height * 0.9 - size_w;
         rubraview_pal_rect_t text = { text_left + lw->row_height * 0.3, row.y, tw, row.height };
         if (m > 0 && tw > 0.0)
@@ -129,6 +158,7 @@ void draw_files_window(app_state_t *app) {
             case FILES_PREVIEW_FAILED: say = T("no preview: it could not be read as a picture"); break;
             case FILES_PREVIEW_FAR:    say = T("deep in a solid archive: Enter or a click opens it"); break;
             case FILES_PREVIEW_MEDIA:  say = T("a film or a sound: Enter or a click plays it"); break;
+            case FILES_PREVIEW_BOOK:   say = T("a book or archive: Enter or a click opens it"); break;
             default:                   say = page >= 0 ? NULL : T("point at a file, or use the arrow keys"); break;
         }
         if (say && room.height >= font * 1.4 && room.width > 16.0 * dpi) {
@@ -139,14 +169,14 @@ void draw_files_window(app_state_t *app) {
             double h1 = caption_h >= font * 2.0 ? caption_h * 0.5 : caption_h;
             rubraview_pal_rect_t line1 = { pv.x + 8.0 * dpi, pv.y + pv.height - caption_h, pv.width - 16.0 * dpi, h1 };
             if (line1.width > 0.0) {
-                proven_u8str_view_t name = page_display_name(app, (size_t)page);
+                proven_u8str_view_t name = list_item_name(app, (size_t)page);
                 rubraview_pal_render_draw_text(r, fit_text_measured(r, cut, sizeof(cut), name, line1.width, font), line1, font, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
             }
             if (caption_h >= font * 2.0) {
                 rubraview_pal_rect_t line2 = { line1.x, line1.y + h1 - 2.0, line1.width, caption_h - h1 };
                 char facts[160], size_text[32];
                 int fn = 0;
-                uint64_t bytes = rubraview_page_source_entry_size(&app->source, (size_t)page);
+                uint64_t bytes = outer ? ((size_t)page < app->book_list_n ? app->book_list[page].size_bytes : 0) : rubraview_page_source_entry_size(&app->source, (size_t)page);
                 if (bytes > 0) files_size_text(size_text, sizeof(size_text), bytes); else size_text[0] = '\0';
                 if (app->files_preview_state == FILES_PREVIEW_SHOWN) {
                     fn = bytes > 0 ? rubraview_fmt(facts, sizeof(facts), "{} x {}   {}", PROVEN_ARG((int)app->files_preview_w), PROVEN_ARG((int)app->files_preview_h), PROVEN_ARG(size_text))
@@ -203,7 +233,7 @@ size_t files_pump(app_state_t *app) {
                                      ? (int32_t)list_page(app, index) : -1;
                 if (app->files_hover != was) app->files_dirty = true;
                 if (app->chooser.open && app->chooser.where == CHOOSE_IN_FILES) app->files_dirty = true;
-                if (app->files_list.editable || app->ctx_in_files) app->files_dirty = true;   /* its buttons light under the pointer */
+                if (app->files_list.editable || app->files_list.has_view_toggle || app->ctx_in_files) app->files_dirty = true;   /* its buttons light under the pointer */
                 list_motion(app, event.mouse.x, event.mouse.y, true);
                 break;
             }
@@ -218,8 +248,9 @@ size_t files_pump(app_state_t *app) {
                     size_t n = event.drop.count < 16 ? event.drop.count : 16;
                     for (size_t i = 0; i < n; ++i) paths[i] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event.drop.paths[i], .size = event.drop.path_lengths[i] };
                     listwin_sync(app);
-                    size_t at = event.drop.has_point && !list_viewed(app) ? rubraview_listwin_insert_index(&app->files_list, event.drop.y, page_count(app))
-                                                                          : page_count(app);
+                    size_t total = list_item_count(app);
+                    size_t at = event.drop.has_point && !list_viewed(app) ? rubraview_listwin_insert_index(&app->files_list, event.drop.y, total)
+                                                                          : total;
                     list_insert_paths(app, paths, n, at);
                     app->files_dirty = true;
                 }
@@ -281,7 +312,7 @@ size_t files_pump(app_state_t *app) {
                 else if (key_is(combo, "Home")) step = -(long)count;
                 else if (key_is(combo, "End")) step = (long)count;
                 if (step != 0) {   /* 1.25.0: through the rows shown */
-                    int32_t current = current_page_index(app);
+                    int32_t current = list_current_item(app);
                     size_t from = app->files_selected >= 0 ? list_row_of(app, (size_t)app->files_selected) : SIZE_MAX;
                     size_t here = current >= 0 ? list_row_of(app, (size_t)current) : SIZE_MAX;
                     size_t to = rubraview_filewin_step(from, here, step, count);

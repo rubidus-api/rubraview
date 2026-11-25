@@ -960,22 +960,26 @@ void list_add_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t c
 static void list_add_station(app_state_t *app, proven_u8str_view_t address, proven_u8str_view_t title) {
     proven_u8str_view_t path = app_keep(app, address);
     proven_u8str_view_t name = title.size > 0 ? app_keep(app, title) : rubraview_stream_display_name(path);
-    bool files_open = page_count(app) > 0 && app->source.archive_path.size == 0;
-    size_t have = files_open ? page_count(app) : 0;
+    bool outer = list_showing_outer(app);
+    bool files_open = outer || (page_count(app) > 0 && app->source.archive_path.size == 0);
+    size_t have = files_open ? list_item_count(app) : 0;
     for (size_t i = 0; i < have; ++i) {
-        if (!proven_u8str_view_eq(app->source.pages[i].path, path)) continue;
+        if (!proven_u8str_view_eq(list_item_path(app, i), path)) continue;
         osd_say(app, TU8("that station is in the list already"));
-        go_to_spread(app, spread_for_chosen_page(app, (int32_t)i));
+        if (outer) book_jump(app, i);
+        else go_to_spread(app, spread_for_chosen_page(app, (int32_t)i));
         return;
     }
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, have + 1, sizeof(rubraview_fs_entry_t));
     if (!proven_is_ok(res.err)) return;
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
-    for (size_t i = 0; i < have; ++i) entries[i] = (rubraview_fs_entry_t){ .name = app->source.pages[i].name, .path = app->source.pages[i].path };
+    for (size_t i = 0; i < have; ++i)
+        entries[i] = outer ? app->book_list[i] : (rubraview_fs_entry_t){ .name = app->source.pages[i].name, .path = app->source.pages[i].path };
     entries[have] = (rubraview_fs_entry_t){ .name = name, .path = path };
     char line[96];
     rubraview_fmt(line, sizeof(line), T("{} added to the list ({} in it)"), PROVEN_ARG((size_t)1), PROVEN_ARG((size_t)(have + 1)));
-    open_set_ordered(app, entries, have + 1, cstr(line), true, path);
+    if (outer) book_restore_entries(app, entries, have + 1, have, line);
+    else open_set_ordered(app, entries, have + 1, cstr(line), true, path);
 }
 
 void address_begin(app_state_t *app) {
@@ -1249,7 +1253,7 @@ void handle_drop(app_state_t *app, const rubraview_window_event_t *event) {
         proven_u8str_view_t paths[16];
         for (size_t i = 0; i < count; ++i) paths[i] = (proven_u8str_view_t){ .ptr = (const proven_byte_t *)event->drop.paths[i], .size = event->drop.path_lengths[i] };
         listwin_sync(app);
-        list_insert_paths(app, paths, count, list_viewed(app) ? page_count(app) : rubraview_listwin_insert_index(&app->listwin, event->drop.y, page_count(app)));
+        list_insert_paths(app, paths, count, list_viewed(app) ? list_item_count(app) : rubraview_listwin_insert_index(&app->listwin, event->drop.y, list_item_count(app)));
         return;
     }
 

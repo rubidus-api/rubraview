@@ -56,22 +56,90 @@ void listwin_toggle(app_state_t *app) {
 /* A press on the window: true when it took it. */
 /* ---- D-111: the list changed from its window ---- */
 
-/* A book's pages are not a list of files: only a folder's files or a
-   playlist can be reordered, taken out of the list or added to. */
+bool list_showing_outer(const app_state_t *app) {
+    return app->book_active && app->book_list != NULL && !app->book_list_pages;
+}
+
+bool list_has_book_switch(const app_state_t *app) {
+    return app->book_active && app->book_list != NULL;
+}
+
+size_t list_item_count(const app_state_t *app) {
+    return list_showing_outer(app) ? app->book_list_n : page_count(app);
+}
+
+const void *list_item_identity(const app_state_t *app) {
+    return list_showing_outer(app) ? (const void *)app->book_list : (const void *)app->source.pages;
+}
+
+proven_u8str_view_t list_item_path(const app_state_t *app, size_t index) {
+    if (list_showing_outer(app)) return index < app->book_list_n ? app->book_list[index].path : PROVEN_LIT("");
+    return index < page_count(app) ? app->source.pages[index].path : PROVEN_LIT("");
+}
+
+proven_u8str_view_t list_item_name(const app_state_t *app, size_t index) {
+    if (list_showing_outer(app)) {
+        if (index >= app->book_list_n) return PROVEN_LIT("");
+        return app->book_list[index].name.size > 0 ? app->book_list[index].name : rubraview_path_basename(app->book_list[index].path);
+    }
+    return index < page_count(app) ? page_display_name(app, index) : PROVEN_LIT("");
+}
+
+int32_t list_current_item(const app_state_t *app) {
+    if (list_showing_outer(app)) return app->book_row < app->book_list_n ? (int32_t)app->book_row : -1;
+    return current_page_index(app);
+}
+
+/* A book's pages are not a list of files: only a folder's files, a
+   playlist, or the outer mixed playlist while reading one of its books
+   can be reordered, taken out of the list or added to. */
 bool list_editable(const app_state_t *app) {
-    return app->source.archive_path.size == 0;   /* RV-276: an emptied list too, so Add, Load and a drop fill it again */
+    return list_showing_outer(app) || app->source.archive_path.size == 0;   /* RV-276: an emptied list too, so Add, Load and a drop fill it again */
+}
+
+static double list_view_toggle_width(rubraview_renderer_t *r, double font, double dpi, bool showing_pages) {
+    proven_u8str_view_t label = cstr(showing_pages ? T("Playlist") : T("Book pages"));
+    double tw = font * 5.5;
+    if (r) (void)rubraview_pal_render_measure_text(r, label, font, &tw);
+    return tw + 14.0 * dpi;
 }
 
 /* The window's shape for what is open, and a check mark for every page. */
 void listwin_sync(app_state_t *app) {
     app->listwin.editable = list_editable(app);
+    app->listwin.has_view_toggle = list_has_book_switch(app);
+    if (app->listwin.has_view_toggle) {
+        double dpi = rubraview_pal_window_dpi_scale(app->window);
+        if (dpi <= 0.0) dpi = 1.0;
+        app->listwin.view_toggle_width = list_view_toggle_width(app->renderer, app->listwin.title_height * 0.40, dpi, app->book_list_pages);
+    } else {
+        app->listwin.view_toggle_width = 0.0;
+    }
     app->listwin.tools = app->files_list.tools = true;   /* 1.25.0 */
-    size_t count = page_count(app);
+    size_t count = list_item_count(app);
     if (app->list_checked_count != count) {
         rubraview_free(app->list_checked);
         app->list_checked = (bool*)rubraview_alloc_zero(count ? count : 1, sizeof(bool));
         app->list_checked_count = app->list_checked ? count : 0;
     }
+}
+
+void list_toggle_book_view(app_state_t *app) {
+    if (!list_has_book_switch(app)) return;
+    list_filter_files_end(app);
+    if (app->rename_active && app->rename_is_listfilter) rename_end(app);
+    if (app->ctx_open) ctx_close(app);
+    if (app->chooser.open && (app->chooser.kind == CHOOSE_LISTEXT || app->chooser.kind == CHOOSE_LISTSORT || app->chooser.kind == CHOOSE_SHAPE))
+        chooser_close(app);
+    app->book_list_pages = !app->book_list_pages;
+    app->list_row_pressed = false;
+    app->list_row_dragging = false;
+    app->files_selected = app->files_hover = -1;
+    app->files_want = -1;
+    files_preview_drop(app);
+    listwin_sync(app);
+    list_view_changed(app);
+    if (app->files_open) files_layout(app);
 }
 
 /* ---- 1.25.0 (owner, 2026-10-20: "필터 에디트 박스(버튼 포함), 목록 정렬 ..., 목록 내 특정 확장자 파일만 보기"):
@@ -87,12 +155,13 @@ bool list_ext_is_off(const app_state_t *app, proven_u8str_view_t ext) {
 }
 
 bool list_viewed(const app_state_t *app) {
-    return app->list_filter[0] != '\0' || app->list_ext_off_n > 0;
+    return list_editable(app) && (app->list_filter[0] != '\0' || app->list_ext_off_n > 0);
 }
 
 static void list_map_build(app_state_t *app) {
-    size_t count = page_count(app);
-    if (app->list_map_pages == (const void*)app->source.pages && app->list_map_count == count &&
+    size_t count = list_item_count(app);
+    const void *ident = list_item_identity(app);
+    if (app->list_map_pages == ident && app->list_map_count == count &&
         app->list_map_gen == app->list_view_gen && (app->list_map || count == 0)) return;
     if (app->list_map_cap < count || !app->list_map) {
         size_t *grown = (size_t*)rubraview_realloc(rubraview_mem_mut(app->list_map, (count ? count : 1) * sizeof(size_t)));
@@ -103,35 +172,35 @@ static void list_map_build(app_state_t *app) {
     proven_u8str_view_t part = cstr(app->list_filter);
     size_t n = 0;
     for (size_t i = 0; i < count; ++i) {
-        proven_u8str_view_t name = page_display_name(app, i);
+        proven_u8str_view_t name = list_item_name(app, i);
         if (app->list_ext_off_n > 0) {
-            proven_u8str_view_t e = rubraview_path_ext(app->source.pages[i].path);
+            proven_u8str_view_t e = rubraview_path_ext(list_item_path(app, i));
             if (list_ext_is_off(app, e.size > 0 ? e : PROVEN_LIT("."))) continue;
         }
         if (part.size > 0 && !name_holds(name, part)) continue;
         app->list_map[n++] = i;
     }
     app->list_map_n = n;
-    app->list_map_pages = (const void*)app->source.pages;
+    app->list_map_pages = ident;
     app->list_map_count = count;
     app->list_map_gen = app->list_view_gen;
 }
 
 /* How many rows; the page at a row (SIZE_MAX past them); the row of a page (SIZE_MAX: not shown). */
 size_t list_rows(app_state_t *app) {
-    if (!list_viewed(app)) return page_count(app);
+    if (!list_viewed(app)) return list_item_count(app);
     list_map_build(app);
     return app->list_map_n;
 }
 
 size_t list_page(app_state_t *app, size_t row) {
-    if (!list_viewed(app)) return row < page_count(app) ? row : SIZE_MAX;
+    if (!list_viewed(app)) return row < list_item_count(app) ? row : SIZE_MAX;
     list_map_build(app);
     return row < app->list_map_n ? app->list_map[row] : SIZE_MAX;
 }
 
 size_t list_row_of(app_state_t *app, size_t page) {
-    if (!list_viewed(app)) return page < page_count(app) ? page : SIZE_MAX;
+    if (!list_viewed(app)) return page < list_item_count(app) ? page : SIZE_MAX;
     list_map_build(app);
     for (size_t r = 0; r < app->list_map_n; ++r) if (app->list_map[r] == page) return r;
     return SIZE_MAX;
@@ -197,13 +266,14 @@ size_t list_checked_total(const app_state_t *app) {
    on screen — the one after it when it left the list — and a film or a
    song goes on from where it was. */
 void list_apply(app_state_t *app, const size_t *order, size_t n, const rubraview_fs_entry_t *added, const char *said) {
-    size_t have = page_count(app);
+    bool outer = list_showing_outer(app);
+    size_t have = list_item_count(app);
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n ? n : 1, sizeof(rubraview_fs_entry_t));
     bool *checked = (bool*)rubraview_alloc_zero(n ? n : 1, sizeof(bool));
     if (n == 0 || !proven_is_ok(res.err) || !checked) { rubraview_free(checked); return; }
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
 
-    int32_t at = current_page_index(app);
+    int32_t at = list_current_item(app);
     proven_u8str_view_t start = PROVEN_LIT("");
     bool reading_stays = false;
     size_t next_added = 0, after = SIZE_MAX;
@@ -213,10 +283,49 @@ void list_apply(app_state_t *app, const size_t *order, size_t n, const rubraview
             continue;
         }
         size_t old = order[i];
-        entries[i] = (rubraview_fs_entry_t){ .name = app->source.pages[old].name, .path = app->source.pages[old].path };
+        entries[i] = outer ? app->book_list[old]
+                           : (rubraview_fs_entry_t){ .name = app->source.pages[old].name, .path = app->source.pages[old].path };
         checked[i] = old < app->list_checked_count && app->list_checked[old];
         if (at >= 0 && old == (size_t)at) { start = entries[i].path; reading_stays = true; }
         if (at >= 0 && old > (size_t)at && after == SIZE_MAX) after = i;
+    }
+    if (outer) {
+        size_t first = app->listwin.first;
+        bool stayed = false;
+        size_t to = rubraview_list_track_index(order, n, app->book_row, &stayed);
+        if (stayed) {
+            app->book_list = entries;
+            app->book_list_n = n;
+            app->book_row = to;
+            rubraview_free(app->list_checked);
+            app->list_checked = checked;
+            app->list_checked_count = n;
+            app->listwin.first = first;
+            rubraview_listwin_scroll(&app->listwin, 0, list_rows(app));
+            app->listwin_shown_page = (int32_t)to;
+            app->files_selected = -1;
+            app->files_want = -1;
+            files_preview_drop(app);
+            list_view_changed(app);
+            osd_say(app, cstr(said));
+        } else {
+            book_restore_entries(app, entries, n, to < n ? to : 0, said);
+            if (list_item_count(app) == n) {
+                rubraview_free(app->list_checked);
+                app->list_checked = checked;
+                app->list_checked_count = n;
+            } else {
+                rubraview_free(checked);
+            }
+            app->listwin.first = first;
+            rubraview_listwin_scroll(&app->listwin, 0, list_rows(app));
+            app->listwin_shown_page = list_current_item(app);
+            app->files_selected = -1;
+            app->files_want = -1;
+            files_preview_drop(app);
+            app->files_dirty = true;
+        }
+        return;
     }
     if (!reading_stays) start = entries[at < 0 ? 0 : after != SIZE_MAX ? after : n - 1].path;   /* an empty list: its first */
 
@@ -244,11 +353,12 @@ void list_apply(app_state_t *app, const size_t *order, size_t n, const rubraview
 
 /* RV-276: every row out of the list: nothing open, as at the start; the files stay on the disk. */
 void list_empty(app_state_t *app) {
-    size_t had = page_count(app);
+    size_t had = list_item_count(app);
     media_close(app);
     text_close(app);   /* a text page on screen is one of the rows */
     history_remember(app);
     unload_all_pages(app);
+    book_forget(app);
     source_close(app);
     app->source = (rubraview_page_source_t){ .kind = RUBRAVIEW_PAGE_SOURCE_FOLDER };
     app->layout.count = 0;
@@ -258,6 +368,10 @@ void list_empty(app_state_t *app) {
     app->list_checked_count = 0;
     app->listwin.first = 0;
     app->listwin_shown_page = -1;
+    app->files_selected = app->files_hover = app->files_want = -1;
+    files_preview_drop(app);
+    listwin_sync(app);
+    list_view_changed(app);
     update_window_title(app);
     app->needs_relayout = true;
     char line[96];
@@ -267,7 +381,7 @@ void list_empty(app_state_t *app) {
 
 /* The rows marked in `gone` leave the list; the files stay on the disk. */
 void list_remove(app_state_t *app, const bool *gone) {
-    size_t count = page_count(app), n = 0;
+    size_t count = list_item_count(app), n = 0;
     size_t *order = (size_t*)rubraview_malloc_product((count ? count : 1), sizeof(size_t), 1);
     if (!order) return;
     for (size_t i = 0; i < count; ++i) if (!gone[i]) order[n++] = i;
@@ -285,7 +399,7 @@ void list_remove(app_state_t *app, const bool *gone) {
 
 /* The rows marked in `moving` go, together, before what is row `to`. */
 static void list_move(app_state_t *app, const bool *moving, size_t to) {
-    size_t count = page_count(app);
+    size_t count = list_item_count(app);
     size_t *order = (size_t*)rubraview_malloc_product((count ? count : 1), sizeof(size_t), 1);
     if (!order) return;
     if (rubraview_list_move(order, count, moving, to)) list_apply(app, order, count, NULL, T("the list's order changed"));
@@ -298,7 +412,7 @@ void list_insert_paths(app_state_t *app, const proven_u8str_view_t *paths, size_
     proven_u8str_view_t *walked = NULL;   /* RV-276: a folder brings what is under it */
     count = list_walk_paths(app, paths, count, &walked);
     paths = walked;
-    size_t have = page_count(app);
+    size_t have = list_item_count(app);
     if (to > have) to = have;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, count ? count : 1, sizeof(rubraview_fs_entry_t));
     size_t *order = (size_t*)rubraview_malloc_product((have + count + 1), sizeof(size_t), 1);
@@ -313,7 +427,7 @@ void list_insert_paths(app_state_t *app, const proven_u8str_view_t *paths, size_
             continue;
         }
         bool there = false;
-        for (size_t k = 0; k < have && !there; ++k) there = rubraview_path_same(app->source.pages[k].path, entry.path);
+        for (size_t k = 0; k < have && !there; ++k) there = rubraview_path_same(list_item_path(app, k), entry.path);
         for (size_t k = 0; k < n && !there; ++k) there = rubraview_path_same(added[k].path, entry.path);
         if (there) { skipped++; continue; }
         entry.path = app_keep(app, entry.path);
@@ -351,7 +465,10 @@ static const rubraview_file_filter_t LIST_FILTERS[] = {
 static const char *list_save_dir(app_state_t *app, char *buf, size_t cap) {
     buf[0] = '\0';
     proven_u8str_view_t path = PROVEN_LIT("");
-    if (app->book_active && app->book_list) {
+    if (list_showing_outer(app)) {
+        int32_t at = app->files_selected >= 0 ? app->files_selected : list_current_item(app);
+        if (at >= 0 && (size_t)at < app->book_list_n) path = app->book_list[at].path;
+    } else if (app->book_active && app->book_list) {
         if (app->book_row < app->book_list_n) path = app->book_list[app->book_row].path;
     } else {
         int32_t at = app->files_selected >= 0 ? app->files_selected : current_page_index(app);
@@ -472,9 +589,9 @@ static void list_add_picked(app_state_t *app, rubraview_window_t *owner) {
    default (Enter, Esc, N), Y or its button recycles it. */
 void list_delete_row(app_state_t *app, size_t row, rubraview_window_t *owner) {
     (void)owner;
-    size_t count = page_count(app);
+    size_t count = list_item_count(app);
     if (row >= count || !list_editable(app)) return;
-    proven_u8str_view_t from = app->source.pages[row].path;
+    proven_u8str_view_t from = list_item_path(app, row);
     if (from.size == 0 || from.size >= sizeof(app->list_del_path)) return;
     proven_sys_mem_copy(app->list_del_path, from.ptr, from.size);   /* the list it points into is made again below */
     app->list_del_path[from.size] = '\0';
@@ -492,24 +609,38 @@ void list_delete_answer(app_state_t *app, bool yes) {
     char path[1024];
     size_t plen = proven_cstr_len(app->list_del_path);
     proven_sys_mem_copy(path, app->list_del_path, plen + 1);
-    if (row >= page_count(app) || !rubraview_path_same(app->source.pages[row].path, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)path, .size = plen })) {
+    size_t count = list_item_count(app);
+    if (row >= count || !rubraview_path_same(list_item_path(app, row), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)path, .size = plen })) {
         osd_say(app, TU8("not deleted: the list changed meanwhile"));
         return;
     }
     proven_u8str_view_t from = { .ptr = (const proven_byte_t *)path, .size = plen };
     proven_u8str_view_t name = rubraview_path_basename(from);
-    if (app->media && app->media_page == (int32_t)row) media_close(app);   /* a film playing holds its file */
+    bool outer = list_showing_outer(app);
+    bool deleting_open_book = outer && row == app->book_row;
+    rubraview_fs_entry_t *saved_entries = deleting_open_book ? app->book_list : NULL;
+    size_t saved_n = deleting_open_book ? app->book_list_n : 0;
+    if (deleting_open_book) {
+        media_close(app);
+        text_close(app);
+        unload_all_pages(app);
+        source_close(app);
+    } else if (!outer && app->media && app->media_page == (int32_t)row) {
+        media_close(app);   /* a film playing holds its file */
+    }
     proven_u8str_view_t gone = { .ptr = (const proven_byte_t *)path, .size = from.size };
     if (!rubraview_pal_fs_recycle(gone)) {
+        if (deleting_open_book) book_restore_entries(app, saved_entries, saved_n, row, "");
         osd_say(app, TU8("could not move it to the recycle bin (is it open in another program?)"));
         return;
     }
-    if (page_count(app) <= 1) {
-        reopen_after_removal(app, 0);
+    if (count <= 1) {
+        if (outer) list_empty(app);
+        else reopen_after_removal(app, 0);
     } else {
-        bool *one = (bool*)rubraview_alloc_zero(page_count(app), sizeof(bool));
+        bool *one = (bool*)rubraview_alloc_zero(count, sizeof(bool));
         if (one) {
-            one[row < page_count(app) ? row : page_count(app) - 1] = true;
+            one[row < count ? row : count - 1] = true;
             list_remove(app, one);
             rubraview_free(one);
         }
@@ -522,7 +653,7 @@ void list_delete_answer(app_state_t *app, bool yes) {
 /* A press on either list (RV-117: the floating one, or the file window's,
    `in_files`, which its own frame moves, sizes and closes): true when it took it. */
 bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, double y, bool right, bool in_files) {
-    size_t row = 0, count = page_count(app);
+    size_t row = 0, count = list_item_count(app);
     listwin_sync(app);
     lw->editable = list_editable(app);
     lw->tools = true;
@@ -534,6 +665,10 @@ bool list_press(app_state_t *app, rubraview_listwin_t *lw, double x, double y, b
     rubraview_listwin_part_t part = list_hit(app, lw, x, y, list_rows(app), &row);
     if (part == RUBRAVIEW_LISTWIN_NONE) return false;
     note_activity(app);
+    if (!right && part == RUBRAVIEW_LISTWIN_VIEW) {
+        list_toggle_book_view(app);
+        return true;
+    }
     size_t index = list_page(app, row);   /* 1.25.0: the page of that row */
     bool viewed = list_viewed(app);       /* rows of a filtered list keep their pages' order */
     if (!right && part == RUBRAVIEW_LISTWIN_SHAPE) {   /* RV-192 */
@@ -630,7 +765,7 @@ void list_motion(app_state_t *app, double x, double y, bool in_files) {
         if (app->listwin.dragging) rubraview_listwin_drag_to(&app->listwin, x, y, (double)w, (double)h);
         if (app->listwin.resizing) {
             rubraview_listwin_resize_to(&app->listwin, x, y, (double)w, (double)h);
-            rubraview_listwin_scroll(&app->listwin, 0, page_count(app));
+            rubraview_listwin_scroll(&app->listwin, 0, list_rows(app));
         }
     }
     if (app->list_row_pressed && app->list_held_in_files == in_files && list_editable(app)) {
@@ -639,7 +774,7 @@ void list_motion(app_state_t *app, double x, double y, bool in_files) {
         if (!app->list_row_dragging && !list_viewed(app) && fabs(y - app->list_press_y) > 4.0 * rubraview_pal_window_dpi_scale(win)) {
             app->list_row_dragging = true;
         }
-        if (app->list_row_dragging) app->list_drop_at = rubraview_listwin_insert_index(lw, y, page_count(app));
+        if (app->list_row_dragging) app->list_drop_at = rubraview_listwin_insert_index(lw, y, list_item_count(app));
         if (in_files) app->files_dirty = true;
     }
 }
@@ -655,10 +790,12 @@ bool listwin_release(app_state_t *app) {
     app->listwin.resizing = false;
     if (!app->list_row_pressed) return held;
     app->list_row_pressed = false;
-    size_t count = page_count(app), row = app->list_press_row;
+    size_t count = list_item_count(app), row = app->list_press_row;
     if (row >= count) return held;
     if (!app->list_row_dragging) {
-        if ((int32_t)row != current_page_index(app)) {
+        if (list_showing_outer(app)) {
+            if (row != app->book_row) book_jump(app, row);
+        } else if ((int32_t)row != current_page_index(app)) {
             go_to_spread(app, spread_for_chosen_page(app, (int32_t)row));
             update_precache(app);
         }
@@ -1193,6 +1330,7 @@ rubraview_listwin_part_t list_hit(const app_state_t *app, const rubraview_listwi
         if (!lw->open || !rubraview_rect_contains(rubraview_listwin_rect(lw), x, y)) return RUBRAVIEW_LISTWIN_NONE;
         double head = rubraview_listwin_head_height(lw);
         if (y < lw->y + head) {
+            if (rubraview_rect_contains(rubraview_listwin_view_rect(lw), x, y)) return RUBRAVIEW_LISTWIN_VIEW;
             static const rubraview_listwin_part_t BAR[8] = {
                 RUBRAVIEW_LISTWIN_ALL, RUBRAVIEW_LISTWIN_ADD, RUBRAVIEW_LISTWIN_URL, RUBRAVIEW_LISTWIN_DEL,
                 RUBRAVIEW_LISTWIN_SAVE, RUBRAVIEW_LISTWIN_LOAD, RUBRAVIEW_LISTWIN_PATHS, RUBRAVIEW_LISTWIN_APPLY,
@@ -1215,11 +1353,15 @@ void files_bar_layout(app_state_t *app) {
     if (dpi <= 0.0) dpi = 1.0;
     double title_h = 30.0 * dpi;
     app->files_title_h = title_h;
+    lw->title_height = title_h;
+    lw->has_view_toggle = list_has_book_switch(app);
+    lw->view_toggle_width = lw->has_view_toggle
+        ? list_view_toggle_width(app->files_renderer, title_h * 0.40, dpi, app->book_list_pages)
+        : 0.0;
     app->files_wrapped_bar = false;
     proven_sys_mem_set(app->files_bar_rect, 0, sizeof(app->files_bar_rect));
     proven_sys_mem_set(app->files_tool_rect, 0, sizeof(app->files_tool_rect));
     if (!lw->editable || lw->width <= 0.0) {
-        lw->title_height = title_h;
         lw->bar_height = 28.0 * dpi;
         app->files_head_h = rubraview_listwin_head_height(lw);
         return;
@@ -1309,7 +1451,7 @@ void files_layout(app_state_t *app) {
 
 void files_show(app_state_t *app) {
     if (app->files_open) { files_close(app); return; }   /* the same key puts it away */
-    if (page_count(app) == 0) {
+    if (list_item_count(app) == 0) {
         osd_say(app, TU8("nothing is open to list"));
         return;
     }
@@ -1338,6 +1480,7 @@ void files_show(app_state_t *app) {
     app->files_pages = NULL;                     /* the first frame takes the list as new */
     app->files_selected = app->files_hover = -1;
     app->files_followed = -1;
+    app->files_book_page = -1;
     app->files_want = -1;
     files_preview_drop(app);
     rubraview_pal_window_accept_drops(app->files_window, true);   /* RV-117: files dragged in join the list */
@@ -1349,13 +1492,15 @@ void files_show(app_state_t *app) {
 int32_t files_target(const app_state_t *app) {
     if (app->files_hover >= 0) return app->files_hover;
     if (app->files_selected >= 0) return app->files_selected;
-    return current_page_index(app);
+    return list_current_item(app);
 }
 
 /* Turn the viewer to a file of the list. */
 void files_go_to(app_state_t *app, int32_t index) {
-    if (index < 0 || (size_t)index >= page_count(app)) return;
-    if (index != current_page_index(app)) {
+    if (index < 0 || (size_t)index >= list_item_count(app)) return;
+    if (list_showing_outer(app)) {
+        if ((size_t)index != app->book_row) book_jump(app, (size_t)index);
+    } else if (index != current_page_index(app)) {
         go_to_spread(app, spread_for_chosen_page(app, index));
         update_precache(app);
     }
@@ -1382,19 +1527,42 @@ void files_preview_step(app_state_t *app, double now) {
     files_preview_drop(app);
     app->files_preview_page = page;
     app->files_dirty = true;
-    if (page < 0 || (size_t)page >= page_count(app)) return;
-    if (is_media_path(app->source.pages[page].path)) { app->files_preview_state = FILES_PREVIEW_MEDIA; return; }
-    if (page_read_cost(app, (size_t)page) > PAGE_JOB_MIN_COST) { app->files_preview_state = FILES_PREVIEW_FAR; return; }
-
-    void *mem = NULL;
-    rubraview_page_bytes_t bytes = page_read_owned(&app->source, &app->source_lock, (size_t)page, &mem);
+    if (page < 0 || (size_t)page >= list_item_count(app)) return;
+    proven_u8str_view_t path = list_item_path(app, (size_t)page);
+    if (is_media_path(path) || is_station_path(path)) { app->files_preview_state = FILES_PREVIEW_MEDIA; return; }
     rubraview_image_load_result_t loaded = {0};
-    if (bytes.ok) {
-        loaded = bytes.from_disk
-            ? rubraview_pal_image_load_texture(app->files_renderer, app->source.pages[page].path, true)
-            : rubraview_pal_image_load_texture_from_memory(app->files_renderer, rubraview_mem_view((const uint8_t*)bytes.data.ptr, bytes.data.size), true);
+    if (list_showing_outer(app)) {
+        if (path_is_book_row(path)) {
+            if ((size_t)page != app->book_row) { app->files_preview_state = FILES_PREVIEW_BOOK; return; }
+            int32_t cur = current_page_index(app);
+            if (cur < 0 || (size_t)cur >= page_count(app)) { app->files_preview_state = FILES_PREVIEW_BOOK; return; }
+            if (is_media_path(app->source.pages[cur].path) || page_read_cost(app, (size_t)cur) > PAGE_JOB_MIN_COST) {
+                app->files_preview_state = FILES_PREVIEW_BOOK;
+                return;
+            }
+            void *mem = NULL;
+            rubraview_page_bytes_t bytes = page_read_owned(&app->source, &app->source_lock, (size_t)cur, &mem);
+            if (bytes.ok) {
+                loaded = bytes.from_disk
+                    ? rubraview_pal_image_load_texture(app->files_renderer, app->source.pages[cur].path, true)
+                    : rubraview_pal_image_load_texture_from_memory(app->files_renderer, rubraview_mem_view((const uint8_t*)bytes.data.ptr, bytes.data.size), true);
+            }
+            rubraview_free(mem);
+        } else {
+            loaded = rubraview_pal_image_load_texture(app->files_renderer, path, true);
+        }
+    } else {
+        if (path_is_book_row(path)) { app->files_preview_state = FILES_PREVIEW_BOOK; return; }
+        if (page_read_cost(app, (size_t)page) > PAGE_JOB_MIN_COST) { app->files_preview_state = FILES_PREVIEW_FAR; return; }
+        void *mem = NULL;
+        rubraview_page_bytes_t bytes = page_read_owned(&app->source, &app->source_lock, (size_t)page, &mem);
+        if (bytes.ok) {
+            loaded = bytes.from_disk
+                ? rubraview_pal_image_load_texture(app->files_renderer, app->source.pages[page].path, true)
+                : rubraview_pal_image_load_texture_from_memory(app->files_renderer, rubraview_mem_view((const uint8_t*)bytes.data.ptr, bytes.data.size), true);
+        }
+        rubraview_free(mem);
     }
-    rubraview_free(mem);
     if (!loaded.ok || !loaded.texture) { app->files_preview_state = FILES_PREVIEW_FAILED; return; }
     app->files_preview = loaded.texture;
     app->files_preview_w = loaded.full_width > 0 ? loaded.full_width : loaded.width;

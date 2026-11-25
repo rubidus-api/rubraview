@@ -27,7 +27,7 @@ bool list_row_is_book(const app_state_t *app, size_t page) {
 void book_forget(app_state_t *app) {
     app->book_list = NULL;   /* in the working arena */
     app->book_list_n = 0;
-    app->book_active = app->book_wanted = false;
+    app->book_active = app->book_wanted = app->book_list_pages = false;
 }
 
 /* A turn landed (go_to_spread) or a list opened: looked at once the pass is done, never in the middle of a turn. */
@@ -53,6 +53,9 @@ void book_after_open(app_state_t *app) {
             bool first = app->book_wanted;
             app->book_wanted = false;
             app->book_active = true;
+            app->files_dirty = true;
+            app->listwin_shown_page = -1;
+            app->files_followed = -1;
             if (first) {
                 app->resume_offer = false;   /* the list reads it from its start (or its end), not where it was left */
                 if (app->book_back && app->layout.count > 1) go_to_spread(app, app->layout.count - 1);
@@ -77,6 +80,23 @@ static void book_restore(app_state_t *app, size_t to, bool back) {
     rubraview_fmt(said, sizeof(said), T("the list, row {} of {}"), PROVEN_ARG((size_t)(to + 1)), PROVEN_ARG(n));
     app->book_restoring = true;
     app->book_back = back;
+    history_remember(app);
+    unload_all_pages(app);
+    open_set_ordered(app, entries, n, cstr(said), true, entries[to].path);
+    app->book_restoring = false;
+    book_forget(app);
+}
+
+void book_jump(app_state_t *app, size_t row) {
+    if (!app->book_active || !app->book_list || row >= app->book_list_n || row == app->book_row) return;
+    if (app->arc_job || !subs_may_leave(app)) return;
+    book_restore(app, row, false);
+}
+
+void book_restore_entries(app_state_t *app, rubraview_fs_entry_t *entries, size_t n, size_t to, const char *said) {
+    if (!entries || n == 0 || to >= n) { list_empty(app); return; }
+    app->book_restoring = true;
+    app->book_back = false;
     history_remember(app);
     unload_all_pages(app);
     open_set_ordered(app, entries, n, cstr(said), true, entries[to].path);
@@ -110,13 +130,17 @@ static void book_enter(app_state_t *app, size_t page, bool back) {
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n, sizeof(rubraview_fs_entry_t));
     if (!proven_is_ok(res.err)) return;
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
-    for (size_t i = 0; i < n; ++i) entries[i] = (rubraview_fs_entry_t){ .name = app->source.pages[i].name, .path = app->source.pages[i].path };
+    for (size_t i = 0; i < n; ++i)
+        entries[i] = (rubraview_fs_entry_t){ .name = app->source.pages[i].name, .path = app->source.pages[i].path,
+                                             .size_bytes = rubraview_page_source_entry_size(&app->source, i) };
     app->book_list = entries;
     app->book_list_n = n;
     app->book_row = page;
     app->book_back = back;
     app->book_wanted = true;
     app->book_active = false;
+    app->book_list_pages = false;
+    app->files_dirty = true;
     proven_u8str_view_t path = entries[page].path;
     app_log(app, "open", path);
     history_remember(app);
@@ -320,10 +344,24 @@ bool book_add_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t c
         for (size_t k = 0; k < n && !there; ++k) there = rubraview_path_same(entries[k].path, paths[i]);
         if (there) continue;
         proven_u8str_view_t kept = app_keep(app, paths[i]);
-        entries[n++] = (rubraview_fs_entry_t){ .name = rubraview_path_basename(kept), .path = kept };
+        rubraview_fs_entry_t entry = { .name = rubraview_path_basename(kept), .path = kept };
+        rubraview_fs_entry_t st;
+        if (rubraview_pal_fs_stat(app->arena, kept, &st) && !st.is_directory) entry.size_bytes = st.size_bytes;
+        entries[n++] = entry;
+    }
+    if (n > have && list_showing_outer(app)) {
+        bool *checked = (bool*)rubraview_alloc_zero(n, sizeof(bool));
+        if (checked) {
+            size_t keep = app->list_checked_count < have ? app->list_checked_count : have;
+            if (app->list_checked && keep > 0) proven_sys_mem_copy(checked, app->list_checked, keep * sizeof(bool));
+            rubraview_free(app->list_checked);
+            app->list_checked = checked;
+            app->list_checked_count = n;
+        }
     }
     app->book_list = entries;
     app->book_list_n = n;
+    list_view_changed(app);
     char line[128];
     rubraview_fmt(line, sizeof(line), T("{} added to the list ({} in it)"), PROVEN_ARG((size_t)(n - have)), PROVEN_ARG(n));
     osd_say(app, cstr(line));
