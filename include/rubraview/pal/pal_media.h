@@ -36,6 +36,8 @@ typedef struct rubraview_media_info {
     bool     has_video;
     bool     has_audio;
     bool     audio_output;               /* the sound reaches a device (false on a machine without one) */
+    bool     audio_undecodable;          /* RV-318: the backend has no decoder for its sound (not the device) */
+    char     audio_codec[48];            /* RV-318: that sound's codec, in words, for the notice (empty when unknown) */
     uint32_t video_fourcc;               /* the native codec, for messages (RUBRAVIEW_FOURCC order) */
     bool     hardware_decode;            /* RV-062: the pictures are decoded on the graphics card */
     /* For the information window (owner, 2026-09-29); 0 when unknown. */

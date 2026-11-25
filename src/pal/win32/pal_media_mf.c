@@ -742,14 +742,24 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
 
     /* The sound: float samples, at whatever rate and layout the file has. */
     UINT32 audio_rate = 0, audio_channels = 0;
+    bool audio_undecodable = false;   /* RV-318 */
+    char audio_codec[48] = "";
     if (has_audio) {
         IMFSourceReader_SetStreamSelection(reader, audio_stream, TRUE);
         UINT32 rate = 0, channels = 0;
         bool decodable = mf_negotiate_audio(reader, audio_stream, &rate, &channels);
         audio_rate = rate;
         audio_channels = channels;
+        audio_undecodable = !decodable;
         IMFMediaType *native = NULL;
         if (SUCCEEDED(IMFSourceReader_GetNativeMediaType(reader, audio_stream, 0, &native)) && native) {
+            GUID sub;
+            if (!decodable && SUCCEEDED(IMFMediaType_GetGUID(native, &MF_MT_SUBTYPE, &sub))) {
+                /* RV-318: named for the notice; a tag the table does not know by its number */
+                const char *words = mf_codec_words(&sub);
+                if (words) rubraview_fmt(audio_codec, sizeof audio_codec, "{}", PROVEN_ARG(words));
+                else if ((uint32_t)sub.Data1 <= 0xFFFF) rubraview_fmt(audio_codec, sizeof audio_codec, "format tag 0x{:04X}", PROVEN_ARG((unsigned)sub.Data1));
+            }
             UINT32 hr_ = 0, hc_ = 0;
             IMFMediaType_GetUINT32(native, &MF_MT_AUDIO_SAMPLES_PER_SECOND, &hr_);
             IMFMediaType_GetUINT32(native, &MF_MT_AUDIO_NUM_CHANNELS, &hc_);
@@ -861,7 +871,9 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
         .audio_channels = audio_channels,
         .bitrate_kbps = 0,   /* the window works it out from the size and the duration */
         .hdr_transfer = m->hdr_transfer,
+        .audio_undecodable = has_audio && m->audio == NULL && audio_undecodable,
     };
+    proven_sys_mem_copy(m->info.audio_codec, audio_codec, sizeof audio_codec);
     *out_reader = reader;
     return true;
 }

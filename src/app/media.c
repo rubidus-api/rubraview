@@ -1065,6 +1065,7 @@ typedef struct film_open {
     rubraview_media_open_result_t opened;
     rubraview_media_failure_t why;
     int32_t hdr_handed;
+    bool sound_ffmpeg_tried;   /* RV-318: FFmpeg was asked for a sound Windows could not decode, and played none */
 } film_open_t;
 
 static void media_fourcc_str(uint32_t fourcc, char out[16]) {
@@ -1155,6 +1156,23 @@ static void film_open_run(film_open_t *fo) {
             fo->opened = other;
         } else if (other.media) {
             rubraview_pal_media_close(other.media);
+        }
+    }
+    /* RV-318 (D-397): a song whose sound Windows has no decoder for (IMA ADPCM in a recorder's WAV) opened all
+       the same, silent; FFmpeg is asked for it, and kept only when it is heard there */
+    opened = fo->opened;
+    if (opened.media && opened.info.backend == RUBRAVIEW_BACKEND_MEDIA_FOUNDATION &&
+        fo->decoder_mode != RUBRAVIEW_DECODER_WINDOWS_ONLY && fo->ffmpeg_here &&
+        rubraview_media_sound_ask_ffmpeg(opened.info.has_video, opened.info.has_audio, opened.info.audio_output,
+                                         opened.info.audio_undecodable)) {
+        rubraview_pal_media_log("app: Windows cannot decode the sound of {}; open by FFmpeg", PROVEN_ARG(path));
+        rubraview_media_open_result_t other = rubraview_pal_media_open(path, RUBRAVIEW_BACKEND_FFMPEG, &fo->gpu);
+        if (other.media && other.info.audio_output) {
+            rubraview_pal_media_close(opened.media);
+            fo->opened = other;
+        } else {
+            if (other.media) rubraview_pal_media_close(other.media);
+            fo->sound_ffmpeg_tried = true;
         }
     }
 }
@@ -1387,6 +1405,7 @@ static void media_log_open(app_state_t *app, proven_u8str_view_t path, const fil
 /* What was opened for page `index` becomes the page's player; nothing opened, and it is said why and passed. */
 static void media_adopt(app_state_t *app, int32_t index, proven_u8str_view_t path, rubraview_media_open_result_t opened,
                         rubraview_media_failure_t why, const film_open_t *fo) {
+    bool sound_ffmpeg_tried = fo && fo->sound_ffmpeg_tried;
     media_log_open(app, path, fo, &opened, why);
     if (!opened.media) {
         osd_say(app, (why == RUBRAVIEW_MEDIA_FAIL_STATION || why == RUBRAVIEW_MEDIA_FAIL_STATION_NEEDS_FFMPEG)
@@ -1428,7 +1447,16 @@ static void media_adopt(app_state_t *app, int32_t index, proven_u8str_view_t pat
     /* A file whose sound cannot be played looks exactly like a file with
        no sound, which is how three measurements were misread on
        2026-09-24. Say which call failed instead. */
-    if (opened.info.has_audio && !opened.info.audio_output) {
+    rubraview_no_sound_t no_sound = rubraview_media_no_sound(opened.info.has_audio, opened.info.audio_undecodable, opened.info.audio_output);
+    if (no_sound == RUBRAVIEW_NO_SOUND_UNDECODABLE) {
+        /* RV-318: the decoder, not the device; FFmpeg's DLLs named when they are not here to try */
+        char line[256];
+        proven_u8str_view_t codec = proven_u8str_view_from_cstr(opened.info.audio_codec[0] ? opened.info.audio_codec : "?");
+        int n = sound_ffmpeg_tried
+            ? rubraview_fmt(line, sizeof(line), T("no sound: neither Windows nor FFmpeg decodes this sound ({})"), PROVEN_ARG(codec))
+            : rubraview_fmt(line, sizeof(line), T("no sound: Windows has no decoder for this sound ({}) — FFmpeg's DLLs would play it (Settings › External)"), PROVEN_ARG(codec));
+        if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
+    } else if (no_sound == RUBRAVIEW_NO_SOUND_DEVICE) {
         char why[128], line[192];
         int n = rubraview_pal_audio_last_failure(why, sizeof(why))
             ? rubraview_fmt(line, sizeof(line), T("no sound: the device would not open ({})"), PROVEN_ARG(why))

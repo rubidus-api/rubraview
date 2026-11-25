@@ -133,6 +133,22 @@ const char *rubraview_ffmpeg_hw_refusal(int32_t mode, bool has_device, uint32_t 
  */
 bool rubraview_media_hdr_ask_ffmpeg(int32_t windows_transfer, uint32_t video_fourcc);
 
+/**
+ * RV-318 (D-397): whether a file Windows opened is worth opening again with FFmpeg for its sound: a song (no
+ * picture) whose sound Windows has no decoder for (`audio_undecodable`; IMA ADPCM in a recorder's WAV), and so
+ * nothing heard. A film keeps the picture Windows plays; a device that failed would fail FFmpeg's sound too.
+ */
+bool rubraview_media_sound_ask_ffmpeg(bool has_video, bool has_audio, bool audio_output, bool audio_undecodable);
+
+/* RV-318: why a file with sound is not heard, for the notice */
+typedef enum rubraview_no_sound {
+    RUBRAVIEW_NO_SOUND_NONE = 0,       /* heard, or nothing to hear */
+    RUBRAVIEW_NO_SOUND_DEVICE,         /* decoded; the sound device would not open */
+    RUBRAVIEW_NO_SOUND_UNDECODABLE,    /* no decoder for the sound */
+} rubraview_no_sound_t;
+
+rubraview_no_sound_t rubraview_media_no_sound(bool has_audio, bool audio_undecodable, bool audio_output);
+
 bool rubraview_media_end_overdue(double position, double duration, double stalled_seconds);
 
 bool rubraview_audio_count_fix(double per_second, uint32_t rate, uint32_t channels, uint32_t header_rate,

@@ -471,6 +471,15 @@ bool rubraview_media_hdr_ask_ffmpeg(int32_t windows_transfer, uint32_t video_fou
            video_fourcc == RUBRAVIEW_FOURCC('A', 'V', '0', '1') || video_fourcc == RUBRAVIEW_FOURCC('a', 'v', '0', '1');
 }
 
+bool rubraview_media_sound_ask_ffmpeg(bool has_video, bool has_audio, bool audio_output, bool audio_undecodable) {
+    return !has_video && has_audio && !audio_output && audio_undecodable;
+}
+
+rubraview_no_sound_t rubraview_media_no_sound(bool has_audio, bool audio_undecodable, bool audio_output) {
+    if (!has_audio || audio_output) return RUBRAVIEW_NO_SOUND_NONE;
+    return audio_undecodable ? RUBRAVIEW_NO_SOUND_UNDECODABLE : RUBRAVIEW_NO_SOUND_DEVICE;
+}
+
 bool rubraview_media_end_overdue(double position, double duration, double stalled_seconds) {
     if (!(duration > 0.0)) return false;
     return position >= duration - 1.5 && stalled_seconds >= 3.0;
