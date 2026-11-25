@@ -1303,6 +1303,7 @@ typedef struct app_state {
     rubraview_card_t       card;
     rubraview_card_share_t card_kept[CARD_KINDS];
     int32_t                card_kind;          /* CARD_*, while open */
+    int32_t                card_inline_mode;   /* 0 = titled, 1 = path, 2 = filter, 3 = inplace */
     int32_t                card_host;          /* CARD_HOST_*: the window it was last drawn in */
     double                 card_host_w, card_host_h;
     uint64_t               card_subject;       /* what was on screen when it opened, to tell the window moved on */
@@ -1382,11 +1383,13 @@ typedef struct app_state {
     bool                   spath_active;
     bool                   spath_number;      /* 1.24.0: the box takes a number for a slider's setting */
     double                 settings_px, settings_py;   /* 1.25.0: the pointer over the settings window */
-    rubraview_pal_rect_t   spath_btn[3];      /* 1.24.0: OK, Cancel, Browse... under it, as last drawn */
+    rubraview_pal_rect_t   spath_btn[3];      /* inline right-side buttons (Browse, ✓, ✕) as last drawn */
+    int32_t                spath_btn_kind[3];
     int32_t                spath_btn_n;
+    rubraview_card_t       spath_card;        /* movable & resizable inline container inside settings_window */
+    editbox_view_t         spath_view;
+    bool                   spath_blink_on;
     rubraview_editctl_t    spath_ec;      /* RV-293: the settings window's typing box, its undo */
-    editbox_clicks_t       spath_clicks;
-    bool                   spath_dragging;
     char                   spath_buffer[1024];
     char                   spath_composing[64];
     size_t                 spath_composing_length;
@@ -1397,7 +1400,7 @@ typedef struct app_state {
     int32_t                spath_list;         /* which of FOLDER_LISTS that list is */
     rubraview_editctl_t    rename_ec;     /* RV-293: the text in rename_buffer, its caret and selection, its undo */
     rubraview_pal_rect_t   rename_field;  /* where its text is drawn, and from where (for the pointer) */
-    double                 rename_field_x0, rename_field_size;
+    double                 rename_field_x0, rename_field_size, rename_scroll;
     bool                   rename_dragging;
     bool                   rename_inplace;      /* RV-293 E3: typed where the name is shown (a tile, the title bar), no card */
     rubraview_pal_rect_t   rename_inplace_rect; /* there, as last drawn */
@@ -2191,6 +2194,11 @@ bool card_motion(app_state_t *app, int32_t host, double x, double y);
 bool card_release(app_state_t *app, int32_t host);
 double draw_card_frame(app_state_t *app, rubraview_pal_rect_t c, const char *title, const char *hint, bool focused, double dpi);
 void draw_card_buttons(app_state_t *app, rubraview_pal_rect_t c, const char *const *words, int32_t n, rubraview_pal_rect_t *out, double dpi);
+rubraview_cursor_shape_t card_cursor_for_part(int32_t part);
+rubraview_cursor_shape_t card_hover_cursor(const app_state_t *app, int32_t host, double x, double y);
+void draw_editbar_grip(rubraview_renderer_t *r, rubraview_pal_rect_t grip, bool hovered, bool dragging, double dpi);
+void draw_editbar_button(rubraview_renderer_t *r, rubraview_pal_rect_t b, int style, uint32_t icon, const char *fallback,
+                         const char *word, bool hovered, bool active, double dpi);
 void number_card_begin(app_state_t *app, int32_t target);
 void volume_set(app_state_t *app, double percent);
 void number_typed(app_state_t *app);
@@ -2741,6 +2749,7 @@ void rename_field_begin(app_state_t *app);   /* RV-293 */
 bool rename_field_press(app_state_t *app, double x, double y, int button, uint32_t modifiers);
 bool rename_field_drag(app_state_t *app, double x, double y);
 void chooser_open_editmenu(app_state_t *app, double x, double y);
+void chooser_open_editmenu_in(app_state_t *app, int where, double x, double y);
 void rename_picker_begin(app_state_t *app, size_t at);
 void rename_picker_commit(app_state_t *app);
 void rename_text(app_state_t *app, const rubraview_window_event_t *event);

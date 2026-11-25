@@ -3490,7 +3490,11 @@ size_t edit_pump(app_state_t *app) {
                 app->edit_tab_hover = edit_bar_part_at(app, event.mouse.x, event.mouse.y);
                 if (app->edit_tab_hover != was) app->edit_dirty = true;
                 }
-                if (card_motion(app, CARD_HOST_EDIT, event.mouse.x, event.mouse.y)) break;   /* RV-265: the card moved or sized */
+                if (card_motion(app, CARD_HOST_EDIT, event.mouse.x, event.mouse.y)) {   /* RV-265: the card moved or sized */
+                    rubraview_pal_window_set_cursor_shape(app->edit_window, card_hover_cursor(app, CARD_HOST_EDIT, event.mouse.x, event.mouse.y));
+                    break;
+                }
+                rubraview_pal_window_set_cursor_shape(app->edit_window, card_hover_cursor(app, CARD_HOST_EDIT, event.mouse.x, event.mouse.y));
                 if (scrollbar_motion(app, app->edit_window, event.mouse.x, event.mouse.y)) { app->edit_dirty = true; break; }   /* RV-170: a list's bar */
                 if (app->change_press >= 0) { changes_motion(app, event.mouse.y); break; }
                 if (app->curve_dragging >= 0) { curve_widget_drag(app, event.mouse.x, event.mouse.y); break; }
@@ -3520,7 +3524,10 @@ size_t edit_pump(app_state_t *app) {
                 (void)panel_handle_press(app, event.mouse.x, event.mouse.y);
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
-                if (card_release(app, CARD_HOST_EDIT)) break;   /* RV-265 */
+                if (card_release(app, CARD_HOST_EDIT)) {   /* RV-265 */
+                    rubraview_pal_window_set_cursor_shape(app->edit_window, card_hover_cursor(app, CARD_HOST_EDIT, event.mouse.x, event.mouse.y));
+                    break;
+                }
                 if (scrollbar_release(app, app->edit_window)) { app->edit_dirty = true; break; }   /* RV-170 */
                 changes_release(app, event.mouse.y);
                 app->curve_dragging = -1;

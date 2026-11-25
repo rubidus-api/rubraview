@@ -851,7 +851,14 @@ static size_t owned_pump(app_state_t *app, int which) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE:
                 *px = event.mouse.x; *py = event.mouse.y;
-                if (card_motion(app, which == 1 ? CARD_HOST_BATCH : CARD_HOST_NAMES, event.mouse.x, event.mouse.y)) break;   /* RV-265 */
+                {
+                    int32_t host_id = which == 1 ? CARD_HOST_BATCH : CARD_HOST_NAMES;
+                    if (card_motion(app, host_id, event.mouse.x, event.mouse.y)) {   /* RV-265 */
+                        rubraview_pal_window_set_cursor_shape(win, card_hover_cursor(app, host_id, event.mouse.x, event.mouse.y));
+                        break;
+                    }
+                    rubraview_pal_window_set_cursor_shape(win, card_hover_cursor(app, host_id, event.mouse.x, event.mouse.y));
+                }
                 if (which == 2 && dlgpage_held(&app->names_pv_page, event.mouse.x, event.mouse.y)) break;
                 if (scrollbar_motion(app, win, event.mouse.x, event.mouse.y)) break;
                 if (app->panel.active_row >= 0) {
@@ -870,8 +877,13 @@ static size_t owned_pump(app_state_t *app, int which) {
                 if (which == 2 && !rubraview_rect_contains(app->panel.bounds, event.mouse.x, event.mouse.y)) break;
                 owned_press(app, which, event.mouse.x, event.mouse.y);
                 break;
-            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
-                if (card_release(app, which == 1 ? CARD_HOST_BATCH : CARD_HOST_NAMES)) break;   /* RV-265 */
+            case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP: {
+                int32_t host_id = which == 1 ? CARD_HOST_BATCH : CARD_HOST_NAMES;
+                if (card_release(app, host_id)) {   /* RV-265 */
+                    rubraview_pal_window_set_cursor_shape(win, card_hover_cursor(app, host_id, event.mouse.x, event.mouse.y));
+                    break;
+                }
+            }
                 if (which == 2) (void)dlgpage_release(&app->names_pv_page);
                 (void)scrollbar_release(app, win);
                 rubraview_panel_release(&app->panel);

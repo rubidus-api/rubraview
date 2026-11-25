@@ -39,6 +39,7 @@ typedef struct rubraview_card {
     double min_width, min_height;
     double margin;             /* kept free between the card and the host's edges */
     double title_height;       /* the band a drag moves it by */
+    double grip_width;         /* left move-handle strip inside edge for titleless bars; 0 for titled cards */
     double edge;               /* how far in from its border an edge can be taken */
     bool open;
     bool focused;              /* the keyboard is the card's */
@@ -62,6 +63,22 @@ typedef struct rubraview_card_share {
  */
 void rubraview_card_open(rubraview_card_t *card, double host_w, double host_h, double want_w, double want_h, double rise,
                          const rubraview_card_share_t *kept);
+
+/** Opens a card or inline bar at an explicit rectangle `want`, clamped inside its host window. */
+void rubraview_card_open_at(rubraview_card_t *card, double host_w, double host_h, rubraview_rect_t want, double min_w, double min_h);
+
+/** Horizontal single-row edit control layout: optional left move grip, text field, and right action buttons. */
+#define RUBRAVIEW_EDITBAR_MAX_BTNS 4
+typedef struct rubraview_editbar_layout {
+    rubraview_rect_t grip;
+    rubraview_rect_t field;
+    rubraview_rect_t btns[RUBRAVIEW_EDITBAR_MAX_BTNS];
+    int32_t btn_count;
+} rubraview_editbar_layout_t;
+
+rubraview_editbar_layout_t rubraview_editbar_layout(rubraview_rect_t row, double grip_w, double grip_gap,
+                                                    const double *btn_w, int32_t btn_count, double btn_gap,
+                                                    double min_field_w);
 
 /** Closes it; any drag ends. */
 void rubraview_card_close(rubraview_card_t *card);

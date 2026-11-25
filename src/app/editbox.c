@@ -153,6 +153,9 @@ void editbox_draw(rubraview_renderer_t *r, const rubraview_editctl_t *ec, editbo
     double inner = v->box.width - 2.0 * pad;
     v->scroll = rubraview_editctl_scroll(v->scroll, to_caret, full, inner, 8.0 * dpi);
     v->x0 = v->box.x + pad - v->scroll;
+    rubraview_pal_rect_t clip = { v->box.x + 1.0, v->box.y + 1.0, fmax(0.0, v->box.width - 2.0), fmax(0.0, v->box.height - 2.0) };
+    if (clip.width <= 0.0 || clip.height <= 0.0) return;
+    rubraview_pal_render_push_clip(r, clip);
     size_t a = 0, b = 0;
     rubraview_textedit_selection_range(te, &a, &b);
     if (a != b && focused) {   /* RV-294: a field left keeps its selection unshown, as Windows' do */
@@ -162,7 +165,7 @@ void editbox_draw(rubraview_renderer_t *r, const rubraview_editctl_t *ec, editbo
         double left = fmax(v->box.x + 1.0, v->x0 + xa), right = fmin(v->box.x + v->box.width - 1.0, v->x0 + xb);
         if (right > left) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ left, v->box.y + v->box.height * 0.18, right - left, v->box.height * 0.64 }, 0xA05B9BD5u, 2.0);
     }
-    /* the text from where the scroll puts it: what lies left of the box is not drawn (no clip in the renderer) */
+    /* the text from where the scroll puts it: what lies left of the box is not drawn */
     size_t from = 0;
     double from_x = 0.0;
     for (size_t i = 0; i < n && v->scroll > 0.0; ++i) {
@@ -186,6 +189,7 @@ void editbox_draw(rubraview_renderer_t *r, const rubraview_editctl_t *ec, editbo
         if (cx >= v->box.x && cx <= v->box.x + v->box.width)
             rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cx, v->box.y + v->box.height * 0.2, 1.5 * dpi, v->box.height * 0.6 }, text_argb, 0.0);
     }
+    rubraview_pal_render_pop_clip(r);
 }
 
 /* The text's byte under x in a field drawn by editbox_draw (with no syllable being made). */

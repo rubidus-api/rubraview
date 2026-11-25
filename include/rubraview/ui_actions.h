@@ -137,6 +137,10 @@ void rubraview_confirm_clear(rubraview_confirm_t *confirm);
 #define RUBRAVIEW_ICON_MENU       0xE700u   /* three lines */
 #define RUBRAVIEW_ICON_BASKET     0xE7BFu   /* a shopping cart: the open-file screen's baskets (D-286) */
 #define RUBRAVIEW_ICON_PUT_HERE   0xE896u   /* an arrow down to a line: a basket's files put here */
+#define RUBRAVIEW_ICON_CHECK      0xE73Eu   /* checkmark: inline confirm */
+#define RUBRAVIEW_ICON_COPY       0xE8C8u   /* copy pages: inline path copy */
+#define RUBRAVIEW_ICON_BROWSE     0xE838u   /* folder open: inline browse */
+#define RUBRAVIEW_ICON_UP         0xE70Eu   /* chevron up: find previous */
 
 #ifdef __cplusplus
 }

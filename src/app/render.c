@@ -731,6 +731,7 @@ int picker_column_left_of(const picker_columns_t *c, int edge_col) {
 
 bool picker_columns_motion(app_state_t *app, double x, double y) {
     double dpi = rubraview_pal_window_dpi_scale(app->window);
+    rubraview_cursor_shape_t card_cur = card_hover_cursor(app, CARD_HOST_MAIN, x, y);
     if (app->col_drag == 1) {
         rubraview_picker_cols_resize(g_col_w, app->col_drag_left, app->col_drag_k,
                                      app->col_drag_w_left0, app->col_drag_w0,
@@ -742,6 +743,10 @@ bool picker_columns_motion(app_state_t *app, double x, double y) {
         if (app->col_drag_k > 0 && fabs(x - app->col_drag_x0) > 6.0 * dpi) app->col_drag_moved = true;
         rubraview_pal_window_set_cursor_shape(app->window, RUBRAVIEW_CURSOR_ARROW);
         return true;
+    }
+    if (card_cur != RUBRAVIEW_CURSOR_ARROW || (app->card.open && rubraview_card_hit(&app->card, x, y) != RUBRAVIEW_CARD_OUTSIDE)) {
+        rubraview_pal_window_set_cursor_shape(app->window, card_cur);
+        return false;
     }
     int32_t w = 0, h = 0;
     rubraview_pal_window_get_size(app->window, &w, &h);
@@ -1171,11 +1176,11 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
                                        bar, 13.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);   /* a status line's size (owner, 2026-10-12: it was 32) */
     }
 
-    /* The picker covers the chrome: its text box and its messages are drawn here. */
+    /* The picker covers the chrome: draw titlebar before floating edit bars/cards so moved inputs stay above it. */
+    draw_titlebar(app, win_w);
     draw_rename_box(app, CARD_HOST_MAIN, win_w, win_h, dpi);
     draw_progress_card(app, win_w, win_h, dpi);   /* RV-268: over the open-file screen too */
     draw_notice(app, win_w, win_h, dpi);
-    draw_titlebar(app, win_w);   /* over the band at the top */
 }
 
 static rubraview_pal_rect_t pal_r(rubraview_rect_t r) {

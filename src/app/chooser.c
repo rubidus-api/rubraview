@@ -482,20 +482,26 @@ void chooser_open_drop(app_state_t *app, double x, double y) {
 }
 
 /* RV-293: a field's right click — Undo, Cut, Copy, Paste, Delete, Select all (a hidden password is never copied) */
-void chooser_open_editmenu(app_state_t *app, double x, double y) {
+void chooser_open_editmenu_in(app_state_t *app, int where, double x, double y) {
     chooser_t *c = &app->chooser;
     *c = (chooser_t){ .kind = CHOOSE_EDITMENU, .current = -1 };
     rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Edit")));
-    bool secret = app->rename_is_password;
-    if (rubraview_editctl_can_undo(&app->rename_ec)) chooser_word(c, (double)EDITBOX_UNDO, "{}", PROVEN_ARG(T("Undo")));
-    bool sel = rubraview_textedit_has_selection(&app->rename_ec.te);
+    bool in_settings = (where == CHOOSE_IN_SETTINGS);
+    const rubraview_editctl_t *ec = in_settings ? &app->spath_ec : &app->rename_ec;
+    bool secret = !in_settings && app->rename_is_password;
+    if (rubraview_editctl_can_undo(ec)) chooser_word(c, (double)EDITBOX_UNDO, "{}", PROVEN_ARG(T("Undo")));
+    bool sel = rubraview_textedit_has_selection(&ec->te);
     if (sel && !secret) chooser_word(c, (double)EDITBOX_CUT, "{}", PROVEN_ARG(T("Cut")));
     if (sel && !secret) chooser_word(c, (double)EDITBOX_COPY, "{}", PROVEN_ARG(T("Copy")));
     chooser_word(c, (double)EDITBOX_PASTE, "{}", PROVEN_ARG(T("Paste")));
     if (sel) chooser_word(c, (double)EDITBOX_DELETE, "{}", PROVEN_ARG(T("Delete")));
     chooser_word(c, (double)EDITBOX_ALL, "{}", PROVEN_ARG(T("Select all")));
     c->focus = 0;
-    chooser_show(app, CHOOSE_IN_MAIN, x, y, y);
+    chooser_show(app, where, x, y, y);
+}
+
+void chooser_open_editmenu(app_state_t *app, double x, double y) {
+    chooser_open_editmenu_in(app, CHOOSE_IN_MAIN, x, y);
 }
 
 /* D-286 (owner, 2026-11-07: "장바구니 버튼에서 누르면 그 안의 파일들 목록을 볼 수 있는 기능"; "보기 + 하나씩 빼기"): basket
@@ -753,7 +759,15 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             break;
         }
         case CHOOSE_EDITMENU:   /* RV-293 */
-            if (app->rename_active) editbox_menu_do(app->window, &app->rename_ec, (int)lround(c->values[index]), app->rename_is_password);
+            if (c->where == CHOOSE_IN_SETTINGS && app->spath_active) {
+                editbox_menu_do(app->settings_window, &app->spath_ec, (int)lround(c->values[index]), false);
+                if (!app->spath_number && app->spath_kind == RUBRAVIEW_TEXT_SEARCH)
+                    rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key,
+                                                app_keep(app, rubraview_textedit_text(&app->spath_ec.te)));
+                app->settings_dirty = true;
+            } else if (app->rename_active) {
+                editbox_menu_do(app->window, &app->rename_ec, (int)lround(c->values[index]), app->rename_is_password);
+            }
             break;
         case CHOOSE_DROP: {   /* RV-286 */
             int value = (int)lround(c->values[index]);

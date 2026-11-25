@@ -367,6 +367,10 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
         picker_hist_push(app, false, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)was, .size = was_len });
         app->picker_fwd_n = 0;
     }
+    if (app->rename_active && (app->rename_is_path || app->rename_is_filter) &&
+        (was_len == 0 || !rubraview_path_same((proven_u8str_view_t){ .ptr = (const proven_byte_t *)was, .size = was_len }, dir))) {
+        rename_end(app);
+    }
     proven_arena_t *pa = picker_next_arena(app);
     /* The PC page lists drives and the usual folders, in the PAL's order
        (owner, 2026-09-28: the whole machine, not only the folder the

@@ -45,6 +45,17 @@ void rubraview_card_open(rubraview_card_t *card, double host_w, double host_h, d
     card_clamp(card, host_w, host_h);
 }
 
+void rubraview_card_open_at(rubraview_card_t *card, double host_w, double host_h, rubraview_rect_t want, double min_w, double min_h) {
+    card->open = true;
+    card->focused = true;
+    card->drag = 0;
+    card->sized = false;
+    card->min_width = min_w;
+    card->min_height = min_h;
+    card->rect = want;
+    card_clamp(card, host_w, host_h);
+}
+
 void rubraview_card_close(rubraview_card_t *card) {
     card->open = false;
     card->focused = false;
@@ -67,7 +78,8 @@ int32_t rubraview_card_hit(const rubraview_card_t *card, double x, double y) {
     if (y < r.y + card->edge) edges |= RUBRAVIEW_CARD_TOP;
     else if (y >= r.y + r.height - card->edge) edges |= RUBRAVIEW_CARD_BOTTOM;
     if (edges) return edges;
-    if (y < r.y + card->title_height) return RUBRAVIEW_CARD_TITLE;
+    if (card->title_height > 0.0 && y < r.y + card->title_height) return RUBRAVIEW_CARD_TITLE;
+    if (card->grip_width > 0.0 && x < r.x + card->edge + card->grip_width) return RUBRAVIEW_CARD_TITLE;
     return RUBRAVIEW_CARD_BODY;
 }
 
@@ -137,4 +149,72 @@ rubraview_card_share_t rubraview_card_share_of(const rubraview_card_t *card, dou
 bool rubraview_card_share_valid(const rubraview_card_share_t *share) {
     return share->known && share->left >= 0.0 && share->left < 1.0 && share->top >= 0.0 && share->top < 1.0 &&
            share->width > 0.0 && share->width <= 1.0 && share->height > 0.0 && share->height <= 1.0;
+}
+
+rubraview_editbar_layout_t rubraview_editbar_layout(rubraview_rect_t row, double grip_w, double grip_gap,
+                                                    const double *btn_w, int32_t btn_count, double btn_gap,
+                                                    double min_field_w) {
+    rubraview_editbar_layout_t out = {0};
+    if (row.width <= 0.0 || row.height <= 0.0) return out;
+    if (btn_count < 0) btn_count = 0;
+    if (btn_count > RUBRAVIEW_EDITBAR_MAX_BTNS) btn_count = RUBRAVIEW_EDITBAR_MAX_BTNS;
+    out.btn_count = btn_count;
+
+    double x0 = row.x;
+    if (grip_w > 0.0) {
+        double gw = card_min(grip_w, row.width * 0.25);
+        double gg = grip_gap > 0.0 ? grip_gap : 0.0;
+        out.grip = (rubraview_rect_t){ row.x, row.y, gw, row.height };
+        x0 = card_min(row.x + row.width, row.x + gw + gg);
+    }
+    double avail = card_max(0.0, row.x + row.width - x0);
+    double gap = btn_gap > 0.0 ? btn_gap : 0.0;
+    double gaps = btn_count > 0 ? gap * (double)btn_count : 0.0;
+    double w[RUBRAVIEW_EDITBAR_MAX_BTNS] = {0};
+    double sum_w = 0.0;
+    for (int32_t i = 0; i < btn_count; ++i) {
+        w[i] = (btn_w && btn_w[i] > 0.0) ? btn_w[i] : row.height;
+        sum_w += w[i];
+    }
+
+    double btn_budget = avail - card_max(0.0, min_field_w) - gaps;
+    if (btn_budget < 0.0) btn_budget = avail > gaps ? (avail - gaps) * 0.45 : 0.0;
+    if (sum_w > btn_budget && sum_w > 0.0) {
+        double scale = btn_budget / sum_w;
+        sum_w = 0.0;
+        for (int32_t i = 0; i < btn_count; ++i) {
+            w[i] *= scale;
+            sum_w += w[i];
+        }
+    }
+
+    double total_btns = sum_w + gaps;
+    if (total_btns > avail) {
+        total_btns = avail;
+        if (btn_count > 0) {
+            if (gaps > avail) {
+                gap = avail / (double)btn_count;
+                gaps = avail;
+                sum_w = 0.0;
+                for (int32_t i = 0; i < btn_count; ++i) w[i] = 0.0;
+            } else if (sum_w > 0.0) {
+                double scale = (avail - gaps) / sum_w;
+                sum_w = 0.0;
+                for (int32_t i = 0; i < btn_count; ++i) {
+                    w[i] *= scale;
+                    sum_w += w[i];
+                }
+            }
+        }
+    }
+
+    out.field = (rubraview_rect_t){ x0, row.y, card_max(0.0, avail - total_btns), row.height };
+    double bx = out.field.x + out.field.width + (btn_count > 0 ? gap : 0.0);
+    double right = row.x + row.width;
+    for (int32_t i = 0; i < btn_count; ++i) {
+        double bw = card_max(0.0, card_min(w[i], right - bx));
+        out.btns[i] = (rubraview_rect_t){ bx, row.y, bw, row.height };
+        bx += w[i] + gap;
+    }
+    return out;
 }

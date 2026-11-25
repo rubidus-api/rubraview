@@ -453,8 +453,16 @@ bool rubraview_pal_window_is_maximized(const rubraview_window_t *window);
 /** §3.2.5: hide the pointer during fullscreen presentation. Idempotent. */
 void rubraview_pal_window_set_cursor_visible(rubraview_window_t *window, bool visible);
 
-/** RV-137: the pointer's shape over the window's client area: an arrow, or a cross while an area is chosen. */
-typedef enum rubraview_cursor_shape { RUBRAVIEW_CURSOR_ARROW = 0, RUBRAVIEW_CURSOR_CROSS, RUBRAVIEW_CURSOR_SIZE_WE /* 1.25.0: a column's width */ } rubraview_cursor_shape_t;
+/** RV-137: the pointer's shape over the window's client area: an arrow, a cross, column/card sizing or card move. */
+typedef enum rubraview_cursor_shape {
+    RUBRAVIEW_CURSOR_ARROW = 0,
+    RUBRAVIEW_CURSOR_CROSS,
+    RUBRAVIEW_CURSOR_SIZE_WE,   /* 1.25.0: a column's width, or a box's left/right edge */
+    RUBRAVIEW_CURSOR_SIZE_NS,
+    RUBRAVIEW_CURSOR_SIZE_NWSE,
+    RUBRAVIEW_CURSOR_SIZE_NESW,
+    RUBRAVIEW_CURSOR_MOVE,
+} rubraview_cursor_shape_t;
 void rubraview_pal_window_set_cursor_shape(rubraview_window_t *window, rubraview_cursor_shape_t shape);
 
 /** §3.21.2: begin an OS window drag, as if the caption bar were grabbed. */

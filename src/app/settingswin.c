@@ -662,6 +662,9 @@ void settings_follow(app_state_t *app, int what) {
    in it changed. */
 void settings_close(app_state_t *app) {
     app->spath_active = false;   /* a folder being typed is dropped with the window */
+    app->spath_view.dragging = false;
+    rubraview_card_close(&app->spath_card);
+    if (app->settings_window) rubraview_pal_window_set_cursor_shape(app->settings_window, RUBRAVIEW_CURSOR_ARROW);
     if (!app->settings_open) return;
     settings_write_if_changed(app, true);
     app->key_capture = 0;
@@ -1323,6 +1326,8 @@ static void shell_types_action(app_state_t *app, proven_u8str_view_t name) {
     settings_say(app, say);
 }
 
+static void settings_path_end(app_state_t *app);
+
 void settings_event(app_state_t *app, rubraview_settings_event_t event) {
     {
         /* The setting the focus was last on: "this setting" is pressed with the focus on the button. */
@@ -1345,6 +1350,7 @@ void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             app->settings_message[0] = '\0';
             break;
         case RUBRAVIEW_SEVENT_REVERT: {
+            if (app->spath_active) settings_path_end(app);
             uint32_t total = app->settings.revision_total;
             app->settings = app->settings_opened;
             app->settings.revision_total = total + 1;
@@ -1357,6 +1363,7 @@ void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             break;
         }
         case RUBRAVIEW_SEVENT_DEFAULTS:
+            if (app->spath_active) settings_path_end(app);
             rubraview_settings_reset(&app->settings);
             app->keymap = rubraview_keymap_parse(app->arena, cstr(rubraview_default_keymap()));
             keymap_table_refresh(app);
@@ -1367,6 +1374,7 @@ void settings_event(app_state_t *app, rubraview_settings_event_t event) {
             break;
         case RUBRAVIEW_SEVENT_DEFAULTS_PAGE: {
             /* The owner (2026-10-17): this page only; on Keys, the keys. */
+            if (app->spath_active) settings_path_end(app);
             rubraview_settings_reset_page(&app->settings, (rubraview_settings_tab_t)app->settings_view.page);
             if (app->settings_view.page == RUBRAVIEW_TAB_KEYS) {
                 app->keymap = rubraview_keymap_parse(app->arena, cstr(rubraview_default_keymap()));
@@ -1693,6 +1701,10 @@ void settings_path_begin(app_state_t *app, const rubraview_setting_def_t *def) {
     proven_u8str_view_t now = rubraview_settings_get_text(&app->settings, def->section, def->key);
     rubraview_textedit_set(&app->spath_ec.te, now.size < sizeof(app->spath_buffer) ? now : PROVEN_LIT(""));
     rubraview_textedit_select_all(&app->spath_ec.te);
+    app->spath_view = (editbox_view_t){0};
+    rubraview_card_close(&app->spath_card);
+    app->spath_blink_on = false;
+    app->spath_number = false;
     app->spath_section = def->section;
     app->spath_key = def->key;
     app->spath_kind = def->text_kind;
@@ -1714,6 +1726,9 @@ void settings_number_begin(app_state_t *app) {
     editbox_begin(&app->spath_ec, app->spath_buffer, sizeof(app->spath_buffer), false);
     rubraview_textedit_set(&app->spath_ec.te, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)now, .size = n > 0 ? (size_t)n : 0 });
     rubraview_textedit_select_all(&app->spath_ec.te);
+    app->spath_view = (editbox_view_t){0};
+    rubraview_card_close(&app->spath_card);
+    app->spath_blink_on = false;
     app->spath_section = def->section;
     app->spath_key = def->key;
     app->spath_kind = RUBRAVIEW_TEXT_PLAIN;
@@ -1733,6 +1748,9 @@ static void settings_path_end(app_state_t *app) {
     app->spath_number = false;
     app->spath_btn_n = 0;
     app->spath_active = false;
+    app->spath_view.dragging = false;
+    rubraview_card_close(&app->spath_card);
+    if (app->settings_window) rubraview_pal_window_set_cursor_shape(app->settings_window, RUBRAVIEW_CURSOR_ARROW);
     app->spath_list_index = -1;
     app->spath_composing_length = 0;
     rubraview_pal_window_text_input(app->settings_window, false);
@@ -1875,40 +1893,58 @@ static bool settings_path_box(const app_state_t *app, int32_t list, int32_t *row
     return *row >= 0 && *cols >= 8;
 }
 
-/* The first character shown: a long path shows its end, where the caret usually is. */
-static size_t settings_path_first(const app_state_t *app, int32_t cols) {
-    size_t caret_chars = 0;
-    for (size_t i = 0; i < app->spath_ec.te.caret && i < app->spath_ec.te.len; ++i) {
-        if (((unsigned char)app->spath_ec.te.buf[i] & 0xC0) != 0x80) caret_chars++;
+/* A press in the inline settings edit bar: buttons, field caret/drag/editmenu, move grip & resize edges.
+   Returns true when handled inside the bar; clicks outside unfocus the bar modelessly and return false. */
+static bool settings_path_press(app_state_t *app, double x, double y, int button, uint32_t modifiers) {
+    if (!app->spath_active) return false;
+    if (button == RUBRAVIEW_MOUSE_LEFT) {
+        for (int32_t i = 0; i < app->spath_btn_n; ++i) {
+            if (!pal_rect_has(app->spath_btn[i], x, y)) continue;
+            switch (app->spath_btn_kind[i]) {
+                case RENAME_BTN_OK:
+                    editbox_text(&app->spath_ec, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length }, true);
+                    app->spath_composing_length = 0;
+                    settings_path_commit(app);
+                    break;
+                case RENAME_BTN_CANCEL:
+                    if (!app->spath_number && app->spath_kind == RUBRAVIEW_TEXT_SEARCH)
+                        rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app->spath_before);
+                    settings_path_end(app);
+                    settings_say(app, rubraview_tr(spath_way(app)->left));
+                    break;
+                case RENAME_BTN_BROWSE:
+                    settings_path_browse(app);
+                    break;
+                default: break;
+            }
+            app->settings_dirty = true;
+            return true;
+        }
     }
-    return caret_chars + 2 > (size_t)cols ? caret_chars + 2 - (size_t)cols : 0;
-}
-
-/* A click in the box puts the caret at that character. */
-static size_t settings_path_at(const app_state_t *app, int32_t col, int32_t cols) {
-    size_t want = settings_path_first(app, cols) + (size_t)(col < 0 ? 0 : col), seen = 0, at = 0;
-    const char *t = app->spath_ec.te.buf;
-    while (at < app->spath_ec.te.len && seen < want) {
-        at++;
-        while (at < app->spath_ec.te.len && ((unsigned char)t[at] & 0xC0) == 0x80) at++;
-        seen++;
+    if (app->spath_view.box.width > 0.0 && pal_rect_has(app->spath_view.box, x, y)) {
+        app->spath_card.focused = true;
+        rubraview_pal_window_text_input(app->settings_window, true);
+        app->spath_composing_length = 0;
+        if (button == RUBRAVIEW_MOUSE_RIGHT) {
+            chooser_open_editmenu_in(app, CHOOSE_IN_SETTINGS, x, y);
+            app->settings_dirty = true;
+            return true;
+        }
+        if (button == RUBRAVIEW_MOUSE_LEFT) {
+            (void)editbox_pointer_down(app->settings_renderer, &app->spath_ec, &app->spath_view,
+                                       x, y, (modifiers & RUBRAVIEW_MOD_SHIFT) != 0);
+            app->settings_dirty = true;
+            return true;
+        }
     }
-    return at;
-}
-
-/* RV-293: a click puts the caret, a double click a word, a triple click all; Shift+click and a drag select. */
-static void settings_path_click(app_state_t *app, int32_t col, int32_t cols, double x, double y, bool shift) {
-    int clicks = editbox_clicks(&app->spath_clicks, x, y, rubraview_pal_time_now_seconds());
-    editbox_press(&app->spath_ec, settings_path_at(app, col, cols), clicks, shift);
-    app->spath_dragging = clicks == 1;
-    app->settings_dirty = true;
-}
-
-static void settings_path_drag(app_state_t *app, double x) {
-    int32_t brow = 0, bcol = 0, bcols = 0;
-    if (!app->spath_dragging || !settings_path_box(app, app->spath_list_index >= 0 ? app->spath_list : -1, &brow, &bcol, &bcols)) return;
-    rubraview_editctl_place(&app->spath_ec, settings_path_at(app, (int32_t)(x / app->settings_cell_w) - bcol, bcols), true);
-    app->settings_dirty = true;
+    if (app->spath_card.open && button == RUBRAVIEW_MOUSE_LEFT) {
+        bool was = app->spath_card.focused;
+        bool on = rubraview_card_press(&app->spath_card, x, y);
+        if (app->spath_card.focused != was) rubraview_pal_window_text_input(app->settings_window, app->spath_card.focused);
+        app->settings_dirty = true;
+        return on;
+    }
+    return false;
 }
 
 /* The column of a folder row's X, which takes the folder off (owner, 2026-10-16). */
@@ -1934,92 +1970,104 @@ static void skip_dirs_draw_x(app_state_t *app) {
     }
 }
 
-/* The typing box: its text, the selection, the caret. The list's box is
-   there even when nothing is typed, an empty field waiting for a folder. */
-static void settings_path_draw(app_state_t *app) {
+/* Waiting frames under folder lists awaiting a typed folder. */
+static void skip_dirs_draw_frames(app_state_t *app) {
     rubraview_renderer_t *r = app->settings_renderer;
-    const rubraview_settings_view_t *v = &app->settings_view;
-    const double cw = app->settings_cell_w, ch = app->settings_cell_h, fs = app->settings_font;
-    int32_t ww = 0, wh = 0;
-    rubraview_pal_window_get_size(app->settings_window, &ww, &wh);
+    const double cw = app->settings_cell_w, ch = app->settings_cell_h;
     int32_t row = 0, col0 = 0, cols = 0;
     int32_t typing = app->spath_active ? (app->spath_list_index >= 0 ? app->spath_list : -1) : -2;
     for (int32_t l = 0; l < FOLDER_LIST_COUNT; ++l) {   /* waiting: each field's frame round its hint */
         if (l == typing || !settings_path_box(app, l, &row, &col0, &cols)) continue;
         rubraview_pal_render_stroke_rect(r, (rubraview_pal_rect_t){ cw * col0, settings_row_y(app, row), cw * cols, ch }, 0xFF707070u, 1.0, 0.0);
     }
-    if (!app->spath_active || !settings_path_box(app, typing, &row, &col0, &cols)) return;
-    /* 1.25.0 (owner, 2026-10-20: "에디트 컨트롤과 버튼의 세로 길이가 조금 더 넉넉하게"): a little taller than its row */
-    double pad = ch * 0.22;
-    double y = settings_row_y(app, row);
-    rubraview_pal_rect_t box = { cw * col0, y - pad, cw * cols, ch + 2.0 * pad };
-    rubraview_pal_render_fill_rect(r, box, 0xFF101010u, 3.0);
-    rubraview_pal_render_stroke_rect(r, box, 0xFF5B9BD5u, 1.0, 3.0);
-    proven_u8str_view_t text = rubraview_textedit_text(&app->spath_ec.te);
-    size_t caret_chars = 0, sel_a = 0, sel_b = 0, a = 0, b = 0;
-    rubraview_textedit_selection_range(&app->spath_ec.te, &a, &b);
-    for (size_t i = 0; i < text.size; ++i) {
-        if (((unsigned char)text.ptr[i] & 0xC0) == 0x80) continue;
-        if (i < app->spath_ec.te.caret) caret_chars++;
-        if (i < a) sel_a++;
-        if (i < b) sel_b++;
+}
+
+/* Movable & resizable inline rectangular edit bar over the settings window. */
+static void settings_path_draw(app_state_t *app) {
+    if (!app->spath_active) return;
+    rubraview_renderer_t *r = app->settings_renderer;
+    const rubraview_settings_view_t *v = &app->settings_view;
+    const double cw = app->settings_cell_w, ch = app->settings_cell_h, fs = app->settings_font;
+    double dpi = rubraview_pal_window_dpi_scale(app->settings_window);
+    int32_t ww = 0, wh = 0;
+    rubraview_pal_window_get_size(app->settings_window, &ww, &wh);
+    if (ww <= 0 || wh <= 0) return;
+
+    double pad = 5.0 * dpi, grip_w = 14.0 * dpi, grip_gap = 4.0 * dpi, btn_gap = 4.0 * dpi;
+    double min_w = 220.0 * dpi, min_h = fmax(34.0 * dpi, ch + 10.0 * dpi);
+    if (!app->spath_card.open) {
+        int32_t row = 0, col0 = 0, cols = 0;
+        int32_t typing = app->spath_list_index >= 0 ? app->spath_list : -1;
+        rubraview_rect_t want;
+        if (settings_path_box(app, typing, &row, &col0, &cols)) {
+            double ry = settings_row_y(app, row);
+            double want_h = min_h;
+            double want_y = ry + (ch - want_h) * 0.5;
+            want = (rubraview_rect_t){ cw * (double)col0 - pad - grip_w - grip_gap, want_y,
+                                       fmax(min_w, cw * (double)cols + pad + grip_w + grip_gap + 92.0 * dpi), want_h };
+        } else {
+            double avail_w = fmax(min_w, (double)ww - cw * (double)v->content_col - cw);
+            want = (rubraview_rect_t){ cw * (double)v->content_col, app->settings_content_top + ch, fmin(avail_w, 520.0 * dpi), min_h };
+        }
+        app->spath_card.margin = 4.0 * dpi;
+        app->spath_card.edge = 5.0 * dpi;
+        app->spath_card.title_height = 0.0;
+        app->spath_card.grip_width = grip_w;
+        rubraview_card_open_at(&app->spath_card, (double)ww, (double)wh, want, min_w, min_h);
     }
-    size_t first = settings_path_first(app, cols);
-    size_t skip = 0, seen = 0;
-    while (skip < text.size && seen < first) {
-        skip++;
-        while (skip < text.size && ((unsigned char)text.ptr[skip] & 0xC0) == 0x80) skip++;
-        seen++;
+    rubraview_card_fit(&app->spath_card, (double)ww, (double)wh, min_w, min_h);
+    bool focused = app->spath_card.focused;
+    rubraview_pal_rect_t card = { app->spath_card.rect.x, app->spath_card.rect.y, app->spath_card.rect.width, app->spath_card.rect.height };
+    double round = 2.0 * dpi;
+    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ card.x + 3.0 * dpi, card.y + 5.0 * dpi, card.width, card.height }, 0x60000000u, round);
+    rubraview_pal_render_fill_rect(r, card, 0xFA242424u, round);
+    rubraview_pal_render_stroke_rect(r, card, focused ? 0xFF5B9BD5u : COLOR_BOX_BORDER, (focused ? 1.5 : 1.0) * dpi, round);
+
+    rubraview_rect_t row_r = { card.x + pad, card.y + pad, fmax(1.0, card.width - 2.0 * pad), fmax(1.0, card.height - 2.0 * pad) };
+    int32_t kinds[3] = {0};
+    uint32_t icons[3] = {0};
+    const char *fbs[3] = {0};
+    int styles[3] = {0};
+    double btn_w[3] = {0};
+    int32_t n = 0;
+    double bw = fmin(fmax(row_r.height, 26.0 * dpi), 40.0 * dpi);
+    if (!app->spath_number && (app->spath_list_index >= 0 || spath_way(app)->browse)) {
+        kinds[n] = RENAME_BTN_BROWSE; icons[n] = RUBRAVIEW_ICON_BROWSE; fbs[n] = "..."; styles[n] = 0; btn_w[n] = bw; n++;
     }
-    if (sel_b > sel_a) {
-        double sx = sel_a > first ? (double)(sel_a - first) : 0.0, ex = (double)(sel_b - first);
-        if (ex > sx) rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ box.x + cw * sx, y, cw * (ex - sx), ch }, 0x704A90D9u, 0.0);
-    }
-    rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ .ptr = text.ptr + skip, .size = text.size - skip }, box.x, y, fs, SETTINGS_TEXT);
-    double cx = box.x + cw * (double)(caret_chars - first);
-    if (app->spath_composing_length > 0) {
-        rubraview_pal_render_draw_text_mono(r, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length },
-                                            cx, y, fs, 0xFFFFD27Fu);
-    }
-    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ cx, y + 2.0, 1.5, ch - 4.0 }, SETTINGS_TEXT, 0.0);
-    /* 1.24.0: its buttons — OK, Cancel, and Browse... in wrapping rows that fit inside the pane */
-    const char *words[3] = { T("OK"), T("Cancel"), T("Browse...") };
-    int32_t n = !app->spath_number && spath_way(app)->browse ? 3 : 2;   /* RV-311: Browse... for the kinds that have it */
-    double x0 = cw * (double)v->content_col, right = (double)ww - cw;
-    if (right < x0 + cw * 10.0) right = x0 + cw * 10.0;
-    double left = (right - box.x >= cw * 22.0) ? box.x : x0;
-    double room = right - left, bh = ch + 2.0 * pad, gap_y = pad * 0.8;
-    double bw[3] = { 0 }, rx[3] = { 0 };
-    uint32_t brow[3] = { 0 };
-    for (int32_t i = 0; i < n; ++i) {
-        double tw = 0.0;
-        if (!rubraview_pal_render_measure_text(r, cstr(words[i]), fs, &tw) || tw <= 0.0) tw = cw * (double)rubraview_utf8_chars(cstr(words[i]));
-        bw[i] = tw + cw * 3.0;
-        if (bw[i] < cw * 9.0) bw[i] = cw * 9.0;
-        if (bw[i] > room) bw[i] = room;
-    }
-    size_t rows = rubraview_flow_inline(bw, (size_t)n, cw, room, brow, rx);
-    double btns_h = rows ? (double)rows * bh + (double)(rows - 1) * gap_y : bh;
-    double by = box.y + box.height + pad;
-    if (by + btns_h > (double)wh - ch && box.y - pad - btns_h >= app->settings_content_top)
-        by = box.y - pad - btns_h;
-    rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ left - cw * 0.5, by - pad * 0.5, room + cw, btns_h + pad }, SETTINGS_BACKGROUND, 0.0);
-    app->spath_btn_n = n;
-    for (int32_t i = 0; i < n; ++i) {
-        rubraview_pal_rect_t b = { left + rx[i], by + (double)brow[i] * (bh + gap_y), bw[i], bh };
+    kinds[n] = RENAME_BTN_OK; icons[n] = RUBRAVIEW_ICON_CHECK; fbs[n] = "\xE2\x9C\x93"; styles[n] = 1; btn_w[n] = bw; n++;
+    kinds[n] = RENAME_BTN_CANCEL; icons[n] = RUBRAVIEW_ICON_CLOSE; fbs[n] = "\xC3\x97"; styles[n] = 2; btn_w[n] = bw; n++;
+
+    rubraview_editbar_layout_t lo = rubraview_editbar_layout(row_r, grip_w, grip_gap, btn_w, n, btn_gap, 80.0 * dpi);
+    rubraview_pal_rect_t grip = { lo.grip.x, lo.grip.y, lo.grip.width, lo.grip.height };
+    draw_editbar_grip(r, grip, pal_rect_has(grip, app->settings_px, app->settings_py), app->spath_card.drag == RUBRAVIEW_CARD_TITLE, dpi);
+
+    rubraview_pal_rect_t field = { lo.field.x, lo.field.y, lo.field.width, lo.field.height };
+    rubraview_pal_render_fill_rect(r, field, 0xFF101010u, round);
+    rubraview_pal_render_stroke_rect(r, field, focused ? 0xFF5B9BD5u : COLOR_BOX_BORDER, 1.0, round);
+
+    app->spath_view.box = field;
+    app->spath_view.size = fs;
+    editbox_draw(r, &app->spath_ec, &app->spath_view,
+                 (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length },
+                 focused, SETTINGS_TEXT, dpi);
+
+    app->spath_btn_n = lo.btn_count;
+    for (int32_t i = 0; i < lo.btn_count; ++i) {
+        rubraview_pal_rect_t b = { lo.btns[i].x, lo.btns[i].y, lo.btns[i].width, lo.btns[i].height };
         app->spath_btn[i] = b;
+        app->spath_btn_kind[i] = kinds[i];
         bool over = pal_rect_has(b, app->settings_px, app->settings_py);
-        rubraview_pal_render_fill_rect(r, b, i == 0 ? SETTINGS_FOCUS : over ? 0xFF3A3A3Au : 0xFF2A2A2Au, 3.0);
-        rubraview_pal_render_stroke_rect(r, b, 0xFF5B9BD5u, 1.0, 3.0);
-        char bfit[64];
-        proven_u8str_view_t lbl = b.width > 6.0 ? fit_text_measured(r, bfit, sizeof(bfit), cstr(words[i]), b.width - 6.0, fs) : PROVEN_LIT("");
-        if (lbl.size > 0) rubraview_pal_render_draw_text(r, lbl, b, fs, SETTINGS_TEXT, RUBRAVIEW_TEXT_CENTER);
+        draw_editbar_button(r, b, styles[i], icons[i], fbs[i], NULL, over, false, dpi);
     }
 }
 
 size_t settings_pump(app_state_t *app) {
     size_t handled = 0;
     rubraview_window_event_t event;
+    if (app->spath_active && app->spath_card.open && app->spath_card.focused) {
+        bool blink = fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5;
+        if (blink != app->spath_blink_on) { app->spath_blink_on = blink; app->settings_dirty = true; }
+    }
     /* the keys page: a row rested on says what its action does */
     if (app->settings_open && (app->settings_tip_row > 0 || app->settings_tip_help >= 0) && !app->settings_tip_shown &&
         rubraview_pal_time_now_seconds() - app->settings_tip_since >= 0.6) {
@@ -2071,13 +2119,27 @@ size_t settings_pump(app_state_t *app) {
                     app->settings_dirty = true;
                     break;
                 }
-                if (settings_path_key(app, event.key.combo)) break;
+                if (app->spath_active) {
+                    if (app->spath_card.open && !app->spath_card.focused) {
+                        if (key_is(event.key.combo, "Escape")) {
+                            if (!app->spath_number && app->spath_kind == RUBRAVIEW_TEXT_SEARCH)
+                                rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app->spath_before);
+                            settings_path_end(app);
+                            settings_say(app, rubraview_tr(spath_way(app)->left));
+                            break;
+                        }
+                    } else if (settings_path_key(app, event.key.combo)) {
+                        break;
+                    }
+                }
                 if (settings_copy_key(app, event.key.combo)) break;
                 rubraview_settings_key_t key;
                 if (settings_key_of(event.key.combo, &key)) {
                     int32_t sw = 0, sh = 0;
+                    int32_t before_page = view->page;
                     rubraview_pal_window_get_size(app->settings_window, &sw, &sh);
                     settings_event(app, rubraview_settings_view_key(view, &app->settings, key));
+                    if (app->spath_active && view->page != before_page) settings_path_end(app);
                     settings_sidebar_reveal(app, sh);
                 }
                 break;
@@ -2086,36 +2148,13 @@ size_t settings_pump(app_state_t *app) {
                 int32_t sw = 0, sh = 0;
                 rubraview_pal_window_get_size(app->settings_window, &sw, &sh);
                 if (chooser_press(app, CHOOSE_IN_SETTINGS, event.mouse.x, event.mouse.y)) break;   /* 1.24.0 */
+                if (settings_path_press(app, event.mouse.x, event.mouse.y, event.mouse.button, event.mouse.modifiers)) break;
                 /* RV-170: the scroll bar: its thumb dragged, its track a page, its buttons a row */
                 if (event.mouse.button == RUBRAVIEW_MOUSE_LEFT && scrollbar_press(app, RVSB_SETTINGS, event.mouse.x, event.mouse.y)) {
                     app->settings_dirty = true;
                     break;
                 }
-                if (app->spath_active) {   /* 1.24.0: the box's own buttons */
-                    int32_t hit = -1;
-                    for (int32_t i = 0; i < app->spath_btn_n; ++i) if (pal_rect_has(app->spath_btn[i], event.mouse.x, event.mouse.y)) hit = i;
-                    if (hit == 0) { editbox_text(&app->spath_ec, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->spath_composing, .size = app->spath_composing_length }, true);
-                                    app->spath_composing_length = 0; settings_path_commit(app); app->settings_dirty = true; break; }
-                    if (hit == 1) {   /* Cancel: as Esc (a search put back as it was) */
-                        if (!app->spath_number && app->spath_kind == RUBRAVIEW_TEXT_SEARCH)
-                            rubraview_settings_set_text(&app->settings, app->spath_section, app->spath_key, app->spath_before);
-                        settings_path_end(app); app->settings_dirty = true; break;
-                    }
-                    if (hit == 2) { settings_path_browse(app); app->settings_dirty = true; break; }
-                }
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
-                if (app->spath_active) {   /* a click in the box moves the caret; elsewhere keeps the folder as it was */
-                    int32_t brow = 0, bcol = 0, bcols = 0;
-                    int32_t mc = (int32_t)(event.mouse.x / app->settings_cell_w), mr = settings_y_to_row(app, event.mouse.y);
-                    if (settings_path_box(app, app->spath_list_index >= 0 ? app->spath_list : -1, &brow, &bcol, &bcols) &&
-                        mr == brow && mc >= bcol && mc < bcol + bcols) {
-                        settings_path_click(app, mc - bcol, bcols, event.mouse.x, event.mouse.y, (event.mouse.modifiers & RUBRAVIEW_MOD_SHIFT) != 0);
-                        break;
-                    }
-                    settings_path_end(app);
-                    settings_say(app, T("folder left as it was"));
-                    break;
-                }
                 if (app->key_capture > 0) {
                     app->key_capture = 0;   /* a click elsewhere is a change of mind */
                     settings_say(app, T("no key added"));
@@ -2144,6 +2183,7 @@ size_t settings_pump(app_state_t *app) {
                     int32_t vis = settings_sidebar_visible(app, sh);
                     if (p >= app->settings_page_scroll && p < app->settings_page_scroll + vis &&
                         view->doc && p >= 0 && p < (int32_t)view->doc->page_count) {
+                        if (app->spath_active && p != view->page) settings_path_end(app);
                         rubraview_settings_view_set_page(view, p);
                         settings_sidebar_reveal(app, sh);
                         app->settings_dirty = true;
@@ -2198,7 +2238,23 @@ size_t settings_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_MOVE: {
                 app->settings_px = event.mouse.x;
                 app->settings_py = event.mouse.y;
-                if (app->spath_active && app->spath_dragging) { settings_path_drag(app, event.mouse.x); break; }   /* RV-293 */
+                if (app->spath_active && app->spath_view.dragging) {
+                    if (editbox_pointer_move(app->settings_renderer, &app->spath_ec, &app->spath_view, event.mouse.x)) app->settings_dirty = true;
+                    break;
+                }
+                if (app->spath_active && app->spath_card.open && app->spath_card.drag != 0) {
+                    int32_t sw = 0, sh = 0;
+                    rubraview_pal_window_get_size(app->settings_window, &sw, &sh);
+                    if (rubraview_card_motion(&app->spath_card, event.mouse.x, event.mouse.y, (double)sw, (double)sh)) app->settings_dirty = true;
+                    rubraview_pal_window_set_cursor_shape(app->settings_window, card_cursor_for_part(app->spath_card.drag));
+                    break;
+                }
+                if (app->spath_active && app->spath_card.open) {
+                    int32_t part = rubraview_card_hit(&app->spath_card, event.mouse.x, event.mouse.y);
+                    rubraview_pal_window_set_cursor_shape(app->settings_window, card_cursor_for_part(part));
+                } else {
+                    rubraview_pal_window_set_cursor_shape(app->settings_window, RUBRAVIEW_CURSOR_ARROW);
+                }
                 {   /* RV-252: the circle under the pointer lights */
                     int32_t dot = keys_dot_under(app, event.mouse.x, event.mouse.y);
                     if (dot != g_keys_dot_hover) { g_keys_dot_hover = dot; app->settings_dirty = true; }
@@ -2252,7 +2308,13 @@ size_t settings_pump(app_state_t *app) {
                 }
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_UP:
-                app->spath_dragging = false;   /* RV-293 */
+                app->spath_view.dragging = false;   /* RV-293 */
+                if (app->spath_active && app->spath_card.open && rubraview_card_release(&app->spath_card)) {
+                    int32_t part = rubraview_card_hit(&app->spath_card, event.mouse.x, event.mouse.y);
+                    rubraview_pal_window_set_cursor_shape(app->settings_window, card_cursor_for_part(part));
+                    app->settings_dirty = true;
+                    break;
+                }
                 if (scrollbar_release(app, app->settings_window)) { app->settings_dirty = true; break; }   /* RV-170 */
                 if (app->settings_selecting) {
                     app->settings_selecting = false;
@@ -2267,7 +2329,7 @@ size_t settings_pump(app_state_t *app) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_TEXT:
             case RUBRAVIEW_WINDOW_EVENT_COMPOSITION:
-                if (app->spath_active) {
+                if (app->spath_active && (!app->spath_card.open || app->spath_card.focused)) {
                     proven_u8str_view_t typed = { .ptr = (const proven_byte_t *)event.text.utf8, .size = event.text.length };
                     if (event.kind == RUBRAVIEW_WINDOW_EVENT_TEXT) {
                         editbox_text(&app->spath_ec, typed, true);
@@ -2284,7 +2346,6 @@ size_t settings_pump(app_state_t *app) {
                 break;
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_WHEEL: {
                 if (chooser_wheel(app, CHOOSE_IN_SETTINGS, event.mouse.wheel_delta)) break;
-                if (app->spath_active) break;   /* the box stays over its row */
                 if (event.mouse.x < app->settings_cell_w * view->list_cols) {
                     int32_t sw = 0, sh = 0;
                     rubraview_pal_window_get_size(app->settings_window, &sw, &sh);
@@ -2561,7 +2622,7 @@ void draw_settings_window(app_state_t *app) {
     }
 
     skip_dirs_draw_x(app);
-    settings_path_draw(app);
+    skip_dirs_draw_frames(app);
     keys_layout_draw(app);   /* RV-217 */
 
     /* The marked block, shaded over the text it covers. */
@@ -2655,6 +2716,7 @@ void draw_settings_window(app_state_t *app) {
         rubraview_pal_render_draw_text(r, help, (rubraview_pal_rect_t){ x + cw, y, tw - cw * 2.0, th }, fs, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
     }
     /* 1.25.0 (owner, 2026-10-20: "가로 세로 스크롤바가 생기거나"): a bar at the right while the page is taller; RV-170 */
+    settings_path_draw(app);
     draw_chooser(app, r, CHOOSE_IN_SETTINGS, -1.0, -1.0);   /* 1.24.0 */
     if (!rubraview_pal_render_end(r)) app->settings_dirty = true;
 }

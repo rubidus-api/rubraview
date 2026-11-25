@@ -640,7 +640,17 @@ static LRESULT CALLBACK window_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM l
                window of the program, the settings window too, where moving it brought nothing back. */
             if (!w->cursor_visible && LOWORD(lparam) == HTCLIENT) { SetCursor(NULL); return TRUE; }
             if (w->cursor_shape != RUBRAVIEW_CURSOR_ARROW && LOWORD(lparam) == HTCLIENT) {
-                SetCursor(LoadCursorW(NULL, w->cursor_shape == RUBRAVIEW_CURSOR_SIZE_WE ? IDC_SIZEWE : IDC_CROSS));
+                LPCWSTR res = IDC_ARROW;
+                switch (w->cursor_shape) {
+                    case RUBRAVIEW_CURSOR_CROSS:     res = IDC_CROSS; break;
+                    case RUBRAVIEW_CURSOR_SIZE_WE:   res = IDC_SIZEWE; break;
+                    case RUBRAVIEW_CURSOR_SIZE_NS:   res = IDC_SIZENS; break;
+                    case RUBRAVIEW_CURSOR_SIZE_NWSE: res = IDC_SIZENWSE; break;
+                    case RUBRAVIEW_CURSOR_SIZE_NESW: res = IDC_SIZENESW; break;
+                    case RUBRAVIEW_CURSOR_MOVE:      res = IDC_SIZEALL; break;
+                    default:                         res = IDC_ARROW; break;
+                }
+                SetCursor(LoadCursorW(NULL, res));
                 return TRUE;
             }
             break;
@@ -1504,7 +1514,17 @@ void rubraview_pal_window_set_cursor_shape(rubraview_window_t *window, rubraview
     window->cursor_shape = (int)shape;
     POINT at;   /* the pointer over it now changes at once */
     if (window->hwnd && window->cursor_visible && GetCursorPos(&at) && WindowFromPoint(at) == window->hwnd) {
-        SetCursor(LoadCursorW(NULL, shape == RUBRAVIEW_CURSOR_CROSS ? IDC_CROSS : shape == RUBRAVIEW_CURSOR_SIZE_WE ? IDC_SIZEWE : IDC_ARROW));
+        LPCWSTR res = IDC_ARROW;
+        switch (shape) {
+            case RUBRAVIEW_CURSOR_CROSS:     res = IDC_CROSS; break;
+            case RUBRAVIEW_CURSOR_SIZE_WE:   res = IDC_SIZEWE; break;
+            case RUBRAVIEW_CURSOR_SIZE_NS:   res = IDC_SIZENS; break;
+            case RUBRAVIEW_CURSOR_SIZE_NWSE: res = IDC_SIZENWSE; break;
+            case RUBRAVIEW_CURSOR_SIZE_NESW: res = IDC_SIZENESW; break;
+            case RUBRAVIEW_CURSOR_MOVE:      res = IDC_SIZEALL; break;
+            default:                         res = IDC_ARROW; break;
+        }
+        SetCursor(LoadCursorW(NULL, res));
     }
 }
 

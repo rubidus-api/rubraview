@@ -264,6 +264,8 @@ void triage_undo(app_state_t *app) {
 /* The box closes: the window goes back to keys only (K5). */
 void rename_end(app_state_t *app) {
     card_close_keep(app);   /* RV-265: its place kept for the next of its kind */
+    app->card_inline_mode = 0;
+    app->rename_scroll = 0.0;
     app->rename_inplace = false;   /* RV-293 */
     app->rename_inplace_rect = (rubraview_pal_rect_t){0};
     app->rename_active = false;

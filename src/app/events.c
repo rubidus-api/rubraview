@@ -107,6 +107,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (card_motion(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y)) {   /* RV-265: the card moved or sized */
                 app->pointer_x = event->mouse.x;
                 app->pointer_y = event->mouse.y;
+                rubraview_pal_window_set_cursor_shape(app->window, card_hover_cursor(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y));
                 break;
             }
             if (scrollbar_motion(app, app->window, event->mouse.x, event->mouse.y)) break;   /* RV-170: a list's bar held */
@@ -258,6 +259,14 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             app->pointer_inside = true;
             app->pointer_x = event->mouse.x;
             app->pointer_y = event->mouse.y;
+            {
+                rubraview_cursor_shape_t card_cur = card_hover_cursor(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y);
+                if (card_cur != RUBRAVIEW_CURSOR_ARROW || (app->card.open && rubraview_card_hit(&app->card, event->mouse.x, event->mouse.y) != RUBRAVIEW_CARD_OUTSIDE)) {
+                    rubraview_pal_window_set_cursor_shape(app->window, card_cur);
+                } else if (!app->picker_open) {
+                    rubraview_pal_window_set_cursor_shape(app->window, app->sel_mode ? RUBRAVIEW_CURSOR_CROSS : RUBRAVIEW_CURSOR_ARROW);
+                }
+            }
             if (app->frameless && !app->chrome_hidden) rubraview_titlebar_pointer_moved(&app->titlebar, event->mouse.y);
             if (rubraview_cursor_hide_notify_motion(&app->cursor)) {
                 rubraview_pal_window_set_cursor_visible(app->window, true);
@@ -605,7 +614,12 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && titlebar_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-257 */
             if (volpop_release(app)) break;   /* RV-237 */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && edge_press_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-285 */
-            if (card_release(app, CARD_HOST_MAIN)) break;   /* RV-265 */
+            if (card_release(app, CARD_HOST_MAIN)) {   /* RV-265 */
+                rubraview_cursor_shape_t cur = card_hover_cursor(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y);
+                if (cur == RUBRAVIEW_CURSOR_ARROW && app->sel_mode) cur = RUBRAVIEW_CURSOR_CROSS;
+                rubraview_pal_window_set_cursor_shape(app->window, cur);
+                break;
+            }
             if (app->picker_rhold && event->mouse.button == RUBRAVIEW_MOUSE_RIGHT) {   /* RV-223: a right click, not a drag */
                 app->picker_rhold = false;
                 if (app->picker_open && app->picker_rhold_index < app->picker_listing.count)

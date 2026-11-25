@@ -1465,6 +1465,8 @@ void rename_field_begin(app_state_t *app) {
     rubraview_editctl_free(&app->rename_ec);
     rubraview_editctl_init(&app->rename_ec, app->rename_buffer, sizeof(app->rename_buffer), false);
     app->rename_dragging = false;
+    app->rename_scroll = 0.0;
+    app->card_inline_mode = 0;
 }
 
 static bool rename_edit_key(app_state_t *app, rubraview_key_combo_t combo) {
@@ -1550,7 +1552,14 @@ static size_t rename_field_index(app_state_t *app, double x) {
 
 /* A press on the field: the caret, a word, the line, Shift's selection; a right press its list. */
 bool rename_field_press(app_state_t *app, double x, double y, int button, uint32_t modifiers) {
-    if (!app->rename_active || !rename_has_keys(app) || app->rename_field.width <= 0.0 || !pal_rect_has(app->rename_field, x, y)) return false;
+    if (!app->rename_active || app->rename_field.width <= 0.0 || !pal_rect_has(app->rename_field, x, y)) return false;
+    if (app->card.open && app->card_host != CARD_HOST_MAIN) return false;
+    if (!app->card.open && (app->batch_typing || (app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)))) return false;
+    if (app->card.open && !app->card.focused) {
+        app->card.focused = true;
+        rubraview_pal_window_text_input(app->window, true);
+    }
+    if (!rename_has_keys(app)) return false;
     app->rename_composing_length = 0;
     if (button == RUBRAVIEW_MOUSE_RIGHT) { chooser_open_editmenu(app, x, y); return true; }
     if (button != RUBRAVIEW_MOUSE_LEFT) return false;

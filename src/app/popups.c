@@ -947,6 +947,7 @@ void card_close_keep(app_state_t *app) {
         app->card_kept[app->card_kind] = rubraview_card_share_of(&app->card, app->card_host_w, app->card_host_h);
     rubraview_card_close(&app->card);
     app->card_kind = -1;
+    app->card_inline_mode = 0;
     app->card_for_len = 0;
 }
 
@@ -1003,6 +1004,7 @@ static void card_open_in(app_state_t *app, int32_t kind, double win_w, double wi
     cd->margin = 8.0 * dpi;
     cd->edge = 6.0 * dpi;
     cd->title_height = 46.0 * dpi;
+    cd->grip_width = 0.0;
     const rubraview_card_share_t *kept = &app->card_kept[kind];
     double rise = 0.45;
     if (live) {   /* what it filters stays in sight: near the top */
@@ -1058,18 +1060,93 @@ static void rename_card_words(const app_state_t *app, char *title, size_t capaci
     rubraview_fmt(title, capacity, "{}", PROVEN_ARG(t));
 }
 
+rubraview_cursor_shape_t card_cursor_for_part(int32_t part) {
+    if (part == RUBRAVIEW_CARD_TITLE) return RUBRAVIEW_CURSOR_MOVE;
+    if (part == (RUBRAVIEW_CARD_LEFT | RUBRAVIEW_CARD_TOP) || part == (RUBRAVIEW_CARD_RIGHT | RUBRAVIEW_CARD_BOTTOM))
+        return RUBRAVIEW_CURSOR_SIZE_NWSE;
+    if (part == (RUBRAVIEW_CARD_RIGHT | RUBRAVIEW_CARD_TOP) || part == (RUBRAVIEW_CARD_LEFT | RUBRAVIEW_CARD_BOTTOM))
+        return RUBRAVIEW_CURSOR_SIZE_NESW;
+    if ((part & (RUBRAVIEW_CARD_LEFT | RUBRAVIEW_CARD_RIGHT)) != 0) return RUBRAVIEW_CURSOR_SIZE_WE;
+    if ((part & (RUBRAVIEW_CARD_TOP | RUBRAVIEW_CARD_BOTTOM)) != 0) return RUBRAVIEW_CURSOR_SIZE_NS;
+    return RUBRAVIEW_CURSOR_ARROW;
+}
+
+static rubraview_cursor_shape_t one_card_cursor(const rubraview_card_t *cd, double x, double y) {
+    int32_t part = cd->drag != 0 ? cd->drag : rubraview_card_hit(cd, x, y);
+    return card_cursor_for_part(part);
+}
+
+rubraview_cursor_shape_t card_hover_cursor(const app_state_t *app, int32_t host, double x, double y) {
+    if (app->ab_card.open && host == CARD_HOST_MAIN) {
+        if (app->ab_card.drag != 0 || rubraview_card_hit(&app->ab_card, x, y) != RUBRAVIEW_CARD_OUTSIDE)
+            return one_card_cursor(&app->ab_card, x, y);
+    }
+    if (app->prog_card.open && host == CARD_HOST_MAIN) {
+        if (app->prog_card.drag != 0 || rubraview_card_hit(&app->prog_card, x, y) != RUBRAVIEW_CARD_OUTSIDE)
+            return one_card_cursor(&app->prog_card, x, y);
+    }
+    if (app->px_card.open && host == app->px_card_host) {
+        if (app->px_card.drag != 0 || rubraview_card_hit(&app->px_card, x, y) != RUBRAVIEW_CARD_OUTSIDE)
+            return one_card_cursor(&app->px_card, x, y);
+    }
+    if (app->card.open && host == app->card_host) {
+        if (app->card.drag != 0 || rubraview_card_hit(&app->card, x, y) != RUBRAVIEW_CARD_OUTSIDE)
+            return one_card_cursor(&app->card, x, y);
+    }
+    return RUBRAVIEW_CURSOR_ARROW;
+}
+
+void draw_editbar_grip(rubraview_renderer_t *r, rubraview_pal_rect_t grip, bool hovered, bool dragging, double dpi) {
+    if (grip.width <= 0.0 || grip.height <= 0.0) return;
+    double round = 2.0 * dpi;
+    if (dragging || hovered)
+        rubraview_pal_render_fill_rect(r, grip, dragging ? 0x40FFFFFFu : 0x28FFFFFFu, round);
+    double d = fmax(2.0, 2.0 * dpi), gx = fmax(3.5, 4.0 * dpi), gy = fmax(4.0, 5.0 * dpi);
+    double sx = grip.x + (grip.width - d - gx) * 0.5, sy = grip.y + (grip.height - 2.0 * gy - d) * 0.5;
+    uint32_t col = (hovered || dragging) ? 0xE8F0F0F0u : 0x90C8C8C8u;
+    for (int row = 0; row < 3; ++row) {
+        for (int col_i = 0; col_i < 2; ++col_i) {
+            rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ sx + (double)col_i * gx, sy + (double)row * gy, d, d }, col, 0.0);
+        }
+    }
+}
+
+void draw_editbar_button(rubraview_renderer_t *r, rubraview_pal_rect_t b, int style, uint32_t icon, const char *fallback,
+                         const char *word, bool hovered, bool active, double dpi) {
+    if (b.width <= 0.0 || b.height <= 0.0) return;
+    double round = 2.0 * dpi;
+    uint32_t fill = style == 1 ? COLOR_TILE_CURRENT
+                  : style == 2 ? (hovered ? COLOR_CLOSE_HOVER : 0xFF323232u)
+                  : (active ? COLOR_TILE_CURRENT : hovered ? 0x50FFFFFFu : 0xFF2D2D2Du);
+    rubraview_pal_render_fill_rect(r, b, fill, round);
+    if (style == 1 && hovered) rubraview_pal_render_fill_rect(r, b, 0x30FFFFFFu, round);
+    uint32_t border = style == 1 ? (hovered ? 0x60FFFFFFu : 0x30FFFFFFu) : COLOR_BOX_BORDER;
+    rubraview_pal_render_stroke_rect(r, b, border, 1.0, round);
+    if (word && word[0]) {
+        rubraview_pal_render_draw_text(r, cstr(word), b, fmin(13.5 * dpi, b.height * 0.44), COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    } else {
+        draw_sign(r, icon, fallback, b, fmin(16.0 * dpi, b.height * 0.48), COLOR_TEXT);
+    }
+}
+
+static void draw_card_box(app_state_t *app, rubraview_pal_rect_t c, bool focused, bool grip_dots, double dpi) {
+    double round = 2.0 * dpi;
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ c.x + 3.0 * dpi, c.y + 5.0 * dpi, c.width, c.height }, 0x60000000u, round);
+    rubraview_pal_render_fill_rect(app->renderer, c, 0xFA242424u, round);
+    rubraview_pal_render_stroke_rect(app->renderer, c, focused ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, (focused ? 1.5 : 1.0) * dpi, round);
+    if (!grip_dots) return;
+    for (int gi = 0; gi < 3; ++gi)
+        for (int gj = 0; gi + gj < 3; ++gj)
+            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ c.x + c.width - 8.0 * dpi - (double)gi * 4.0 * dpi,
+                                           c.y + c.height - 8.0 * dpi - (double)gj * 4.0 * dpi, 2.0 * dpi, 2.0 * dpi }, 0x90F0F0F0u, 0.0);
+}
+
 /* RV-265 (R296): every input card is drawn by this: its shadow, the card lit at its edge while it has the keys, the
    grip its corner is sized by, the title (moved by), the line saying what the keys do. Returns where the content
    starts. */
 double draw_card_frame(app_state_t *app, rubraview_pal_rect_t c, const char *title, const char *hint, bool focused, double dpi) {
     double pad = 20.0 * dpi, title_h = 30.0 * dpi, hint_h = 22.0 * dpi;
-    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ c.x + 3.0 * dpi, c.y + 5.0 * dpi, c.width, c.height }, 0x60000000u, 8.0 * dpi);   /* its shadow */
-    rubraview_pal_render_fill_rect(app->renderer, c, 0xFA242424u, 8.0 * dpi);
-    rubraview_pal_render_stroke_rect(app->renderer, c, focused ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, (focused ? 1.5 : 1.0) * dpi, 8.0 * dpi);
-    for (int gi = 0; gi < 3; ++gi)   /* the grip a corner is sized by: six dots in a triangle */
-        for (int gj = 0; gi + gj < 3; ++gj)
-            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ c.x + c.width - 8.0 * dpi - (double)gi * 4.0 * dpi,
-                                           c.y + c.height - 8.0 * dpi - (double)gj * 4.0 * dpi, 2.0 * dpi, 2.0 * dpi }, 0x90F0F0F0u, 0.0);
+    draw_card_box(app, c, focused, true, dpi);
     if (!focused) hint = T("The window has the keys  ·  click the card to type in it  ·  Esc closes it");
     rubraview_pal_rect_t tr = { c.x + pad, c.y + pad - 4.0 * dpi, c.width - 2.0 * pad, title_h };
     proven_u8str_view_t tv = proven_u8str_view_from_cstr(title);
@@ -1093,7 +1170,7 @@ void draw_card_buttons(app_state_t *app, rubraview_pal_rect_t c, const char *con
         rubraview_pal_rect_t b = { bx + (double)i * (bw + gap), by, bw, bh };
         out[i] = b;
         bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
-        double round = 5.0 * dpi;
+        double round = 2.0 * dpi;
         rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? COLOR_TILE_CURRENT : over ? 0x50FFFFFFu : COLOR_TILE_FILL, round);
         if (i == 0 && over) rubraview_pal_render_fill_rect(app->renderer, b, 0x30FFFFFFu, round);
         if (i > 0) rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, round);
@@ -1103,120 +1180,220 @@ void draw_card_buttons(app_state_t *app, rubraview_pal_rect_t c, const char *con
 
 void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h, double dpi) {
     if (!app->rename_active) return;
-    {
-        /* RV-238: a card — title, the line saying what the keys do, the field, the buttons — over a dimmed window;
-           the open-file screen's typed path and filter stay in its path bar, Compress keeps its own window */
-        bool inplace = app->rename_inplace && app->rename_inplace_rect.width > 0.0;   /* RV-293 E3: where the name is shown */
-        bool card = !(app->rename_is_path || app->rename_is_filter || inplace);
-        bool live = app->rename_is_find || app->rename_is_listfilter;   /* what it filters stays in sight, undimmed */
-        rubraview_pal_rect_t card_rect = {0};
-        bool focused = true;
-        double box_w = 560.0 * dpi, box_h = 72.0 * dpi;   /* 1.25.0: roomier */
-        if (box_w > win_w - 16.0 * dpi) box_w = win_w - 16.0 * dpi;   /* a narrow Edit window (RV-137) */
-        rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, win_h * 0.75, box_w, box_h };
-        if (card) {
-            double pad = 20.0 * dpi, title_h = 30.0 * dpi, hint_h = 22.0 * dpi, field_h = 46.0 * dpi, btn_h = 38.0 * dpi;
-            double row_h = 34.0 * dpi, rows_h = app->rename_is_extension ? row_h * (double)app->ext_n + 8.0 * dpi : 0.0;
-            /* RV-265 (R296): the card is where the reader put it and as large, inside the window, never under what its
-               content needs; nothing under it is dimmed or held: a press there is the window's, and takes the keys */
-            double min_h = pad + title_h + hint_h + 12.0 * dpi + rows_h + field_h + 18.0 * dpi + btn_h + pad;
-            int32_t kind = card_kind_now(app);
-            if (!app->card.open || app->card_kind != kind) {
-                if (app->card.open) card_close_keep(app);
-                app->card_host = host;
-                app->card_host_w = win_w;
-                app->card_host_h = win_h;
-                card_open_in(app, kind, win_w, win_h, 600.0 * dpi, min_h, live, dpi);
+    bool inplace = app->rename_inplace && app->rename_inplace_rect.width > 0.0;
+    int32_t inline_mode = app->rename_is_path ? 1 : app->rename_is_filter ? 2 : inplace ? 3 : 0;
+    bool live = app->rename_is_find || app->rename_is_listfilter;
+    bool focused = true;
+    rubraview_pal_rect_t card_rect = {0};
+    rubraview_pal_rect_t box = {0};
+    rubraview_editbar_layout_t lo = {0};
+    int32_t kinds[RUBRAVIEW_EDITBAR_MAX_BTNS] = {0};
+    uint32_t icons[RUBRAVIEW_EDITBAR_MAX_BTNS] = {0};
+    const char *fbs[RUBRAVIEW_EDITBAR_MAX_BTNS] = {0};
+    const char *btn_words[RUBRAVIEW_EDITBAR_MAX_BTNS] = {0};
+    int styles[RUBRAVIEW_EDITBAR_MAX_BTNS] = {0};
+    bool btn_active[RUBRAVIEW_EDITBAR_MAX_BTNS] = {0};
+    double btn_w[RUBRAVIEW_EDITBAR_MAX_BTNS] = {0};
+    int32_t n = 0;
+
+    if (inline_mode != 0) {
+        double pad = 5.0 * dpi, grip_w = 14.0 * dpi, grip_gap = 4.0 * dpi, btn_gap = 4.0 * dpi;
+        double min_w = (inline_mode == 3 ? 200.0 : 240.0) * dpi, min_h = 34.0 * dpi;
+        if (!app->card.open || app->card_kind != -1 || app->card_inline_mode != inline_mode) {
+            if (app->card.open) card_close_keep(app);
+            app->card.margin = 8.0 * dpi;
+            app->card.edge = 5.0 * dpi;
+            app->card.title_height = 0.0;
+            app->card.grip_width = grip_w;
+            rubraview_rect_t want;
+            if (inline_mode == 1 || inline_mode == 2) {
+                double bar_h = fmax(min_h, PICKER_CRUMB_HEIGHT * dpi);
+                want = (rubraview_rect_t){ 8.0 * dpi, picker_top(app), fmax(min_w, win_w - 16.0 * dpi), bar_h };
+            } else {
+                rubraview_pal_rect_t ir = app->rename_inplace_rect;
+                double bh = fmax(28.0 * dpi, ir.height);
+                double want_h = fmax(min_h, bh + 2.0 * pad);
+                double extra = grip_w + grip_gap + 2.0 * (bh + btn_gap) + 2.0 * pad;
+                want = (rubraview_rect_t){
+                    ir.x - pad - grip_w - grip_gap,
+                    ir.y - (want_h - ir.height) * 0.5,
+                    fmax(min_w, ir.width + extra),
+                    want_h
+                };
             }
             app->card_host = host;
             app->card_host_w = win_w;
             app->card_host_h = win_h;
-            rubraview_card_fit(&app->card, win_w, win_h, 440.0 * dpi, min_h);
-            focused = app->card.focused;
-            double cx = app->card.rect.x, cy = app->card.rect.y, cw = app->card.rect.width, ch = app->card.rect.height;
-            card_rect = (rubraview_pal_rect_t){ cx, cy, cw, ch };
-            char title[1200];
-            const char *hint = "";
-            rename_card_words(app, title, sizeof(title), &hint);
-            double fy = draw_card_frame(app, card_rect, title, hint, focused, dpi);
-            if (app->rename_is_extension) {   /* 1.24.0: the rows over the field, the one it edits lit */
-                for (int32_t k = 0; k < app->ext_n; ++k) {
-                    rubraview_pal_rect_t r = { cx + pad, fy + row_h * (double)k, cw - 2.0 * pad, row_h - 4.0 * dpi };
-                    app->ext_row_rect[k] = r;
-                    bool on = k == app->ext_at;
-                    rubraview_pal_render_fill_rect(app->renderer, r, on ? COLOR_TILE_CURRENT : pal_rect_has(r, app->pointer_x, app->pointer_y) ? 0x40FFFFFFu : COLOR_TILE_FILL, 4.0 * dpi);
-                    char line[128];
-                    proven_u8str_view_t to = on ? rubraview_textedit_text(&app->rename_ec.te) : cstr(app->ext_to[k]);
-                    int n = rubraview_fmt(line, sizeof(line), "{}   \xE2\x86\x92   {}", PROVEN_ARG(app->ext_from[k]), PROVEN_ARG(rubraview_bytes_view(to.ptr, (int)(to.size < 64 ? to.size : 64))));
-                    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n },
-                                                              (rubraview_pal_rect_t){ r.x + 14.0 * dpi, r.y, r.width - 28.0 * dpi, r.height },
-                                                              15.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-                }
-                fy += rows_h;
+            rubraview_card_open_at(&app->card, win_w, win_h, want, min_w, min_h);
+            app->card_kind = -1;
+            app->card_inline_mode = inline_mode;
+        }
+        app->card_host = host;
+        app->card_host_w = win_w;
+        app->card_host_h = win_h;
+        rubraview_card_fit(&app->card, win_w, win_h, min_w, min_h);
+        focused = app->card.focused;
+        card_rect = (rubraview_pal_rect_t){ app->card.rect.x, app->card.rect.y, app->card.rect.width, app->card.rect.height };
+        draw_card_box(app, card_rect, focused, false, dpi);
+
+        rubraview_rect_t row = { card_rect.x + pad, card_rect.y + pad, fmax(1.0, card_rect.width - 2.0 * pad), fmax(1.0, card_rect.height - 2.0 * pad) };
+        double bw = fmin(fmax(row.height, 28.0 * dpi), 44.0 * dpi);
+        if (app->rename_is_path) {
+            kinds[n] = RENAME_BTN_COPY; icons[n] = RUBRAVIEW_ICON_COPY; fbs[n] = "C"; styles[n] = 0; btn_w[n] = bw; n++;
+        }
+        kinds[n] = RENAME_BTN_OK; icons[n] = RUBRAVIEW_ICON_CHECK; fbs[n] = "\xE2\x9C\x93"; styles[n] = 1; btn_w[n] = bw; n++;
+        kinds[n] = RENAME_BTN_CANCEL; icons[n] = RUBRAVIEW_ICON_CLOSE; fbs[n] = "\xC3\x97"; styles[n] = 2; btn_w[n] = bw; n++;
+        lo = rubraview_editbar_layout(row, grip_w, grip_gap, btn_w, n, btn_gap, 80.0 * dpi);
+        rubraview_pal_rect_t grip = { lo.grip.x, lo.grip.y, lo.grip.width, lo.grip.height };
+        draw_editbar_grip(app->renderer, grip, pal_rect_has(grip, app->pointer_x, app->pointer_y), app->card.drag == RUBRAVIEW_CARD_TITLE, dpi);
+        box = (rubraview_pal_rect_t){ lo.field.x, lo.field.y, lo.field.width, lo.field.height };
+    } else {
+        double pad = 14.0 * dpi, title_h = 26.0 * dpi, hint_h = 20.0 * dpi, field_h = 38.0 * dpi;
+        double row_h = 32.0 * dpi, rows_h = app->rename_is_extension ? row_h * (double)app->ext_n + 8.0 * dpi : 0.0;
+        double header_h = pad + title_h + hint_h + 10.0 * dpi;
+        double min_w = 340.0 * dpi, min_h = header_h + rows_h + field_h + pad;
+        int32_t kind = card_kind_now(app);
+        if (!app->card.open || app->card_kind != kind || app->card_inline_mode != 0) {
+            if (app->card.open) card_close_keep(app);
+            app->card_host = host;
+            app->card_host_w = win_w;
+            app->card_host_h = win_h;
+            card_open_in(app, kind, win_w, win_h, 580.0 * dpi, min_h, live, dpi);
+            app->card.edge = 6.0 * dpi;
+            app->card.title_height = header_h;
+            app->card.grip_width = 0.0;
+            app->card_inline_mode = 0;
+        }
+        app->card_host = host;
+        app->card_host_w = win_w;
+        app->card_host_h = win_h;
+        app->card.title_height = header_h;
+        app->card.grip_width = 0.0;
+        rubraview_card_fit(&app->card, win_w, win_h, min_w, min_h);
+        focused = app->card.focused;
+        double cx = app->card.rect.x, cy = app->card.rect.y, cw = app->card.rect.width, ch = app->card.rect.height;
+        card_rect = (rubraview_pal_rect_t){ cx, cy, cw, ch };
+        draw_card_box(app, card_rect, focused, true, dpi);
+
+        char title[1200];
+        const char *hint = "";
+        rename_card_words(app, title, sizeof(title), &hint);
+        if (!focused) hint = T("The window has the keys  ·  click the card to type in it  ·  Esc closes it");
+        {
+            rubraview_pal_rect_t hclip = { cx + pad, cy + pad - 2.0 * dpi, fmax(1.0, cw - 2.0 * pad), title_h + hint_h };
+            rubraview_pal_render_push_clip(app->renderer, hclip);
+            rubraview_pal_rect_t tr = { cx + pad, cy + pad - 2.0 * dpi, fmax(1.0, cw - 2.0 * pad), title_h };
+            proven_u8str_view_t tv = proven_u8str_view_from_cstr(title);
+            rubraview_pal_render_draw_text(app->renderer, tv, tr, 16.5 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+            rubraview_pal_render_draw_text(app->renderer, tv, (rubraview_pal_rect_t){ tr.x + 0.6 * dpi, tr.y, tr.width, tr.height },
+                                           16.5 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+            rubraview_pal_render_draw_text(app->renderer, cstr(hint), (rubraview_pal_rect_t){ cx + pad, tr.y + title_h, fmax(1.0, cw - 2.0 * pad), hint_h },
+                                           12.5 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_LEFT);
+            rubraview_pal_render_pop_clip(app->renderer);
+        }
+        double fy = cy + header_h;
+        if (app->rename_is_extension) {   /* 1.24.0: the rows over the field, the one it edits lit */
+            for (int32_t k = 0; k < app->ext_n; ++k) {
+                rubraview_pal_rect_t r = { cx + pad, fy + row_h * (double)k, cw - 2.0 * pad, row_h - 4.0 * dpi };
+                app->ext_row_rect[k] = r;
+                bool on = k == app->ext_at;
+                rubraview_pal_render_fill_rect(app->renderer, r, on ? COLOR_TILE_CURRENT : pal_rect_has(r, app->pointer_x, app->pointer_y) ? 0x40FFFFFFu : COLOR_TILE_FILL, 2.0 * dpi);
+                char line[128];
+                proven_u8str_view_t to = on ? rubraview_textedit_text(&app->rename_ec.te) : cstr(app->ext_to[k]);
+                int ln = rubraview_fmt(line, sizeof(line), "{}   \xE2\x86\x92   {}", PROVEN_ARG(app->ext_from[k]), PROVEN_ARG(rubraview_bytes_view(to.ptr, (int)(to.size < 64 ? to.size : 64))));
+                if (ln > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)ln },
+                                                           (rubraview_pal_rect_t){ r.x + 12.0 * dpi, r.y, r.width - 24.0 * dpi, r.height },
+                                                           14.5 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
             }
-            box = (rubraview_pal_rect_t){ cx + pad, fy, cw - 2.0 * pad, field_h };
+            fy += rows_h;
         }
-        /* The typed path sits where the path is, as an address bar does. */
-        if (app->rename_is_path || app->rename_is_filter) {
-            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, picker_top(app), win_w, PICKER_CRUMB_HEIGHT * dpi },
-                                           0xFF101010u, 0.0);   /* the chips under it do not show through */
-            box = (rubraview_pal_rect_t){ 4.0 * dpi, picker_top(app) + 4.0 * dpi, win_w - 8.0 * dpi, (PICKER_CRUMB_HEIGHT - 8.0) * dpi };
+
+        double avail_h = fmax(20.0 * dpi, (cy + ch - pad) - fy);
+        double ctrl_h = fmin(fmax(avail_h, field_h), 58.0 * dpi);
+        if (ctrl_h > avail_h) ctrl_h = avail_h;
+        rubraview_rect_t ctrl_row = { cx + pad, fy, fmax(1.0, cw - 2.0 * pad), ctrl_h };
+        double bw = fmin(fmax(ctrl_h, 30.0 * dpi), 44.0 * dpi);
+        if (app->rename_is_password) {
+            kinds[n] = RENAME_BTN_EYE;
+            icons[n] = app->password_shown ? RUBRAVIEW_ICON_HIDE : RUBRAVIEW_ICON_VIEW;
+            fbs[n] = app->password_shown ? "x" : "o";
+            styles[n] = 0; btn_active[n] = app->password_shown; btn_w[n] = bw; n++;
+        } else if (app->rename_is_target || app->rename_is_extract) {
+            kinds[n] = RENAME_BTN_BROWSE; icons[n] = RUBRAVIEW_ICON_BROWSE; fbs[n] = "...";
+            styles[n] = 0; btn_w[n] = bw; n++;
+        } else if (app->rename_is_find) {
+            kinds[n] = RENAME_BTN_BACK; icons[n] = RUBRAVIEW_ICON_UP; fbs[n] = "^";
+            styles[n] = 0; btn_w[n] = bw; n++;
+        } else if (app->rename_is_extension && app->ext_at + 1 < app->ext_n) {
+            double tw = 0.0;
+            btn_words[n] = T("Apply");
+            kinds[n] = RENAME_BTN_OK + 100; styles[n] = 0;
+            (void)rubraview_pal_render_measure_text(app->renderer, cstr(btn_words[n]), 13.5 * dpi, &tw);
+            btn_w[n] = fmax(bw, tw + 20.0 * dpi);
+            n++;
         }
-        if (inplace) box = app->rename_inplace_rect;
-        if (card) {   /* RV-238: a field that looks like one: dark, lit at its edge */
-            rubraview_pal_render_fill_rect(app->renderer, box, 0xFF141414u, 5.0 * dpi);
-            rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_TILE_CURRENT, 1.5 * dpi, 5.0 * dpi);
-        } else {
-            rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
-            rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_BOX_BORDER, 1.0, 3.0);
+        kinds[n] = RENAME_BTN_OK; icons[n] = RUBRAVIEW_ICON_CHECK; fbs[n] = "\xE2\x9C\x93"; styles[n] = 1; btn_w[n] = bw; n++;
+        kinds[n] = RENAME_BTN_CANCEL; icons[n] = RUBRAVIEW_ICON_CLOSE; fbs[n] = "\xC3\x97"; styles[n] = 2; btn_w[n] = bw; n++;
+        lo = rubraview_editbar_layout(ctrl_row, 0.0, 0.0, btn_w, n, 4.0 * dpi, 120.0 * dpi);
+        box = (rubraview_pal_rect_t){ lo.field.x, lo.field.y, lo.field.width, lo.field.height };
+    }
+
+    /* Field frame */
+    rubraview_pal_render_fill_rect(app->renderer, box, 0xFF141414u, 2.0 * dpi);
+    rubraview_pal_render_stroke_rect(app->renderer, box, focused ? COLOR_TILE_CURRENT : COLOR_BOX_BORDER, (focused ? 1.5 : 1.0) * dpi, 2.0 * dpi);
+
+    /* Right-side inline rectangular buttons */
+    app->rename_btn_n = lo.btn_count;
+    for (int32_t i = 0; i < lo.btn_count; ++i) {
+        rubraview_pal_rect_t b = { lo.btns[i].x, lo.btns[i].y, lo.btns[i].width, lo.btns[i].height };
+        app->rename_btn[i] = b;
+        app->rename_btn_kind[i] = kinds[i];
+        bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
+        draw_editbar_button(app->renderer, b, styles[i], icons[i], fbs[i], btn_words[i], over, btn_active[i], dpi);
+    }
+
+    /* Clipped text, selection highlight, IME composition, and blinking caret */
+    const rubraview_textedit_t *te = &app->rename_ec.te;
+    char shown[3 * (sizeof(app->rename_buffer) + sizeof(app->rename_composing))];
+    size_t caret = te->caret, len = te->len, comp = app->rename_composing_length;
+    proven_sys_mem_copy(shown, app->rename_buffer, caret);
+    proven_sys_mem_copy(shown + caret, app->rename_composing, comp);
+    proven_sys_mem_copy(shown + caret + comp, app->rename_buffer + caret, len - caret);
+    size_t total = len + comp;
+    size_t sel_a = 0, sel_b = 0;
+    bool has_selection = rubraview_textedit_has_selection(te);
+    if (has_selection) rubraview_textedit_selection_range(te, &sel_a, &sel_b);
+    if (app->rename_is_password && !app->password_shown) {   /* D-262 */
+        char plain[sizeof(app->rename_buffer) + sizeof(app->rename_composing)];
+        proven_sys_mem_copy(plain, shown, total);
+        size_t dots = 0, at_caret = 0, at_a = 0, at_b = 0;
+        for (size_t i = 0; i <= total; ++i) {
+            if (i == caret + comp) at_caret = dots;
+            if (i == (sel_a >= caret ? sel_a + comp : sel_a)) at_a = dots;
+            if (i == (sel_b >= caret ? sel_b + comp : sel_b)) at_b = dots;
+            if (i < total && ((unsigned char)plain[i] & 0xC0) != 0x80) dots++;
         }
-        /* The name with the syllable the IME is still building at the
-           caret, the selection shaded under its characters, and a caret
-           that blinks (owner, 2026-09-23: the box did not look like it was
-           taking text). Widths come from the face the text is drawn in, so
-           caret and shading sit under the right characters, Hangul too. */
-        const rubraview_textedit_t *te = &app->rename_ec.te;
-        char shown[3 * (sizeof(app->rename_buffer) + sizeof(app->rename_composing))];
-        size_t caret = te->caret, len = te->len, comp = app->rename_composing_length;
-        proven_sys_mem_copy(shown, app->rename_buffer, caret);
-        proven_sys_mem_copy(shown + caret, app->rename_composing, comp);
-        proven_sys_mem_copy(shown + caret + comp, app->rename_buffer + caret, len - caret);
-        size_t total = len + comp;
-        size_t sel_a = 0, sel_b = 0;
-        bool has_selection = rubraview_textedit_has_selection(te);
-        if (has_selection) rubraview_textedit_selection_range(te, &sel_a, &sel_b);
-        if (app->rename_is_password && !app->password_shown) {   /* D-262: the eye shows it as typed */
-            /* A dot a character (the IME's unfinished syllable too); the
-               caret and the selection are counted in characters. */
-            char plain[sizeof(app->rename_buffer) + sizeof(app->rename_composing)];
-            proven_sys_mem_copy(plain, shown, total);
-            size_t dots = 0, at_caret = 0, at_a = 0, at_b = 0;
-            for (size_t i = 0; i <= total; ++i) {
-                if (i == caret + comp) at_caret = dots;
-                if (i == (sel_a >= caret ? sel_a + comp : sel_a)) at_a = dots;
-                if (i == (sel_b >= caret ? sel_b + comp : sel_b)) at_b = dots;
-                if (i < total && ((unsigned char)plain[i] & 0xC0) != 0x80) dots++;
-            }
-            secure_wipe(rubraview_mem_mut(plain, sizeof(plain)));
-            for (size_t d = 0; d < dots; ++d) proven_sys_mem_copy(shown + 3 * d, "\xE2\x97\x8F", 3);   /* ● */
-            total = 3 * dots;
-            caret = 3 * at_caret;
-            comp = 0;
-            sel_a = 3 * at_a;
-            sel_b = 3 * at_b;
-        }
-        double size = inplace ? fmin(18.0 * dpi, box.height * 0.62) : 18.0 * dpi, pad = inplace ? 6.0 * dpi : 14.0 * dpi;
-        double full = 0.0, to_caret = 0.0;
-        (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = total }, size, &full);
-        (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = caret + comp }, size, &to_caret);
-        /* Centred while it fits; longer, it scrolls so the caret stays in the box. */
-        double inner = box.width - 2.0 * pad;
-        double x0 = full <= inner && !app->rename_is_path && !card && !(inplace && !app->rename_is_picker) ? box.x + (box.width - full) * 0.5 : box.x + pad;   /* RV-238: a card's from the left */
-        if (full > inner && to_caret > inner) x0 = box.x + pad + inner - to_caret;
-        if (host == CARD_HOST_MAIN) { app->rename_field = box; app->rename_field_x0 = x0; app->rename_field_size = size; }   /* RV-293: for the pointer */
-        if (has_selection) {
+        secure_wipe(rubraview_mem_mut(plain, sizeof(plain)));
+        for (size_t d = 0; d < dots; ++d) proven_sys_mem_copy(shown + 3 * d, "\xE2\x97\x8F", 3);   /* ● */
+        total = 3 * dots;
+        caret = 3 * at_caret;
+        comp = 0;
+        sel_a = 3 * at_a;
+        sel_b = 3 * at_b;
+    }
+    double size = fmin(fmax(box.height * 0.48, 12.0 * dpi), 26.0 * dpi), fpad = 8.0 * dpi;
+    double full = 0.0, to_caret = 0.0;
+    (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = total }, size, &full);
+    (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = caret + comp }, size, &to_caret);
+    double inner = fmax(1.0, box.width - 2.0 * fpad);
+    app->rename_scroll = rubraview_editctl_scroll(app->rename_scroll, to_caret, full, inner, 8.0 * dpi);
+    double x0 = box.x + fpad - app->rename_scroll;
+    if (host == CARD_HOST_MAIN) { app->rename_field = box; app->rename_field_x0 = x0; app->rename_field_size = size; }
+    rubraview_pal_rect_t clip = { box.x + 1.0, box.y + 1.0, fmax(0.0, box.width - 2.0), fmax(0.0, box.height - 2.0) };
+    if (clip.width > 0.0 && clip.height > 0.0) {
+        rubraview_pal_render_push_clip(app->renderer, clip);
+        if (has_selection && focused) {
             size_t a = sel_a, b = sel_b;
-            /* the composing text sits at the caret, which is one end of the selection */
             size_t da = a >= caret ? a + comp : a, db = b >= caret ? b + comp : b;
             double xa = 0.0, xb = 0.0;
             (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = da }, size, &xa);
@@ -1224,78 +1401,22 @@ void draw_rename_box(app_state_t *app, int32_t host, double win_w, double win_h,
             rubraview_pal_rect_t shade = { x0 + xa, box.y + box.height * 0.2, xb - xa, box.height * 0.6 };
             rubraview_pal_render_fill_rect(app->renderer, shade, 0xA05B9BD5u, 2.0);
         }
-        rubraview_pal_rect_t line = { x0, box.y, full + 4.0 * dpi, box.height };
+        rubraview_pal_rect_t line = { x0, box.y, fmax(inner, full + 16.0 * dpi), box.height };
         if (total > 0) {
             rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = total },
                                            line, size, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
+        }
+        if (comp > 0 && !(app->rename_is_password && !app->password_shown)) {
+            double xs = 0.0;
+            (void)rubraview_pal_render_measure_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)shown, .size = caret }, size, &xs);
+            if (to_caret > xs)
+                rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ x0 + xs, box.y + box.height * 0.8, to_caret - xs, 1.5 * dpi }, COLOR_TEXT, 0.0);
         }
         if (focused && fmod(rubraview_pal_time_now_seconds(), 1.0) < 0.5) {
             rubraview_pal_rect_t bar = { x0 + to_caret, box.y + box.height * 0.22, 2.0 * dpi, box.height * 0.56 };
             rubraview_pal_render_fill_rect(app->renderer, bar, COLOR_TEXT, 0.0);
         }
-        /* 1.24.0: its buttons under it — what Enter does, Cancel (Esc), and Browse (Ctrl+O) for a folder */
-        const char *words[4];
-        int32_t kinds[4], n = 0;
-        if (app->rename_is_find) {
-            words[n] = T("Next"); kinds[n++] = RENAME_BTN_OK;
-            words[n] = T("Back"); kinds[n++] = RENAME_BTN_BACK;
-            words[n] = T("Close"); kinds[n++] = RENAME_BTN_CANCEL;
-        } else {
-            words[n] = app->rename_is_extension ? (app->ext_at + 1 < app->ext_n ? T("Next") : T("Apply"))
-                     : app->rename_is_extract ? T("Extract")
-                     : app->rename_is_password ? (app->password_for_extract ? T("Extract") : T("Open")) : app->rename_is_filter || app->rename_is_listfilter ? T("Done") : T("OK");
-            kinds[n++] = RENAME_BTN_OK;
-            if (app->rename_is_path) { words[n] = T("Copy"); kinds[n++] = RENAME_BTN_COPY; }
-            if (app->rename_is_extension && app->ext_at + 1 < app->ext_n) { words[n] = T("Apply"); kinds[n++] = RENAME_BTN_OK + 100; }
-            if (app->rename_is_target || app->rename_is_extract) { words[n] = T("Browse..."); kinds[n++] = RENAME_BTN_BROWSE; }
-            words[n] = T("Cancel"); kinds[n++] = RENAME_BTN_CANCEL;
-        }
-        if (inplace) n = 0;   /* RV-293 E3: Enter keeps it, Esc leaves it, as in Explorer */
-        double bw = (card ? 104.0 : 120.0) * dpi, bh = (card ? 38.0 : 48.0) * dpi, gap = 10.0 * dpi;   /* 1.25.0: roomier; RV-238: a card's */
-        for (int32_t i = 0; i < n; ++i) {   /* RV-182: one width for all, the longest word's with room, never less */
-            double tw = 0.0;
-            if (rubraview_pal_render_measure_text(app->renderer, cstr(words[i]), 15.0 * dpi, &tw) && tw + 36.0 * dpi > bw) bw = tw + 36.0 * dpi;
-        }
-        rubraview_pal_rect_t at = box;
-        if ((app->rename_is_path || app->rename_is_filter) && n > 0) {
-            double max_bw = (at.width - gap * (double)(n - 1)) / (double)n;
-            if (bw > max_bw) bw = fmax(44.0 * dpi, max_bw);
-        }
-        double bx = app->rename_is_path || app->rename_is_filter ? fmax(at.x, at.x + at.width - (bw + gap) * (double)n + gap)
-                                                                   : at.x + (at.width - (bw + gap) * (double)n + gap) * 0.5;
-        double by = at.y + at.height + 10.0 * dpi;
-        if (card) {   /* RV-238: along the card's foot, at its right */
-            bx = card_rect.x + card_rect.width - 20.0 * dpi - (bw + gap) * (double)n + gap;
-            by = card_rect.y + card_rect.height - 20.0 * dpi - bh;
-        }
-        app->rename_btn_n = n;
-        if ((app->rename_is_path || app->rename_is_filter) && n > 0) {
-            rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, by - 4.0 * dpi, win_w, bh + 8.0 * dpi },
-                                           0xFF101010u, 0.0);
-        }
-        for (int32_t i = 0; i < n; ++i) {
-            rubraview_pal_rect_t b = { bx + (double)i * (bw + gap), by, bw, bh };
-            app->rename_btn[i] = b;
-            app->rename_btn_kind[i] = kinds[i];
-            bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
-            double round = card ? 5.0 * dpi : 3.0;
-            uint32_t idle = (app->rename_is_path || app->rename_is_filter) ? 0xFF242424u : card ? COLOR_TILE_FILL : COLOR_BOX_FILL;
-            rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? COLOR_TILE_CURRENT : over ? 0x50FFFFFFu : idle, round);
-            if (i == 0 && over && card) rubraview_pal_render_fill_rect(app->renderer, b, 0x30FFFFFFu, round);
-            if (!card || i > 0) rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, round);
-            rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, (card ? 14.0 : 15.0) * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
-        }
-        /* D-262 (owner, 2026-11-02: "눈알 버튼을 달아서 그걸로 보면서 입력할 때는 다른 문자도 입력 가능"): an unpacking
-           password's eye, at the box's right end: shown as typed, any letter through the IME; hidden, plain letters */
-        if (app->rename_is_password && n < 4) {
-            rubraview_pal_rect_t eye = { box.x + box.width - box.height, box.y, box.height, box.height };
-            bool over = pal_rect_has(eye, app->pointer_x, app->pointer_y);
-            if (over || app->password_shown) rubraview_pal_render_fill_rect(app->renderer, eye, app->password_shown ? COLOR_TILE_CURRENT : 0x40FFFFFFu, 3.0);
-            draw_sign(app->renderer, app->password_shown ? RUBRAVIEW_ICON_HIDE : RUBRAVIEW_ICON_VIEW, app->password_shown ? "x" : "o", eye, 20.0 * dpi, COLOR_TEXT);
-            app->rename_btn[n] = eye;
-            app->rename_btn_kind[n] = RENAME_BTN_EYE;
-            app->rename_btn_n = n + 1;
-        }
+        rubraview_pal_render_pop_clip(app->renderer);
     }
 }
 
