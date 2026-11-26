@@ -631,6 +631,7 @@ typedef struct app_state {
     double                 navbox_near_at;       /* the pointer last in the box or the middle */
     double                 navbox_opened_at;     /* RV-285: when a click opened it */
     bool                   navbox_hint;          /* RV-285: the middle's see-through hint shows */
+    bool                   navbox_vol_drag;      /* R358: its volume bar held */
     int32_t                folder_opened_kind;   /* RV-168/169: the kind of the file the folder came with (1 pictures, 2 films, 3 music; 0 a folder) */
     /* D-86: what Explorer's menu asked, gathered until the selection is whole. */
     rubraview_shellreq_collector_t shell_requests;
@@ -1881,8 +1882,7 @@ enum { PICKER_TOOL_FAVS = 0,  /* RV-317: Favourites + Places 2-column popup */
        PICKER_TOOL_SELECT,    /* RV-317: 2-step selection chooser */
        PICKER_TOOL_SORT,      /* RV-317 / R346: sort column chooser */
        PICKER_TOOL_SORT_DIR,  /* R346: ascending/descending arrow toggle */
-       PICKER_TOOL_FOLDERS_FIRST, /* R346: Folders first / Files first toggle */
-       PICKER_TOOL_VIEW,      /* RV-317: unified view layout + file filter chooser */
+       PICKER_TOOL_VIEW,      /* RV-317: unified view layout + file filter chooser; R354: Folders first / Files first in it */
        PICKER_TOOL_FILTER,    /* RV-317: filter field (omitted inside a book) */
        PICKER_TOOL_COUNT };
 enum {
@@ -2233,6 +2233,7 @@ void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h);
 void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h);
 void draw_text_weight(app_state_t *app, proven_u8str_view_t text, rubraview_pal_rect_t r, double size, uint32_t argb, bool bold);
 void draw_titlebar(app_state_t *app, double win_w);
+proven_u8str_view_t action_first_key(const app_state_t *app, proven_u8str_view_t action, char *buffer, size_t capacity);
 void draw_toolbox_window(app_state_t *app);
 rubraview_edge_side_t edge_nav_side(app_state_t *app, double x, double y);
 bool edge_column_shown(app_state_t *app);   /* RV-206 */
@@ -2291,6 +2292,11 @@ void favorite_rename_begin(app_state_t *app, size_t index);
 void favorite_rename_commit(app_state_t *app);
 bool favorite_toggle_path(app_state_t *app, proven_u8str_view_t path);
 void favorites_save(app_state_t *app);
+void favorites_reload(app_state_t *app);
+bool favorite_is_folder(app_state_t *app, proven_u8str_view_t path);
+bool favorites_grouped(app_state_t *app);
+void favorites_add_picked(app_state_t *app);
+size_t favpop_picked_files(const app_state_t *app, size_t *out, size_t cap);
 void favwin_build(app_state_t *app);
 void favwin_motion(app_state_t *app, double x, double y);
 bool favwin_press(app_state_t *app, double x, double y);
@@ -2488,6 +2494,8 @@ void list_paste(app_state_t *app);
 /* RV-277 (navbox.c) */
 void navbox_tick(app_state_t *app);
 bool navbox_press(app_state_t *app, double x, double y);
+bool navbox_motion(app_state_t *app, double x);
+bool navbox_release(app_state_t *app);
 bool navbox_click(app_state_t *app, double x, double y);
 bool navbox_escape(app_state_t *app);
 bool edge_press_motion(app_state_t *app, double x, double y);

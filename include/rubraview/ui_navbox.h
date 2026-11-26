@@ -36,6 +36,8 @@ typedef enum rubraview_navbox_part {
     RUBRAVIEW_NAVBOX_COPY,          /* RV-299: the file on screen copied to the default folder (as G C C), a row under the pairs */
     RUBRAVIEW_NAVBOX_MOVE,          /* RV-299: moved there (as G M M) */
     RUBRAVIEW_NAVBOX_UNDO,          /* RFC-0010 §5: the last copy, move or rename undone (as Z), right of Move */
+    RUBRAVIEW_NAVBOX_MUTE,          /* R358: a film or music only, the sound off or on, left of the volume */
+    RUBRAVIEW_NAVBOX_VOLUME,        /* R358: a film or music only, the volume pressed or dragged, a row over Copy and Move */
     RUBRAVIEW_NAVBOX_PARTS,
 } rubraview_navbox_part_t;
 
@@ -55,6 +57,9 @@ rubraview_rect_t rubraview_navbox_middle(double view_w, double view_h);
 rubraview_navbox_t rubraview_navbox_place(double px, double py, double view_w, double view_h, double dpi_scale, bool media);
 
 rubraview_rect_t rubraview_navbox_part_rect(const rubraview_navbox_t *nav, rubraview_navbox_part_t part);
+
+/** R358: the volume (0..100, whole) at x along the volume bar. */
+double rubraview_navbox_volume_at(const rubraview_navbox_t *nav, double x);
 
 /** The part under the point; NONE outside the box or between its parts. */
 rubraview_navbox_part_t rubraview_navbox_hit(const rubraview_navbox_t *nav, double px, double py);

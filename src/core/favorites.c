@@ -108,3 +108,19 @@ bool rubraview_favorites_move(rubraview_favorites_t *favorites, size_t from, siz
     favorites->names[to] = name;
     return true;
 }
+
+bool rubraview_favorites_group(rubraview_favorites_t *favorites, const bool *is_folder) {
+    if (!favorites || !is_folder) return false;
+    proven_u8str_view_t paths[RUBRAVIEW_FAVORITES_MAX], names[RUBRAVIEW_FAVORITES_MAX];
+    size_t n = favorites->count < RUBRAVIEW_FAVORITES_MAX ? favorites->count : RUBRAVIEW_FAVORITES_MAX, k = 0;
+    bool changed = false;
+    for (int pass = 0; pass < 2; ++pass)
+        for (size_t i = 0; i < n; ++i) {
+            if (is_folder[i] != (pass == 0)) continue;
+            changed |= k != i;
+            paths[k] = favorites->paths[i];
+            names[k++] = favorites->names[i];
+        }
+    for (size_t i = 0; i < n; ++i) { favorites->paths[i] = paths[i]; favorites->names[i] = names[i]; }
+    return changed;
+}

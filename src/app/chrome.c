@@ -32,7 +32,9 @@ static const struct { const char *words, *action; int32_t group; } TMENU[] = {
 
 /* RV-287 (owner, 2026-11-15: "이 메뉴에서 슬라이드 쇼와 그림 보정은 불필요한 항목이고, 탐색기 메뉴와 구 탐색기 메뉴 항목은
    파일관리 모드에서 우클릭해서 떠야 할 항목이니 사라지게"): the right click's items the ☰ leaves out. */
-static const char *const TMENU_NOT[] = { "toggle_slideshow", "open_edit", "explorer_menu", "explorer_menu_classic", "explorer_apps" };
+/* R355 (owner, 2026-11-26: "재생소리 밑의 무작위 Ctrl+R 기능은 툴바 아이콘에서 처리하니 없애도"): Shuffle too */
+static const char *const TMENU_NOT[] = { "toggle_slideshow", "open_edit", "explorer_menu", "explorer_menu_classic", "explorer_apps",
+                                         "toggle_shuffle" };
 
 /* RV-205 (owner, 2026-10-31: "화면 우클릭 컨텍스트 메뉴의 모든 항목들이 타이틀바 좌측의 메뉴에도 들어가게"): its own rows, then
    the right click's list for what is on screen (the right click leaves out what the Toolbar has; this does not),
@@ -85,7 +87,7 @@ static size_t tmenu_rows_flat(const app_state_t *app, tmenu_row_t *rows) {
 }
 
 /* RV-246: an action's first key, as the Keys page names it ("Ctrl+Q"), for the menu's small print. */
-static proven_u8str_view_t tmenu_key_of(const app_state_t *app, proven_u8str_view_t action, char *buffer, size_t capacity) {
+proven_u8str_view_t action_first_key(const app_state_t *app, proven_u8str_view_t action, char *buffer, size_t capacity) {
     for (size_t b = 0; b < app->keymap.count; ++b) {
         const rubraview_key_binding_t *binding = &app->keymap.bindings[b];
         if (!proven_u8str_view_eq(binding->action, action) || binding->combo_count == 0) continue;
@@ -144,7 +146,7 @@ static void tmenu_layout(app_state_t *app, tmenu_layout_t *L) {
         (void)rubraview_pal_render_measure_text(app->renderer, tmenu_words(&L->rows[i], &facts, false, scratch, sizeof scratch), L->size, &tw);
         if (tmenu_asks(L->rows[i].action))
             (void)rubraview_pal_render_measure_text(app->renderer, tmenu_words(&L->rows[i], &facts, true, scratch, sizeof scratch), L->size, &aw);
-        proven_u8str_view_t key = tmenu_key_of(app, L->rows[i].action, keybuf, sizeof keybuf);
+        proven_u8str_view_t key = action_first_key(app, L->rows[i].action, keybuf, sizeof keybuf);
         if (key.size > 0) (void)rubraview_pal_render_measure_text(app->renderer, key, L->size * 0.72, &kw);
         L->widths[i] = fmax(64.0 * dpi, 12.0 * dpi + fmax(tw, aw) + (kw > 0.0 ? 16.0 * dpi + kw : 0.0) + 14.0 * dpi);
     }
@@ -251,7 +253,7 @@ static void draw_tmenu_in(app_state_t *app) {
         proven_u8str_view_t shown = k > 0 ? (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k < sizeof(line) ? (size_t)k : sizeof(line) - 1 } : text;
         rubraview_pal_rect_t words = { r.x + 12.0 * dpi, r.y, r.width - 14.0 * dpi, r.height };
         char keybuf[48];
-        proven_u8str_view_t key = tmenu_key_of(app, L.rows[i].action, keybuf, sizeof keybuf);
+        proven_u8str_view_t key = action_first_key(app, L.rows[i].action, keybuf, sizeof keybuf);
         if (key.size > 0) {   /* RV-246: its key in small print at the right */
             double ks = size * 0.72, kw = 0.0;
             (void)rubraview_pal_render_measure_text(app->renderer, key, ks, &kw);

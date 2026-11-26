@@ -27,7 +27,6 @@ static void tools_act(app_state_t *app, double x, double y, double dpi, double w
             case PICKER_TOOL_SELECT: favpop_close(app); chooser_open_picker_select(app, t.x, t.y + t.height, t.y); break;
             case PICKER_TOOL_SORT:   favpop_close(app); chooser_open_sort(app, t.x, t.y + t.height, t.y); break;
             case PICKER_TOOL_SORT_DIR: favpop_close(app); picker_toggle_sort_dir(app); break;
-            case PICKER_TOOL_FOLDERS_FIRST: favpop_close(app); picker_toggle_folders_first(app); break;
             case PICKER_TOOL_VIEW:   favpop_close(app); chooser_open_picker_view(app, t.x, t.y + t.height, t.y); break;
             case PICKER_TOOL_FILTER: {
                 favpop_close(app);
@@ -103,6 +102,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (foldercard_motion(app, event->mouse.x)) { app->pointer_x = event->mouse.x; app->pointer_y = event->mouse.y; break; }   /* RV-296 */
             if (rename_field_drag(app, event->mouse.x, event->mouse.y)) { app->pointer_x = event->mouse.x; app->pointer_y = event->mouse.y; break; }   /* RV-293 */
             if (volpop_motion(app, event->mouse.x, event->mouse.y)) break;   /* RV-237: the volume's bar dragged */
+            if (navbox_motion(app, event->mouse.x)) { app->pointer_x = event->mouse.x; app->pointer_y = event->mouse.y; break; }   /* R358 */
             if (edge_press_motion(app, event->mouse.x, event->mouse.y)) break;   /* RV-285: a side held, along its column */
             if (card_motion(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y)) {   /* RV-265: the card moved or sized */
                 app->pointer_x = event->mouse.x;
@@ -614,6 +614,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             foldercard_release(app);   /* RV-296 */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && titlebar_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-257 */
             if (volpop_release(app)) break;   /* RV-237 */
+            if (navbox_release(app)) break;   /* R358 */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && edge_press_release(app, event->mouse.x, event->mouse.y)) break;   /* RV-285 */
             if (card_release(app, CARD_HOST_MAIN)) {   /* RV-265 */
                 rubraview_cursor_shape_t cur = card_hover_cursor(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y);

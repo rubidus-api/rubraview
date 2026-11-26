@@ -348,9 +348,6 @@ proven_u8str_view_t picker_tool_label(const app_state_t *app, int which, char *b
         case PICKER_TOOL_SORT_DIR:
             n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(desc ? "\xE2\x96\xBC" : "\xE2\x96\xB2"));
             break;
-        case PICKER_TOOL_FOLDERS_FIRST:
-            n = rubraview_fmt(buf, cap, "{}", PROVEN_ARG(picker_folders_first(app) ? T("Folders first") : T("Files first")));
-            break;
         case PICKER_TOOL_VIEW:
             n = rubraview_fmt(buf, cap, "{} \xE2\x96\xBE", PROVEN_ARG(T("View")));
             break;
@@ -572,6 +569,7 @@ void favpop_toggle(app_state_t *app) {
     app->favpop_drag_pane = 0;
     app->favpop_drag_moved = false;
     if (app->favpop_open) {
+        favorites_reload(app);   /* R357 */
         chooser_close(app);
         ctx_close(app);
     }
@@ -616,14 +614,62 @@ void favpop_sb_to(app_state_t *app, int pane, size_t first, double win_w, double
     }
 }
 
+/* R359: the files the star row's right half would add: those picked, or the one under the focus; none inside an
+   archive or a book (not files on disk). Their places in the listing into `out` (may be NULL). */
+size_t favpop_picked_files(const app_state_t *app, size_t *out, size_t cap) {
+    if (app->picker_in_book || picker_in_archive(app)) return 0;
+    size_t n = 0;
+    for (size_t i = 0; i < app->picker_listing.count; ++i) {
+        if (!app->picker_selected || !app->picker_selected[i] || app->picker_listing.entries[i].is_directory) continue;
+        if (out && n < cap) out[n] = i;
+        n++;
+    }
+    size_t f = app->picker.focus;
+    if (n == 0 && f < app->picker_listing.count && !app->picker_listing.entries[f].is_directory && !picker_is_up(app, f)) {
+        if (out && cap) out[0] = f;
+        n = 1;
+    }
+    return n;
+}
+
+void favorites_add_picked(app_state_t *app) {
+    size_t at[RUBRAVIEW_FAVORITES_MAX];
+    size_t n = favpop_picked_files(app, at, RUBRAVIEW_FAVORITES_MAX), added = 0, had = 0;
+    if (n == 0) { osd_say(app, TU8("pick some files first")); return; }
+    for (size_t k = 0; k < n && k < RUBRAVIEW_FAVORITES_MAX; ++k) {
+        proven_u8str_view_t path = app->picker_listing.entries[at[k]].path;
+        if (rubraview_favorites_contains(&app->favorites, path)) { had++; continue; }
+        if (!favorite_toggle_path(app, path)) break;   /* full: it said so */
+        added++;
+    }
+    char line[120];
+    rubraview_fmt(line, sizeof line, T("{} added to favourites, {} there already"), PROVEN_ARG(added), PROVEN_ARG(had));
+    if (added + had > 0) osd_say(app, cstr(line));
+    if (app->favwin.open) favwin_build(app);
+}
+
 static void favpop_activate_fav(app_state_t *app, size_t idx) {
     if (idx >= app->favorites.count) return;
     rubraview_fs_entry_t st;
     proven_u8str_view_t path = app_keep(app, app->favorites.paths[idx]);
     favpop_close(app);
     if (rubraview_pal_fs_stat(app->arena, path, &st) && !st.is_directory) {
-        app->picker_open = false;
-        open_path_or_tree(app, path);
+        /* R359 (owner, 2026-11-26: "즐겨찾기 안의 파일을 선택하면 해당 파일 위치 폴더로 가서 해당 파일 선택한 상태로"): its
+           folder, the file picked and in view */
+        picker_navigate(app, rubraview_path_dirname(path));
+        proven_u8str_view_t name = rubraview_path_basename(path);
+        for (size_t i = 0; i < app->picker_listing.count; ++i) {
+            if (!proven_u8str_view_eq(app->picker_listing.entries[i].name, name)) continue;
+            if (app->picker_selected) {
+                for (size_t k = 0; k < app->picker_listing.count; ++k) app->picker_selected[k] = false;
+                app->picker_selected[i] = true;
+            }
+            app->picker.focus = i;
+            rubraview_picker_reveal_focus(&app->picker);
+            return;
+        }
+        app->picker.focus = 0;
+        osd_say(app, TU8("that file is not listed here (the filter, or the files shown?)"));
     } else {
         picker_navigate(app, path);
         app->picker.focus = 0;
@@ -668,6 +714,10 @@ bool favpop_press(app_state_t *app, double x, double y, bool right) {
             return true;
         case RUBRAVIEW_FAVPOP_HIT_STAR_TOGGLE:
             picker_toggle_favorite(app);
+            favpop_clamp(app, (double)w, (double)h, dpi);
+            return true;
+        case RUBRAVIEW_FAVPOP_HIT_FILE_STAR:   /* R359 */
+            favorites_add_picked(app);
             favpop_clamp(app, (double)w, (double)h, dpi);
             return true;
         case RUBRAVIEW_FAVPOP_HIT_FAV_ROW:

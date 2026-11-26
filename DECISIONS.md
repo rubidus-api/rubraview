@@ -4492,3 +4492,33 @@ Do not store credentials, private infrastructure details, personal data, private
   - Move here with entries asks first (`basket_move_ask`, drawn over everything; Enter, Esc, or its two buttons). Confirmed, a group counts as arrived when it ended DONE with nothing failed, skipped or asked; after an archive's last group its arrived entries go out of it by `dragout_take_out` (the drag's cut, `rubraview_arcedit_run` DELETE, the archive replaced and the old one kept as `.rvold` for Ctrl+Z) and, when it was replaced, out of the basket. Anything else stays in the archive and the basket.
   - The file job's end takes moved files out of the basket by their paths, not their places, since a basket now mixes kinds.
 - Consequences: R353; T530 (`test_basket`), `check-lang.py` (8 new texts; the old refusal's removed), `gate.sh t2`, `make win64`, VM T531 PASS. A name already in the folder leaves that entry in its archive until moved again; Ctrl+Z restores only the last archive written again.
+
+## D-403: Folders First / Files First Goes Into The View Menu (`R354`)
+
+- Date: 2026-11-26
+- Status: Accepted (owner, 2026-11-26: "파일 브라우저의 파일 먼저/폴더 먼저 버튼은 그 옆의 보기 버튼 밑에 통합해 주세요.")
+- Context: R346 (D-394) gave folders-or-files ordering its own toggle chip on the open-file screen's tool row, beside `View ▾`; the row is crowded on a narrow window.
+- Decision: the chip (`PICKER_TOOL_FOLDERS_FIRST`) is removed; `chooser_open_picker_view` adds `Folders first` (value 4) and `Files first` (value 5), ticked as `files.picker_folders_first` is, and a choice of the other calls `picker_toggle_folders_first`. The rows show inside a book too, where the file rows do not.
+- Consequences: R354; `check-lang.py` (no new texts), `gate.sh t2`, `make win64`, VM T532.
+
+## D-404: The Owner's UI Batch Of 2026-11-26: Menu, Info Counts, Favourites, Navigator Volume, Start Guide (`R355`-`R360`)
+
+- Date: 2026-11-26
+- Status: Accepted (owner, 2026-11-26, six requests quoted in R355-R360)
+- Context: the requests came while R354 was being checked; each is small, and all touch the screens a reader meets first.
+- Decision:
+  - R355: `toggle_info` is in `RUBRAVIEW_MENUCAT_FILES`; `toggle_shuffle` joins `TMENU_NOT` (the right click and the Toolbar keep it).
+  - R356: the Info window's counts through `T("{} items, {} in all")` and `T("{} items")`.
+  - R357: the menu's and the file browser's favourites were already one store in a window (seen on the VM); what was added is reading `favorites.ini` again when the ★ popup or the list window opens, so two windows agree. A zero-byte file clears the list; an unreadable one keeps what is held.
+  - R358: the volume row only over a film or music (a picture has no sound); the bar's value 0-100 by `rubraview_navbox_volume_at`, set by `volume_set` (which unmutes, as the volume's own bar does).
+  - R359: folders above files is an order kept in the list itself (grouped when a list of them opens, on adding and on moving, not at startup, where a favourite on an offline share could hold the window; a move across the kinds refused), so every view of it agrees without index mapping. One that cannot be reached is a folder when its name has no extension. A file chosen in the ★ popup is shown picked in its folder; the ☰ list window still opens it.
+  - R360: the guide is drawn as a base layer with the logo (under the boxes, the ☰ menu and the list windows), not a window: it needs no closing and goes when anything opens. Arrows are glyphs (▲ ▶ ◀; no line primitive was added). Each label is dropped when its target is off screen or it would cover the card.
+- Consequences: R355-R360; `test_ui_ctxmenu`, `test_ui_navbox` (T533), `test_favorites` (T534), `test_ui_browse`; `check-lang.py` (10 new texts); `gate.sh t2`, `make win64`; VM T532, T535.
+
+## D-405: The Project Site Prepared As A gh-pages Branch Of One Commit
+
+- Date: 2026-11-26
+- Status: Accepted (owner, 2026-11-26: "다 하고 나면 커밋 푸쉬 릴리즈 하고, 내가 브랜치를 gh-pages로 변경할 수 있게 준비해 주세요")
+- Context: Pages serves the public repository's main `/docs` (the live page is byte for byte `docs/index.html`). The workspace's other projects (rubrapack, lowent_lang) publish Pages from a `gh-pages` branch of one commit.
+- Decision: `ops/scripts/pages-publish.sh` makes one commit whose tree is HEAD's `docs/` (refused while `docs/` has uncommitted changes), checks every file for private paths, names and tokens, and with `--push` force-pushes it as `gh-pages` to `public.manifest`'s repository. No `.nojekyll`: GitHub keeps building the site as it does from `/docs`, so the manual's `.md` pages keep their `.html` addresses. `docs/` stays on main: the Store's privacy policy links to `main/docs/manual/privacy-policy.md`. The owner switches Settings › Pages to `gh-pages`, `/ (root)`; after each release the script is run again.
+- Consequences: one more step after a release (`sh ops/scripts/pages-publish.sh --push`) until a publisher command does it.

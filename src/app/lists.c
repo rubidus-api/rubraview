@@ -1036,6 +1036,34 @@ bool recentwin_release(app_state_t *app) {
    open-file screen, a file in the viewer. The bar: all, Add this (the file on screen), Remove. ---- */
 
 /* In or out of the favourites, written at once (another viewer's changes read first, D-99). */
+/* R359: a favourite is a folder (a drive too); one that cannot be reached now (an unplugged drive, a share offline)
+   is taken by its name: no extension, a folder */
+bool favorite_is_folder(app_state_t *app, proven_u8str_view_t path) {
+    rubraview_fs_entry_t st;
+    if (rubraview_pal_fs_stat(app->arena, path, &st)) return st.is_directory;
+    return rubraview_path_ext(path).size == 0;
+}
+
+/* R359: the folders above the files, each kind in its own order. True when the order changed. */
+bool favorites_grouped(app_state_t *app) {
+    bool folder[RUBRAVIEW_FAVORITES_MAX] = { false };
+    for (size_t i = 0; i < app->favorites.count && i < RUBRAVIEW_FAVORITES_MAX; ++i) folder[i] = favorite_is_folder(app, app->favorites.paths[i]);
+    return rubraview_favorites_group(&app->favorites, folder);
+}
+
+/* R357 (owner, 2026-11-26: "메뉴 버튼 밑의 즐겨찾기나 즐겨찾기에 추가는, 파일 브라우저 밑의 즐겨찾기와 동일한 데이터로 연동"):
+   the one favorites.ini read again when a list of them opens, so what another window added or took out shows. */
+void favorites_reload(app_state_t *app) {
+    if (app->favorites_path.size == 0) return;
+    bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
+    proven_u8str_view_t text = rubraview_pal_fs_read_file(app->arena, app->favorites_path, 64u * 1024u);
+    if (locked) rubraview_pal_config_unlock();
+    rubraview_fs_entry_t st;
+    if (text.size > 0) app->favorites = rubraview_favorites_parse(app->arena, text);
+    else if (rubraview_pal_fs_stat(app->arena, app->favorites_path, &st) && st.size_bytes == 0) app->favorites = (rubraview_favorites_t){ 0 };   /* emptied there, not a failed read */
+    (void)favorites_grouped(app);
+}
+
 bool favorite_toggle_path(app_state_t *app, proven_u8str_view_t path) {
     if (path.size == 0) return false;
     bool locked = rubraview_pal_config_lock(CONFIG_LOCK_MS);
@@ -1045,6 +1073,7 @@ bool favorite_toggle_path(app_state_t *app, proven_u8str_view_t path) {
     }
     bool was = rubraview_favorites_contains(&app->favorites, path);
     bool now = rubraview_favorites_toggle(app->arena, &app->favorites, app_keep(app, path));
+    (void)favorites_grouped(app);   /* R359: a new folder goes up among the folders */
     bool written = (!was && !now) || app->favorites_path.size == 0 ||
         rubraview_pal_fs_write_file_atomic(app->favorites_path, rubraview_favorites_serialize(app->arena, &app->favorites));
     if (locked) rubraview_pal_config_unlock();
@@ -1072,6 +1101,7 @@ void favwin_toggle(app_state_t *app) {
         app->favwin.open = true;
     }
     app->favwin.editable = true;
+    favorites_reload(app);
     for (size_t i = 0; i < RUBRAVIEW_FAVORITES_MAX; ++i) app->fav_checked[i] = false;
     favwin_build(app);
     int32_t w = 0, h = 0;
@@ -1212,6 +1242,10 @@ bool favwin_press(app_state_t *app, double x, double y) {
             bool up = rubraview_listwin_hit(lw, x, y, count, &index) == RUBRAVIEW_LISTWIN_ROW_UP;
             if (index >= count || (up && index == 0) || (!up && index + 1 >= count)) break;
             size_t to = up ? index - 1 : index + 1;
+            if (favorite_is_folder(app, app->favorites.paths[index]) != favorite_is_folder(app, app->favorites.paths[to])) {
+                osd_say(app, TU8("folders stay above files"));   /* R359 */
+                break;
+            }
             if (rubraview_favorites_move(&app->favorites, index, to)) {
                 bool c = app->fav_checked[index];
                 app->fav_checked[index] = app->fav_checked[to];

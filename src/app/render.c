@@ -1228,9 +1228,25 @@ static void draw_favpop(app_state_t *app, double win_w, double win_h) {
         int sn = can_star ? rubraview_fmt(sbuf, sizeof(sbuf), "{}  {}", PROVEN_ARG(starred ? "\xE2\x98\x85" : "\xE2\x98\x86"),
                                           PROVEN_ARG(starred ? T("Remove current folder") : T("Add current folder")))
                           : rubraview_fmt(sbuf, sizeof(sbuf), "{}", PROVEN_ARG(T("Open a folder to star it")));
+        char sfit[160];
         rubraview_pal_rect_t tr = { lo.star_btn.x + 12.0 * dpi, lo.star_btn.y, fmax(0.0, lo.star_btn.width - 24.0 * dpi), lo.star_btn.height };
-        rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ (const proven_byte_t *)sbuf, sn > 0 ? (size_t)sn : 0 },
-                                       tr, 14.0 * dpi, can_star ? COLOR_TEXT : 0x80B8B8B8u, RUBRAVIEW_TEXT_LEFT);
+        proven_u8str_view_t drawn = fit_text_measured(app->renderer, sfit, sizeof(sfit), (proven_u8str_view_t){ (const proven_byte_t *)sbuf, sn > 0 ? (size_t)sn : 0 },
+                                                      tr.width, 14.0 * dpi);
+        rubraview_pal_render_draw_text(app->renderer, drawn, tr, 14.0 * dpi, can_star ? COLOR_TEXT : 0x80B8B8B8u, RUBRAVIEW_TEXT_LEFT);
+    }
+
+    {   /* R359: the picked files added */
+        size_t files = favpop_picked_files(app, NULL, 0);
+        bool over_file = files && rubraview_rect_contains(lo.file_btn, app->pointer_x, app->pointer_y);
+        rubraview_pal_render_fill_rect(app->renderer, pal_r(lo.file_btn), !files ? 0xFF1A1A1Au : over_file ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, pal_r(lo.file_btn), COLOR_BOX_BORDER, 1.0, 3.0);
+        char fbuf[160], ffit[160];
+        int fn = files ? rubraview_fmt(fbuf, sizeof(fbuf), "\xE2\x98\x86  {} ({})", PROVEN_ARG(T("Add picked files")), PROVEN_ARG(files))
+                       : rubraview_fmt(fbuf, sizeof(fbuf), "{}", PROVEN_ARG(T("Pick files to star them")));
+        rubraview_pal_rect_t tr = { lo.file_btn.x + 12.0 * dpi, lo.file_btn.y, fmax(0.0, lo.file_btn.width - 24.0 * dpi), lo.file_btn.height };
+        proven_u8str_view_t drawn = fit_text_measured(app->renderer, ffit, sizeof(ffit), (proven_u8str_view_t){ (const proven_byte_t *)fbuf, fn > 0 ? (size_t)fn : 0 },
+                                                      tr.width, 14.0 * dpi);
+        rubraview_pal_render_draw_text(app->renderer, drawn, tr, 14.0 * dpi, files ? COLOR_TEXT : 0x80B8B8B8u, RUBRAVIEW_TEXT_LEFT);
     }
 
     size_t fav_count = favpop_fav_count(app);
@@ -1610,6 +1626,11 @@ static void draw_sub_list(app_state_t *app) {
 
 /* 1.25.0 (owner, 2026-10-20: "아무 옵션 없이 그냥 rubraview가 시작하면 rubraview를 알리는 이미지를 빈 배경 중앙에
    가로 폭의 30% 정도 크기의 정사각형으로"): the program's icon, its largest, in the middle of an empty window. */
+/* R360: the start screen's guide shows (no file, no film, no text, the open-file screen closed) */
+static bool start_guide_on(const app_state_t *app) {
+    return page_count(app) == 0 && !app->media && !app->picker_open && !text_active(app);
+}
+
 static void draw_logo(app_state_t *app, int32_t win_w, int32_t win_h) {
     enum { LOGO = 256 };
     if (app->logo_tex && app->logo_back != COLOR_CANVAS) {   /* the ground changed in Settings: laid again */
@@ -1637,13 +1658,84 @@ static void draw_logo(app_state_t *app, int32_t win_w, int32_t win_h) {
         }
     }
     if (!app->logo_tex) return;
-    double side = (double)win_w * 0.30;
-    if (side > (double)win_h * 0.6) side = (double)win_h * 0.6;
+    /* R360: smaller and higher, the guide's card under it */
+    double side = (double)win_w * 0.22;
+    if (side > (double)win_h * 0.34) side = (double)win_h * 0.34;
     double k = side / (double)LOGO;
     rubraview_pal_render_draw_texture(app->renderer, app->logo_tex,
         rubraview_mat3x2_multiply(rubraview_mat3x2_scale(k, k),
-                                  rubraview_mat3x2_translate(((double)win_w - side) * 0.5, ((double)win_h - side) * 0.5)),
+                                  rubraview_mat3x2_translate(((double)win_w - side) * 0.5, (double)win_h * 0.38 - side * 0.5)),
         RUBRAVIEW_INTERP_HIGH_QUALITY_CUBIC);
+}
+
+/* A see-through label with an arrow glyph pointing at what it names. */
+static void guide_label(app_state_t *app, rubraview_pal_rect_t box, proven_u8str_view_t text, double size, double dpi) {
+    rubraview_pal_render_fill_rect(app->renderer, box, 0xE0262626u, 6.0 * dpi);
+    rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_TILE_CURRENT, 1.5 * dpi, 6.0 * dpi);
+    rubraview_pal_render_draw_text(app->renderer, text, (rubraview_pal_rect_t){ box.x + 10.0 * dpi, box.y, box.width - 20.0 * dpi, box.height },
+                                   size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+}
+
+static bool pal_rects_meet(rubraview_pal_rect_t a, rubraview_pal_rect_t b) {
+    return a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
+/* R360 (owner, 2026-11-26: "기본 화면(눈알 나오는 화면)에서, 뭔가 안내메시지 ... 상단 탭을 가리키거나 플로팅 박스를 가리키는
+   화살표를 표시하거나 중앙 영역에 네모를 그려서 표시하면서 설명 텍스트"): under the logo a card of how to begin, its keys as the
+   keymap has them; an arrow and a label at the title bar's menu and at the floating tools, each only while it is on screen
+   and where it does not cover the card. */
+static void draw_start_guide(app_state_t *app, double win_w, double win_h) {
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    char kopen[48], khelp[48], kset[48], text[600];
+    proven_u8str_view_t o = action_first_key(app, PROVEN_LIT("open_picker"), kopen, sizeof kopen);
+    proven_u8str_view_t hl = action_first_key(app, PROVEN_LIT("toggle_help"), khelp, sizeof khelp);
+    proven_u8str_view_t st = action_first_key(app, PROVEN_LIT("open_settings"), kset, sizeof kset);
+    int n = rubraview_fmt(text, sizeof text, T("Drop a picture, a film, a song, an archive or a folder here to open it\n{}: choose one in the file browser\n{}: help    {}: settings"),
+                          PROVEN_ARG(o.size ? o : TU8("Open")), PROVEN_ARG(hl.size ? hl : TU8("Help")), PROVEN_ARG(st.size ? st : TU8("Settings")));
+    proven_u8str_view_t body = { (const proven_byte_t *)text, n > 0 ? (size_t)n : 0 };
+    double size = 15.0 * dpi, cw = fmin(620.0 * dpi, win_w - 32.0 * dpi), tw = 0.0, th = 0.0;
+    rubraview_pal_rect_t card = { 0 };
+    if (cw > 160.0 * dpi && rubraview_pal_render_measure_text_wrapped(app->renderer, body, size, cw - 40.0 * dpi, &tw, &th)) {
+        double logo_side = fmin(win_w * 0.22, win_h * 0.34);
+        double y = win_h * 0.38 + logo_side * 0.5 + 18.0 * dpi, h = th + 32.0 * dpi;
+        if (y + h > win_h - 8.0 * dpi) y = fmax(content_top(app) + 8.0 * dpi, win_h - 8.0 * dpi - h);
+        card = (rubraview_pal_rect_t){ (win_w - cw) * 0.5, y, cw, h };
+        rubraview_pal_render_fill_rect(app->renderer, card, 0xE01E1E1Eu, 10.0 * dpi);
+        rubraview_pal_render_stroke_rect(app->renderer, card, 0x80FFFFFFu, 1.0 * dpi, 10.0 * dpi);
+        rubraview_pal_render_draw_text(app->renderer, body, (rubraview_pal_rect_t){ card.x + 20.0 * dpi, card.y + 16.0 * dpi, card.width - 40.0 * dpi, th },
+                                       size, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+    double lsize = 13.5 * dpi, lh = 34.0 * dpi, arrow = 20.0 * dpi;
+    if (app->titlebar.shown) {   /* ▲ under ☰, its label under the arrow */
+        rubraview_rect_t mr = rubraview_titlebar_button_rect(&app->titlebar, RUBRAVIEW_TITLEBAR_MENU, win_w);
+        proven_u8str_view_t words = TU8("Menu: everything the viewer does");
+        double w = 0.0;
+        if (rubraview_pal_render_measure_text(app->renderer, words, lsize, &w)) {
+            rubraview_pal_rect_t a = { mr.x, mr.y + mr.height + 2.0 * dpi, mr.width, arrow };
+            rubraview_pal_rect_t box = { mr.x + 4.0 * dpi, a.y + a.height, w + 24.0 * dpi, lh };
+            if (box.x + box.width < win_w - 8.0 * dpi && !pal_rects_meet(box, card)) {
+                rubraview_pal_render_draw_text(app->renderer, PROVEN_LIT("\xE2\x96\xB2"), a, arrow * 0.8, COLOR_TILE_CURRENT, RUBRAVIEW_TEXT_CENTER);
+                guide_label(app, box, words, lsize, dpi);
+            }
+        }
+    }
+    if (!app->chrome_hidden && app->toolbox.state != RUBRAVIEW_BOX_DETACHED) {   /* ▶ beside the floating tools, on their open side */
+        rubraview_tile_metrics_t m = tile_metrics(dpi);
+        rubraview_rect_t tb = rubraview_box_bounds(&app->toolbox, &m);
+        proven_u8str_view_t words = TU8("Floating tools: point at them to open, drag the handle to move");
+        double w = 0.0;
+        if (tb.width > 0.0 && rubraview_pal_render_measure_text(app->renderer, words, lsize, &w)) {
+            bool left_of = tb.x + tb.width * 0.5 > win_w * 0.5;
+            double bw = w + 24.0 * dpi, y = tb.y + tb.height * 0.5 - lh * 0.5;
+            rubraview_pal_rect_t a = { left_of ? tb.x - arrow - 4.0 * dpi : tb.x + tb.width + 4.0 * dpi, y, arrow, lh };
+            rubraview_pal_rect_t box = { left_of ? a.x - bw - 2.0 * dpi : a.x + a.width + 2.0 * dpi, y, bw, lh };
+            if (box.x > 4.0 * dpi && box.x + box.width < win_w - 4.0 * dpi && box.y > content_top(app) && !pal_rects_meet(box, card)) {
+                rubraview_pal_render_draw_text(app->renderer, left_of ? PROVEN_LIT("\xE2\x96\xB6") : PROVEN_LIT("\xE2\x97\x80"), a, arrow * 0.8,
+                                               COLOR_TILE_CURRENT, RUBRAVIEW_TEXT_CENTER);
+                guide_label(app, box, words, lsize, dpi);
+            }
+        }
+    }
 }
 
 void render_frame(app_state_t *app) {
@@ -1675,6 +1767,7 @@ void render_frame(app_state_t *app) {
         draw_text_page(app, win_w, win_h);   /* RFC-0005 */
     } else if (page_count(app) == 0 && !app->media && !app->picker_open) {
         draw_logo(app, win_w, win_h);   /* 1.25.0 */
+        if (start_guide_on(app)) draw_start_guide(app, (double)win_w, (double)win_h);   /* R360: a base layer, under the boxes, menus and lists */
     } else if (app->layout.count > 0) {
         /* §3.2.5: while a transition runs, both spreads are on screen —
            the old one fading out under the new one fading in. M3 had the

@@ -92,6 +92,11 @@ bool navbox_press(app_state_t *app, double x, double y) {
         note_activity(app);
         return true;
     }
+    if (part == RUBRAVIEW_NAVBOX_VOLUME) {   /* R358: pressed, then dragged */
+        app->navbox_vol_drag = true;
+        volume_set(app, rubraview_navbox_volume_at(&app->navbox, x));
+        return true;
+    }
     if (part == RUBRAVIEW_NAVBOX_COPY || part == RUBRAVIEW_NAVBOX_MOVE) {   /* RV-299: straight to the default folder */
         app->navbox_shown = false;
         foldercard_put_default(app, part == RUBRAVIEW_NAVBOX_MOVE);
@@ -108,6 +113,21 @@ bool navbox_press(app_state_t *app, double x, double y) {
     }
     handle_action(app, cstr(rubraview_navbox_action(part, app->navbox.media)));
     note_activity(app);
+    return true;
+}
+
+/* R358: the volume bar dragged; let go. */
+bool navbox_motion(app_state_t *app, double x) {
+    if (!app->navbox_vol_drag) return false;
+    if (!app->navbox_shown) { app->navbox_vol_drag = false; return false; }
+    app->navbox_near_at = rubraview_pal_time_now_seconds();
+    volume_set(app, rubraview_navbox_volume_at(&app->navbox, x));
+    return true;
+}
+
+bool navbox_release(app_state_t *app) {
+    if (!app->navbox_vol_drag) return false;
+    app->navbox_vol_drag = false;
     return true;
 }
 
@@ -166,6 +186,31 @@ void draw_navbox(app_state_t *app) {
         rubraview_pal_render_fill_rect(r, pb, over == RUBRAVIEW_NAVBOX_PLAY ? 0x50FFFFFFu : COLOR_TILE_FILL, 4.0 * dpi);
         if (!rubraview_pal_render_draw_icon(r, app->media_paused ? 0xE768 : 0xE769, pb, pb.height * 0.5, COLOR_TEXT))
             rubraview_pal_render_draw_text(r, app->media_paused ? PROVEN_LIT(">") : PROVEN_LIT("||"), pb, pb.height * 0.55, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+
+    if (media) {   /* R358: mute, then the volume's bar and its percent */
+        bool muted = rubraview_settings_get(&app->settings, PROVEN_LIT("audio"), PROVEN_LIT("mute")) > 0.5;
+        rubraview_rect_t mr = rubraview_navbox_part_rect(nav, RUBRAVIEW_NAVBOX_MUTE);
+        rubraview_pal_rect_t mb = { mr.x, mr.y, mr.width, mr.height };
+        rubraview_pal_render_fill_rect(r, mb, over == RUBRAVIEW_NAVBOX_MUTE ? 0x50FFFFFFu : COLOR_TILE_FILL, 4.0 * dpi);
+        rubraview_pal_render_stroke_rect(r, mb, COLOR_BOX_BORDER, 1.0, 4.0 * dpi);
+        if (!rubraview_pal_render_draw_icon(r, muted ? 0xE74F : 0xE767, mb, mb.height * 0.5, COLOR_TEXT))
+            rubraview_pal_render_draw_text(r, muted ? PROVEN_LIT("x") : PROVEN_LIT("))"), mb, mb.height * 0.5, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+        rubraview_rect_t vr = rubraview_navbox_part_rect(nav, RUBRAVIEW_NAVBOX_VOLUME);
+        int pct = volume_percent(app);
+        double vf = (muted ? 0.0 : pct) / 100.0;
+        vf = vf < 0.0 ? 0.0 : vf > 1.0 ? 1.0 : vf;
+        rubraview_pal_rect_t vt = { vr.x, vr.y + vr.height * 0.5 - 3.0 * dpi, vr.width, 6.0 * dpi };
+        rubraview_pal_render_fill_rect(r, vt, 0x40FFFFFFu, 3.0 * dpi);
+        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ vt.x, vt.y, vt.width * vf, vt.height }, COLOR_TILE_CURRENT, 3.0 * dpi);
+        double vk = 12.0 * dpi;
+        rubraview_pal_render_fill_rect(r, (rubraview_pal_rect_t){ vt.x + vt.width * vf - vk * 0.5, vr.y + vr.height * 0.5 - vk * 0.5, vk, vk },
+                                       over == RUBRAVIEW_NAVBOX_VOLUME || app->navbox_vol_drag ? 0xFFFFFFFFu : 0xFFD8D8D8u, vk * 0.5);
+        char pw[24];
+        int pn = rubraview_fmt(pw, sizeof pw, "{}%", PROVEN_ARG(pct));
+        if (pn > 0) rubraview_pal_render_draw_text(r, (proven_u8str_view_t){ (const proven_byte_t *)pw, (size_t)pn },
+                                                   (rubraview_pal_rect_t){ vr.x + vr.width, vr.y, nav->box.x + nav->box.width - vr.x - vr.width - nav->pad * 0.5, vr.height },
+                                                   12.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_RIGHT);
     }
 
     /* the X */

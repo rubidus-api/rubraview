@@ -160,6 +160,7 @@ typedef enum rubraview_favpop_hit {
     RUBRAVIEW_FAVPOP_HIT_PLACE_ROW,
     RUBRAVIEW_FAVPOP_HIT_LEFT_SB,
     RUBRAVIEW_FAVPOP_HIT_RIGHT_SB,
+    RUBRAVIEW_FAVPOP_HIT_FILE_STAR,   /* R359: the picked files added */
 } rubraview_favpop_hit_t;
 
 typedef struct rubraview_favpop_layout {
@@ -171,7 +172,8 @@ typedef struct rubraview_favpop_layout {
     rubraview_rect_t right_pane;
     rubraview_rect_t divider;
     rubraview_rect_t left_heading;
-    rubraview_rect_t star_btn;
+    rubraview_rect_t star_btn;        /* the folder on screen in or out: the star row's left half */
+    rubraview_rect_t file_btn;        /* R359: the picked files added: its right half */
     rubraview_rect_t left_list;
     rubraview_rect_t left_sb;
     rubraview_rect_t right_heading;

@@ -1,5 +1,6 @@
 #include "rubraview/ui_navbox.h"
 #include "rubraview/lang.h"
+#include <math.h>
 
 /* RV-277: the navigator's geometry (ui_navbox.h). */
 
@@ -20,6 +21,7 @@ rubraview_navbox_t rubraview_navbox_place(double px, double py, double view_w, d
     double inner = nav.pad * 0.2;   /* half the space inside a pair, as part_rect has it */
     double w = 2.0 * nav.pad + 8.0 * nav.button + 4.0 * 2.0 * inner + 3.0 * nav.gap;   /* four pairs (the VM: the last button was on the edge) */
     double h = 2.0 * nav.pad + nav.bar_h + 8.0 * s + nav.button_h + nav.label_h + nav.button_h * 0.8 + nav.pad * 0.5;   /* RV-299: the row */
+    if (media) h += nav.button_h * 0.8 + nav.pad * 0.5;   /* R358: the volume row */
     double x = clampd(px - w * 0.5, 0.0, view_w - w);
     double y = clampd(py - h * 0.5, 0.0, view_h - h);
     nav.box = (rubraview_rect_t){ x, y, w, h };
@@ -38,11 +40,20 @@ rubraview_rect_t rubraview_navbox_part_rect(const rubraview_navbox_t *nav, rubra
         return nav->media ? (rubraview_rect_t){ b.x + nav->pad, b.y + nav->pad, nav->bar_h * 1.5, nav->bar_h } : none;
     if (part == RUBRAVIEW_NAVBOX_BAR)
         return (rubraview_rect_t){ b.x + nav->pad + play_w, b.y + nav->pad, b.width - 3.0 * nav->pad - nav->bar_h - play_w, nav->bar_h };
+    /* R358 (owner, 2026-11-26: "내비버튼에 대해, 볼륨조절바 넣어주세요"): a film or music's volume, a row under the pairs' words */
+    double row_y = b.y + nav->pad + nav->bar_h + nav->pad * 0.8 + nav->button_h + nav->label_h + nav->pad * 0.1;
+    if (part == RUBRAVIEW_NAVBOX_MUTE || part == RUBRAVIEW_NAVBOX_VOLUME) {
+        if (!nav->media) return none;
+        double mute_w = nav->bar_h * 1.5, label_w = nav->pad * 5.0;   /* the percent at its right */
+        if (part == RUBRAVIEW_NAVBOX_MUTE) return (rubraview_rect_t){ b.x + nav->pad, row_y, mute_w, nav->button_h * 0.8 };
+        double x = b.x + 2.0 * nav->pad + mute_w;
+        return (rubraview_rect_t){ x, row_y, b.x + b.width - nav->pad - label_w - x, nav->button_h * 0.8 };
+    }
     if (part == RUBRAVIEW_NAVBOX_COPY || part == RUBRAVIEW_NAVBOX_MOVE || part == RUBRAVIEW_NAVBOX_UNDO) {
         /* RV-299: Copy and Move, two halves of a row under the pairs' words; RFC-0010: Undo, one button wide, at its right */
         double undo_w = nav->button;
         double half = (b.width - 2.0 * nav->pad - 2.0 * nav->gap - undo_w) * 0.5;
-        double y = b.y + nav->pad + nav->bar_h + nav->pad * 0.8 + nav->button_h + nav->label_h + nav->pad * 0.1;
+        double y = row_y + (nav->media ? nav->button_h * 0.8 + nav->pad * 0.5 : 0.0);
         if (part == RUBRAVIEW_NAVBOX_UNDO) return (rubraview_rect_t){ b.x + b.width - nav->pad - undo_w, y, undo_w, nav->button_h * 0.8 };
         return (rubraview_rect_t){ b.x + nav->pad + (part == RUBRAVIEW_NAVBOX_MOVE ? half + nav->gap : 0.0), y, half, nav->button_h * 0.8 };
     }
@@ -52,6 +63,14 @@ rubraview_rect_t rubraview_navbox_part_rect(const rubraview_navbox_t *nav, rubra
     double x = b.x + nav->pad + (double)pair * (2.0 * nav->button + 2.0 * inner + nav->gap) + (double)side * (nav->button + 2.0 * inner);
     double y = b.y + nav->pad + nav->bar_h + nav->pad * 0.8;
     return (rubraview_rect_t){ x, y, nav->button, nav->button_h };
+}
+
+double rubraview_navbox_volume_at(const rubraview_navbox_t *nav, double x) {
+    rubraview_rect_t bar = rubraview_navbox_part_rect(nav, RUBRAVIEW_NAVBOX_VOLUME);
+    if (!(bar.width > 0.0)) return 0.0;
+    double t = (x - bar.x) / bar.width;
+    t = t > 0.0 ? (t < 1.0 ? t : 1.0) : 0.0;
+    return round(t * 100.0);
 }
 
 rubraview_navbox_part_t rubraview_navbox_hit(const rubraview_navbox_t *nav, double px, double py) {
@@ -76,6 +95,7 @@ static const char *const ACTIONS[2][8] = {
 
 const char *rubraview_navbox_action(rubraview_navbox_part_t part, bool media) {
     if (part == RUBRAVIEW_NAVBOX_PLAY) return media ? "media_play_pause" : "";
+    if (part == RUBRAVIEW_NAVBOX_MUTE) return media ? "media_mute" : "";
     if (part < RUBRAVIEW_NAVBOX_PAGE_PREV || part > RUBRAVIEW_NAVBOX_BOOK_NEXT) return "";   /* the bar, the X: the viewer's */
     return ACTIONS[media ? 1 : 0][part - RUBRAVIEW_NAVBOX_PAGE_PREV];
 }

@@ -450,9 +450,10 @@ static void info_add_summary(app_state_t *app, proven_arena_t *a, rubraview_info
     char size[96];
     for (int k = 0; k <= INFO_ALL; ++k) {
         if (app->info_counts[k] == 0) continue;
-        if (k == INFO_FOLDERS) { rubraview_info_addf(a, info, NAME[k], "{}", PROVEN_ARG((unsigned long long)app->info_counts[k])); continue; }
+        /* R356 (owner, 2026-11-26: "27, 57.36MB 이렇게 되는데, 이걸 27개 총 57.36MB 이렇게"): the count and the size in words */
+        if (k == INFO_FOLDERS) { rubraview_info_addf(a, info, NAME[k], T("{} items"), PROVEN_ARG((unsigned long long)app->info_counts[k])); continue; }
         rubraview_info_bytes(size, sizeof(size), app->info_bytes[k]);
-        rubraview_info_addf(a, info, NAME[k], "{}, {}", PROVEN_ARG((unsigned long long)app->info_counts[k]), PROVEN_ARG(size));
+        rubraview_info_addf(a, info, NAME[k], T("{} items, {} in all"), PROVEN_ARG((unsigned long long)app->info_counts[k]), PROVEN_ARG(size));
     }
 }
 

@@ -52,6 +52,10 @@ bool rubraview_favorites_rename(rubraview_favorites_t *favorites, size_t index, 
    closing up behind it. False when either is out of range. */
 bool rubraview_favorites_move(rubraview_favorites_t *favorites, size_t from, size_t to);
 
+/* R359 (owner, 2026-11-26: "즐겨찾기에서 폴더가 목록 위쪽에, 아래에는 파일들이"): the folders (`is_folder[i]`) moved
+   above the files, each kind keeping its own order, names with their paths. True when the order changed. */
+bool rubraview_favorites_group(rubraview_favorites_t *favorites, const bool *is_folder);
+
 #ifdef __cplusplus
 }
 #endif

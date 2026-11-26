@@ -365,6 +365,9 @@ void chooser_open_picker_view(app_state_t *app, double x, double y, double above
         chooser_word(c, 2.0, "{}  {}", PROVEN_ARG(!every ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Viewer's files")));
         chooser_word(c, 3.0, "{}  {}", PROVEN_ARG(every ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Every file")));
     }
+    bool ff = picker_folders_first(app);   /* R354: moved here from its own button on the tool row */
+    chooser_word(c, 4.0, "{}  {}", PROVEN_ARG(ff ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Folders first")));
+    chooser_word(c, 5.0, "{}  {}", PROVEN_ARG(!ff ? "\xE2\x98\x91" : "\xE2\x98\x90"), PROVEN_ARG(T("Files first")));
     c->current = details ? 1 : 0;
     chooser_show(app, CHOOSE_IN_MAIN, x, y, above_y);
 }
@@ -727,6 +730,8 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             else if (val == 1 && !picker_details(app)) picker_button(app, PICKER_BTN_VIEW);
             else if (val == 2 && picker_every_file(app)) picker_toggle_every_file(app);
             else if (val == 3 && !picker_every_file(app)) picker_toggle_every_file(app);
+            else if (val == 4 && !picker_folders_first(app)) picker_toggle_folders_first(app);
+            else if (val == 5 && picker_folders_first(app)) picker_toggle_folders_first(app);
             break;
         }
         case CHOOSE_LISTEXT: {   /* stays open: the next box is a click away */

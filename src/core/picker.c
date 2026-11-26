@@ -265,9 +265,19 @@ rubraview_favpop_layout_t rubraview_favpop_place(double top, double win_w, doubl
     lo.left_heading = (rubraview_rect_t){ lo.left_pane.x + l_pad, body_y + 4.0 * dpi, l_inner_w, fmax(0.0, l_head_h - 4.0 * dpi) };
     double star_y = body_y + l_head_h;
     double star_h = fmin(row_h, fmax(0.0, body_y + body_h - star_y));
-    lo.star_btn = (rubraview_rect_t){ lo.left_pane.x + l_pad, star_y, l_inner_w, star_h };
+    /* R359: folder | picked files side by side; one over the other when a half would be under 200 px (VM: cut at 560 px) */
+    double half_gap = 6.0 * dpi, star_w = fmax(0.0, (l_inner_w - half_gap) * 0.5);
+    bool stacked = star_w < 200.0 * dpi;
+    double file_y = star_y;
+    if (stacked) {
+        star_w = l_inner_w;
+        file_y = fmin(star_y + star_h + row_gap, body_y + body_h);
+    }
+    double file_h = fmin(star_h, fmax(0.0, body_y + body_h - file_y));
+    lo.star_btn = (rubraview_rect_t){ lo.left_pane.x + l_pad, star_y, star_w, star_h };
+    lo.file_btn = (rubraview_rect_t){ lo.left_pane.x + l_pad + l_inner_w - star_w, file_y, star_w, file_h };
 
-    double l_list_y = star_y + star_h + row_gap;
+    double l_list_y = file_y + file_h + row_gap;
     double l_list_h = fmax(0.0, body_y + body_h - l_list_y - fmin(pad, body_h));
     lo.left_list = (rubraview_rect_t){ lo.left_pane.x + l_pad, l_list_y, l_inner_w, l_list_h };
     lo.left_sb = (rubraview_rect_t){ fmax(lo.left_pane.x, lo.left_pane.x + lo.left_pane.width - l_sb_w - 4.0 * dpi),
@@ -320,6 +330,7 @@ rubraview_favpop_hit_t rubraview_favpop_hit(const rubraview_favpop_layout_t *lo,
     if (rubraview_rect_contains(lo->manage_btn, px, py)) return RUBRAVIEW_FAVPOP_HIT_MANAGE;
     if (rubraview_rect_contains(lo->close_btn, px, py)) return RUBRAVIEW_FAVPOP_HIT_CLOSE;
     if (rubraview_rect_contains(lo->star_btn, px, py)) return RUBRAVIEW_FAVPOP_HIT_STAR_TOGGLE;
+    if (rubraview_rect_contains(lo->file_btn, px, py)) return RUBRAVIEW_FAVPOP_HIT_FILE_STAR;
     if (rubraview_rect_contains(lo->left_sb, px, py)) return RUBRAVIEW_FAVPOP_HIT_LEFT_SB;
     if (rubraview_rect_contains(lo->right_sb, px, py)) return RUBRAVIEW_FAVPOP_HIT_RIGHT_SB;
     rubraview_favpop_hit_t hit = favpop_list_hit(lo->left_list, lo->row_h, lo->row_gap, px, py,

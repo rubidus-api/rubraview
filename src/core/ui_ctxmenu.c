@@ -173,7 +173,7 @@ static const struct { const char *action; int category; } MENUCAT_OF[] = {
     { "rename_file", RUBRAVIEW_MENUCAT_FILES }, { "reveal_in_explorer", RUBRAVIEW_MENUCAT_FILES }, { "file_properties", RUBRAVIEW_MENUCAT_FILES },
     { "explorer_menu", RUBRAVIEW_MENUCAT_FILES }, { "explorer_apps", RUBRAVIEW_MENUCAT_FILES }, { "explorer_menu_classic", RUBRAVIEW_MENUCAT_FILES },
     { "list_copy_path", RUBRAVIEW_MENUCAT_FILES }, { "list_delete_file", RUBRAVIEW_MENUCAT_FILES }, { "list_reveal", RUBRAVIEW_MENUCAT_FILES },
-    { "toggle_first_page_alone", RUBRAVIEW_MENUCAT_VIEW }, { "toggle_info", RUBRAVIEW_MENUCAT_VIEW }, { "toggle_fullscreen", RUBRAVIEW_MENUCAT_VIEW },
+    { "toggle_first_page_alone", RUBRAVIEW_MENUCAT_VIEW }, { "toggle_info", RUBRAVIEW_MENUCAT_FILES } /* R355 */, { "toggle_fullscreen", RUBRAVIEW_MENUCAT_VIEW },
     { "toggle_miniplayer", RUBRAVIEW_MENUCAT_PLAY }, { "next_audio_track", RUBRAVIEW_MENUCAT_PLAY }, { "toggle_shuffle", RUBRAVIEW_MENUCAT_PLAY },
     { "toggle_slideshow", RUBRAVIEW_MENUCAT_PLAY },
     { "choose_subtitle_track", RUBRAVIEW_MENUCAT_SUBTITLES }, { "extract_subtitles", RUBRAVIEW_MENUCAT_SUBTITLES },
