@@ -1,5 +1,6 @@
 #include "rubraview/core.h"
 #include "rubraview/tags.h"
+#include "rubraview/audio_exts.h"
 #include "rubraview/path.h"
 #include "rubraview/number.h"
 #include <string.h>
@@ -731,6 +732,68 @@ static void read_wav(proven_arena_t *arena, const uint8_t *p, size_t len, rubrav
     }
 }
 
+/* ---- ADTS AAC (a bare .aac): each frame's 7-byte header says the rate, the channels and its own length ----
+   RV-319 (D-400): read before the MP3 scan, which took an ADTS file's stray 0xFFE bytes for MP3 frames. */
+
+static bool read_adts(const uint8_t *p, size_t len, size_t from, rubraview_tags_t *out) {
+    static const uint32_t RATES[13] = { 96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350 };
+    if (from + 7 > len || p[from] != 0xFF || (p[from + 1] & 0xF6) != 0xF0) return false;   /* sync, layer 0 */
+    uint32_t rate_index = (uint32_t)(p[from + 2] >> 2) & 0x0F;
+    uint32_t channels = ((uint32_t)(p[from + 2] & 0x01) << 2) | (uint32_t)(p[from + 3] >> 6);
+    if (rate_index >= 13) return false;
+    /* walk the frames the head holds; a stream is two frames that chain, or one that ends the head */
+    size_t at = from, frames = 0, bytes = 0;
+    while (at + 7 <= len && p[at] == 0xFF && (p[at + 1] & 0xF6) == 0xF0) {
+        size_t frame = ((size_t)(p[at + 3] & 0x03) << 11) | ((size_t)p[at + 4] << 3) | (size_t)(p[at + 5] >> 5);
+        if (frame < 7) break;
+        frames++;
+        bytes += frame;
+        at += frame;
+    }
+    if (frames == 0 || (frames == 1 && at < len)) return false;
+    out->codec = PROVEN_LIT("AAC");
+    out->sample_rate = RATES[rate_index];
+    out->channels = channels;   /* 0: said in the stream, not the header */
+    /* 1024 samples to a frame */
+    double kbps = (double)bytes / (double)frames * 8.0 * (double)out->sample_rate / 1024.0 / 1000.0;
+    if (kbps > 0.0 && kbps < 100000.0) out->bitrate_kbps = (uint32_t)(kbps + 0.5);
+    return true;
+}
+
+/* ---- ASF (.wma): the header object's File Properties and the audio stream's WAVEFORMATEX ---- */
+
+static const uint8_t ASF_HEADER[16] = { 0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11, 0xA6, 0xD9, 0x00, 0xAA, 0x00, 0x62, 0xCE, 0x6C };
+static const uint8_t ASF_FILE_PROPS[16] = { 0xA1, 0xDC, 0xAB, 0x8C, 0x47, 0xA9, 0xCF, 0x11, 0x8E, 0xE4, 0x00, 0xC0, 0x0C, 0x20, 0x53, 0x65 };
+static const uint8_t ASF_STREAM_PROPS[16] = { 0x91, 0x07, 0xDC, 0xB7, 0xB7, 0xA9, 0xCF, 0x11, 0x8E, 0xE6, 0x00, 0xC0, 0x0C, 0x20, 0x53, 0x65 };
+static const uint8_t ASF_AUDIO_MEDIA[16] = { 0x40, 0x9E, 0x69, 0xF8, 0x4D, 0x5B, 0xCF, 0x11, 0xA8, 0xFD, 0x00, 0x80, 0x5F, 0x5C, 0x44, 0x2B };
+
+static uint64_t le64(const uint8_t *p) { return (uint64_t)le32(p + 4) << 32 | le32(p); }
+
+static void read_asf(const uint8_t *p, size_t len, rubraview_tags_t *out) {
+    out->codec = PROVEN_LIT("WMA");
+    if (len < 30) return;
+    uint64_t header = le64(p + 16);
+    size_t end = header < (uint64_t)len ? (size_t)header : len;
+    for (size_t at = 30; at + 24 <= end;) {
+        uint64_t size = le64(p + at + 16);
+        if (size < 24 || size > (uint64_t)(end - at)) break;
+        const uint8_t *o = p + at;
+        if (proven_sys_mem_cmp(o, ASF_FILE_PROPS, 16) == 0 && size >= 88) {
+            uint64_t play = le64(o + 64), preroll = le64(o + 80);   /* 100 ns; ms */
+            double seconds = (double)play / 1e7 - (double)preroll / 1000.0;
+            if (seconds > 0.0) out->duration_seconds = seconds;
+        } else if (proven_sys_mem_cmp(o, ASF_STREAM_PROPS, 16) == 0 && size >= 78 + 16 &&
+                   proven_sys_mem_cmp(o + 24, ASF_AUDIO_MEDIA, 16) == 0 && out->sample_rate == 0) {
+            const uint8_t *wf = o + 78;                              /* WAVEFORMATEX */
+            out->channels = le16(wf + 2);
+            out->sample_rate = le32(wf + 4);
+            uint32_t bytes_per_second = le32(wf + 8);
+            if (bytes_per_second > 0) out->bitrate_kbps = (bytes_per_second * 8 + 500) / 1000;
+        }
+        at += (size_t)size;
+    }
+}
+
 /* ---- MP3: the first frame header says the rest ---- */
 
 static void read_mp3_frame(proven_mem_view_t p_view, size_t from, rubraview_tags_t *out) {
@@ -782,7 +845,9 @@ rubraview_tags_t rubraview_tags_read(proven_arena_t *arena, rubraview_tags_sourc
         if (out.codec.size == 0) out.codec = PROVEN_LIT("AAC");
     } else if (four(p, "RIFF") && len > 12 && four(p + 8, "WAVE")) {
         read_wav(arena, p, len, &out);
-    } else {
+    } else if (len >= 16 && proven_sys_mem_cmp(p, ASF_HEADER, 16) == 0) {
+        read_asf(p, len, &out);
+    } else if (!read_adts(p, len, after_id3 < len ? after_id3 : 0, &out)) {
         read_mp3_frame(rubraview_mem_view(p, len), after_id3 < len ? after_id3 : 0, &out);
     }
 
@@ -796,15 +861,26 @@ rubraview_tags_t rubraview_tags_read(proven_arena_t *arena, rubraview_tags_sourc
     return out;
 }
 
+/* RV-319 (D-398): the rows of audio_exts.h, dotted */
+#define DOTTED_ROW(ext, opens, shell, lossless) "." ext,
+static const char *const AUDIO_DOTTED[] = { RUBRAVIEW_AUDIO_EXTS(DOTTED_ROW) };
+#undef DOTTED_ROW
+
 bool rubraview_tags_is_music_name(proven_u8str_view_t filename) {
-    static const char *const EXTS[] = {
-        ".mp3", ".flac", ".wav", ".ogg", ".oga", ".opus", ".m4a", ".aac",
-        ".wma", ".aiff", ".aif", ".ape", ".alac", ".ra",
-    };
     proven_u8str_view_t ext = rubraview_path_ext(filename);
     if (ext.size == 0) return false;
-    for (size_t i = 0; i < sizeof(EXTS) / sizeof(EXTS[0]); ++i) {
-        if (proven_u8str_view_eq_ascii_ci(ext, proven_u8str_view_from_cstr(EXTS[i]))) return true;
+    for (size_t i = 0; i < RUBRAVIEW_AUDIO_EXT_COUNT; ++i) {
+        if (proven_u8str_view_eq_ascii_ci(ext, proven_u8str_view_from_cstr(AUDIO_DOTTED[i]))) return true;
     }
     return false;
+}
+
+const char *rubraview_tags_cue_sibling_ext(size_t i) {
+    for (int lossless = 1; lossless >= 0; --lossless) {
+        for (size_t r = 0; r < RUBRAVIEW_AUDIO_EXT_COUNT; ++r) {
+            if (RUBRAVIEW_AUDIO_EXT_TABLE[r].lossless != (bool)lossless) continue;
+            if (i-- == 0) return AUDIO_DOTTED[r];
+        }
+    }
+    return NULL;
 }

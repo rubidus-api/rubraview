@@ -22,6 +22,12 @@ typedef struct archwork {
     bool ask;                                 /* RV-294: the Compress window is the job's: it asks there, then packs */
     void (*then)(app_state_t *app, bool ok, void *ctx);   /* RV-295: a drag's first step: told how it went, nothing said here */
     void *then_ctx;
+    /* RV-320: told once when it ends for good (not while its password is asked), how it went */
+    void (*told)(app_state_t *app, const archwork_told_t *how, void *ctx);
+    void *told_ctx;
+    app_state_t *told_app;
+    bool started;                             /* RV-320: its job began (told only then) */
+    size_t asked;                             /* RV-320: names already there, sent to the clashes window */
     /* extracting: the archives in turn */
     char **archives;
     size_t count, at;
@@ -62,6 +68,12 @@ static void free_list(char **list, size_t n) {
 
 static void work_free(archwork_t *w) {
     if (!w) return;
+    if (w->told && w->started) {   /* RV-320 */
+        archwork_told_t how = { .result = (int)w->ex.result, .written = w->written, .skipped = w->skipped, .failed = w->failed, .asked = w->asked };
+        void (*told)(app_state_t *, const archwork_told_t *, void *) = w->told;
+        w->told = NULL;
+        told(w->told_app, &how, w->told_ctx);
+    }
     free_list(w->archives, w->count);
     free_list(w->sources, w->source_count);
     rubraview_free(w->only);
@@ -105,6 +117,7 @@ static bool work_start(app_state_t *app, archwork_t *w) {
     w->job = filejob_archive_start(app, &a, names, w->only, w->rules);
     rubraview_free(names);
     if (w->job < 0) { work_free(w); return false; }
+    w->started = true;   /* RV-320 */
     w->prog = (rubraview_jobwire_progress_t){0};
     w->stopping = false;
     app->archwork = w;
@@ -200,6 +213,9 @@ void archwork_extract_dest_typed(app_state_t *app) {
     extract_go(app, w);
 }
 
+/* RV-320: the mode of the extraction waiting for its folder (rubraview_extract_mode_t), -1 when none waits */
+int archwork_dest_wait_mode(void) { return g_dest_wait ? (int)g_dest_wait->mode : -1; }
+
 void archwork_extract_dest_dropped(app_state_t *app) {
     if (g_dest_wait) { work_free(g_dest_wait); g_dest_wait = NULL; osd_say(app, TU8("not extracted")); }
 }
@@ -248,6 +264,29 @@ bool archwork_extract_then(app_state_t *app, const char *archive, const char *in
     w->then_ctx = ctx;
     extract_go(app, w);
     return app->archwork == w;
+}
+
+/* RV-320 (D-402): a basket's entries of one folder of `archive` (`only`, picked in `inner`) written straight into
+   `dest` as an extraction in the open-file screen is (names already there asked, RV-258); `told` how it went. */
+bool archwork_extract_into(app_state_t *app, const char *archive, const char *inner, const size_t *only, size_t only_count, const char *dest,
+                           void (*told)(app_state_t *app, const archwork_told_t *how, void *ctx), void *ctx) {
+    if (app->archwork) return false;
+    archwork_t *w = rubraview_alloc_zero(1, sizeof *w);
+    if (!w) return false;
+    w->archives = rubraview_alloc_zero(1, sizeof *w->archives);
+    w->only = only_count ? rubraview_alloc(only_count * sizeof *w->only) : NULL;
+    if (!w->archives || !(w->archives[0] = rubraview_strdup(archive)) || !w->only) { work_free(w); return false; }
+    w->count = 1;
+    proven_sys_mem_copy(w->only, only, only_count * sizeof *w->only);
+    w->only_count = only_count;
+    rubraview_fmt(w->inner, sizeof w->inner, "{}", PROVEN_ARG(inner));
+    rubraview_fmt(w->dest, sizeof w->dest, "{}", PROVEN_ARG(dest));
+    w->mode = RUBRAVIEW_EXTRACT_AS_IS;
+    w->told = told;
+    w->told_ctx = ctx;
+    w->told_app = app;
+    extract_go(app, w);
+    return app->archwork != NULL;
 }
 
 void archwork_extract(app_state_t *app, int mode, bool choose_folder) {
@@ -313,6 +352,8 @@ void archwork_extract_inside(app_state_t *app, int mode, bool choose_folder) {
     } else {
         w->inner[0] = '\0';   /* the whole archive, as it is named */
     }
+    /* RV-320 (D-401): what was picked, into the folder asked for, goes straight in */
+    mode = (int)rubraview_extract_mode_for_pick((rubraview_extract_mode_t)mode, w->only_count > 0, choose_folder);
     extract_start(app, w, mode, choose_folder);
 }
 
@@ -570,6 +611,7 @@ void archwork_poll(app_state_t *app, bool quitting) {
     if (quitting) {   /* RV-292: the viewer goes; the work goes on in its own process */
         filejob_archive_forget(w->job);
         app->archwork = NULL;
+        w->told = NULL;   /* RV-320: nothing follows it now */
         work_free(w);
         return;
     }
@@ -668,6 +710,7 @@ void archwork_poll(app_state_t *app, bool quitting) {
         else rubraview_fmt(line, sizeof line, T("extracted {} files into {}"), PROVEN_ARG((unsigned)w->written), PROVEN_ARG(rubraview_bytes_view((const char *)where.ptr, (int)where.size)));
         if (w->password[0]) password_remember(app, proven_u8str_view_from_cstr(w->password));
         size_t asked = xrows_take(app, w);   /* RV-258: the names taken, to the clashes window */
+        w->asked = asked;   /* RV-320 */
         if (asked) {
             size_t len = proven_cstr_len(line);
             rubraview_fmt(line + len, sizeof line - len, T("; {} names already there are asked (Ctrl+Shift+K)"), PROVEN_ARG(asked));

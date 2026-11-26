@@ -215,6 +215,8 @@ typedef struct cut_job {
     HANDLE thread;
     volatile LONG done;
     int result;
+    void (*told)(app_state_t *app, bool ok, void *ctx);   /* RV-320: a basket's move, told when the archive is replaced */
+    void *told_ctx;
 } cut_job_t;
 
 static cut_job_t *g_cut;
@@ -225,6 +227,8 @@ static DWORD WINAPI cut_main(void *arg) {
     InterlockedExchange(&c->done, 1);
     return 0;
 }
+
+static bool cut_go(app_state_t *app, cut_job_t *c, const char *archive, proven_u8str_view_t dir, rubraview_codepage_t cp, size_t count);
 
 /* Each tile whose file left our folder is taken out of the archive; one that is still there stays in it. */
 static void cut_arrived(app_state_t *app, const pick_t *p) {
@@ -248,20 +252,60 @@ static void cut_arrived(app_state_t *app, const pick_t *p) {
         if (count == 0) osd_say(app, TU8("copied; nothing left the folder, so the archive is as it was"));
         return;
     }
-    rubraview_fmt(c->archive, sizeof c->archive, "{}", PROVEN_ARG(p->archive));
-    rubraview_fmt(c->out, sizeof c->out, "{}.rvnew", PROVEN_ARG(p->archive));
-    rubraview_fmt(c->dir, sizeof c->dir, "{}", PROVEN_ARG(app->picker_dir));
+    (void)cut_go(app, c, p->archive, app->picker_dir, cp, count);
+}
+
+/* The archive written again without `c->entries` (`count` of them) on a thread; false when it could not start (c freed). */
+static bool cut_go(app_state_t *app, cut_job_t *c, const char *archive, proven_u8str_view_t dir, rubraview_codepage_t cp, size_t count) {
+    rubraview_fmt(c->archive, sizeof c->archive, "{}", PROVEN_ARG(archive));
+    rubraview_fmt(c->out, sizeof c->out, "{}.rvnew", PROVEN_ARG(archive));
+    rubraview_fmt(c->dir, sizeof c->dir, "{}", PROVEN_ARG(dir));
     c->job = (rubraview_arcedit_job_t){ .archive_path = c->archive, .codepage = cp, .op = RUBRAVIEW_ARCEDIT_DELETE, .entries = c->entries,
                                         .entry_count = count, .target = RUBRAVIEW_ARCEDIT_SAME, .out_path = c->out, .level = 6 };
     c->thread = CreateThread(NULL, 0, cut_main, c, 0, NULL);
-    if (!c->thread) { rubraview_free(c->entries); rubraview_free(c); osd_say(app, TU8("moved out; the archive could not be written again")); return; }
+    if (!c->thread) { rubraview_free(c->entries); rubraview_free(c); osd_say(app, TU8("moved out; the archive could not be written again")); return false; }
     arc_undo_drop(app);   /* one step back, and it is this one's from here */
     g_cut = c;
     osd_say(app, TU8("taking them out of the archive..."));
+    return true;
+}
+
+bool dragout_cut_busy(const app_state_t *app) { return g_cut != NULL || app->arc_job != NULL; }
+
+/* RV-320 (D-402): a basket's move: `names` (entries of `archive`, each with what is under it) taken out of it, the
+   archive written again and the old one kept for Ctrl+Z as a drag's move does; `told` whether the archive was replaced. */
+bool dragout_take_out(app_state_t *app, const char *archive, const proven_u8str_view_t *names, size_t n,
+                      void (*told)(app_state_t *app, bool ok, void *ctx), void *ctx) {
+    if (dragout_cut_busy(app) || n == 0) return false;
+    rubraview_archive_index_t ix = { 0 };
+    rubraview_codepage_t cp = app->archive_codepage;
+    if (picker_index_read(app, archive, cp, &ix) != RUBRAVIEW_ARCHIVE_DONE) { osd_say(app, TU8("moved out; the archive could not be read again")); return false; }
+    cut_job_t *c = rubraview_alloc_zero(1, sizeof *c);
+    if (c) c->entries = rubraview_alloc((ix.count ? ix.count : 1) * sizeof *c->entries);
+    size_t count = 0;
+    bool locked = false;
+    for (size_t i = 0; c && c->entries && i < n; ++i) {
+        size_t got = rubraview_archive_index_under(&ix, names[i], c->entries + count, ix.count - count);
+        for (size_t j = 0; j < got; ++j) locked = locked || ix.items[c->entries[count + j]].encrypted;
+        if (got) c->gone++;
+        count += got;
+    }
+    rubraview_archive_index_free(&ix);
+    bool movable = rubraview_dragout_archive_movable(proven_u8str_view_from_cstr(archive), locked);
+    if (!c || !c->entries || count == 0 || !movable) {
+        if (c) { rubraview_free(c->entries); rubraview_free(c); }
+        if (!movable) osd_say(app, TU8("copied: this archive cannot be written again, so they stay in it"));
+        return false;
+    }
+    c->told = told;
+    c->told_ctx = ctx;
+    char dir[RUBRAVIEW_ARCHIVE_PATH];
+    rubraview_fmt(dir, sizeof dir, "{}", PROVEN_ARG(app->picker_dir));
+    return cut_go(app, c, archive, cstr(dir), cp, count);
 }
 
 /* The archive written without them takes the old one's place, the old one kept for Ctrl+Z (D-89). */
-static void cut_finish(app_state_t *app, cut_job_t *c) {
+static bool cut_finish(app_state_t *app, cut_job_t *c) {
     proven_u8str_view_t archive = cstr(c->archive);
     bool book = app->source.archive_path.size > 0 &&
                 (rubraview_path_same(app->source.archive_path, archive) || rubraview_path_same(rubraview_page_source_first_volume(&app->source), archive));
@@ -287,6 +331,7 @@ static void cut_finish(app_state_t *app, cut_job_t *c) {
                                     PROVEN_ARG(c->gone), PROVEN_ARG(c->kept));
     else rubraview_fmt(line, sizeof line, T("{} moved out of the archive  (Ctrl+Z takes it back)"), PROVEN_ARG(c->gone));
     osd_say(app, cstr(line));
+    return done;
 }
 
 /* A move or a cut told: Explorer may still be moving the files when it says so, so each tile is looked at again on
@@ -480,11 +525,11 @@ void picker_drag_out(app_state_t *app, size_t pressed, bool right) {
     proven_u8str_view_t *views = pick_views(app, p);
     uint32_t allowed = rubraview_dragout_effects(p->from_archive, p->movable, right);
     drag_ctx_t ctx = { .app = app, .pick = p, .right = right };
-    /* RV-227: files on disk may be let go on the basket button (an archive's entries have no path to keep) */
+    /* RV-227: files on disk may be let go on the basket button; RV-320: an archive's entries too, kept by their names */
     int32_t win_w = 0, win_h = 0;
     rubraview_pal_window_get_size(app->window, &win_w, &win_h);
     rubraview_pal_rect_t basket = picker_basket_rect(app, rubraview_pal_window_dpi_scale(app->window), (double)win_w, 0);
-    rubraview_pal_window_set_own_drop(app->window, !p->from_archive && picker_basket_shown(app), basket.x, basket.y, basket.width, basket.height);
+    rubraview_pal_window_set_own_drop(app->window, picker_basket_shown(app), basket.x, basket.y, basket.width, basket.height);
     folder_drop_t fd = { .app = app, .views = views, .count = p->count };
     if (views && !p->from_archive) rubraview_pal_window_set_own_drop_hit(app->window, folder_drop_hit, &fd);   /* RV-286 */
     uint32_t done = views ? rubraview_pal_drag_out(app->window, views, p->count, allowed, right, drag_ready, &ctx) : 0u;
@@ -502,8 +547,10 @@ void picker_drag_out(app_state_t *app, size_t pressed, bool right) {
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, p->count, sizeof(proven_u8str_view_t));
         if (proven_is_ok(res.err)) {
             app->basket_pending = (proven_u8str_view_t*)(void*)res.value.ptr;
-            for (size_t i = 0; i < p->count; ++i) app->basket_pending[i] = app_keep(app, views[i]);
+            for (size_t i = 0; i < p->count; ++i) app->basket_pending[i] = app_keep(app, p->from_archive ? cstr(p->rels[i]) : views[i]);
             app->basket_pending_count = p->count;
+            if (p->from_archive) rubraview_fmt(app->basket_pending_archive, sizeof app->basket_pending_archive, "{}", PROVEN_ARG(p->archive));
+            else app->basket_pending_archive[0] = '\0';
             rubraview_pal_rect_t upper = picker_basket_rect(app, rubraview_pal_window_dpi_scale(app->window), (double)win_w, 1);
             chooser_open_basket(app, BASKET_LIST_PUT_IN, basket.x, basket.y + basket.height, upper.y);
         }
@@ -630,9 +677,11 @@ void dragout_poll(app_state_t *app, bool quitting) {
         WaitForSingleObject(c->thread, INFINITE);
         CloseHandle(c->thread);
         g_cut = NULL;
-        if (!quitting && c->result == RUBRAVIEW_ARCEDIT_OK) cut_finish(app, c);
+        bool replaced = false;
+        if (!quitting && c->result == RUBRAVIEW_ARCEDIT_OK) replaced = cut_finish(app, c);
         else if (!quitting) osd_say(app, cstr(rubraview_arcedit_result_text((rubraview_arcedit_result_t)c->result)));
         else (void)rubraview_pal_fs_delete(cstr(c->out));
+        if (c->told && !quitting) c->told(app, replaced, c->told_ctx);   /* RV-320 */
         rubraview_arcedit_job_free(&c->job);
         rubraview_free(c->entries);
         rubraview_free(c);

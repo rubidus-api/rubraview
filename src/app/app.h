@@ -67,6 +67,7 @@
 #include "rubraview/vobsub.h"
 #include "rubraview/pgs.h"
 #include "rubraview/tags.h"
+#include "rubraview/audio_exts.h"
 #include "rubraview/music.h"
 #include "rubraview/boxes_doc.h"
 #include "rubraview/ui_chrome.h"
@@ -187,7 +188,7 @@ enum { CARD_HOST_NONE = 0, CARD_HOST_MAIN, CARD_HOST_EDIT, CARD_HOST_BATCH, CARD
 #define IMAGE_FILTER "*.jpg;*.jpeg;*.png;*.apng;*.webp;*.gif;*.bmp;*.tif;*.tiff;*.ico;*.avif;*.jxl"
 /* M5: video and sound files join the folder as pages (sound since slice 2, RV-084). */
 #define VIDEO_FILTER "*.mp4;*.m4v;*.mov;*.mkv;*.webm;*.avi;*.wmv;*.asf;*.ts;*.m2ts;*.mts;*.mpg;*.mpeg;*.flv;*.ogv;*.3gp"
-#define AUDIO_FILTER "*.mp3;*.m4a;*.aac;*.flac;*.wav;*.wma;*.ogg;*.oga;*.opus"
+#define AUDIO_FILTER RUBRAVIEW_AUDIO_FILTER   /* RV-319: the table in audio_exts.h */
 #define MEDIA_FILTER VIDEO_FILTER ";" AUDIO_FILTER
 /* Playlists; RV-157: and the lists internet radio comes in (.pls, and Windows Media's .asx, .wax, .wvx). */
 #define LIST_FILTER "*.m3u8;*.m3u;*.rvlist;*.pls;*.asx;*.wax;*.wvx"
@@ -1628,6 +1629,11 @@ typedef struct app_state {
     rubraview_pal_rect_t   list_del_btn[2];                   /* RV-256: requests waiting while the window asks or takes input */
     proven_u8str_view_t   *basket_pending;
     size_t                 basket_pending_count;
+    char                   basket_pending_archive[1024];   /* RV-320: the pending are this archive's entries ("" files on disk) */
+    bool                   basket_move_ask;          /* RV-320: Move here takes entries out of their archives: asked first */
+    int                    basket_move_which;
+    size_t                 basket_move_entries;
+    rubraview_pal_rect_t   basket_move_btn[2];
     proven_u8str_view_t   *drop_pending;           /* RV-286: right-dragged onto a folder, waiting for Move here / Copy here */
     size_t                 drop_pending_count;
     proven_u8str_view_t    drop_dir;
@@ -2354,6 +2360,18 @@ void archwork_poll(app_state_t *app, bool quitting);
 void archwork_extract(app_state_t *app, int mode, bool choose_folder);
 void archwork_extract_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, int mode, bool choose_folder);
 void archwork_compress_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, bool ask);
+/* RV-320: how an extraction ended, for who started it */
+typedef struct archwork_told {
+    int result;                        /* rubraview_archive_result_t */
+    uint32_t written, skipped, failed;
+    size_t asked;                      /* names already there, asked in the clashes window */
+} archwork_told_t;
+bool archwork_extract_into(app_state_t *app, const char *archive, const char *inner, const size_t *only, size_t only_count, const char *dest,
+                           void (*told)(app_state_t *app, const archwork_told_t *how, void *ctx), void *ctx);
+bool dragout_cut_busy(const app_state_t *app);   /* RV-320: an archive being written again (a move out, an add) */
+bool dragout_take_out(app_state_t *app, const char *archive, const proven_u8str_view_t *names, size_t n,
+                      void (*told)(app_state_t *app, bool ok, void *ctx), void *ctx);
+int archwork_dest_wait_mode(void);   /* RV-320 */
 void archwork_extract_inside(app_state_t *app, int mode, bool choose_folder);
 bool picker_in_archive(const app_state_t *app);
 /* RV-279: Explorer's menu inside Rubraview (explorermenu.c) */
@@ -2424,6 +2442,7 @@ void archwork_extract_dest_browse(app_state_t *app);
 void extract_done_answer(app_state_t *app, int which);
 bool extract_done_press(app_state_t *app, double x, double y);
 bool pack_ask_press(app_state_t *app, double x, double y);
+bool basket_move_ask_press(app_state_t *app, double x, double y);   /* RV-320 */
 void list_add_paths(app_state_t *app, const proven_u8str_view_t *paths, size_t count, bool show);
 void playlist_add(app_state_t *app, proven_u8str_view_t path);     /* RV-255: a playlist's files to the end of the list */
 void playlist_ask_open(app_state_t *app, proven_u8str_view_t path); /* RV-255: the card: as text, added, or in place */
@@ -2641,6 +2660,12 @@ bool picker_basket_shown(const app_state_t *app);
 void basket_add_picked(app_state_t *app, double x, double y, double above_y);
 void basket_put_open(app_state_t *app, double x, double y, double above_y);
 void basket_chosen(app_state_t *app, int which);   /* from the list: into it, or out of it here */
+void basket_put_here(app_state_t *app, int which, bool moving);   /* RV-320 */
+proven_u8str_view_t basket_item_name(const app_state_t *app, int which, size_t i);   /* RV-320 */
+void basket_move_answer(app_state_t *app, bool yes);             /* RV-320 */
+bool basketarc_start(app_state_t *app, int which, proven_u8str_view_t dir, bool moving);   /* RV-320, basketarc.c */
+void basketarc_poll(app_state_t *app, bool quitting);
+bool basketarc_busy(void);
 size_t basket_total(const app_state_t *app);
 enum { BASKET_LIST_PUT_IN = 0, BASKET_LIST_PUT_HERE, BASKET_LIST_SEE };   /* D-286: the last, a basket chosen to see its files */
 void chooser_open_basket(app_state_t *app, int mode, double x, double y, double above_y);

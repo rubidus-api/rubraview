@@ -1764,6 +1764,11 @@ void dispatch_key(app_state_t *app, rubraview_key_combo_t combo) {
         else if (key_is(combo, "2")) playlist_ask_answer(app, 1);
         return;
     }
+    if (app->basket_move_ask) {   /* RV-320: Enter moves them out of their archives, Esc puts nothing */
+        if (key_is(combo, "Enter")) basket_move_answer(app, true);
+        else if (key_is(combo, "Escape")) basket_move_answer(app, false);
+        return;
+    }
     if (app->pack_ask) {   /* D-267: Enter recycles the older parts and compresses, Esc gives up; nothing else meanwhile */
         if (key_is(combo, "Enter")) archwork_pack_ask_answer(app, true);
         else if (key_is(combo, "Escape")) archwork_pack_ask_answer(app, false);

@@ -1861,6 +1861,7 @@ uint64_t scene_signature(const app_state_t *app) {
     SIG(&h, rubraview_edge_press_shows(&app->edge_press));   /* RV-285: a side dragged along its column */
     if (app->edge_press.on) { SIG(&h, (int64_t)app->pointer_x); SIG(&h, (int64_t)app->pointer_y); }
     SIG(&h, app->list_del_ask);   /* RV-256 */
+    SIG(&h, app->basket_move_ask);   /* RV-320 */
     { bool asking = arcadd_asking(); SIG(&h, asking); }   /* RV-260 */
     { uint64_t fc = foldercard_signature(app); SIG(&h, fc); }   /* RV-296 */
     SIG(&h, rubraview_pal_time_now_seconds() < app->vol_flash_until);

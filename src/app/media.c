@@ -334,9 +334,9 @@ proven_u8str_view_t cue_audio_path(app_state_t *app, proven_u8str_view_t cue_pat
     proven_u8str_view_t audio = rubraview_path_join(app->arena, dir, named);
     rubraview_fs_entry_t found;
     if (rubraview_pal_fs_stat(app->arena, audio, &found) && !found.is_directory) return audio;
-    static const char *const EXTS[] = { ".flac", ".wav", ".ape", ".wv", ".mp3", ".m4a", ".ogg", ".opus", ".tta" };
-    for (size_t i = 0; i < sizeof(EXTS) / sizeof(EXTS[0]); ++i) {
-        proven_u8str_view_t other = rubraview_path_with_ext(app->arena, audio, EXTS[i]);
+    /* RV-319: every sound file's extension, the lossless first */
+    for (size_t i = 0; rubraview_tags_cue_sibling_ext(i) != NULL; ++i) {
+        proven_u8str_view_t other = rubraview_path_with_ext(app->arena, audio, rubraview_tags_cue_sibling_ext(i));
         if (rubraview_pal_fs_stat(app->arena, other, &found) && !found.is_directory) return other;
     }
     return PROVEN_LIT("");

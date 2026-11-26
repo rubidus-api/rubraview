@@ -1143,7 +1143,7 @@ static void shell_request_act(app_state_t *app, rubraview_shell_verb_t verb, con
    from Explorer, another launch or a drop waits, and is worked through one a pass once it is free (D-308). The
    open-file screen alone holds nothing: it is a screen of the window's own (D-304). */
 bool window_taking_input(const app_state_t *app) {
-    return app->rename_active || app->extract_done || app->pack_ask || app->playlist_ask || app->book_ask || app->arc_ask != ARC_ASK_NONE ||
+    return app->rename_active || app->extract_done || app->pack_ask || app->basket_move_ask || app->playlist_ask || app->book_ask || app->arc_ask != ARC_ASK_NONE ||
            app->confirm_purge || app->list_del_ask || arcadd_asking() || app->tmenu_open || app->chooser.open || app->arc_job != NULL;
 }
 

@@ -177,6 +177,7 @@ void frame_tick(app_state_t *app, frame_clock_t *fc, size_t handled) {
     arc_job_poll(app, false);
     archwork_poll(app, false);   /* RV-207 */
     dragout_poll(app, false);    /* RV-223 */
+    basketarc_poll(app, false);  /* RV-320 */
     page_job_poll(app);
     arena_refill(app);
     memory_watch(app, rubraview_pal_time_now_seconds());

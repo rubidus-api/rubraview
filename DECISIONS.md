@@ -4434,3 +4434,61 @@ Do not store credentials, private infrastructure details, personal data, private
   - `rubraview_media_sound_ask_ffmpeg` (core, tested): a Media Foundation song with no picture, sound, none heard, undecodable → `film_open_run` opens it by FFmpeg after the HDR hand-over (D-182), unless the decoder mode is Windows only or FFmpeg is not here, and keeps FFmpeg's only when its sound is heard. A film is not handed over: it keeps the picture Windows plays, and its silent sound is said as the decoder's.
   - `rubraview_media_no_sound` (core, tested) chooses the notice: the decoder's (naming FFmpeg's DLLs, or that FFmpeg could not either) or the device's; two new texts in all five language packs.
 - Consequences: R348; T522 (`test_mediaclock`), `check-lang.py`, `gate.sh t2`, `make win64`, VM T523. Recorder WAVs play when FFmpeg's DLLs are beside the program; without them the notice names the cause. Our own ADPCM decoder (to play them without FFmpeg) is left to the WAV work in `BACKLOGS.md`.
+
+## D-398: One Table Of The Sound Files' Extensions (`RV-319`)
+
+- Date: 2026-11-26
+- Status: Accepted (R349; owner: "다음 진행", the first step of RV-319 as recommended on 2026-11-25).
+- Context: the sound files' extensions were six lists that disagreed: `AUDIO_FILTER` (nine), `rubraview_tags_is_music_name` (fourteen, with `.aiff`/`.ape`/`.alac`/`.ra` but no `.wv`/`.mka`), the music icon (fifteen, with `.wv`/`.mka`), `cue_audio_path` (nine, with `.tta`), and the file types (six, in the shell groups, the settings document, `settingswin.c` and the Store manifest).
+- Decision:
+  - `include/rubraview/audio_exts.h` is the table, an X-macro so the compile-time strings (`AUDIO_FILTER` inside `MEDIA_FILTER`, the icon's wide list) are made from it; a row carries opens, a file type of ours, lossless. Its rows are the union of the old lists.
+  - What opens and what is associated stays as it was: adding `.aac`/`.wma`/`.oga` as file types (new settings, Store and MSI claims on users' types) and opening the by-name-only rows (they need FFmpeg and its notice) are the later steps of RV-319.
+  - The copies that cannot include a C header (`SHELL_GROUPS`, `rubraview_shell_extensions` and `_all`, the settings document, the Store manifest) stay written out, and `T524` compares them with the table; `settingswin.c` keeps a literal read per key because `check-settings.py` finds the wired keys by those reads.
+  - The cue sheet's sibling order becomes every row, the lossless first (was `.flac .wav .ape .wv .mp3 .m4a .ogg .opus .tta`).
+- Consequences: R349; T524 (`test_shellreq`), `gate.sh t2`, `make win64`. `rubraview_tags_is_music_name` also takes `.wv`, `.tta`, `.mka`, which changes nothing seen (every caller first asks whether the file opens); the music icon's list also has `.tta`, `.alac`, `.ra` (only registered types wear it); a cue sheet's audio file is also found as `.aiff`, `.aif`, `.alac`, `.aac`, `.wma`, `.oga`, `.mka`, `.ra`. SPEC §11's format line had claimed RA, RAM, AIFF and APE played; it now says what opens.
+
+## D-399: AAC, WMA And OGA Songs Are File Types Of Ours (`RV-319`)
+
+- Date: 2026-11-26
+- Status: Accepted (R350; owner: "예 그렇게 해 주세요" to default-on file types for `.aac`, `.wma`, `.oga`).
+- Context: after D-398 the table showed three extensions that open but were not ours in Explorer: double-clicking an `.aac`, `.wma` or `.oga` never reached Rubraview, and the right-click menu did not offer it.
+- Decision:
+  - Their rows in `audio_exts.h` are file types. The written-out copies follow: `SHELL_GROUPS` "music" and `rubraview_shell_extensions`/`_all` (`src/core/filemanage.c`), `shell.ext_*`/`shell.menu_*` in the settings document, on by default like the other songs (the Music part is its own piece of `PARTS`, the old one having passed C's 4095-byte string), their reads in `settingswin.c`, the Store manifest's `[assoc.Music_aac|wma|oga]` and its four menus, the five language packs' `.aac`/`.wma`/`.oga` labels, the settings fuzz corpus.
+  - The installer runs `--register-shell --all-users --setup`, which registers `rubraview_shell_extensions_for` the chosen kinds: an install or an upgrade claims the three types as it claims `.mp3`, and Settings › Explorer can switch each off.
+- Consequences: R350; T524/T525 (`test_shellreq`), `test_filemanage`, `test_settings_doc`, `test_ui_settings`, `check-store.py`, `check-settings.py`, `check-lang.py`, `gate.sh t2`, `make win64`. Windows' own choice of default app for a type is not taken over: as for the others, Windows asks or keeps the user's choice.
+
+## D-400: A Bare AAC And A WMA Read By Their Own Headers (`RV-319`)
+
+- Date: 2026-11-26
+- Status: Accepted (R351; found in the VM check the owner asked for: "VM에서 확인해 주세요").
+- Context: `rubraview_tags_read` knew FLAC, Ogg, MP4 and WAV by their first bytes and sent everything else to the MP3 frame scan, which names its answer "MP3" and takes the first bytes that look like an MPEG frame. An ADTS `.aac` (sync `0xFFF`, layer 0, which the scan skips) and an ASF `.wma` fell there and showed made-up numbers. It mattered more once `.aac`/`.wma` became our file types (D-399).
+- Decision:
+  - ASF by its header object's GUID: codec `WMA`; File Properties gives the length (play duration less preroll), the first audio Stream Properties' `WAVEFORMATEX` gives the channels, rate and bitrate.
+  - ADTS, at the start or after an ID3v2 tag: a stream when at least two frame headers chain or one fills the head; codec `AAC`, the header's rate and channels, the bitrate from the frames' mean length (1024 samples each). A pair of sync bytes with no frame is not a stream, and the MP3 scan reads it as before.
+  - WMA's own tags (the Content Description object) are left for later.
+- Consequences: R351; T527 (`test_tags`), `gate.sh t2`, `make win64`, VM T526.
+
+## D-401: Picked Entries Into A Chosen Folder Go Straight In (`RV-320`)
+
+- Date: 2026-11-26
+- Status: Accepted (R352; owner: "그냥 파일이 풀리게 할 수 없을까요", via the open-file screen's Extract button).
+- Context: the bar's Extract inside an archive runs `archive.extract_mode` (a folder of the archive's name by default, or smart) and asks where. The picked entries were already named from the folder they were picked in (`inner`, D-254), but the mode's own folder was made around them: `root1.zip`'s `root1/sub1/` files picked and extracted to `D:\out` came out as `D:\out\root1\…` (and the `sub1` folder picked as `D:\out\root1\sub1\…`), which reads as the archive's tree made again.
+- Decision:
+  - `rubraview_extract_mode_for_pick(mode, picked, folder_chosen)` (core, tested): a pick into a folder the reader chose runs as-is; anything else keeps the mode. `archwork_extract_inside` applies it: the bar's Extract and Extract to... with a pick write it straight into the chosen folder; nothing picked (the whole archive), Extract into a folder of its name and Extract here (beside the archive) are as they were.
+  - The folder box's hint says what this extraction will do (`archwork_dest_wait_mode`), not the setting: "What was picked goes straight into it" (five packs) for a pick; the archive's folder for the rest. It had followed `archive.extract_mode` alone, so Explorer's Extract to... in smart mode said smart.
+  - Names already in the folder go through the questions of RV-258, as an as-is extraction's do.
+  - Baskets taking an archive's entries (the owner's "장바구니에 넣을 때도 마찬가지로", a feature asked for: they refuse them today) are a separate change to the basket and the job's data, planned apart (RV-320; done as D-402).
+- Consequences: R352; T528 (`test_archive_job`), `check-lang.py`, `gate.sh t2`, `make win64`, VM T529 PASS. Extracting the whole archive in the default mode (a folder of its name) still doubles a top folder of the same name (`root1.zip` → `root1\root1\…`); the smart mode avoids it.
+
+## D-402: Baskets Take An Archive's Entries; Move Here Takes Them Out After A Warning (`RV-320`)
+
+- Date: 2026-11-26
+- Status: Accepted (R353; owner on plan `archive/plans/2026-11-26-RV-320-basket-archive.md`: Move here "(나)로 하되 경고와 확인을 거칩시다" — taken out of the archive, after a warning and a confirmation; picks of several folders flat "예").
+- Context: `basket_add_picked` refused an archive's entries ("extract first"); the owner asked that they go in, and out into a folder as plainly as D-401's extraction.
+- Decision:
+  - `rubraview_basket_t` keeps `entries` beside `paths`: NULL for a file on disk, the name inside the archive for an entry (`paths` then the archive). `rubraview_basket_add_entries`, `_entry`, `_entry_folder` and `rubraview_basket_groups` (by archive, then the folder an entry sits in, each in the order first met) are core and tested; remove and keep-unmoved keep both in step.
+  - Put in: the basket button inside an archive (the picked tiles' names in it) and a drag of them let go on the basket button (its pick's archive and names).
+  - Copy here (`basket_put_here`): the files on disk through the file job as before; the entries through `basketarc.c`, one as-is extraction a group (`archwork_extract_into`, `inner` the group's folder, `only` the entries under each pick), one after another; `archwork_t` gains `told` (from `work_free`, once a started work ends for good) with its result, counts and the names it sent to the clashes window.
+  - Move here with entries asks first (`basket_move_ask`, drawn over everything; Enter, Esc, or its two buttons). Confirmed, a group counts as arrived when it ended DONE with nothing failed, skipped or asked; after an archive's last group its arrived entries go out of it by `dragout_take_out` (the drag's cut, `rubraview_arcedit_run` DELETE, the archive replaced and the old one kept as `.rvold` for Ctrl+Z) and, when it was replaced, out of the basket. Anything else stays in the archive and the basket.
+  - The file job's end takes moved files out of the basket by their paths, not their places, since a basket now mixes kinds.
+- Consequences: R353; T530 (`test_basket`), `check-lang.py` (8 new texts; the old refusal's removed), `gate.sh t2`, `make win64`, VM T531 PASS. A name already in the folder leaves that entry in its archive until moved again; Ctrl+Z restores only the last archive written again.

@@ -1087,6 +1087,10 @@ rubraview_extract_after_t rubraview_extract_after(rubraview_extract_after_t sett
     return setting;
 }
 
+rubraview_extract_mode_t rubraview_extract_mode_for_pick(rubraview_extract_mode_t mode, bool picked, bool folder_chosen) {
+    return picked && folder_chosen ? RUBRAVIEW_EXTRACT_AS_IS : mode;   /* RV-320 (D-401) */
+}
+
 rubraview_extract_after_t rubraview_extract_after_box(rubraview_extract_after_t setting, bool ticked, rubraview_extract_after_t kept) {
     if (ticked) return RUBRAVIEW_AFTER_CLOSE;
     if (setting != RUBRAVIEW_AFTER_CLOSE) return setting;

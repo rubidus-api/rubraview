@@ -287,7 +287,22 @@ static void job_ended(app_state_t *app, fj_job_t *job) {
         }
     }
     bool moving = job->moving;
-    if (moved && moving) rubraview_basket_keep_unmoved(&app->baskets, job->basket, moved);
+    if (moved && moving) {   /* RV-320: by their paths: the job had only the basket's files on disk, an archive's entries not */
+        size_t count = rubraview_basket_count(&app->baskets, job->basket);
+        bool *out = count ? (bool *)rubraview_alloc_zero(count, sizeof *out) : NULL;
+        size_t tt = 0;
+        for (size_t i = 0; out && i < job->nitems; ++i) {
+            if (job->items[i].parent >= 0) continue;
+            if (tt < top && moved[tt]) {
+                for (size_t b = 0; b < count; ++b)
+                    if (!out[b] && rubraview_basket_entry(&app->baskets, job->basket, b).size == 0 &&
+                        rubraview_path_same(rubraview_basket_path(&app->baskets, job->basket, b), cstr(job->items[i].source))) { out[b] = true; break; }
+            }
+            tt++;
+        }
+        if (out) rubraview_basket_keep_unmoved(&app->baskets, job->basket, out);
+        rubraview_free(out);
+    }
     rubraview_free(moved);
     if (job->from_cut && moving && done > 0) { dragout_clip_pasted(app); if (job->end.failed == 0) rubraview_pal_clipboard_clear(app->window); }
     char line[260];

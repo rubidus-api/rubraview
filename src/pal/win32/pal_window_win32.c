@@ -19,6 +19,7 @@
 #include "rubraview/pal/pal_time.h"
 #include "rubraview/path.h"
 #include "rubraview/filemanage.h"
+#include "rubraview/audio_exts.h"
 #include "rubraview/pal/pal_shellverbs.h"
 
 #define RUBRAVIEW_WINDOW_CLASS L"Rubraview_MainWindow_Class"
@@ -1874,13 +1875,14 @@ static void delete_if_empty(HKEY root, const WCHAR *subkey) {
 /* 1.25.0 (owner, 2026-10-20): the icon a type of file shows in Explorer — the resource ID in
    rubraview.rc: 2 a film, 3 text, 4 a picture, 5 a book (a comic archive, EPUB, PDF), 6 music (RV-189), 7 a box (a plain
    archive, RV-275); the program's own (1) for the rest. */
+#define ICON_ROW(ext, opens, shell, lossless) ext "."
 static int icon_for_ext(const WCHAR *ext) {
     static const struct { int id; const WCHAR *list; } KINDS[] = {
         { 2, L".mp4.m4v.mkv.webm.avi.mov.wmv.flv.mpg.mpeg.ts.m2ts.mts.3gp.ogv.asf.vob." },
         { 3, L".txt.text.md.log.nfo.ini.csv.json.xml.srt.ass.smi.vtt." },
         { 4, L".jpg.jpeg.jpe.jfif.png.apng.gif.webp.bmp.dib.tif.tiff.avif.heic.heif.jxl.ico.tga.psd.svg.dds.qoi." },
         { 5, L".cbz.cbr.cb7.cbt.epub.pdf." },
-        { 6, L".mp3.flac.wav.ogg.oga.opus.m4a.aac.wma.ape.wv.mka.aiff.aif." },   /* RV-189 */
+        { 6, L"." RUBRAVIEW_AUDIO_EXTS(ICON_ROW) },   /* RV-189; RV-319: every row of audio_exts.h */
         { 7, L".zip.rar.7z.tar.alz.egg.azo." },   /* RV-275 */
         { 8, L".m3u8.m3u.pls.rvlist." },   /* RV-282 (owner, 2026-11-14): the playlists, a list (were the music's notes) */
     };

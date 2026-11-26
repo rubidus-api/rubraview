@@ -295,6 +295,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (tmenu_press(app, event->mouse.x, event->mouse.y)) break;   /* 1.25.0: the ☰ pull-down */
             if (arc_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-212: the archive's Delete question */
             if (pack_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* D-267 */
+            if (basket_move_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-320 */
             if (extract_done_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-240 */
             if (playlist_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-255 */
             if (book_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-276 */

@@ -86,6 +86,10 @@ rubraview_tags_t rubraview_tags_read(proven_arena_t *arena, rubraview_tags_sourc
 /** Is this a name a music file would have? — for the caller's own sorting. */
 bool rubraview_tags_is_music_name(proven_u8str_view_t filename);
 
+/* RV-319: the i-th extension (".flac") a cue sheet's missing audio file is looked for under: every row
+   of audio_exts.h, the lossless first, in the table's order; NULL past the last. */
+const char *rubraview_tags_cue_sibling_ext(size_t i);
+
 #ifdef __cplusplus
 }
 #endif

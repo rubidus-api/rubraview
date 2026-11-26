@@ -134,7 +134,7 @@ static const char *const PARTS[] = {
 "  pair   shell.menu_mpg      \"Open with\" \"Right-click menu\" = true wired\n"
 "  toggle shell.ext_mpeg       \".mpeg\" = true wired\n"
 "  pair   shell.menu_mpeg     \"Open with\" \"Right-click menu\" = true wired\n"
-"  section \"Music\"\n"
+"  section \"Music\"\n",
 "  toggle shell.ext_mp3        \".mp3\" = true wired\n"
 "  pair   shell.menu_mp3      \"Open with\" \"Right-click menu\" = true wired\n"
 "  toggle shell.ext_flac       \".flac\" = true wired\n"
@@ -146,7 +146,13 @@ static const char *const PARTS[] = {
 "  toggle shell.ext_opus       \".opus\" = true wired\n"
 "  pair   shell.menu_opus     \"Open with\" \"Right-click menu\" = true wired\n"
 "  toggle shell.ext_m4a        \".m4a\" = true wired\n"
-"  pair   shell.menu_m4a      \"Open with\" \"Right-click menu\" = true wired\n",
+"  pair   shell.menu_m4a      \"Open with\" \"Right-click menu\" = true wired\n"
+"  toggle shell.ext_aac      \".aac\" = true wired\n"
+"  pair   shell.menu_aac     \"Open with\" \"Right-click menu\" = true wired\n"
+"  toggle shell.ext_wma      \".wma\" = true wired\n"
+"  pair   shell.menu_wma     \"Open with\" \"Right-click menu\" = true wired\n"
+"  toggle shell.ext_oga      \".oga\" = true wired\n"
+"  pair   shell.menu_oga     \"Open with\" \"Right-click menu\" = true wired\n",
 "  section \"Text\"\n"
 "  toggle shell.ext_txt     \".txt\" = false wired\n"
 "  pair   shell.menu_txt    \"Open with\" \"Right-click menu\" = false wired\n"

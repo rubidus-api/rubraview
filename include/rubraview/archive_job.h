@@ -236,6 +236,11 @@ rubraview_extract_after_t rubraview_extract_after(rubraview_extract_after_t sett
    it had before close), stay when that is close; a setting other than close is left as it is when unticked. */
 rubraview_extract_after_t rubraview_extract_after_box(rubraview_extract_after_t setting, bool ticked, rubraview_extract_after_t kept);
 
+/* RV-320 (D-401; owner, 2026-11-26: picked files "그냥 파일이 풀리게"): the mode an extraction runs in. What was picked in
+   an archive (`picked`), written into a folder the reader chose (`folder_chosen`), goes straight into it (AS_IS): no
+   folder of the archive's name around it. The whole archive, or beside it, keeps `mode`. */
+rubraview_extract_mode_t rubraview_extract_mode_for_pick(rubraview_extract_mode_t mode, bool picked, bool folder_chosen);
+
 #ifdef __cplusplus
 }
 #endif

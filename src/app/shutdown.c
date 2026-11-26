@@ -68,6 +68,7 @@ void app_end(app_state_t *app) {
     apply_all_poll(app, true);  /* the copy in hand is finished, the rest left */
     arc_job_poll(app, true);    /* D-88: an archive being written again is stopped; the old one stands */
     archwork_poll(app, true);   /* RV-207: an extracting or a compressing stopped; nothing half-written stays */
+    basketarc_poll(app, true);  /* RV-320: a basket put out of its archives forgotten */
     dragout_quit(app);
     rubraview_heldq_free(&app->heldq);
     rubraview_log_free(&app->log);   /* RV-256: never written unless saved */   /* RV-256: what still waited is not acted on */

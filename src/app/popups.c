@@ -636,6 +636,7 @@ double name_scale(const app_state_t *app) {
 
 /* What Shape (or a sort by length) waits for, under the button pressed: how many of how many, a bar, Esc. */
 static void draw_pack_ask(app_state_t *app, double win_w, double win_h, double dpi);   /* D-267, below */
+static void draw_basket_move_ask(app_state_t *app, double win_w, double win_h, double dpi);   /* RV-320, below */
 static void draw_extract_done(app_state_t *app, double win_w, double win_h, double dpi);   /* RV-240, below */
 static void draw_playlist_ask(app_state_t *app, double win_w, double win_h, double dpi);   /* RV-255, below */
 static void draw_list_del(app_state_t *app, double win_w, double win_h, double dpi);       /* RV-256, below */
@@ -671,6 +672,7 @@ void draw_reading(app_state_t *app, double win_w, double win_h, double dpi) {
 void draw_notice(app_state_t *app, double win_w, double win_h, double chrome_dpi) {
     draw_reading(app, win_w, win_h, chrome_dpi);
     draw_pack_ask(app, win_w, win_h, chrome_dpi);   /* D-267 */
+    draw_basket_move_ask(app, win_w, win_h, chrome_dpi);   /* RV-320 */
     draw_extract_done(app, win_w, win_h, chrome_dpi);   /* RV-240 */
     draw_playlist_ask(app, win_w, win_h, chrome_dpi);   /* RV-255 */
     draw_book_ask(app, win_w, win_h, chrome_dpi);   /* RV-276 */
@@ -718,6 +720,45 @@ static void draw_pack_ask(app_state_t *app, double win_w, double win_h, double d
     rubraview_pal_render_draw_text(app->renderer, TU8("They would be read as part of the new set; the Recycle Bin can give them back."),
                                    (rubraview_pal_rect_t){ box.x, by + bh + 12.0 * dpi, box.width, 26.0 * dpi },
                                    13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+}
+
+/* RV-320 (D-402; owner: "경고와 확인을 거칩시다"): a basket's Move here takes an archive's entries out of it: asked first. */
+static void draw_basket_move_ask(app_state_t *app, double win_w, double win_h, double dpi) {
+    if (!app->basket_move_ask) return;
+    double box_w = 680.0 * dpi, box_h = 196.0 * dpi;
+    if (box_w > win_w - 16.0 * dpi) box_w = win_w - 16.0 * dpi;
+    rubraview_pal_rect_t box = { (win_w - box_w) * 0.5, (win_h - box_h) * 0.5, box_w, box_h };
+    rubraview_pal_render_fill_rect(app->renderer, (rubraview_pal_rect_t){ 0.0, 0.0, win_w, win_h }, 0x90000000u, 0.0);
+    rubraview_pal_render_fill_rect(app->renderer, box, COLOR_BOX_FILL, 3.0);
+    rubraview_pal_render_stroke_rect(app->renderer, box, COLOR_CLOSE_HOVER, 2.0, 3.0);
+    char line[600];
+    int n = rubraview_fmt(line, sizeof line, T("Move {} items out of their archives?"), PROVEN_ARG(app->basket_move_entries));
+    if (n > 0) rubraview_pal_render_draw_text(app->renderer, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)(n < (int)sizeof line ? n : (int)sizeof line - 1) },
+                                              (rubraview_pal_rect_t){ box.x + 12.0 * dpi, box.y + 12.0 * dpi, box.width - 24.0 * dpi, 30.0 * dpi },
+                                              17.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    rubraview_pal_render_draw_text(app->renderer, TU8("Each archive is written again without them; the old one is kept and Ctrl+Z in its folder brings it back."),
+                                   (rubraview_pal_rect_t){ box.x + 12.0 * dpi, box.y + 44.0 * dpi, box.width - 24.0 * dpi, 24.0 * dpi },
+                                   13.0 * dpi, 0xFFFFC870u, RUBRAVIEW_TEXT_CENTER);
+    const char *words[2] = { T("Move them out  (Enter)"), T("Cancel  (Esc)") };
+    double gap = 12.0 * dpi, bh = 52.0 * dpi, bw = (box.width - 3.0 * gap) / 2.0, by = box.y + 80.0 * dpi;
+    for (int i = 0; i < 2; ++i) {
+        rubraview_pal_rect_t b = { box.x + gap + (double)i * (bw + gap), by, bw, bh };
+        app->basket_move_btn[i] = b;
+        bool over = pal_rect_has(b, app->pointer_x, app->pointer_y);
+        rubraview_pal_render_fill_rect(app->renderer, b, i == 0 ? (over ? COLOR_CLOSE_HOVER : 0xC0802030u) : over ? 0x50FFFFFFu : COLOR_BOX_FILL, 3.0);
+        rubraview_pal_render_stroke_rect(app->renderer, b, COLOR_BOX_BORDER, 1.0, 3.0);
+        rubraview_pal_render_draw_text(app->renderer, cstr(words[i]), b, 15.0 * dpi, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
+    }
+    rubraview_pal_render_draw_text(app->renderer, TU8("Those not written out whole (a name already there, a failure) stay in the archive and the basket."),
+                                   (rubraview_pal_rect_t){ box.x, by + bh + 10.0 * dpi, box.width, 24.0 * dpi },
+                                   13.0 * dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
+}
+
+bool basket_move_ask_press(app_state_t *app, double x, double y) {
+    if (!app->basket_move_ask) return false;
+    if (pal_rect_has(app->basket_move_btn[0], x, y)) basket_move_answer(app, true);
+    else if (pal_rect_has(app->basket_move_btn[1], x, y)) basket_move_answer(app, false);
+    return true;   /* nothing under it while it asks */
 }
 
 /* RV-240: an extraction done, the card asks what next — the folder here, in Explorer, or nothing (the RV-238 card's look) */
@@ -1038,8 +1079,9 @@ static void rename_card_words(const app_state_t *app, char *title, size_t capaci
         *hint = T("Enter  ·  Ctrl+O browses  ·  a folder not there yet is made");
     } else if (app->rename_is_extract) {   /* RV-240 */
         t = T("Extract into which folder?");
-        *hint = (int)lround(rubraview_settings_get(&app->settings, PROVEN_LIT("archive"), PROVEN_LIT("extract_mode"))) == 1
-              ? T("A folder of the archive's name is made in it when it holds more than one thing  ·  Ctrl+O browses")
+        int mode = archwork_dest_wait_mode();   /* RV-320: what this extraction will do, not the setting */
+        *hint = mode == RUBRAVIEW_EXTRACT_AS_IS ? T("What was picked goes straight into it  ·  Ctrl+O browses")
+              : mode == RUBRAVIEW_EXTRACT_SMART ? T("A folder of the archive's name is made in it when it holds more than one thing  ·  Ctrl+O browses")
               : T("A folder of the archive's name is made in it  ·  Ctrl+O browses");
     } else if (app->rename_is_extension) { t = T("Change extensions"); *hint = T("A new one for each  ·  Tab: the next row"); }
     else if (app->rename_is_password) {

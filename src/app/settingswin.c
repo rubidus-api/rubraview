@@ -1179,6 +1179,9 @@ static size_t shell_chosen_words(app_state_t *app, bool menu, char *out, size_t 
         { "ogg",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_ogg")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_ogg")) > 0.5 },
         { "opus", rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_opus")) > 0.5, rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_opus")) > 0.5 },
         { "m4a",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_m4a")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_m4a")) > 0.5 },
+        { "aac",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_aac")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_aac")) > 0.5 },   /* RV-319 */
+        { "wma",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_wma")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_wma")) > 0.5 },
+        { "oga",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_oga")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_oga")) > 0.5 },
         /* RV-123: text files */
         { "txt",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_txt")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_txt")) > 0.5 },
         { "log",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_log")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_log")) > 0.5 },

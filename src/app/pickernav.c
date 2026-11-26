@@ -802,6 +802,14 @@ bool curation_has_numbers(const app_state_t *app) {
 
 /* ---- RV-227 (D-282; owner, 2026-11-06: "여러개 중 하나의 장바구니에 담는 기능"): five baskets of paths ---- */
 
+/* RV-320: an item's own name: a file's, or an archive entry's last part */
+proven_u8str_view_t basket_item_name(const app_state_t *app, int which, size_t i) {
+    proven_u8str_view_t entry = rubraview_basket_entry(&app->baskets, which, i);
+    if (entry.size == 0) return rubraview_path_basename(rubraview_basket_path(&app->baskets, which, i));
+    proven_u8str_view_t folder = rubraview_basket_entry_folder(entry);
+    return (proven_u8str_view_t){ .ptr = entry.ptr + folder.size, .size = entry.size - folder.size };
+}
+
 size_t basket_total(const app_state_t *app) {
     size_t n = 0;
     for (int i = 0; i < RUBRAVIEW_BASKETS; ++i) n += rubraview_basket_count(&app->baskets, i);
@@ -811,11 +819,25 @@ size_t basket_total(const app_state_t *app) {
 /* The basket button's upper part: what is picked waits for a basket chosen in the list. A drag let go on the button (dragout.c) sets the waiting paths itself. */
 void basket_add_picked(app_state_t *app, double x, double y, double above_y) {
     rubraview_fs_entry_t *entries = NULL;
-    size_t n = picker_in_archive(app) ? 0 : picker_picked_entries(app, &entries);
-    if (n == 0 && picker_in_archive(app) && picker_picked_count(app) > 0) {
-        osd_say(app, TU8("inside an archive: extract them first, then put them in a basket"));
+    if (picker_in_archive(app) && picker_picked_count(app) > 0) {   /* RV-320 (D-402): an archive's entries, by their names in it */
+        size_t total = app->picker_listing.count, k = 0;
+        proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, total ? total : 1, sizeof(proven_u8str_view_t));
+        if (!proven_is_ok(res.err)) return;
+        proven_u8str_view_t *names = (proven_u8str_view_t *)(void *)res.value.ptr;
+        char rel[RUBRAVIEW_ARCHIVE_PATH];
+        for (size_t i = 0; app->picker_selected && i < total; ++i) {
+            if (!app->picker_selected[i] || picker_is_up(app, i)) continue;
+            if (picker_archive_rel(app, app->picker_listing.entries[i].path, rel, sizeof rel) && rel[0]) names[k++] = app_keep(app, cstr(rel));
+        }
+        if (k == 0) return;
+        app->basket_pending = names;
+        app->basket_pending_count = k;
+        rubraview_fmt(app->basket_pending_archive, sizeof app->basket_pending_archive, "{}", PROVEN_ARG(app->picker_arc_path));
+        chooser_open_basket(app, BASKET_LIST_PUT_IN, x, y, above_y);
         return;
     }
+    app->basket_pending_archive[0] = '\0';
+    size_t n = picker_picked_entries(app, &entries);
     if (n == 0) {   /* D-286: nothing picked, the baskets to see */
         if (basket_total(app) == 0) { osd_say(app, TU8("the baskets are empty: pick files, then the Basket button")); return; }
         app->basket_pending_count = 0;
@@ -846,7 +868,10 @@ void basket_put_open(app_state_t *app, double x, double y, double above_y) {
 void basket_chosen(app_state_t *app, int which) {
     if (app->basket_pending_count > 0) {
         size_t n = app->basket_pending_count;
-        size_t added = rubraview_basket_add(&app->baskets, which, app->basket_pending, n);
+        size_t added = app->basket_pending_archive[0]   /* RV-320: an archive's entries */
+                     ? rubraview_basket_add_entries(&app->baskets, which, cstr(app->basket_pending_archive), app->basket_pending, n)
+                     : rubraview_basket_add(&app->baskets, which, app->basket_pending, n);
+        app->basket_pending_archive[0] = '\0';
         app->basket_pending_count = 0;
         app->basket_pending = NULL;
         char line[160];
@@ -857,16 +882,38 @@ void basket_chosen(app_state_t *app, int which) {
     }
     size_t n = rubraview_basket_count(&app->baskets, which);
     if (n == 0) { osd_say(app, TU8("that basket is empty")); return; }
-    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n, sizeof(proven_u8str_view_t));
-    proven_result_mem_mut_t mres = rubraview_arena_alloc_array(app->arena, n, sizeof(bool));
-    if (!proven_is_ok(res.err) || !proven_is_ok(mres.err)) return;
-    proven_u8str_view_t *sources = (proven_u8str_view_t*)(void*)res.value.ptr;
-    bool *moved = (bool*)(void*)mres.value.ptr;
-    for (size_t i = 0; i < n; ++i) sources[i] = app_keep(app, rubraview_basket_path(&app->baskets, which, i));
-    bool moving = app->basket_moving;
+    size_t from_archives = 0;
+    for (size_t i = 0; i < n; ++i) if (rubraview_basket_entry(&app->baskets, which, i).size > 0) from_archives++;
+    if (app->basket_moving && from_archives > 0) {   /* RV-320 (D-402): taken out of their archives only when confirmed */
+        app->basket_move_ask = true;
+        app->basket_move_which = which;
+        app->basket_move_entries = from_archives;
+        return;
+    }
+    basket_put_here(app, which, app->basket_moving);
+}
+
+/* A basket's files and folders into the folder on screen: those on disk copied or moved by a job (RV-258), an
+   archive's entries extracted straight in and, moving, taken out of their archives (RV-320, basketarc.c). */
+void basket_put_here(app_state_t *app, int which, bool moving) {
+    size_t n = rubraview_basket_count(&app->baskets, which);
     proven_u8str_view_t dir = picker_write_dir(app);
-    if (dir.size == 0) return;
-    (void)moved;
-    /* RV-258 (D-310): through the job; what moved leaves the basket when it ends */
-    (void)filejob_start(app, dir, sources, n, moving, which, false);
+    if (n == 0 || dir.size == 0) return;
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, n, sizeof(proven_u8str_view_t));
+    if (!proven_is_ok(res.err)) return;
+    proven_u8str_view_t *sources = (proven_u8str_view_t*)(void*)res.value.ptr;
+    size_t disk = 0;
+    for (size_t i = 0; i < n; ++i)
+        if (rubraview_basket_entry(&app->baskets, which, i).size == 0) sources[disk++] = app_keep(app, rubraview_basket_path(&app->baskets, which, i));
+    if (disk < n) (void)basketarc_start(app, which, dir, moving);
+    /* RV-258 (D-310): through the job; what moved leaves the basket when it ends (by its path, RV-320) */
+    if (disk > 0) (void)filejob_start(app, dir, sources, disk, moving, which, false);
+}
+
+/* RV-320: the move asked about (Enter moves them out, Esc puts nothing) */
+void basket_move_answer(app_state_t *app, bool yes) {
+    if (!app->basket_move_ask) return;
+    app->basket_move_ask = false;
+    if (yes) basket_put_here(app, app->basket_move_which, true);
+    else osd_say(app, TU8("nothing moved"));
 }

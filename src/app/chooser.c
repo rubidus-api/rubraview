@@ -453,7 +453,7 @@ void chooser_open_basket(app_state_t *app, int mode, double x, double y, double 
         size_t n = rubraview_basket_count(&app->baskets, k);
         double value = see ? -10.0 - (double)k : (double)k;   /* D-286: seen, its files */
         if (n == 0) { chooser_word(c, value, T("Basket {} \xE2\x80\x94 empty"), PROVEN_ARG(k + 1)); continue; }
-        proven_u8str_view_t first = rubraview_path_basename(rubraview_basket_path(&app->baskets, k, 0));
+        proven_u8str_view_t first = basket_item_name(app, k, 0);
         int shown = (int)(first.size < 40 ? first.size : 40);
         chooser_word(c, value, T("Basket {} \xE2\x80\x94 {}: {}{}"), PROVEN_ARG(k + 1), PROVEN_ARG(n),
                      PROVEN_ARG(rubraview_bytes_view(first.ptr, shown)), PROVEN_ARG(n > 1 ? " ..." : ""));
@@ -514,9 +514,19 @@ void chooser_open_basket_files(app_state_t *app, int which, double x, double y, 
     rubraview_fmt(c->title, sizeof(c->title), T("Basket {}: {} \xE2\x80\x94 a click takes one out"), PROVEN_ARG(which + 1), PROVEN_ARG(n));
     for (size_t i = 0; i < n && c->count < CHOOSE_MAX - 1; ++i) {
         proven_u8str_view_t path = rubraview_basket_path(&app->baskets, which, i);
-        proven_u8str_view_t name = rubraview_path_basename(path);
+        proven_u8str_view_t name = basket_item_name(app, which, i);
+        proven_u8str_view_t entry = rubraview_basket_entry(&app->baskets, which, i);
+        int nn = (int)(name.size < 48 ? name.size : 48);
+        if (entry.size > 0) {   /* RV-320: an archive's entry: the archive and the folder inside it */
+            proven_u8str_view_t arc = rubraview_path_basename(path), inner = rubraview_basket_entry_folder(entry);
+            if (inner.size > 0) inner.size--;   /* without its '/' */
+            int an = (int)(arc.size < 24 ? arc.size : 24), in = (int)(inner.size < 28 ? inner.size : 28);
+            chooser_word(c, (double)i, "\xC3\x97  {}   \xC2\xB7 {} \xE2\x80\xBA {}", PROVEN_ARG(rubraview_bytes_view(name.ptr, nn)),
+                         PROVEN_ARG(rubraview_bytes_view(arc.ptr, an)), PROVEN_ARG(inner.size ? rubraview_bytes_view(inner.ptr, in) : rubraview_bytes_view("/", 1)));
+            continue;
+        }
         proven_u8str_view_t folder = rubraview_path_basename(rubraview_path_dirname(path));
-        int nn = (int)(name.size < 48 ? name.size : 48), fn = (int)(folder.size < 24 ? folder.size : 24);
+        int fn = (int)(folder.size < 24 ? folder.size : 24);
         chooser_word(c, (double)i, "\xC3\x97  {}   \xC2\xB7 {}", PROVEN_ARG(rubraview_bytes_view(name.ptr, nn)), PROVEN_ARG(rubraview_bytes_view(folder.ptr, fn)));
     }
     if (n > c->count) chooser_word(c, -1.0, T("... and {} more"), PROVEN_ARG(n - c->count));
@@ -780,7 +790,7 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             int value = (int)lround(c->values[index]), which = c->panel;
             rubraview_rect_t f = c->layout.frame;
             if (value < 0) { c->open = true; break; }
-            proven_u8str_view_t name = rubraview_path_basename(rubraview_basket_path(&app->baskets, which, (size_t)value));
+            proven_u8str_view_t name = basket_item_name(app, which, (size_t)value);
             char line[160];
             rubraview_fmt(line, sizeof line, T("taken out of basket {}: {}"), PROVEN_ARG(which + 1),
                           PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)(name.size < 100 ? name.size : 100))));
