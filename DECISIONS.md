@@ -4522,3 +4522,37 @@ Do not store credentials, private infrastructure details, personal data, private
 - Context: Pages serves the public repository's main `/docs` (the live page is byte for byte `docs/index.html`). The workspace's other projects (rubrapack, lowent_lang) publish Pages from a `gh-pages` branch of one commit.
 - Decision: `ops/scripts/pages-publish.sh` makes one commit whose tree is HEAD's `docs/` (refused while `docs/` has uncommitted changes), checks every file for private paths, names and tokens, and with `--push` force-pushes it as `gh-pages` to `public.manifest`'s repository. No `.nojekyll`: GitHub keeps building the site as it does from `/docs`, so the manual's `.md` pages keep their `.html` addresses. `docs/` stays on main: the Store's privacy policy links to `main/docs/manual/privacy-policy.md`. The owner switches Settings › Pages to `gh-pages`, `/ (root)`; after each release the script is run again.
 - Consequences: one more step after a release (`sh ops/scripts/pages-publish.sh --push`) until a publisher command does it.
+
+## D-406: The Site Served From gh-pages, Its Words Kept With Each Release
+
+- Date: 2026-11-26
+- Status: Accepted (owner, 2026-11-26: "지침대로 홈페이지도 gh-pages로 옮기고 있나요", "방금전에 gh-pages로 브랜치 옮겼습니다", "스크린샷은 나중에 할당받으면 진행하고 나머지 먼저 처리합시다")
+- Context: the owner set Settings › Pages to `gh-pages` (the workspace's publishing rule: every project's Pages from a `gh-pages` branch of one commit); GitHub built it at 12:52 UTC. The site's words had not changed since 2026-11-07 (R273) while twenty releases went out, and `make-site.py`, moved under `ops/scripts/`, wrote to `ops/docs/` and its words had drifted from the committed pages (the Floating Icon Group's caption).
+- Decision: the words in `ops/scripts/make-site.py` follow each release's user-visible changes (a check in `LESSONS.md`); `pages-publish.sh` makes the pages again before anything else and stops when they differ from those committed, so what goes out is what the generator says. The 44 screenshots are taken again on the VM when it is free (RV-322); until then the pages show the 2026-11-07 shots.
+- Consequences: a release runs `make-site.py`, commits `docs/`, pushes, then `sh ops/scripts/pages-publish.sh --push`.
+
+## D-407: Audiobooks: .m4b As A File Type, Chapters As A Cue Sheet's Tracks, Tags From The File Mapped (`R362`)
+
+- Date: 2026-11-26
+- Status: Accepted (owner, 2026-11-26: "RV319 진행 바랍니다"; RV-319's next step was `.m4b`)
+- Context: Windows 11's Media Foundation lists byte-stream handlers for `.m4a`, `.mp4` and `audio/mp4` but none for `.m4b` (read on the VM). An audiobook's use is its chapters. `music_load` read a song whole into memory and gave up past 4 MB (`rubraview_pal_fs_read_file`'s bound), so every song over 4 MB had no tags, cover or words: seen on the VM with v1.61.0 and a 6.4 MB MP3. An audiobook's `moov` is often after its sound (FFmpeg's default), past any head.
+- Decision: `.m4b` joins the extension table as a file type of ours, like `.aac` (D-399). The MF reader's byte stream carries `MF_BYTESTREAM_CONTENT_TYPE` `audio/mp4` for it (`rubraview_media_mf_content_type`, in the core for its test). The chapters are read in `tags.c` (`chpl` first, as FFmpeg reads it; else the QuickTime chapter track by `tref`/`chap`) as cue tracks; `music_load` uses them as `music_cue` when no `.cue` cuts the file, so the page keys, the title shown and "n/N" work as for a sheet, with no new window. `music_tags_of` maps the file: the first 4 MB stay the head (the ADTS and MP3 scans stay bounded), the whole mapping is offered as `whole` and read only for an MPEG-4 file's boxes (walked by their sizes) and chapter samples; the cover is copied and the file unmapped at once, so the song playing can still be moved or deleted. ID3v1 is still not read (its bytes are a code page's).
+- Options not taken: a ranged read in the PAL (more code for the same reads); chapters in a window of their own (the cue sheet's keys and words already exist).
+- Consequences: a network file is mapped for the tag read; a page lost there while mapped faults as with an archive (existing risk). The rest of RV-319 (WAV tags after `data`, W64, ADPCM, the FFmpeg formats) can read past the head with `whole`.
+
+## D-408: The Site Follows The Workspace UI Guide; Its Version Written, Not Asked Of GitHub
+
+- Date: 2026-11-26
+- Status: Accepted (owner, 2026-11-26: "홈페이지 디자인을 요청대로 해 주시고"; a request from another project of the workspace)
+- Context: the author decided that the landing and every project's home page follow the workspace's UI guide (projects outside the documentation kit's plan included). The site had its own dark colours, red accents, rounded corners, shadows and gradients, and asked GitHub's API for the latest version (an outside request, against N-P3).
+- Decision: `ops/scripts/make-site.py` writes the pages and `docs/assets/site.css` as the landing does: palette inanis in light and dark, system by default (N-C1, N-C2), its values read from the guide's colour file (left as committed without that checkout); the menu bar fixed at the top with ☰, back (to the landing, or the page before), where the reader is (the app's name in `honey-text`), the sections, and the download at the right end (N-L1, N-W2); the ☰ menu with the language (the other page), theme, text width (960 or the window) and layout (auto, wide, narrow) (N-W4, N-W1), kept in the browser's localStorage only; square corners with brackets on the menu and the cards (N-D6); no shadows, blurs or gradient faces (N-D7); the focus ring in `accent2` (N-I6); background changes only, none under reduced motion (N-M1); system fonts (N-T1); window widths 900 and 600 (N-L3). The download buttons name the version from `version.h`, written when the site is made (each release makes it again, D-406); the page asks no other site anything.
+- Rules not followed, with why (N-P0): the language page at the root (`docs/index.html`) has no menu bar or ☰ menu (N-L1, N-W4): it sends the browser on at once. The cards' brackets are not resize handles (N-D6): a card on a web page has no size to change. The brackets are drawn as solid `linear-gradient` backgrounds, as on the landing (N-D7 forbids gradient faces; these are lines). The section headings are 1.3 rem and the title 2 rem (N-P7 keeps size out of prom2): they are a document's headings, not emphasis inside a UI. Each language is its own page, not two columns (the landing's "both"). No user information or log-in (N-W3): the site has no accounts. Screenshots are pictures of the program, not decoration (N-D7).
+- Consequences: the site looks like the landing in both themes; a change of the guide's colours reaches the site when `make-site.py` runs (as `pages-publish.sh` does first).
+
+## D-409: No Lyrics From Online Services
+
+- Date: 2026-11-26
+- Status: Accepted (owner, 2026-11-26: "알송 가사 서버에서 가져오는건 하지 말아주세요")
+- Context: the owner asked how ALSong's lyrics feature works (an MD5 of the audio data sent to ALSong's lyrics server, timed lyrics back). Rubraview says it never connects to the internet and collects nothing (the site, the Store's privacy policy).
+- Decision: Rubraview does not fetch lyrics from ALSong's server or any other online service. Its words stay those of a `.lrc` beside the song and those the file carries (ID3 USLT/SYLT, Vorbis LYRICS, MP4 ©lyr, WMA WM/Lyrics).
+- Consequences: no network code for lyrics; not proposed again unless the owner asks.

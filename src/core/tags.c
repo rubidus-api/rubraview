@@ -690,6 +690,167 @@ static void mp4_walk(proven_arena_t *arena, proven_mem_view_t p_view, int depth,
     }
 }
 
+/* ---- MP4 chapters (RV-319, R362): Nero's chpl, else the QuickTime chapter track ---- */
+
+#define MP4_MAX_CHAPTERS 2000u
+
+/* The first child box `name` in [p, p + len): its body. */
+static bool mp4_child(const uint8_t *p, size_t len, const char *name, const uint8_t **body, size_t *body_len) {
+    size_t at = 0;
+    while (at + 8 <= len) {
+        uint64_t size = be32(p + at);
+        size_t header = 8;
+        if (size == 1) {
+            if (at + 16 > len) return false;
+            size = ((uint64_t)be32(p + at + 8) << 32) | be32(p + at + 12);
+            header = 16;
+        } else if (size == 0) {
+            size = len - at;                    /* to the end */
+        }
+        if (size < header || size > len - at) return false;
+        if (four(p + at + 4, name)) { *body = p + at + header; *body_len = (size_t)size - header; return true; }
+        at += (size_t)size;
+    }
+    return false;
+}
+
+static bool mp4_path(const uint8_t *p, size_t len, const char *const *names, size_t n, const uint8_t **body, size_t *body_len) {
+    for (size_t i = 0; i < n; ++i) {
+        if (!mp4_child(p, len, names[i], &p, &len)) return false;
+    }
+    *body = p; *body_len = len;
+    return true;
+}
+
+static bool chapters_alloc(proven_arena_t *arena, size_t count, rubraview_tags_t *out) {
+    if (count == 0 || count > MP4_MAX_CHAPTERS) return false;
+    proven_result_mem_mut_t res = proven_arena_alloc(arena, count * sizeof(rubraview_cue_track_t));
+    if (!proven_is_ok(res.err)) return false;
+    out->chapters = (rubraview_cue_track_t *)(void *)res.value.ptr;
+    out->chapter_count = 0;
+    return true;
+}
+
+static void chapter_add(rubraview_tags_t *out, double start, proven_u8str_view_t title) {
+    if (start < 0.0 || start != start) return;
+    if (out->chapter_count > 0 && start < out->chapters[out->chapter_count - 1].start_seconds) return;   /* out of order */
+    rubraview_cue_track_t *c = &out->chapters[out->chapter_count];
+    *c = (rubraview_cue_track_t){ .number = (int32_t)out->chapter_count + 1, .title = title, .performer = none(),
+                                  .start_seconds = start, .end_seconds = 0.0 };
+    out->chapter_count++;
+}
+
+/* chpl: version and flags, a reserved word when the version is 1, a count byte, then each chapter's start
+   (64 bits of 100 ns) and its title (a length byte and UTF-8). */
+static void mp4_chpl(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
+    if (len < 5) return;
+    size_t at = p[0] == 1 ? 8 : 4;
+    if (at + 1 > len) return;
+    size_t count = p[at++];
+    if (!chapters_alloc(arena, count, out)) return;
+    for (size_t k = 0; k < count && at + 9 <= len; ++k) {
+        uint64_t start = ((uint64_t)be32(p + at) << 32) | be32(p + at + 4);
+        size_t tl = p[at + 8];
+        at += 9;
+        if (tl > len - at) break;
+        chapter_add(out, (double)start / 1e7, trim(arena, p + at, tl));
+        at += tl;
+    }
+    if (out->chapter_count == 0) out->chapters = NULL;
+}
+
+/* The chapter track: its samples' times (stts, in mdhd's timescale) and places (stsc, stco or co64, stsz);
+   a sample is a 16-bit length and the title (UTF-8, or UTF-16 with its mark). */
+static void mp4_qt_chapters(proven_arena_t *arena, const uint8_t *file, size_t file_len,
+                            const uint8_t *trak, size_t trak_len, rubraview_tags_t *out) {
+    static const char *const MDHD[] = { "mdia", "mdhd" }, *const STBL[] = { "mdia", "minf", "stbl" };
+    const uint8_t *mdhd, *stbl, *stts, *stsc, *stsz, *stco;
+    size_t mdhd_len, stbl_len, stts_len, stsc_len, stsz_len, stco_len;
+    if (!mp4_path(trak, trak_len, MDHD, 2, &mdhd, &mdhd_len) || !mp4_path(trak, trak_len, STBL, 3, &stbl, &stbl_len)) return;
+    uint32_t timescale = mdhd_len >= 24 && mdhd[0] == 1 ? be32(mdhd + 20) : mdhd_len >= 16 && mdhd[0] == 0 ? be32(mdhd + 12) : 0;   /* after 64- or 32-bit dates */
+    if (timescale == 0) return;
+    if (!mp4_child(stbl, stbl_len, "stts", &stts, &stts_len) || !mp4_child(stbl, stbl_len, "stsc", &stsc, &stsc_len) ||
+        !mp4_child(stbl, stbl_len, "stsz", &stsz, &stsz_len)) return;
+    bool wide = false;
+    if (!mp4_child(stbl, stbl_len, "stco", &stco, &stco_len)) {
+        if (!mp4_child(stbl, stbl_len, "co64", &stco, &stco_len)) return;
+        wide = true;
+    }
+    if (stts_len < 8 || stsc_len < 8 || stsz_len < 12 || stco_len < 8) return;
+    uint32_t samples = be32(stsz + 8), fixed = be32(stsz + 4);
+    if (samples == 0 || samples > MP4_MAX_CHAPTERS || (fixed == 0 && (stsz_len - 12) / 4 < samples)) return;
+    uint32_t chunks = be32(stco + 4), stsc_n = be32(stsc + 4), stts_n = be32(stts + 4);
+    if (chunks > (stco_len - 8) / (wide ? 8u : 4u) || stsc_n == 0 || stsc_n > (stsc_len - 8) / 12 || stts_n > (stts_len - 8) / 8) return;
+    if (!chapters_alloc(arena, samples, out)) return;
+
+    uint64_t time = 0;
+    uint32_t stts_i = 0, stts_left = stts_n ? be32(stts + 8) : 0, sample = 0;
+    for (uint32_t chunk = 1; chunk <= chunks && sample < samples; ++chunk) {
+        uint32_t per = 0;                       /* the stsc entry that holds this chunk: the last whose first is <= it */
+        for (uint32_t e = 0; e < stsc_n; ++e) {
+            if (be32(stsc + 8 + 12 * e) > chunk) break;
+            per = be32(stsc + 8 + 12 * e + 4);
+        }
+        uint64_t off = wide ? ((uint64_t)be32(stco + 8 + 8 * (chunk - 1)) << 32) | be32(stco + 12 + 8 * (chunk - 1))
+                            : be32(stco + 8 + 4 * (chunk - 1));
+        for (uint32_t k = 0; k < per && sample < samples; ++k, ++sample) {
+            uint32_t size = fixed ? fixed : be32(stsz + 12 + 4 * sample);
+            proven_u8str_view_t title = none();
+            if (off <= (uint64_t)file_len && size >= 2 && size <= file_len - (size_t)off) {
+                const uint8_t *s = file + off;
+                size_t tl = be16(s);
+                if (tl <= size - 2) {
+                    if (tl >= 2 && ((s[2] == 0xFE && s[3] == 0xFF) || (s[2] == 0xFF && s[3] == 0xFE)))
+                        title = utf16_to_utf8(arena, rubraview_mem_view(s + 2, tl), true);
+                    else
+                        title = trim(arena, s + 2, tl);
+                }
+            }
+            chapter_add(out, (double)time / (double)timescale, title);
+            off += size;
+            while (stts_left == 0 && stts_i + 1 < stts_n) { stts_i++; stts_left = be32(stts + 8 + 8 * stts_i); }
+            if (stts_left > 0) { time += be32(stts + 12 + 8 * stts_i); stts_left--; }
+        }
+    }
+    if (out->chapter_count == 0) out->chapters = NULL;
+}
+
+static void mp4_chapters(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
+    const uint8_t *moov, *b;
+    size_t moov_len, b_len;
+    if (!mp4_child(p, len, "moov", &moov, &moov_len)) return;
+    static const char *const CHPL[] = { "udta", "chpl" };
+    if (mp4_path(moov, moov_len, CHPL, 2, &b, &b_len)) mp4_chpl(arena, b, b_len, out);
+    if (out->chapter_count > 0) return;
+    /* the tracks an audio track's tref/chap names */
+    uint32_t chap_ids[8];
+    size_t chap_n = 0;
+    for (size_t at = 0; at + 8 <= moov_len;) {
+        uint32_t size = be32(moov + at);
+        if (size < 8 || size > moov_len - at) break;
+        if (four(moov + at + 4, "trak")) {
+            static const char *const CHAP[] = { "tref", "chap" };
+            if (mp4_path(moov + at + 8, size - 8, CHAP, 2, &b, &b_len))
+                for (size_t i = 0; i + 4 <= b_len && chap_n < 8; i += 4) chap_ids[chap_n++] = be32(b + i);
+        }
+        at += size;
+    }
+    for (size_t at = 0; chap_n > 0 && at + 8 <= moov_len;) {
+        uint32_t size = be32(moov + at);
+        if (size < 8 || size > moov_len - at) break;
+        const uint8_t *tkhd;
+        size_t tkhd_len;
+        if (four(moov + at + 4, "trak") && mp4_child(moov + at + 8, size - 8, "tkhd", &tkhd, &tkhd_len)) {
+            uint32_t id = tkhd_len >= 24 && tkhd[0] == 1 ? be32(tkhd + 20) : tkhd_len >= 16 ? be32(tkhd + 12) : 0;
+            for (size_t i = 0; i < chap_n; ++i) {
+                if (id != 0 && id == chap_ids[i]) { mp4_qt_chapters(arena, p, len, moov + at + 8, size - 8, out); break; }
+            }
+            if (out->chapter_count > 0) return;
+        }
+        at += size;
+    }
+}
+
 /* ---- WAV ---- */
 
 static void read_wav(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
@@ -760,20 +921,151 @@ static bool read_adts(const uint8_t *p, size_t len, size_t from, rubraview_tags_
     return true;
 }
 
-/* ---- ASF (.wma): the header object's File Properties and the audio stream's WAVEFORMATEX ---- */
+/* ---- ASF (.wma): the header object's File Properties and the audio stream's WAVEFORMATEX; the tags of the
+   Content Description, the Extended Content Description and the Header Extension's Metadata Library
+   (RV-319, R361: what Windows Media Player writes) ---- */
 
 static const uint8_t ASF_HEADER[16] = { 0x30, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11, 0xA6, 0xD9, 0x00, 0xAA, 0x00, 0x62, 0xCE, 0x6C };
 static const uint8_t ASF_FILE_PROPS[16] = { 0xA1, 0xDC, 0xAB, 0x8C, 0x47, 0xA9, 0xCF, 0x11, 0x8E, 0xE4, 0x00, 0xC0, 0x0C, 0x20, 0x53, 0x65 };
 static const uint8_t ASF_STREAM_PROPS[16] = { 0x91, 0x07, 0xDC, 0xB7, 0xB7, 0xA9, 0xCF, 0x11, 0x8E, 0xE6, 0x00, 0xC0, 0x0C, 0x20, 0x53, 0x65 };
 static const uint8_t ASF_AUDIO_MEDIA[16] = { 0x40, 0x9E, 0x69, 0xF8, 0x4D, 0x5B, 0xCF, 0x11, 0xA8, 0xFD, 0x00, 0x80, 0x5F, 0x5C, 0x44, 0x2B };
+static const uint8_t ASF_CONTENT_DESC[16] = { 0x33, 0x26, 0xB2, 0x75, 0x8E, 0x66, 0xCF, 0x11, 0xA6, 0xD9, 0x00, 0xAA, 0x00, 0x62, 0xCE, 0x6C };
+static const uint8_t ASF_EXT_CONTENT[16] = { 0x40, 0xA4, 0xD0, 0xD2, 0x07, 0xE3, 0xD2, 0x11, 0x97, 0xF0, 0x00, 0xA0, 0xC9, 0x5E, 0xA8, 0x50 };
+static const uint8_t ASF_HEADER_EXT[16] = { 0xB5, 0x03, 0xBF, 0x5F, 0x2E, 0xA9, 0xCF, 0x11, 0x8E, 0xE3, 0x00, 0xC0, 0x0C, 0x20, 0x53, 0x65 };
+static const uint8_t ASF_METADATA_LIB[16] = { 0x94, 0x1C, 0x23, 0x44, 0x98, 0x94, 0xD1, 0x49, 0xA1, 0x41, 0x1D, 0x13, 0x4E, 0x45, 0x70, 0x54 };
 
 static uint64_t le64(const uint8_t *p) { return (uint64_t)le32(p + 4) << 32 | le32(p); }
 
-static void read_asf(const uint8_t *p, size_t len, rubraview_tags_t *out) {
+/* Is this UTF-16LE name, its NUL left off, the ASCII `want`? */
+static bool asf_name_is(const uint8_t *p, size_t len, const char *want) {
+    size_t n = proven_cstr_len(want);
+    while (len >= 2 && p[len - 2] == 0 && p[len - 1] == 0) len -= 2;
+    if (len != n * 2) return false;
+    for (size_t i = 0; i < n; ++i) {
+        uint8_t c = p[2 * i];
+        if (p[2 * i + 1] != 0) return false;
+        if (c >= 'a' && c <= 'z') c = (uint8_t)(c - 'a' + 'A');
+        uint8_t w = (uint8_t)want[i];
+        if (w >= 'a' && w <= 'z') w = (uint8_t)(w - 'a' + 'A');
+        if (c != w) return false;
+    }
+    return true;
+}
+
+static proven_u8str_view_t asf_number(proven_arena_t *arena, uint64_t n) {
+    char text[24];
+    size_t at = sizeof text;
+    do { text[--at] = (char)('0' + n % 10); n /= 10; } while (n > 0 && at > 0);
+    return arena_bytes(arena, rubraview_bytes_view(text + at, sizeof text - at));
+}
+
+/* A value as text: a string (type 0) as it is, a DWORD (3), QWORD (4) or WORD (5) as its number. */
+static proven_u8str_view_t asf_value_text(proven_arena_t *arena, uint16_t type, const uint8_t *v, size_t len, uint64_t add) {
+    if (type == 0) return utf16_to_utf8(arena, rubraview_mem_view(v, len), false);
+    if (type == 3 && len >= 4) return asf_number(arena, (uint64_t)le32(v) + add);
+    if (type == 4 && len >= 8) return asf_number(arena, le64(v) + add);
+    if (type == 5 && len >= 2) return asf_number(arena, (uint64_t)le16(v) + add);
+    return none();
+}
+
+/* WM/Picture: the picture's type, the data's length, MIME and description (UTF-16, NUL-ended), the data.
+   A front cover (type 3) is taken over any other; the first picture when none is. */
+static void asf_picture(const uint8_t *v, size_t len, rubraview_tags_t *out, bool *front) {
+    if (len < 5 || *front) return;
+    uint8_t kind = v[0];
+    uint32_t size = le32(v + 1);
+    size_t at = 5;
+    while (at + 1 < len && (v[at] | v[at + 1])) at += 2;   /* past the MIME type; the bytes say which */
+    at += 2;
+    while (at + 1 < len && (v[at] | v[at + 1])) at += 2;
+    at += 2;
+    if (at > len || size == 0 || size > len - at || size > RUBRAVIEW_TAGS_MAX_ART) return;
+    if (out->art_size > 0 && kind != 3) return;
+    const uint8_t *data = v + at;
+    bool png = size > 8 && data[0] == 0x89 && data[1] == 'P';
+    bool jpeg = size > 3 && data[0] == 0xFF && data[1] == 0xD8;
+    if (!png && !jpeg) return;   /* the image loader is told JPEG or PNG, as with every other format */
+    out->art = data;
+    out->art_size = size;
+    out->art_mime = png ? PROVEN_LIT("image/png") : PROVEN_LIT("image/jpeg");
+    if (kind == 3) *front = true;
+}
+
+/* One named value, from the Extended Content Description or the Metadata Library. */
+static void asf_tag(proven_arena_t *arena, const uint8_t *name, size_t name_len, uint16_t type,
+                    const uint8_t *v, size_t len, rubraview_tags_t *out, bool *front, bool *track_set) {
+    if (asf_name_is(name, name_len, "WM/AlbumTitle")) { if (out->album.size == 0) out->album = asf_value_text(arena, type, v, len, 0); }
+    else if (asf_name_is(name, name_len, "WM/Year")) { if (out->year.size == 0) out->year = asf_value_text(arena, type, v, len, 0); }
+    else if (asf_name_is(name, name_len, "WM/Genre")) { if (out->genre.size == 0) out->genre = asf_value_text(arena, type, v, len, 0); }
+    else if (asf_name_is(name, name_len, "WM/AlbumArtist")) { if (out->artist.size == 0) out->artist = asf_value_text(arena, type, v, len, 0); }
+    else if (asf_name_is(name, name_len, "WM/Lyrics")) { if (out->lyrics_text.size == 0 && type == 0) out->lyrics_text = asf_value_text(arena, type, v, len, 0); }
+    else if (asf_name_is(name, name_len, "WM/TrackNumber")) {   /* 1-based; it wins over WM/Track */
+        proven_u8str_view_t t = asf_value_text(arena, type, v, len, 0);
+        if (t.size > 0 && !*track_set) { out->track_number = t; *track_set = true; }
+    } else if (asf_name_is(name, name_len, "WM/Track")) {        /* the older, 0-based one */
+        if (out->track_number.size == 0) out->track_number = asf_value_text(arena, type, v, len, type == 0 ? 0 : 1);
+    } else if (asf_name_is(name, name_len, "WM/Picture")) {
+        if (type == 1) asf_picture(v, len, out, front);
+    } else if (type == 0) {   /* REPLAYGAIN_TRACK_GAIN and the rest, as foobar2000 and others write them */
+        proven_u8str_view_t n = utf16_to_utf8(arena, rubraview_mem_view(name, name_len), false);
+        if (n.size > 11 && same_ci((proven_u8str_view_t){ n.ptr, 11 }, "REPLAYGAIN_"))
+            replaygain_value(out, n, asf_value_text(arena, type, v, len, 0));
+    }
+}
+
+static void asf_content_desc(proven_arena_t *arena, const uint8_t *o, size_t size, rubraview_tags_t *out) {
+    if (size < 34) return;
+    size_t lens[5], at = 34;
+    for (int i = 0; i < 5; ++i) lens[i] = le16(o + 24 + 2 * i);
+    for (int i = 0; i < 5; ++i) {   /* title, author, copyright, description, rating */
+        if (lens[i] > size - at) return;
+        proven_u8str_view_t text = utf16_to_utf8(arena, rubraview_mem_view(o + at, lens[i]), false);
+        if (i == 0 && text.size > 0) out->title = text;
+        else if (i == 1 && text.size > 0) out->artist = text;
+        at += lens[i];
+    }
+}
+
+static void asf_ext_content(proven_arena_t *arena, const uint8_t *o, size_t size, rubraview_tags_t *out, bool *front, bool *track_set) {
+    if (size < 26) return;
+    uint32_t count = le16(o + 24);
+    size_t at = 26;
+    for (uint32_t k = 0; k < count && at + 2 <= size; ++k) {
+        size_t name_len = le16(o + at);
+        if (name_len > size - at - 2 || size - at - 2 - name_len < 4) return;
+        const uint8_t *name = o + at + 2;
+        at += 2 + name_len;
+        uint16_t type = (uint16_t)le16(o + at);
+        size_t len = le16(o + at + 2);
+        at += 4;
+        if (len > size - at) return;
+        asf_tag(arena, name, name_len, type, o + at, len, out, front, track_set);
+        at += len;
+    }
+}
+
+/* The Metadata Library: language and stream, the name's length, the type, a 32-bit data length, name, data. */
+static void asf_metadata_lib(proven_arena_t *arena, const uint8_t *o, size_t size, rubraview_tags_t *out, bool *front, bool *track_set) {
+    if (size < 26) return;
+    uint32_t count = le16(o + 24);
+    size_t at = 26;
+    for (uint32_t k = 0; k < count && at + 12 <= size; ++k) {
+        size_t name_len = le16(o + at + 4);
+        uint16_t type = (uint16_t)le16(o + at + 6);
+        uint32_t len = le32(o + at + 8);
+        at += 12;
+        if (name_len > size - at || len > size - at - name_len) return;
+        asf_tag(arena, o + at, name_len, type, o + at + name_len, len, out, front, track_set);
+        at += name_len + len;
+    }
+}
+
+static void read_asf(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
     out->codec = PROVEN_LIT("WMA");
     if (len < 30) return;
     uint64_t header = le64(p + 16);
     size_t end = header < (uint64_t)len ? (size_t)header : len;
+    bool front = false, track_set = false;
     for (size_t at = 30; at + 24 <= end;) {
         uint64_t size = le64(p + at + 16);
         if (size < 24 || size > (uint64_t)(end - at)) break;
@@ -789,6 +1081,20 @@ static void read_asf(const uint8_t *p, size_t len, rubraview_tags_t *out) {
             out->sample_rate = le32(wf + 4);
             uint32_t bytes_per_second = le32(wf + 8);
             if (bytes_per_second > 0) out->bitrate_kbps = (bytes_per_second * 8 + 500) / 1000;
+        } else if (proven_sys_mem_cmp(o, ASF_CONTENT_DESC, 16) == 0) {
+            asf_content_desc(arena, o, (size_t)size, out);
+        } else if (proven_sys_mem_cmp(o, ASF_EXT_CONTENT, 16) == 0) {
+            asf_ext_content(arena, o, (size_t)size, out, &front, &track_set);
+        } else if (proven_sys_mem_cmp(o, ASF_HEADER_EXT, 16) == 0 && size >= 46) {
+            size_t inner = le32(o + 42);
+            if (inner > (size_t)size - 46) inner = (size_t)size - 46;
+            for (size_t in = 0; in + 24 <= inner;) {               /* the objects inside it */
+                const uint8_t *e = o + 46 + in;
+                uint64_t esize = le64(e + 16);
+                if (esize < 24 || esize > (uint64_t)(inner - in)) break;
+                if (proven_sys_mem_cmp(e, ASF_METADATA_LIB, 16) == 0) asf_metadata_lib(arena, e, (size_t)esize, out, &front, &track_set);
+                in += (size_t)esize;
+            }
         }
         at += (size_t)size;
     }
@@ -841,12 +1147,19 @@ rubraview_tags_t rubraview_tags_read(proven_arena_t *arena, rubraview_tags_sourc
     } else if (four(p, "OggS")) {
         read_ogg(arena, p, len, &out);
     } else if (len > 12 && four(p + 4, "ftyp")) {
-        mp4_walk(arena, rubraview_mem_view(p, len), 0, &out);
+        /* RV-319: the whole file when there is one: an audiobook's moov is often after its sound, and its chapter
+           titles are samples anywhere in it (the boxes are walked by their sizes, so little of it is read) */
+        const uint8_t *mp = source.whole && source.whole_size >= len ? source.whole : p;
+        size_t mlen = source.whole && source.whole_size >= len ? source.whole_size : len;
+        mp4_walk(arena, rubraview_mem_view(mp, mlen), 0, &out);
         if (out.codec.size == 0) out.codec = PROVEN_LIT("AAC");
+        mp4_chapters(arena, mp, mlen, &out);   /* RV-319: an audiobook's */
+        for (size_t i = 0; i < out.chapter_count; ++i)
+            out.chapters[i].end_seconds = i + 1 < out.chapter_count ? out.chapters[i + 1].start_seconds : out.duration_seconds;
     } else if (four(p, "RIFF") && len > 12 && four(p + 8, "WAVE")) {
         read_wav(arena, p, len, &out);
     } else if (len >= 16 && proven_sys_mem_cmp(p, ASF_HEADER, 16) == 0) {
-        read_asf(p, len, &out);
+        read_asf(arena, p, len, &out);
     } else if (!read_adts(p, len, after_id3 < len ? after_id3 : 0, &out)) {
         read_mp3_frame(rubraview_mem_view(p, len), after_id3 < len ? after_id3 : 0, &out);
     }

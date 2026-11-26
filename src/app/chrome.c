@@ -392,7 +392,12 @@ void draw_titlebar(app_state_t *app, double win_w) {
             draw_text_weight(app, cstr(GLYPHS[i]), br, bh * 0.36 * bk, on[i] ? COLOR_TEXT : 0xC8F0F0F0u, on[i]);
     }
     place_font_end(app, before_buttons);
-    draw_tmenu(app, win_w);
+    if (!app->picker_open) draw_tmenu(app, win_w);   /* RV-321: the open-file screen draws it last, over its popups */
+}
+
+/* RV-321: the ☰ pull-down over the open-file screen's ★ popup, Favourites window and right-click menu. */
+void draw_titlebar_menu(app_state_t *app, double win_w) {
+    if (app->titlebar.shown) draw_tmenu(app, win_w);
 }
 
 /* The filmstrip (F4, or the wheel's for a while): thumbnails from its own thread, else the

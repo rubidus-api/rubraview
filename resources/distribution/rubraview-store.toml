@@ -334,6 +334,13 @@ description = "Music"
 logo = "menu/types/music.png"
 target = "file:App"
 
+[assoc.Music_m4b]
+extension = ".m4b"
+prog-id = "Rubraview.Music"
+description = "Music"
+logo = "menu/types/music.png"
+target = "file:App"
+
 # RV-123: text files (RFC-0005 §9); in a package Windows' Default apps decides.
 [assoc.Text_txt]
 extension = ".txt"
@@ -409,7 +416,7 @@ on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".cbz", ".cb7", ".cbr", ".mp4",
     ".mkv", ".webm", ".avi", ".mov", ".wmv", ".asf", ".mpg", ".mpeg",
-    ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a", ".aac", ".wma", ".oga", ".txt", ".log", ".nfo", ".md", ".m3u8", ".m3u", ".pls", ".rvlist",
+    ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a", ".aac", ".wma", ".oga", ".m4b", ".txt", ".log", ".nfo", ".md", ".m3u8", ".m3u", ".pls", ".rvlist",
     ".zip", ".7z", ".rar", ".alz", ".egg",
 ]
 text = "Open"
@@ -425,7 +432,7 @@ on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".cbz", ".cb7", ".cbr", ".mp4",
     ".mkv", ".webm", ".avi", ".mov", ".wmv", ".asf", ".mpg", ".mpeg",
-    ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a", ".aac", ".wma", ".oga", ".txt", ".log", ".nfo", ".md", ".m3u8", ".m3u", ".pls", ".rvlist",
+    ".mp3", ".flac", ".wav", ".ogg", ".opus", ".m4a", ".aac", ".wma", ".oga", ".m4b", ".txt", ".log", ".nfo", ".md", ".m3u8", ".m3u", ".pls", ".rvlist",
     ".zip", ".7z", ".rar", ".alz", ".egg",
 ]
 text = "Open in a new window"
@@ -441,7 +448,7 @@ on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".mp4", ".mkv", ".webm", ".avi",
     ".mov", ".wmv", ".asf", ".mpg", ".mpeg", ".mp3", ".flac", ".wav", ".ogg",
-    ".opus", ".m4a", ".aac", ".wma", ".oga",
+    ".opus", ".m4a", ".aac", ".wma", ".oga", ".m4b",
 ]
 text = "Open these only"
 text-ko = "이것만 열기"
@@ -456,7 +463,7 @@ on = [
     ".jpg", ".jpeg", ".png", ".apng", ".gif", ".bmp", ".tif", ".tiff",
     ".webp", ".avif", ".jxl", ".ico", ".mp4", ".mkv", ".webm", ".avi",
     ".mov", ".wmv", ".asf", ".mpg", ".mpeg", ".mp3", ".flac", ".wav", ".ogg",
-    ".opus", ".m4a", ".aac", ".wma", ".oga", ".m3u8", ".m3u", ".pls", ".rvlist",
+    ".opus", ".m4a", ".aac", ".wma", ".oga", ".m4b", ".m3u8", ".m3u", ".pls", ".rvlist",
 ]
 text = "Add to the list"
 text-ko = "재생목록에 넣기"

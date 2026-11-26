@@ -246,14 +246,47 @@ void music_make_backdrop(app_state_t *app, const rubraview_tags_t *tags) {
     }
 }
 
+/* RV-319 (R362): a song's tags, from the file mapped: its first 4 MB as the head (a song of any size; one
+   over 4 MB used to have no tags at all) and the whole of it for an MPEG-4
+   file's moov and chapters. The cover is copied and the file let go at once, so a song playing can still be
+   moved or deleted. The words go into `region` (2 MB made room for; the cover's own size after), or into
+   `fallback` when it has no room or is NULL. `*read` is false when the file could not be mapped. */
+rubraview_tags_t music_tags_of(rubraview_region_t *region, proven_arena_t *fallback, proven_u8str_view_t path, bool *read) {
+    rubraview_tags_t tags = {0};
+    *read = false;
+    proven_arena_t *arena = region && rubraview_region_ensure(region, 2u << 20) ? &region->arena : fallback;
+    rubraview_fs_mapping_t map = {0};
+    if (path.size == 0 || !rubraview_pal_fs_map(path, &map)) return tags;
+    if (map.size >= 12 && map.size <= (uint64_t)SIZE_MAX) {
+        size_t size = (size_t)map.size;
+        size_t head = size < MUSIC_MAX_HEAD_BYTES ? size : MUSIC_MAX_HEAD_BYTES;
+        tags = rubraview_tags_read(arena, (rubraview_tags_source_t){
+            .head = map.data, .head_size = head,   /* no tail: ID3v1's bytes are a code page's, not UTF-8 */
+            .file_size = map.size, .whole = map.data, .whole_size = size });
+        if (tags.art && tags.art_size > 0) {
+            if (region && arena == &region->arena && !rubraview_region_ensure(region, tags.art_size)) arena = fallback;
+            proven_result_mem_mut_t res = proven_arena_alloc(arena, tags.art_size);
+            if (proven_is_ok(res.err)) {
+                proven_sys_mem_copy(res.value.ptr, tags.art, tags.art_size);
+                tags.art = (const uint8_t *)res.value.ptr;
+            } else {
+                tags.art = NULL;
+                tags.art_size = 0;
+            }
+        }
+        *read = true;
+    }
+    rubraview_pal_fs_unmap(&map);
+    return tags;
+}
+
 /* Read the file's own words once per track. */
 static void music_load(app_state_t *app, proven_u8str_view_t path) {
     music_clear(app);
     if (path.size == 0) return;
-    proven_u8str_view_t head = rubraview_pal_fs_read_file(media_arena(app, MUSIC_MAX_HEAD_BYTES + 4096u), path, MUSIC_MAX_HEAD_BYTES);
-    if (head.size == 0) return;      /* a record too large for the head budget: no tags, and it still plays */
-    app->music_tags = rubraview_tags_read(media_arena(app, head.size + (1u << 20)), (rubraview_tags_source_t){
-        .head = (const uint8_t*)head.ptr, .head_size = head.size, .file_size = head.size });
+    bool read = false;
+    app->music_tags = music_tags_of(app->mem ? &app->mem->media : NULL, app->arena, path, &read);
+    if (!read) return;               /* not a file that can be mapped: no tags, and it still plays */
     app->music_tags_read = true;
     music_make_backdrop(app, &app->music_tags);
     /* A `.lrc` of the same name beside it: the words, in time. Else the
@@ -315,6 +348,14 @@ static void music_load(app_state_t *app, proven_u8str_view_t path) {
                 break;
             }
         }
+    }
+    /* RV-319 (R362): no sheet, but the file's own chapters (an audiobook's): they are its tracks, the book's
+       title and reader the album's; the page keys go from one to the next as with a sheet's. */
+    if (app->music_cue.count < 2 && app->music_tags.chapter_count >= 2) {
+        const rubraview_tags_t *t = &app->music_tags;
+        app->music_cue = (rubraview_cue_sheet_t){ .album_title = t->album.size > 0 ? t->album : t->title,
+                                                  .album_performer = t->artist, .audio_file = PROVEN_LIT(""),
+                                                  .tracks = t->chapters, .count = t->chapter_count };
     }
     audio_chain_update(app);
 }

@@ -70,6 +70,10 @@ typedef struct rubraview_media_facts {
    say little (an icon, a bare MP3 or AAC, a transport stream). False when it is no kind known here. */
 bool rubraview_media_head_read(rubraview_head_src_t *src, proven_u8str_view_t name, rubraview_media_facts_t *out);
 
+/* RV-319 (R362): the MIME type Media Foundation is told for a file whose ending it has no handler for although
+   one of its handlers reads the bytes (".m4b", an MPEG-4 audiobook: "audio/mp4"); NULL for any other name. */
+const char *rubraview_media_mf_content_type(proven_u8str_view_t name);
+
 #ifdef __cplusplus
 }
 #endif

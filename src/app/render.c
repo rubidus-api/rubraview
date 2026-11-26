@@ -1825,6 +1825,7 @@ void render_frame(app_state_t *app) {
         draw_favpop(app, (double)win_w, (double)win_h);   /* RV-317: two-column Favourites + Places popup */
         draw_favwin(app, (double)win_w, (double)win_h);   /* 1.24.0: opened from Manage... */
         draw_ctxmenu(app);           /* 1.22.0: a tile's right click */
+        draw_titlebar_menu(app, (double)win_w);   /* RV-321: the ☰ pull-down over all of them (its presses come first too) */
     } else {
         edit_preview_update(app);
         draw_edit_preview(app);

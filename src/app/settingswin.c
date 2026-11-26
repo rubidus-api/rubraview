@@ -1182,6 +1182,7 @@ static size_t shell_chosen_words(app_state_t *app, bool menu, char *out, size_t 
         { "aac",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_aac")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_aac")) > 0.5 },   /* RV-319 */
         { "wma",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_wma")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_wma")) > 0.5 },
         { "oga",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_oga")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_oga")) > 0.5 },
+        { "m4b",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_m4b")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_m4b")) > 0.5 },   /* RV-319: audiobooks */
         /* RV-123: text files */
         { "txt",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_txt")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_txt")) > 0.5 },
         { "log",  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("ext_log")) > 0.5,  rubraview_settings_get(st, PROVEN_LIT("shell"), PROVEN_LIT("menu_log")) > 0.5 },

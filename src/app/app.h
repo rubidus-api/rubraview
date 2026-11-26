@@ -1719,6 +1719,7 @@ enum { FRAME_NOT = 0, FRAME_COPY, FRAME_SAVE, FRAME_EDIT };   /* FRAME_EDIT: sav
 /* RV-076: the head of a music file is where its tags and its cover live,
    so a 300 MB record is not read to find out who is singing. */
 #define MUSIC_MAX_HEAD_BYTES (4u * 1024u * 1024u)
+rubraview_tags_t music_tags_of(rubraview_region_t *region, proven_arena_t *fallback, proven_u8str_view_t path, bool *read);   /* RV-319: media.c */
 #define SUBTITLE_MAX_BYTES (2u * 1024u * 1024u)
 
 /* Defined in media.c. */
@@ -2233,6 +2234,7 @@ void draw_subtitle(app_state_t *app, int32_t win_w, int32_t win_h);
 void draw_text_page(app_state_t *app, int32_t win_w, int32_t win_h);
 void draw_text_weight(app_state_t *app, proven_u8str_view_t text, rubraview_pal_rect_t r, double size, uint32_t argb, bool bold);
 void draw_titlebar(app_state_t *app, double win_w);
+void draw_titlebar_menu(app_state_t *app, double win_w);   /* RV-321 */
 proven_u8str_view_t action_first_key(const app_state_t *app, proven_u8str_view_t action, char *buffer, size_t capacity);
 void draw_toolbox_window(app_state_t *app);
 rubraview_edge_side_t edge_nav_side(app_state_t *app, double x, double y);

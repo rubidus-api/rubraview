@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Rubraview — a fast viewer for pictures, comics, video and music on Windows</title>
 <meta name="description" content="A light, fast Windows viewer for pictures, comic books, video and music. Opens straight into what you chose, reads CBZ, CB7 and CBR page by page or two at a time, plays MP4 and MKV with subtitles, and edits, converts and sorts your files. Free and open source.">
 <link rel="alternate" hreflang="en" href="https://rubidus-api.github.io/rubraview/en/">
@@ -14,140 +15,137 @@
 <link rel="icon" href="../assets/icon.png">
 <link rel="stylesheet" href="../assets/site.css">
 </head>
-<body>
-<header class="top"><div class="wrap">
-<a class="brand" href="./"><img src="../assets/icon.png" alt="" width="32" height="32"> Rubraview</a>
-<nav>
-<a href="#pictures">Pictures</a>
-<a href="#comics">Comics</a>
-<a href="#picker">Files</a>
-<a href="#archives">Archives</a>
-<a href="#video">Video</a>
-<a href="#music">Music</a>
-<a class="lang" href="../ko/" hreflang="ko">한국어</a>
-</nav></div></header>
-<section class="hero"><div class="wrap">
-<div class="hero-text">
+<body id="top">
+<nav class="bar" aria-label="Site">
+<details class="menu"><summary aria-label="Menu">☰</summary><div class="panel">
+<nav class="goto"><a href="#pictures">Pictures</a><a href="#comics">Comics</a><a href="#picker">Files</a><a href="#archives">Archives</a><a href="#video">Video</a><a href="#music">Music</a><a href="#download">Download</a></nav>
+<fieldset><legend>Language</legend><a class="pick on" href="./" hreflang="en" aria-current="page">English</a><a class="pick" href="../ko/" hreflang="ko">한국어</a></fieldset>
+<fieldset><legend>Theme</legend><label><input type="radio" name="theme" id="theme-system" checked> System</label><label><input type="radio" name="theme" id="theme-light"> Light</label><label><input type="radio" name="theme" id="theme-dark"> Dark</label></fieldset>
+<fieldset><legend>Text width</legend><label><input type="radio" name="width" id="width-960" checked> 960</label><label><input type="radio" name="width" id="width-fit"> Fit the window</label></fieldset>
+<fieldset><legend>Layout</legend><label><input type="radio" name="layout" id="layout-auto" checked> Auto</label><label><input type="radio" name="layout" id="layout-wide"> Wide</label><label><input type="radio" name="layout" id="layout-narrow"> Narrow</label></fieldset>
+</div></details>
+<a class="back" href="https://rubidus-api.github.io/" aria-label="Back">←</a>
+<a class="here" href="#top"><img src="../assets/icon.png" alt="" width="20" height="20">Rubraview</a>
+<div class="items"><a href="#pictures">Pictures</a><a href="#comics">Comics</a><a href="#picker">Files</a><a href="#archives">Archives</a><a href="#video">Video</a><a href="#music">Music</a></div>
+<a class="end" href="#download">Download</a>
+</nav>
+<script>(function(){var K="rubraview.site",d=document,s={},m=d.querySelector(".menu");try{s=JSON.parse(localStorage.getItem(K))||{}}catch(e){}["theme","width","layout"].forEach(function(g){var r=s[g]&&d.getElementById(g+"-"+s[g]);if(r)r.checked=true});d.addEventListener("change",function(e){var t=e.target;if(t.type!=="radio")return;s[t.name]=t.id.slice(t.name.length+1);try{localStorage.setItem(K,JSON.stringify(s))}catch(e){}});d.addEventListener("keydown",function(e){if(e.key==="Escape"&&m.open){m.open=false;m.querySelector("summary").focus()}});d.addEventListener("click",function(e){if(m.open&&!m.contains(e.target))m.open=false});m.querySelectorAll(".goto a").forEach(function(a){a.addEventListener("click",function(){m.open=false})});d.querySelector(".back").addEventListener("click",function(e){if(history.length>1&&d.referrer){e.preventDefault();history.back()}});})();</script>
+<main>
+<header class="hero">
 <h1>Rubraview</h1>
 <p class="tagline">Pictures · Comics · Video · Music</p>
 <p class="lead">A fast, light viewer for Windows that opens straight into what you chose, turns pages with one key, and stays out of the way. Written in C, it starts at once and uses little memory. It never connects to the internet and collects nothing.</p>
 <div class="buttons">
-<a class="btn primary" href="https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe">Download for Windows <span class="ver" data-version></span></a>
-<a class="btn" href="https://github.com/rubidus-api/rubraview/releases/latest" data-assets>ZIP and installer (MSI)</a>
+<a class="btn primary" href="https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe">Download for Windows v1.62.0</a>
+<a class="btn" href="https://github.com/rubidus-api/rubraview/releases/latest">ZIP and installer (MSI)</a>
 <a class="btn" href="https://apps.microsoft.com/detail/9n99b2x63k7x">Microsoft Store</a>
 <a class="btn" href="https://github.com/rubidus-api/rubraview">Source on GitHub</a>
 </div>
 <p class="note">No installing needed: unzip and run rubraview.exe, or run rubraview.exe alone. The MSI installs it for every user with Explorer&#x27;s right-click menus; the Store keeps it up to date.</p>
-</div>
 <img class="hero-shot" src="../assets/en/picture.webp" alt="A picture with the title bar and the Floating Icon Group" width="1280" height="720">
-</div></section>
-<section class="glance"><div class="wrap">
+</header>
+<section class="glance">
 <h2>At a glance</h2>
 <div class="cards">
 <div class="card"><h3>Pictures</h3><p>JPEG, PNG, GIF, WebP, TIFF, BMP, ICO and AVIF without a codec to install; animations too.</p></div>
 <div class="card"><h3>Comics</h3><p>CBZ, CB7 and CBR read in place, one page or two, right to left, webtoon strips; your place kept.</p></div>
 <div class="card"><h3>Video</h3><p>MP4, MKV, AVI, MOV, WebM on the graphics card; subtitles, A-B repeat, speed, frame steps.</p></div>
-<div class="card"><h3>Music</h3><p>MP3, FLAC, M4A, OGG, Opus, WAV with cover, lyrics, equaliser, analyser and a mini player.</p></div>
-<div class="card"><h3>Files</h3><p>An open-file screen with thumbnails or details, baskets, copy, move, rename, undo.</p></div>
-<div class="card"><h3>Archives</h3><p>Look inside ZIP, 7z, RAR and more; extract where you choose; compress to ZIP or 7z.</p></div>
+<div class="card"><h3>Music</h3><p>MP3, FLAC, M4A, AAC, WMA, OGG, Opus, WAV with cover, lyrics, equaliser and analyser; audiobooks by chapter.</p></div>
+<div class="card"><h3>Files</h3><p>A file browser with thumbnails or details, favourites, baskets, drag to move, copy, rename, undo.</p></div>
+<div class="card"><h3>Archives</h3><p>Look inside ZIP, 7z, RAR and more; extract where you choose, even from Explorer; compress to ZIP or 7z.</p></div>
 <div class="card"><h3>Editing</h3><p>Steps on a selection, colour, 21 effects, resize, export; a batch for many at once.</p></div>
 <div class="card"><h3>Your way</h3><p>Every action on a key you can change; five languages; nothing sent anywhere.</p></div>
-</div></div></section>
-<section id="pictures" class="feature"><div class="wrap">
+</div></section>
+<section id="pictures" class="feature">
 <h2>Pictures, the way you look at them</h2>
-<p>A picture opens in the window it fits, smoothly zoomed and panned on the graphics card. Turn pages with the arrows, the wheel or the edges of the window; the wheel strip and the filmstrip show what is next. AVIF, animated GIF, APNG and WebP open as they are, JPEG XL where Windows or FFmpeg can read it.</p>
+<p>A picture opens in the window it fits, smoothly zoomed and panned on the graphics card. Turn pages with the arrows, the wheel or the edges of the window; the wheel strip and the filmstrip show what is next. AVIF, animated GIF, APNG and WebP open as they are, JPEG XL where Windows or FFmpeg can read it. A click in the middle brings up the navigator: a page bar, the first and last, the folder or archive beside, and copy or move to your folder in one press. With nothing open, the start screen shows how to begin.</p>
 <div class="shots n2">
 <figure><a href="../assets/en/picture.webp"><img src="../assets/en/picture.webp" alt="A picture with the title bar and the Floating Icon Group" loading="lazy" width="1280" height="720"></a><figcaption>A picture with the title bar and the Floating Icon Group</figcaption></figure>
 <figure><a href="../assets/en/strip.webp"><img src="../assets/en/strip.webp" alt="The filmstrip under the picture" loading="lazy" width="1280" height="720"></a><figcaption>The filmstrip under the picture</figcaption></figure>
-</div></div></section>
-<section id="comics" class="feature alt"><div class="wrap">
+</div></section>
+<section id="comics" class="feature">
 <h2>Comics and books, read in place</h2>
-<p>CBZ / ZIP, CB7 / 7z and CBR / RAR — solid, split or locked — are read without unpacking. One page or two side by side, right to left for manga, a cover or a wide spread on its own, and webtoon strips read top to bottom. Each book opens where you stopped.</p>
+<p>CBZ / ZIP, CB7 / 7z and CBR / RAR — solid, split or locked — are read without unpacking. One page or two side by side, right to left for manga, a cover or a wide spread on its own, and webtoon strips read top to bottom. Each book opens where you stopped, and books in a list are read one after another, each in its place.</p>
 <div class="shots n2">
 <figure><a href="../assets/en/comic.webp"><img src="../assets/en/comic.webp" alt="A comic as two pages" loading="lazy" width="1280" height="720"></a><figcaption>A comic as two pages</figcaption></figure>
 <figure><a href="../assets/en/webtoon.webp"><img src="../assets/en/webtoon.webp" alt="A webtoon strip, read down" loading="lazy" width="1280" height="720"></a><figcaption>A webtoon strip, read down</figcaption></figure>
-</div></div></section>
-<section id="picker" class="feature"><div class="wrap">
-<h2>The open-file screen</h2>
-<p>Folders and files as thumbnails or as a details list with size, resolution and length, sorted by any column. One click picks, a double click opens. Recent files, favourites, a path you can type, and five baskets that gather files from anywhere to copy or move them together.</p>
+</div></section>
+<section id="picker" class="feature">
+<h2>The file browser</h2>
+<p>Folders and files as thumbnails or as a details list with size, resolution and length, sorted by any column, folders first or files first. One click picks, a double click opens; programs and documents open in their own programs. Drag picked files onto a folder to move them, with Ctrl to copy. Favourites hold folders and files alike, and five baskets gather files from anywhere, archives included, to copy or move them together. The same browser chooses a folder or a file wherever the program asks for one.</p>
 <div class="shots n2">
 <figure><a href="../assets/en/picker.webp"><img src="../assets/en/picker.webp" alt="Thumbnails of a folder" loading="lazy" width="1280" height="720"></a><figcaption>Thumbnails of a folder</figcaption></figure>
 <figure><a href="../assets/en/details.webp"><img src="../assets/en/details.webp" alt="The same folder as details" loading="lazy" width="1280" height="720"></a><figcaption>The same folder as details</figcaption></figure>
-</div></div></section>
-<section id="archives" class="feature alt"><div class="wrap">
+</div></section>
+<section id="archives" class="feature">
 <h2>Archives, without an archiver</h2>
-<p>Look inside ZIP, 7z, RAR, ALZ, EGG and TAR as if they were folders, open what is in them, and extract into the folder you choose — then open it here or in Explorer. Pack files into a ZIP or a 7z, with a password and split parts if you like. Names stored in your Windows&#x27; own code page read right.</p>
+<p>Look inside ZIP, 7z, RAR, ALZ, EGG and TAR as if they were folders, open what is in them, and extract into the folder you choose — then open it here or in Explorer. Pack files into a ZIP or a 7z, with a password and split parts if you like. Names stored in your Windows&#x27; own code page read right. Explorer&#x27;s right-click menu extracts here, into a folder of its name, or smartly, in a small window of its own; every extraction, copy and move runs on even if the viewer is closed.</p>
 <div class="shots n2">
 <figure><a href="../assets/en/archive.webp"><img src="../assets/en/archive.webp" alt="Inside an archive" loading="lazy" width="1280" height="720"></a><figcaption>Inside an archive</figcaption></figure>
 <figure><a href="../assets/en/extract.webp"><img src="../assets/en/extract.webp" alt="Extract asks where" loading="lazy" width="1280" height="720"></a><figcaption>Extract asks where</figcaption></figure>
-</div></div></section>
-<section id="video" class="feature"><div class="wrap">
+</div></section>
+<section id="video" class="feature">
 <h2>Video with subtitles</h2>
-<p>Films play on the graphics card through Windows&#x27; own decoders, or FFmpeg&#x27;s if you put them beside the program. Subtitles (SRT, SAMI, WebVTT, ASS, DVD) move earlier or later while you watch, are edited in a window of their own, and are taken out of or put into MKV and MP4. Repeat from A to B, change the speed, step frame by frame, save a frame.</p>
+<p>Films play on the graphics card through Windows&#x27; own decoders, or FFmpeg&#x27;s if you put them beside the program. Subtitles (SRT, SAMI, WebVTT, ASS, DVD) move earlier or later while you watch, are edited in a window of their own, and are taken out of or put into MKV and MP4. Repeat from A to B, change the speed, step frame by frame, save a frame. Exposure, contrast, colour and sharpness change while the film plays, and the navigator in the middle of the window has play, the time bar, mute and the volume.</p>
 <div class="shots n3">
 <figure><a href="../assets/en/video.webp"><img src="../assets/en/video.webp" alt="A film with its subtitle and the Toolbar" loading="lazy" width="1280" height="720"></a><figcaption>A film with its subtitle and the Toolbar</figcaption></figure>
 <figure><a href="../assets/en/volume.webp"><img src="../assets/en/volume.webp" alt="The volume bar: drag it or type the percent" loading="lazy" width="1280" height="720"></a><figcaption>The volume bar: drag it or type the percent</figcaption></figure>
 <figure><a href="../assets/en/subtitles.webp"><img src="../assets/en/subtitles.webp" alt="The subtitles in a window of their own" loading="lazy" width="1280" height="720"></a><figcaption>The subtitles in a window of their own</figcaption></figure>
-</div></div></section>
-<section id="music" class="feature alt"><div class="wrap">
+</div></section>
+<section id="music" class="feature">
 <h2>Music, with its cover and words</h2>
-<p>A song shows its cover, its tags and its timed lyrics, with a spectrum or a scope moving to it. An equaliser with presets and ten bands, night mode, gapless play, and a mini player that stays on top. Send this app&#x27;s sound to another device without changing Windows&#x27;.</p>
+<p>MP3, FLAC, M4A, AAC, WMA, OGG, Opus and WAV play with their cover, tags and timed lyrics, and a spectrum or a scope moving to them; a cue sheet splits an album into its songs, and an audiobook (.m4b) goes from chapter to chapter with Page Down and Page Up. An equaliser with presets and ten bands, night mode, gapless play, and a mini player that stays on top. Send this app&#x27;s sound to another device without changing Windows&#x27;.</p>
 <div class="shots n2">
 <figure><a href="../assets/en/music.webp"><img src="../assets/en/music.webp" alt="A song with the analyser" loading="lazy" width="1280" height="720"></a><figcaption>A song with the analyser</figcaption></figure>
 <figure><a href="../assets/en/eq.webp"><img src="../assets/en/eq.webp" alt="The equaliser&#x27;s bands" loading="lazy" width="1280" height="720"></a><figcaption>The equaliser&#x27;s bands</figcaption></figure>
-</div></div></section>
-<section id="edit" class="feature"><div class="wrap">
+</div></section>
+<section id="edit" class="feature">
 <h2>Edit, export and batch</h2>
 <p>Adjust a picture as steps on a selection — tones, colour balance, automatic colour, 21 effects, crop and resize — undone and redone until you save over it or a copy. Export to JPEG, PNG, WebP, AVIF and more. Batch runs the same on hundreds of files at once, with names, borders and watermarks.</p>
 <div class="shots n2">
 <figure><a href="../assets/en/edit.webp"><img src="../assets/en/edit.webp" alt="The Edit window" loading="lazy" width="1280" height="720"></a><figcaption>The Edit window</figcaption></figure>
 <figure><a href="../assets/en/batch.webp"><img src="../assets/en/batch.webp" alt="Batch" loading="lazy" width="1280" height="720"></a><figcaption>Batch</figcaption></figure>
-</div></div></section>
-<section id="text" class="feature alt"><div class="wrap">
+</div></section>
+<section id="text" class="feature">
 <h2>Text files, for reading</h2>
 <p>TXT, LOG, NFO and MD open as pages to read, in Korean, Japanese and Chinese encodings guessed or chosen; line breaks tidied into paragraphs, auto-scroll at a speed you change while it runs, find and copy.</p>
 <div class="shots n1">
 <figure><a href="../assets/en/text.webp"><img src="../assets/en/text.webp" alt="A text file as a page" loading="lazy" width="1280" height="720"></a><figcaption>A text file as a page</figcaption></figure>
-</div></div></section>
-<section id="info" class="feature"><div class="wrap">
+</div></section>
+<section id="info" class="feature">
 <h2>Everything about a file</h2>
-<p>The information window tells a picture&#x27;s size, colours, camera and EXIF in full, a film&#x27;s streams and decoder, a song&#x27;s tags — text you can select and copy. The help lists every key, in your language.</p>
+<p>The information window tells a picture&#x27;s size, colours, camera and EXIF in full, a film&#x27;s streams and decoder, a song&#x27;s tags, a folder&#x27;s files and size — text you can select and copy. The properties window (Alt+Enter) is the viewer&#x27;s own, with the pages Windows&#x27; has: details, digital signatures, security and previous versions. The help lists every key, in your language.</p>
 <div class="shots n2">
 <figure><a href="../assets/en/info.webp"><img src="../assets/en/info.webp" alt="The information window" loading="lazy" width="1280" height="720"></a><figcaption>The information window</figcaption></figure>
 <figure><a href="../assets/en/help.webp"><img src="../assets/en/help.webp" alt="The help: every key" loading="lazy" width="1280" height="720"></a><figcaption>The help: every key</figcaption></figure>
-</div></div></section>
-<section id="settings" class="feature alt"><div class="wrap">
+</div></section>
+<section id="settings" class="feature">
 <h2>Settings and keys, all yours</h2>
-<p>Every action has a key, and every key can be changed on the Keys page — shown on a keyboard, with what each key does in each kind of file. Settings has a page for each part of the program, in five languages: English, Korean, Japanese, Chinese and Persian.</p>
+<p>Every action has a key, and every key can be changed on the Keys page — shown on a keyboard, with what each key does in each kind of file, and found by its name or what it does. W A S D work as the arrows. Settings has a page for each part of the program, in five languages: English, Korean, Japanese, Chinese and Persian.</p>
 <div class="shots n2">
 <figure><a href="../assets/en/settings.webp"><img src="../assets/en/settings.webp" alt="Settings" loading="lazy" width="1280" height="720"></a><figcaption>Settings</figcaption></figure>
 <figure><a href="../assets/en/keys.webp"><img src="../assets/en/keys.webp" alt="The Keys page with the keyboard" loading="lazy" width="1280" height="720"></a><figcaption>The Keys page with the keyboard</figcaption></figure>
-</div></div></section>
-<section id="menus" class="feature"><div class="wrap">
+</div></section>
+<section id="menus" class="feature">
 <h2>Menus that fit what is on screen</h2>
-<p>The title bar&#x27;s ☰ and a right click list what fits the file on screen. Send copies or moves it to a folder you set, or to any folder, in one step.</p>
+<p>The title bar&#x27;s ☰ lists everything the viewer does, under headings, and a right click what fits the file on screen. G shows your default folder and nine more: C C or M M copies or moves the file on screen there at once, Z undoes it.</p>
 <div class="shots n2">
 <figure><a href="../assets/en/menu.webp"><img src="../assets/en/menu.webp" alt="The title bar&#x27;s menu" loading="lazy" width="1280" height="720"></a><figcaption>The title bar&#x27;s menu</figcaption></figure>
 <figure><a href="../assets/en/send.webp"><img src="../assets/en/send.webp" alt="Send: where the file goes" loading="lazy" width="1280" height="720"></a><figcaption>Send: where the file goes</figcaption></figure>
-</div></div></section>
-<section class="download"><div class="wrap">
+</div></section>
+<section id="download" class="download">
 <h2>Download for Windows</h2>
 <div class="buttons">
-<a class="btn primary" href="https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe">rubraview.exe alone</a>
+<a class="btn primary" href="https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe">rubraview.exe alone v1.62.0</a>
 <a class="btn" href="https://github.com/rubidus-api/rubraview/releases/latest">ZIP and installer (MSI)</a>
 <a class="btn" href="https://apps.microsoft.com/detail/9n99b2x63k7x">Microsoft Store</a>
 </div>
 <p class="note">No installing needed: unzip and run rubraview.exe, or run rubraview.exe alone. The MSI installs it for every user with Explorer&#x27;s right-click menus; the Store keeps it up to date.</p>
-</div></section>
-<footer><div class="wrap">
+</section>
+<footer>
 <p><a href="https://github.com/rubidus-api/rubraview/blob/main/README.md">README</a> · <a href="https://github.com/rubidus-api/rubraview/blob/main/docs/manual/rubraview-manual.md">The manual</a> · <a href="https://github.com/rubidus-api/rubraview/blob/main/docs/manual/privacy-policy.md">Privacy policy</a> · <a href="https://github.com/rubidus-api/rubraview/releases">What changed</a> · <a href="https://github.com/rubidus-api/rubraview/blob/main/LICENSE">License (MIT)</a></p>
 <p class="small">The pictures, comics, film and music in these screenshots were made by a program for them. Rubraview is free, open-source software under the MIT License.</p>
-</div></footer>
-<script>
-fetch('https://api.github.com/repos/rubidus-api/rubraview/releases/latest').then(r => r.ok ? r.json() : null).then(j => {
-  if (!j || !j.tag_name) return;
-  document.querySelectorAll('[data-version]').forEach(e => e.textContent = j.tag_name);
-}).catch(() => {});
-</script>
+</footer>
+</main>
 </body>
 </html>

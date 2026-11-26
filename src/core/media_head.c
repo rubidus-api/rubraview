@@ -1300,6 +1300,10 @@ static bool name_is(proven_u8str_view_t name, const char *ext) {
     return true;
 }
 
+const char *rubraview_media_mf_content_type(proven_u8str_view_t name) {
+    return name_is(name, "m4b") ? "audio/mp4" : NULL;
+}
+
 static bool image_brand(const uint8_t *b) {
     static const char *const brands[] = { "avif", "avis", "heic", "heix", "heim", "heis", "mif1", "msf1" };
     for (size_t i = 0; i < sizeof(brands) / sizeof(brands[0]); ++i) if (proven_sys_mem_cmp(b, brands[i], 4) == 0) return true;

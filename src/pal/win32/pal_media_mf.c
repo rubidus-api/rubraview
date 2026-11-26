@@ -17,6 +17,7 @@
 #include "rubraview/pal/pal_media_backend.h"
 #include "rubraview/lang.h"
 #include "rubraview/mediaclock.h"
+#include "rubraview/media_head.h"   /* RV-319: rubraview_media_mf_content_type */
 #include "rubraview/pal/pal_filmcache.h"
 #include <stdio.h>
 
@@ -567,6 +568,20 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
 
     IMFSourceReader *reader = NULL;
     HRESULT hr = E_FAIL;
+    /* RV-319 (R362): an ending Media Foundation has no handler for (".m4b") is read by the handler its MIME
+       type names, told on the byte stream; the name's last letters are ASCII when it is one of those. */
+    WCHAR hint_type[24] = { 0 };
+    {
+        size_t len = 0;
+        while (len < sizeof(m->path) / sizeof(m->path[0]) && m->path[len] != L'\0') len++;
+        size_t from = len > 12 ? len - 12 : 0;
+        char tail[16];
+        size_t t = 0;
+        for (size_t i = from; i < len; ++i) tail[t++] = m->path[i] < 0x80 ? (char)m->path[i] : '?';
+        const char *mime = rubraview_media_mf_content_type((proven_u8str_view_t){ (const proven_byte_t *)tail, t });
+        for (size_t i = 0; mime && mime[i] && i + 1 < sizeof(hint_type) / sizeof(hint_type[0]); ++i) hint_type[i] = (WCHAR)mime[i];
+    }
+    static const GUID CONTENT_TYPE = { 0xfc358289, 0x3cb6, 0x460c, { 0xa4, 0x24, 0xb6, 0x68, 0x12, 0x60, 0x37, 0x5a } };   /* MF_BYTESTREAM_CONTENT_TYPE */
     /* RV-216 (D-249): a film on a network drive is read through its local copy, which fills as it is read. */
     rubraview_filmcache_stream_t *cached = g_mf.stream_on_istream && g_mf.create_reader_stream ? rubraview_pal_filmcache_open_ex(m->path, m->gpu.open_ahead) : NULL;
     m->film = NULL;
@@ -579,6 +594,7 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
             IMFAttributes *named = NULL;
             if (SUCCEEDED(IMFByteStream_QueryInterface(stream, &IID_IMFAttributes, (void **)&named)) && named) {
                 IMFAttributes_SetString(named, &ORIGIN_NAME, m->path);   /* its ending names the kind */
+                if (hint_type[0]) IMFAttributes_SetString(named, &CONTENT_TYPE, hint_type);
                 IMFAttributes_Release(named);
             }
             hr = g_mf.create_reader_stream(stream, attrs, &reader);
@@ -601,6 +617,11 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
         /* MF_ACCESSMODE_READ, MF_OPENMODE_FAIL_IF_NOT_EXIST, MF_FILEFLAGS_NONE */
         if (SUCCEEDED(g_mf.create_file(1, 0, 0, native, &stream)) && stream) {
             reader = NULL;
+            IMFAttributes *typed = NULL;
+            if (hint_type[0] && SUCCEEDED(IMFByteStream_QueryInterface(stream, &IID_IMFAttributes, (void **)&typed)) && typed) {
+                IMFAttributes_SetString(typed, &CONTENT_TYPE, hint_type);
+                IMFAttributes_Release(typed);
+            }
             hr = g_mf.create_reader_stream(stream, attrs, &reader);
             IMFByteStream_Release(stream);
         }

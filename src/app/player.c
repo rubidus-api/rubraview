@@ -551,12 +551,8 @@ static void mini_go_to(app_state_t *app, int32_t index) {
         app->bgm_tags = (rubraview_tags_t){0};
         if (app->mem) rubraview_region_reset(&app->mem->bgm);   /* RFC-0006: the track before's words given back */
         {
-            proven_arena_t *ba = app->mem && rubraview_region_ensure(&app->mem->bgm, MUSIC_MAX_HEAD_BYTES + (2u << 20)) ? &app->mem->bgm.arena : app->arena;
-            proven_u8str_view_t head = rubraview_pal_fs_read_file(ba, path, MUSIC_MAX_HEAD_BYTES);
-            if (head.size > 0) {
-                app->bgm_tags = rubraview_tags_read(ba, (rubraview_tags_source_t){
-                    .head = (const uint8_t*)head.ptr, .head_size = head.size, .file_size = head.size });
-            }
+            bool read = false;
+            app->bgm_tags = music_tags_of(app->mem ? &app->mem->bgm : NULL, app->arena, path, &read);   /* RV-319: a song over 4 MB too */
         }
         rubraview_pal_media_set_paused(app->bgm_media, was_paused);
         bgm_do(app, rubraview_bgm_event(&app->bgm, RUBRAVIEW_BGM_MUSIC_OPENED, bgm_pause_for_sound(app)));

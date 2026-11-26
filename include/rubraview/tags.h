@@ -35,6 +35,9 @@ typedef struct rubraview_tags_source {
     const uint8_t *tail;       /* the last 128 bytes, or NULL: ID3v1 lives there */
     size_t         tail_size;
     uint64_t       file_size;  /* the whole file, for the bitrate when nothing says */
+    const uint8_t *whole;      /* RV-319 (R362): the whole file (mapped), or NULL: an MPEG-4 file's moov and its
+                                  chapter titles are looked for there, wherever they are; nothing else reads it */
+    size_t         whole_size;
 } rubraview_tags_source_t;
 
 typedef struct rubraview_tags {
@@ -71,6 +74,12 @@ typedef struct rubraview_tags {
     proven_u8str_view_t                 lyrics_text;
     rubraview_lyric_line_t *synced_lyrics;
     size_t                  synced_lyrics_count;
+
+    /* RV-319 (R362): an MPEG-4 file's chapters (an audiobook's), from Nero's `chpl` or else the QuickTime
+       chapter track an audio track's `tref`/`chap` names (its titles only when their bytes are in the head),
+       as a cue sheet's tracks: numbered from 1, each ending where the next starts and the last at the length. */
+    rubraview_cue_track_t  *chapters;
+    size_t                  chapter_count;
 } rubraview_tags_t;
 
 /** A cover larger than this is left alone: it is not a cover. */

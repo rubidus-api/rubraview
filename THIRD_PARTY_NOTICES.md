@@ -111,7 +111,7 @@ came from is in its `vendor/<name>/VENDORED.md`.
   License — both in `vendor/libavif/LICENSE`.
 - Used for: reading AVIF pictures, still and animated.
 
-## Rubrapack 0.60.0 (part)
+## Rubrapack 0.61.0 (part)
 
 - At `vendor/rubrapack/` (see `vendor/rubrapack/VENDORED.md`), and adapted
   in `src/menu/rubraview_menu.c`

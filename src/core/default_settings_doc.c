@@ -152,7 +152,9 @@ static const char *const PARTS[] = {
 "  toggle shell.ext_wma      \".wma\" = true wired\n"
 "  pair   shell.menu_wma     \"Open with\" \"Right-click menu\" = true wired\n"
 "  toggle shell.ext_oga      \".oga\" = true wired\n"
-"  pair   shell.menu_oga     \"Open with\" \"Right-click menu\" = true wired\n",
+"  pair   shell.menu_oga     \"Open with\" \"Right-click menu\" = true wired\n"
+"  toggle shell.ext_m4b      \".m4b\" = true wired\n"
+"  pair   shell.menu_m4b     \"Open with\" \"Right-click menu\" = true wired\n",
 "  section \"Text\"\n"
 "  toggle shell.ext_txt     \".txt\" = false wired\n"
 "  pair   shell.menu_txt    \"Open with\" \"Right-click menu\" = false wired\n"
