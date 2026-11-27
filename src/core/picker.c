@@ -41,7 +41,12 @@ proven_u8str_view_t rubraview_picker_parent(proven_u8str_view_t dir) {
             if (!sep && !in_name) ++names;
             in_name = !sep;
         }
-        if (names <= 2) return places;
+        if (names <= 1) return places;
+        if (names == 2) {   /* RV-326 (R375): a share's parent is its server, listing its shares */
+            proven_u8str_view_t server;
+            (void)rubraview_path_unc((proven_u8str_view_t){ .ptr = dir.ptr, .size = len }, &server, NULL);
+            return (proven_u8str_view_t){ .ptr = dir.ptr, .size = (size_t)(server.ptr + server.size - dir.ptr) };
+        }
     }
     proven_u8str_view_t parent = rubraview_path_dirname((proven_u8str_view_t){ .ptr = dir.ptr, .size = len });
     return parent.size > 0 ? parent : places;

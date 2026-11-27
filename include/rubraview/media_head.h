@@ -74,6 +74,53 @@ bool rubraview_media_head_read(rubraview_head_src_t *src, proven_u8str_view_t na
    one of its handlers reads the bytes (".m4b", an MPEG-4 audiobook: "audio/mp4"); NULL for any other name. */
 const char *rubraview_media_mf_content_type(proven_u8str_view_t name);
 
+/* RV-319 (R365): a Sony Wave64 file (".w64": RIFF WAVE with GUIDs for chunk names and 64-bit sizes) seen by Media
+   Foundation, which has no handler for it, as the WAVE file it is: `header` holds a RIFF WAVE head (RF64 when the
+   sound passes 4 GB) whose "fmt " is the file's, then "data", and the sound follows it as the file's bytes
+   [data_at, data_at + data_len). From the file's first bytes `head` (its fmt and the data chunk's header there) and
+   its size; false when it is no Wave64 file or they are not there. */
+#define RUBRAVIEW_W64_HEADER_MAX 400
+typedef struct rubraview_w64_wave {
+    uint8_t  header[RUBRAVIEW_W64_HEADER_MAX];
+    uint32_t header_len;
+    uint64_t data_at, data_len;
+    uint16_t format_tag, block_align;
+    uint32_t rate, byte_rate;
+} rubraview_w64_wave_t;
+bool rubraview_media_w64_is(const uint8_t *head, size_t head_len);
+bool rubraview_media_w64_wave(const uint8_t *head, size_t head_len, uint64_t file_size, rubraview_w64_wave_t *out);
+
+/* RV-319 (R367): an AIFF or AIFF-C of PCM (big-endian, or "sowt" little-endian) or of 32/64-bit floats seen by
+   Media Foundation, which has no handler for AIFF, as a WAVE: `header` a RIFF WAVE head (RF64 past 4 GB), then the
+   sound bytes [data_at, data_at + data_len) of the file, each sample turned as rubraview_media_aiff_fix says. False
+   for another compression (FFmpeg's), or when COMM and SSND's header are not in `head`. */
+typedef struct rubraview_aiff_wave {
+    uint8_t  header[RUBRAVIEW_W64_HEADER_MAX];
+    uint32_t header_len;
+    uint64_t data_at, data_len;
+    uint16_t sample_bytes;   /* 1 to 8 */
+    bool     swap;           /* big-endian samples: their bytes reversed */
+    bool     sign8;          /* 8-bit: AIFF's signed to WAVE's unsigned */
+} rubraview_aiff_wave_t;
+bool rubraview_media_aiff_wave(const uint8_t *head, size_t head_len, uint64_t file_size, rubraview_aiff_wave_t *out);
+/* Whole samples of the file's sound (`len` a multiple of sample_bytes, from a sample's start) turned to the WAVE's. */
+void rubraview_media_aiff_fix(const rubraview_aiff_wave_t *w, uint8_t *buf, size_t len);
+
+/* R365, R366: a WAVE's (RIFF, RF64 or Wave64) "fmt " body and "data" place, from its first bytes and its size;
+   `fact` its frames when it says (ds64's or fact's), else 0. A data size of 0 or past the end (a recording cut
+   short) is the bytes that are there. */
+typedef struct rubraview_wave_chunks {
+    const uint8_t *fmt;
+    uint32_t fmt_len;
+    uint64_t data_at, data_len, fact;
+    bool w64;
+} rubraview_wave_chunks_t;
+bool rubraview_media_wave_chunks(const uint8_t *head, size_t head_len, uint64_t file_size, rubraview_wave_chunks_t *out);
+/* A RIFF WAVE head (RF64 with ds64 when it would pass 4 GB) for `fmt` and `data_len` bytes of sound, into `h`;
+   its length, 0 when `cap` is short. */
+uint32_t rubraview_media_wave_head(uint8_t *h, size_t cap, const uint8_t *fmt, uint32_t fmt_len, uint64_t data_len,
+                                   uint16_t block_align);
+
 #ifdef __cplusplus
 }
 #endif

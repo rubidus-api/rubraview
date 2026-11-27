@@ -304,3 +304,133 @@ proven_u8str_view_t rubraview_path_typed_folder(proven_u8str_view_t typed) {
     while (n > 1 && rubraview_path_is_sep(p[n - 1]) && !(n == 3 && p[1] == ':')) n--;
     return proven_u8str_view_from_bytes(n ? p : "", n);
 }
+
+rubraview_unc_kind_t rubraview_path_unc(proven_u8str_view_t path, proven_u8str_view_t *server, proven_u8str_view_t *share) {
+    if (server) *server = (proven_u8str_view_t){ .ptr = path.ptr, .size = 0 };
+    if (share) *share = (proven_u8str_view_t){ .ptr = path.ptr, .size = 0 };
+    if (!path.ptr || path.size < 3 || !rubraview_path_is_sep((char)path.ptr[0]) || !rubraview_path_is_sep((char)path.ptr[1])) return RUBRAVIEW_UNC_NONE;
+    size_t i = 2, a = i;
+    while (i < path.size && !rubraview_path_is_sep((char)path.ptr[i])) ++i;
+    size_t n = i - a;
+    if (n == 0 || (n == 1 && (path.ptr[a] == '?' || path.ptr[a] == '.'))) return RUBRAVIEW_UNC_NONE;   /* "\\?\", "\\.\" */
+    if (server) *server = (proven_u8str_view_t){ .ptr = path.ptr + a, .size = n };
+    while (i < path.size && rubraview_path_is_sep((char)path.ptr[i])) ++i;
+    size_t b = i;
+    while (i < path.size && !rubraview_path_is_sep((char)path.ptr[i])) ++i;
+    if (i == b) return RUBRAVIEW_UNC_SERVER;
+    if (share) *share = (proven_u8str_view_t){ .ptr = path.ptr + b, .size = i - b };
+    return RUBRAVIEW_UNC_SHARE;
+}
+
+static char up_ascii(char c) { return c >= 'a' && c <= 'z' ? (char)(c - 32) : c; }
+
+bool rubraview_path_name_ok(proven_u8str_view_t name) {
+    if (!name.ptr || name.size == 0 || name.size > 255) return false;
+    for (size_t i = 0; i < name.size; ++i) {
+        unsigned char c = name.ptr[i];
+        if (c < 0x20 || c == '\\' || c == '/' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') return false;
+    }
+    char last = (char)name.ptr[name.size - 1];
+    if (last == ' ' || last == '.') return false;   /* also "." and ".." */
+    size_t stem = 0;
+    while (stem < name.size && name.ptr[stem] != '.') ++stem;
+    while (stem > 0 && name.ptr[stem - 1] == ' ') --stem;   /* "CON .txt" is CON too */
+    static const char *const DEV[] = { "CON", "PRN", "AUX", "NUL" };
+    for (size_t d = 0; d < 4; ++d) {
+        if (stem != 3) break;
+        if (up_ascii((char)name.ptr[0]) == DEV[d][0] && up_ascii((char)name.ptr[1]) == DEV[d][1] && up_ascii((char)name.ptr[2]) == DEV[d][2]) return false;
+    }
+    if (stem == 4 && name.ptr[3] >= '1' && name.ptr[3] <= '9') {
+        char a = up_ascii((char)name.ptr[0]), b = up_ascii((char)name.ptr[1]), c = up_ascii((char)name.ptr[2]);
+        if ((a == 'C' && b == 'O' && c == 'M') || (a == 'L' && b == 'P' && c == 'T')) return false;
+    }
+    return true;
+}
+
+/* a part Windows changes or refuses in its usual form: ending in a dot or a space ("." and ".." aside), a device's */
+static bool part_is_odd(const proven_byte_t *p, size_t n) {
+    if (n == 0 || (n == 1 && p[0] == '.') || (n == 2 && p[0] == '.' && p[1] == '.')) return false;
+    if (p[n - 1] == '.' || p[n - 1] == ' ') return true;
+    bool plain = true;   /* only the device names make an otherwise fine part refused */
+    for (size_t i = 0; i < n && plain; ++i) {
+        unsigned char c = p[i];
+        if (c < 0x20 || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') plain = false;
+    }
+    return plain && !rubraview_path_name_ok((proven_u8str_view_t){ .ptr = p, .size = n });
+}
+
+static bool drive_abs(proven_u8str_view_t p) {
+    return p.size >= 3 && ((p.ptr[0] | 32) >= 'a' && (p.ptr[0] | 32) <= 'z') && p.ptr[1] == ':' && rubraview_path_is_sep((char)p.ptr[2]);
+}
+
+bool rubraview_path_win_wants_literal(proven_u8str_view_t path) {
+    if (!path.ptr) return false;
+    bool lit = path.size >= 4 && rubraview_path_is_sep((char)path.ptr[0]) && rubraview_path_is_sep((char)path.ptr[1]) &&
+               (path.ptr[2] == '?' || path.ptr[2] == '.') && rubraview_path_is_sep((char)path.ptr[3]);
+    if (lit) return false;   /* already literal */
+    if (!drive_abs(path) && rubraview_path_unc(path, NULL, NULL) != RUBRAVIEW_UNC_SHARE) return false;
+    if (path.size >= 248) return true;
+    size_t a = 0;
+    for (size_t i = 0; i <= path.size; ++i) {
+        if (i == path.size || rubraview_path_is_sep((char)path.ptr[i])) {
+            if (part_is_odd(path.ptr + a, i - a)) return true;
+            a = i + 1;
+        }
+    }
+    return false;
+}
+
+size_t rubraview_path_win_literal(proven_u8str_view_t path, char *out, size_t cap) {
+    if (!path.ptr || !out || cap < 8) return 0;
+    bool lit = path.size >= 4 && rubraview_path_is_sep((char)path.ptr[0]) && rubraview_path_is_sep((char)path.ptr[1]) &&
+               (path.ptr[2] == '?' || path.ptr[2] == '.') && rubraview_path_is_sep((char)path.ptr[3]);
+    if (lit) {
+        if (path.size + 1 > cap) return 0;
+        proven_sys_mem_copy(out, path.ptr, path.size);
+        out[path.size] = '\0';
+        return path.size;
+    }
+    size_t w = 0, root = 0, from = 0;
+    proven_u8str_view_t server, share;
+    if (drive_abs(path)) {
+        proven_sys_mem_copy(out, "\\\\?\\", 4);
+        out[4] = (char)path.ptr[0]; out[5] = ':'; out[6] = '\\';
+        w = root = 7;
+        from = 3;
+    } else if (rubraview_path_unc(path, &server, &share) == RUBRAVIEW_UNC_SHARE) {
+        size_t need = 8 + server.size + 1 + share.size + 1;
+        if (need + 1 > cap) return 0;
+        proven_sys_mem_copy(out, "\\\\?\\UNC\\", 8);
+        w = 8;
+        proven_sys_mem_copy(out + w, server.ptr, server.size); w += server.size;
+        out[w++] = '\\';
+        proven_sys_mem_copy(out + w, share.ptr, share.size); w += share.size;
+        out[w++] = '\\';
+        root = w;
+        from = (size_t)(share.ptr + share.size - path.ptr);
+    } else {
+        return 0;
+    }
+    size_t a = from;
+    for (size_t i = from; i <= path.size; ++i) {
+        if (i < path.size && !rubraview_path_is_sep((char)path.ptr[i])) continue;
+        size_t n = i - a;
+        const proven_byte_t *p = path.ptr + a;
+        a = i + 1;
+        if (n == 0 || (n == 1 && p[0] == '.')) continue;
+        if (n == 2 && p[0] == '.' && p[1] == '.') {   /* back one part, never past the root */
+            if (w > root) {
+                w--;   /* the separator after the last part */
+                while (w > root && out[w - 1] != '\\') w--;
+            }
+            continue;
+        }
+        if (w + n + 2 > cap) return 0;
+        proven_sys_mem_copy(out + w, p, n); w += n;
+        out[w++] = '\\';
+    }
+    if (w > root) w--;   /* no separator after the last part */
+    else if (root > 7 && w == root) w--;   /* "\\?\UNC\server\share" itself */
+    out[w] = '\0';
+    return w;
+}

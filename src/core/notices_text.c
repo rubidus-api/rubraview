@@ -118,7 +118,7 @@ static const char *const LINES[] = {
     "  License \xE2""\x80""\x94"" both in `vendor/libavif/LICENSE`.",
     "- Used for: reading AVIF pictures, still and animated.",
     "",
-    "## Rubrapack 0.61.0 (part)",
+    "## Rubrapack 0.62.0 (part)",
     "",
     "- At `vendor/rubrapack/` (see `vendor/rubrapack/VENDORED.md`), and adapted",
     "  in `src/menu/rubraview_menu.c`",

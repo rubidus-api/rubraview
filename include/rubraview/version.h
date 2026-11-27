@@ -15,14 +15,14 @@
  * checks that the two agree.
  */
 
-#define RUBRAVIEW_VERSION_STRING "1.63.0"
+#define RUBRAVIEW_VERSION_STRING "1.64.0"
 
 #define RUBRAVIEW_VERSION_MAJOR 1
-#define RUBRAVIEW_VERSION_MINOR 63
+#define RUBRAVIEW_VERSION_MINOR 64
 #define RUBRAVIEW_VERSION_PATCH 0
 
 /* The day this version was released, for the help window (owner, 2026-10-18). */
-#define RUBRAVIEW_RELEASE_DATE "2026-11-25"
+#define RUBRAVIEW_RELEASE_DATE "2026-11-27"
 #define RUBRAVIEW_PROJECT_URL  "https://github.com/rubidus-api/rubraview"
 
 #endif /* RUBRAVIEW_VERSION_H */

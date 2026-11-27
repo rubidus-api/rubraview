@@ -197,6 +197,9 @@ rubraview_pixbuf_t rubraview_pal_image_read_pixels_within(proven_arena_t *arena,
  */
 rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px);
 
+/** RV-324 (R372): the same in a normal or a bold weight (rubraview_pal_text_mask's is semibold), for Edit's TEXT steps. */
+rubraview_pixbuf_t rubraview_pal_text_mask_weight(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px, bool bold);
+
 /** RV-135: the same, the lines wrapped at `width` pixels and cut at `height` (a page's first lines). */
 rubraview_pixbuf_t rubraview_pal_text_mask_box(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px,
                                                int32_t width, int32_t height);

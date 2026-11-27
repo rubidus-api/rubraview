@@ -406,6 +406,18 @@ void chooser_open_listext(app_state_t *app, int where, double x, double y, doubl
     if (first > 0 && first < c->count) c->layout.first = first;
 }
 
+/* RV-323 (R369): LRCLIB's records for a typed search, one to keep beside the song (♪: with times). */
+void chooser_open_lyrics(app_state_t *app, const char *const *rows, size_t count) {
+    chooser_t *c = &app->chooser;
+    *c = (chooser_t){ .kind = CHOOSE_LYRICS, .current = -1 };
+    rubraview_fmt(c->title, sizeof(c->title), "{}", PROVEN_ARG(T("Lyrics at LRCLIB: pick one")));
+    for (size_t i = 0; i < count; ++i) chooser_word(c, (double)i, "{}", PROVEN_ARG(rows[i]));
+    int32_t w = 0, h = 0;
+    rubraview_pal_window_get_size(app->window, &w, &h);
+    double dpi = rubraview_pal_window_dpi_scale(app->window);
+    chooser_show(app, CHOOSE_IN_MAIN, (double)w * 0.5 - 150.0 * dpi, (double)h * 0.2, (double)h * 0.2);
+}
+
 /* RV-204 (owner, 2026-10-31: "파일 브라우저 창에서 확장자별로 선택하는 기능 ... 맨 왼쪽 열에"): the open-file
    screen's extensions, each with how many of its files are picked of how many; a pick takes them all, or lets
    them go when all already were, and the list stays open. Folders are not counted. */
@@ -745,6 +757,9 @@ static void chooser_pick(app_state_t *app, int32_t index) {
             break;
         }
         case CHOOSE_LISTSORT: list_sort(app, (int)lround(c->values[index]), app->list_sort_desc); break;
+        case CHOOSE_LYRICS:   /* RV-323 */
+            lyricsnet_pick(app, (size_t)lround(c->values[index]));
+            break;
         case CHOOSE_PICKEXT: {   /* RV-204: stays open, its counts new */
             rubraview_rect_t f = c->layout.frame;
             picker_ext_pick(app, (size_t)lround(c->values[index]));

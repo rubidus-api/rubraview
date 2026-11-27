@@ -548,6 +548,12 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
         proven_u8str_view_t name = eq_preset_label(preset);
         int n = rubraview_fmt(line, sizeof(line), T("equaliser: {}"), PROVEN_ARG(rubraview_bytes_view(name.ptr, (int)name.size)));
         if (n > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)n });
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("music_lyrics_find"))) {   /* RV-323 (R369) */
+        lyricsnet_find(app);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("music_lyrics_edit"))) {
+        lyricsnet_edit(app);
+    } else if (proven_u8str_view_eq(action, PROVEN_LIT("music_lyrics_upload"))) {   /* R370 */
+        lyricsnet_upload(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("media_eq_window"))) {
         eqwin_toggle(app);
     } else if (proven_u8str_view_eq(action, PROVEN_LIT("film_adjust"))) {
@@ -1563,7 +1569,7 @@ static size_t rename_field_index(app_state_t *app, double x) {
 bool rename_field_press(app_state_t *app, double x, double y, int button, uint32_t modifiers) {
     if (!app->rename_active || app->rename_field.width <= 0.0 || !pal_rect_has(app->rename_field, x, y)) return false;
     if (app->card.open && app->card_host != CARD_HOST_MAIN) return false;
-    if (!app->card.open && (app->batch_typing || (app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)))) return false;
+    if (!app->card.open && (app->batch_typing || (app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply || app->rename_is_mark)))) return false;
     if (app->card.open && !app->card.focused) {
         app->card.focused = true;
         rubraview_pal_window_text_input(app->window, true);

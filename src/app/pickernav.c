@@ -414,6 +414,12 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
                                    : recent ? recent_listing(app, pa)
                                    : desktop ? rubraview_pal_fs_list_desktop(pa)
                                              : rubraview_pal_fs_list_dir(pa, dir);
+    /* RV-326 (R375): a network place that lists nothing may want a sign-in: asked once, then listed again */
+    if (!places && !recent && !desktop && !in_arc && !in_book && listing.count == 0 && rubraview_path_unc(dir, NULL, NULL) != RUBRAVIEW_UNC_NONE &&
+        !rubraview_pal_fs_exists(dir)) {
+        if (!net_place_reach(app, dir)) return;
+        listing = rubraview_pal_fs_list_dir(pa, dir);
+    }
     /* The reader's favourites first on the PC page, every one of them (owner,
        2026-10-17: the places bar shows as many as fit; the list shows all). */
     if (places && app->favorites.count > 0) {
@@ -615,7 +621,8 @@ size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out) {
 
 proven_u8str_view_t picker_write_dir(app_state_t *app) {
     if (app->picker_dir.size == 0 || rubraview_picker_is_places(app->picker_dir) ||
-        rubraview_picker_is_recent(app->picker_dir) || app->picker_in_book || picker_in_archive(app))
+        rubraview_picker_is_recent(app->picker_dir) || app->picker_in_book || picker_in_archive(app) ||
+        rubraview_path_unc(app->picker_dir, NULL, NULL) == RUBRAVIEW_UNC_SERVER)   /* RV-326: a server holds shares, not folders */
         return PROVEN_LIT("");
     if (rubraview_picker_is_desktop(app->picker_dir))
         return rubraview_pal_fs_desktop_dir(app->arena);
@@ -672,31 +679,63 @@ void picker_make_playlist(app_state_t *app) {
                                                        : TU8("playlist opened"));
 }
 
-/* RV-207 (owner, 2026-11-01): a new folder in the folder on screen ("New folder", or New folder-1 when that is
-   there), its name then typed in the rename box. */
+/* RV-207 (owner, 2026-11-01), RV-327 (R376; owner, 2026-11-27: "파일을 우클릭 한다음 나오는 메뉴에 새 폴더 만들기 넣고, 파일하고는
+   상관없이 현재 폴더에 새 폴더를 만들 수 있게 이름 입력받아 만들어 주세요. smb 드라이브에서도 잘 동작하게"): a new folder in
+   the folder on screen, whatever was clicked: its name asked first ("New folder", or "New folder (2)" when that is
+   there, all of it selected), then made. */
 void picker_new_folder(app_state_t *app) {
     proven_u8str_view_t dir = picker_write_dir(app);
-    if (dir.size == 0) {
+    if (dir.size == 0 || dir.size >= sizeof app->newfolder_dir) {
         osd_say(app, TU8("no new folder can be made here"));
         return;
     }
+    if (app->rename_active) rename_end(app);
+    proven_sys_mem_copy(app->newfolder_dir, dir.ptr, dir.size);
+    app->newfolder_dir[dir.size] = '\0';
     proven_u8str_view_t want = rubraview_path_join(app->arena, dir, proven_u8str_view_from_cstr(T("New folder")));
-    char made[RUBRAVIEW_ARCHIVE_PATH];
-    if (want.size == 0 || !rubraview_archive_free_folder_name(want, rubraview_pal_fs_exists, made, sizeof(made)) ||
-        !rubraview_pal_fs_make_dirs(proven_u8str_view_from_cstr(made))) {
-        osd_say(app, TU8("could not make a new folder here"));
+    char free_name[RUBRAVIEW_ARCHIVE_PATH];
+    proven_u8str_view_t name = proven_u8str_view_from_cstr(T("New folder"));
+    if (want.size && rubraview_archive_free_folder_name(want, rubraview_pal_fs_exists, free_name, sizeof free_name))
+        name = rubraview_path_basename(proven_u8str_view_from_cstr(free_name));
+    rename_field_begin(app);
+    rubraview_textedit_set(&app->rename_ec.te, name);
+    rubraview_textedit_select_all(&app->rename_ec.te);   /* typed over at once, as Explorer's */
+    app->rename_active = true;
+    app->rename_is_newfolder = true;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+}
+
+void picker_new_folder_typed(app_state_t *app) {
+    rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
+    app->rename_composing_length = 0;
+    proven_u8str_view_t typed = rubraview_textedit_text(&app->rename_ec.te);
+    while (typed.size && (typed.ptr[0] == ' ' || typed.ptr[0] == '\t')) { typed.ptr++; typed.size--; }
+    while (typed.size && (typed.ptr[typed.size - 1] == ' ' || typed.ptr[typed.size - 1] == '\t')) typed.size--;
+    if (!rubraview_path_name_ok(typed)) {   /* the box stays to be corrected */
+        osd_say(app, TU8("not a name a folder can have (none of \\ / : * ? \" < > |, no dot or space at its end)"));
         return;
     }
-    picker_navigate(app, app->picker_dir);   /* it is listed now */
-    proven_u8str_view_t name = rubraview_path_basename(proven_u8str_view_from_cstr(made));
+    proven_u8str_view_t dir = proven_u8str_view_from_cstr(app->newfolder_dir);
+    proven_u8str_view_t path = rubraview_path_join(app->arena, dir, typed);
+    if (path.size == 0) { rename_end(app); return; }
+    if (rubraview_pal_fs_exists(path)) { osd_say(app, TU8("a file or folder of that name is there already")); return; }
+    if (!net_place_reach(app, dir)) return;   /* RV-326: a share that wants its sign-in first */
+    if (!rubraview_pal_fs_make_dirs(path)) {
+        osd_say(app, TU8("could not make the folder (no right to write there, or it is read-only)"));
+        return;
+    }
+    rename_end(app);
+    char made[1300];
+    rubraview_fmt(made, sizeof made, "{}", PROVEN_ARG(typed));
+    if (rubraview_path_same(dir, app->picker_dir) || rubraview_picker_is_desktop(app->picker_dir)) picker_navigate(app, app->picker_dir);   /* it is listed now */
     for (size_t i = 0; i < app->picker_listing.count; ++i) {
-        if (!proven_u8str_view_eq(app->picker_listing.entries[i].name, name)) continue;
+        if (!proven_u8str_view_eq(app->picker_listing.entries[i].name, proven_u8str_view_from_cstr(made))) continue;
         app->picker.focus = i;
         rubraview_picker_reveal_focus(&app->picker);
-        rename_picker_begin(app, i);
-        return;
+        break;
     }
-    osd_say(app, TU8("a new folder is made"));   /* hidden by the filter: made, not renamed */
+    osd_say(app, TU8("a new folder is made"));
 }
 
 /* The picked files to the recycle bin, once the button has been pressed

@@ -1,4 +1,4 @@
-[한국어](README.ko.md) | **English** — **Rubraview v1.63.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.63.0/rubraview-v1.63.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.63.0/rubraview-v1.63.0.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.63.0/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+[한국어](README.ko.md) | **English** — **Rubraview v1.64.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.64.0/rubraview-v1.64.0.zip) · [MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.64.0/rubraview-v1.64.0.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.64.0/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE only](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -313,6 +313,9 @@ ships with, so it cannot drift from them.
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
 | Right click `Extract subtitles` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
+| Right click `Find lyrics online...` | Look the song's lyrics up at LRCLIB and pick one to keep beside it |
+| Right click `Edit lyrics` | The song's .lrc in Notepad; what is saved shows at once |
+| Right click `Upload lyrics to LRCLIB...` | Send the song's .lrc to LRCLIB, for everyone (no account) |
 | Title bar ☰ `Align the Floating Icon Group` | The Floating Icon Group back in the bottom-right corner, over the information bar when it is shown |
 
 <!-- keys:end -->

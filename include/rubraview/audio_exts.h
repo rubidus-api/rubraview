@@ -25,14 +25,18 @@
     X("wma",  1, 1, 0) \
     X("oga",  1, 1, 0) \
     X("m4b",  1, 1, 0) \
-    X("aiff", 0, 0, 1) \
-    X("aif",  0, 0, 1) \
-    X("ape",  0, 0, 1) \
-    X("wv",   0, 0, 1) \
-    X("tta",  0, 0, 1) \
+    X("w64",  1, 0, 1) \
+    X("aiff", 1, 0, 1) \
+    X("aif",  1, 0, 1) \
+    X("ape",  1, 0, 1) \
+    X("wv",   1, 0, 1) \
+    X("tta",  1, 0, 1) \
+    X("tak",  1, 0, 1) \
+    X("dsf",  1, 0, 1) \
+    X("dff",  1, 0, 1) \
+    X("mka",  1, 0, 0) \
     X("alac", 0, 0, 1) \
-    X("mka",  0, 0, 0) \
-    X("ra",   0, 0, 0)
+    X("ra",   1, 0, 0)
 
 /* the rest when the flag (a row's literal 0 or 1) is 1; the rest may hold commas */
 #define RUBRAVIEW_AUDIO_IF_0(...)

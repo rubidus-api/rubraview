@@ -4555,7 +4555,7 @@ Do not store credentials, private infrastructure details, personal data, private
 - Status: Accepted (owner, 2026-11-26: "알송 가사 서버에서 가져오는건 하지 말아주세요")
 - Context: the owner asked how ALSong's lyrics feature works (an MD5 of the audio data sent to ALSong's lyrics server, timed lyrics back). Rubraview says it never connects to the internet and collects nothing (the site, the Store's privacy policy).
 - Decision: Rubraview does not fetch lyrics from ALSong's server or any other online service. Its words stay those of a `.lrc` beside the song and those the file carries (ID3 USLT/SYLT, Vorbis LYRICS, MP4 ©lyr, WMA WM/Lyrics).
-- Consequences: no network code for lyrics; not proposed again unless the owner asks.
+- Consequences: no network code for lyrics; not proposed again unless the owner asks. (Replaced for LRCLIB by D-411, 2026-11-27; ALSong stays out.)
 
 ## D-410: On The Open-File Screen The Check Boxes And The Focus Are Apart; The Edit Path Button A Pen Before The Path
 
@@ -4565,3 +4565,35 @@ Do not store credentials, private infrastructure details, personal data, private
 - Decision: a click moves the focus only. The ticks change only by the check boxes, `Ctrl`/`Shift`+click (a range joins), the Select menu, Media, `Ctrl+A` and All/None. One rule says what the actions act on (`rubraview_picker_operand`): the item a right click or a drag started on when it is not ticked, for that menu's items (and a card they open) and that drag only — the bottom row, the keys and the Select menu forget it first (so a menu never acts on ticked items the pointer was not on, and Esc on the menu leaves the ticked as what the buttons act on); else the ticked; else the focus, if a click or a key chose it in this folder (a folder just read shows Cancel and Open only, as before); `..` never. A file key with nothing ticked acts on the focus, as RV-263 did. The same folder read again (a file job done, a refresh) keeps its ticks, by name (`rubraview_picker_carry_ticks`), so a menu's Recycle on one item leaves the others ticked. The focus is drawn as the strong fill (details) or the accent border (tiles); a ticked item has its tick and a faint blue tint. The Edit path button is the pen icon alone, right after Back / Up / Forward, its words the hover hint; the path's chips follow it to the bar's right end.
 - Consequences: D-286's "the others let go" and R345's place and label of the button are replaced (R364). Every reader of the picks for an action goes through `picker_operand`; drawing, the All/None chip, the counts and the Select menu still read the ticks.
 - Evidence: Windows 11 VM (T544).
+
+## D-411: Lyrics From And To LRCLIB, On By Default; The Viewer Goes Online For Them
+
+- Date: 2026-11-27
+- Status: Accepted (owner, 2026-11-27: "https://github.com/jacquesh/foo_openlyrics <- 이 프로젝트 참고해서, 노래 가사 받아오는 기능을 넣어줘요. mp3나 기타 음악 포맷일 때, 제목이나 ID정보 등으로 지능적으로 가수와 제목을 추측해서 얻어오는 것으로. 필요하다면 목록에서 고르게 하는 것도 가능하고, 현재 파일 옆에 똑같은 이름으로 (하지만 확장자는 다르게) 가사파일 받아오게 하게도 하고, ..."; answers: on by default, LRCLIB only, STT and Google search left out; then "https://lrclib.net/ <- 여기에 가사를 올리거나, 혹은 내려받은 가사를 편집하고, 그걸 다시 올리거나 할 수 있는 기능도 추가해 주세요. 올릴 때 아이디 필요한가요?")
+- Context: D-409 (2026-11-26) kept lyrics offline and the privacy policy, the site and the Store listing said Rubraview does not connect to the internet. The owner now asks for lyrics found online, picked from a list, kept beside the song, edited and uploaded; asked, the owner chose the service on by default, LRCLIB as its only source, and no speech recognition or Google search (Windows' recognizer is made for speech, not singing over music; Google has no free search API and its pages may not be scraped).
+- Decision: D-409 is replaced for LRCLIB only (ALSong stays out). LRCLIB (an open database with an API made for players, no key, synced lyrics, an anonymous publish with a proof of work) is asked through WinHTTP: for a song without words when it opens (Settings › Audio switch, on), for a search typed in the menu's box, and to publish the song's `.lrc` when the user confirms. What is sent: artist, title, album, length, the words typed, and on upload the lyrics; never the file or its sound. The privacy policy, the site's words and the Store listing say so. Found words are kept as `<song>.lrc` beside it (never overwriting one, except a record picked from the list); editing is Notepad's, read again when saved.
+- Consequences: R369, R370; the program imports winhttp.dll; a network request now happens without a click (the default), said in the policy; foo_openlyrics' many scraped sources are not followed.
+
+## D-412: Edit's Box, Words And Mosaic First In Adjust; The History A Sidebar When Wide
+
+- Date: 2026-11-27
+- Status: Accepted (owner, 2026-11-27: "편집 메뉴에서 가장 중요한게 박스(속이 찬거/테두리만 있는거), 글자(텍스트박스), 모자이크입니다. 이걸 보정 탭에 넣고, 편집목록은 옆에 사이드바 형식으로 넣는게 맞지 않을까요. 폭이 넓을땐 사이드바, 폭이 좁을땐 별개의 탭. 그리고 편집목록보다는 더 쉬운 단어가 없을까요. ..."; "메모리는 신경쓰지 말고, 편집 화면 개편 바랍니다."; "모자이크는 원형으로도 가능하게 해 주세요"; the name and the scope were recommended and taken)
+- Context: a box, words and a mosaic are what the owner uses Edit for most. Boxes and words were not there at all; a mosaic was one effect among many on the Effects tab, its shape the selection box's. The list of edits was a tab of its own named "Edits" (ko "편집 목록").
+- Decision: two step kinds, BOX and TEXT, drawn by the core (a box by sub-samples; words from a coverage mask the viewer supplies, the platform's text mask, so the core stays pure C and testable with a stand-in); the `.rvsteps` version stays 1 (new kinds and keys; an older Rubraview refuses the file with "a step of a kind this version has not"). Adjust's first section puts them, and a mosaic on a rectangle or an ellipse, on the chosen area. The list is "History" ("작업 내역"); in the widest band it is the last column of every tab and its tab is hidden; narrower it stays a tab. A line break in the words is typed `//` (the card's box is one line).
+- Consequences: R371, R372, R373; RV-324's plan; colours and fonts are short fixed lists for now; the words are placed by the area's corner, not dragged after they are put (undo and put them again).
+
+## D-413: Network Places By Path, Signed Into Through Windows' Own Sign-In
+
+- Date: 2026-11-27
+- Status: Accepted (owner, 2026-11-27: "\\smb_server 와 같이 smb 서버 주소가 입력되면, 열수 있으면 열고 로그인 필요하면 로그인하게 (시스템 전역으로) 처리 바랍니다."; RV-326, D-413)
+- Context: the open-file screen took a typed "\\server\share" only when Windows could already open it, and "\\server" not at all; a share needing a login failed as "no such folder or file". "시스템 전역으로" asks the login to hold for the whole system, as Explorer's does.
+- Decision: no credentials of our own: Windows' `WNetAddConnection3` with an interactive prompt makes the logon session's connection (every program's) and its Credential Manager keeps a remembered one; a server alone lists its disk shares by `NetShareEnum`. Asked only when a network place refuses (never for a drive path); blocking on the UI thread as Explorer's own sign-in is.
+- Consequences: R375; the program imports mpr.dll and netapi32.dll; nothing about the login is stored by Rubraview.
+
+## D-414: Windows' Literal Path Form For The Viewer's Own File Calls, As 7-Zip Does
+
+- Date: 2026-11-27
+- Status: Accepted (owner, 2026-11-27: "windows에서는 경로명 길이 제한이 있는데 이걸 \\?\ 접두어로 해제할 수 있다고 들었습니다. 우리의 루브라뷰가 뭔가 단단하게 경로명을 잘 처리할 수 있도록 할 수 있을까요. 그리고 7-zip의 파일 탐색기가 무척 강력하고 안정적이며 일반적으로 접근 못하는 경로에도 접근이 된다고 들은 것 같은데 ... 우리가 그것을 흉내내어 매우 단단하고 안정적인 파일 브라우징 기능을 제공할 수 있을지 모색하여 구현해 주세요."; RV-328, D-414)
+- Context: Windows' usual path form stops at 260 characters (MAX_PATH; a manifest's longPathAware lifts it only with a registry switch most machines lack) and silently strips a name's ending dots and spaces and refuses device names, so such files, made by other systems or archives, could not be opened, listed or moved. 7-Zip's file manager reaches them by "\\?\" paths (its `GetSuperPath`), retried when the usual form fails.
+- Decision: the core says when a path needs the literal form and writes it (tidied, since Windows no longer resolves "." and ".." in it); the platform layer's kernel32 file calls and the picture reader use it then, and the usual form otherwise (so a path's meaning never changes for what worked before). The shell's own operations, which refuse "\\?\", are left. No manifest is added (the program has none; adding one would change more than paths).
+- Consequences: R377; paths up to about 4,095 characters in those calls; the Recycle Bin, Explorer's menus and a folder copied whole still fail on such paths (the shell's limit).

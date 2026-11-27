@@ -11,6 +11,7 @@ void tick_timers(app_state_t *app, double dt) {
         if (side != app->edge_side) { app->edge_side = side; app->edge_since = rubraview_pal_time_now_seconds(); }
     }
     navbox_tick(app);   /* RV-277 */
+    lyricsnet_poll(app);   /* RV-323: an answer from LRCLIB, or the .lrc saved in Notepad */
     shuffle_note_screen(app);   /* RV-288: the page on screen into the shuffle's history, however it came */
     rubraview_osd_tick(&app->osd, dt);
     hdr_screen_tick(app, dt);   /* RV-153 */

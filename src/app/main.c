@@ -296,6 +296,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
         if (wargv) LocalFree(wargv);
     }
     rubraview_edit_set_plugin_runner(plugin_runner, NULL);
+    rubraview_edit_set_text_runner(edit_text_runner, NULL);   /* RV-324: Edit's words, drawn by DirectWrite */
 
     if (FAILED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE))) {
         return 1;

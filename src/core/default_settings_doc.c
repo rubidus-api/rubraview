@@ -318,6 +318,7 @@ static const char *const PARTS[] = {
 "  choice audio.eq_preset          \"Equaliser\"               flat | rock | pop | jazz | classical | bass | vocal | acoustic | custom = flat wired\n"
 "  toggle audio.night_mode         \"Night mode\"              = false wired\n"
 "  choice audio.visualizer         \"Analyser\"                off | spectrum | scope = spectrum wired\n"
+"  toggle audio.lyrics_online      \"Find missing lyrics online (LRCLIB)\" = true wired\n"
 "  note \"Volume levelling uses the ReplayGain the file carries. Lyrics: a .lrc beside the song, else the words in its tags; a .cue that names the song cuts it into tracks.\"\n"
 "  int    audio.wasapi_latency_ms  \"Audio latency\"           20..100 step 5 unit \"ms\" = 40 wired\n"
 "  toggle audio.bgm_pause_on_video \"Pause music during video\" = true wired\n"

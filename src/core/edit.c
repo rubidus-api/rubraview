@@ -672,6 +672,10 @@ bool rubraview_edit_step_does_something(const rubraview_edit_step_t *step) {
             return step->effect >= 1 && step->effect <= 3;
         case RUBRAVIEW_STEP_FLIP:
             return step->effect == 0 || step->effect == 1;
+        case RUBRAVIEW_STEP_BOX:   /* RV-324 */
+            return (step->ink >> 24) != 0 && (step->fill || step->stroke > 0.0);
+        case RUBRAVIEW_STEP_TEXT:
+            return (step->ink >> 24) != 0 && step->size > 0.0 && step->command[0] != '\0';
     }
     return false;
 }
@@ -689,6 +693,37 @@ bool rubraview_edit_steps_set_last(rubraview_edit_steps_t *steps, const rubravie
     else steps->steps[steps->cursor - 1] = *step;
     steps->count = steps->cursor;
     return true;
+}
+
+bool rubraview_edit_steps_set(rubraview_edit_steps_t *steps, size_t index, const rubraview_edit_step_t *step) {
+    if (!steps || !step || index >= steps->cursor || !rubraview_edit_step_does_something(step)) return false;
+    steps->steps[index] = *step;
+    steps->count = steps->cursor;
+    return true;
+}
+
+bool rubraview_edit_step_is_mark(const rubraview_edit_step_t *step) {
+    if (!step) return false;
+    if (step->kind == RUBRAVIEW_STEP_BOX || step->kind == RUBRAVIEW_STEP_TEXT) return true;
+    return step->kind == RUBRAVIEW_STEP_EFFECT && step->effect == RUBRAVIEW_EFFECT_PIXELIZE && step->area.shape != RUBRAVIEW_AREA_ALL;
+}
+
+int32_t rubraview_edit_steps_mark_at(const rubraview_edit_steps_t *steps, int32_t x, int32_t y) {
+    if (!steps) return -1;
+    for (size_t i = steps->cursor; i-- > 0;) {
+        const rubraview_edit_step_t *s = &steps->steps[i];
+        if (s->kind == RUBRAVIEW_STEP_CROP || s->kind == RUBRAVIEW_STEP_RESIZE || s->kind == RUBRAVIEW_STEP_ROTATE ||
+            s->kind == RUBRAVIEW_STEP_FLIP) return -1;   /* before it, a place is another */
+        if (!rubraview_edit_step_is_mark(s) || s->area.shape == RUBRAVIEW_AREA_ALL) continue;
+        const rubraview_crop_rect_t *r = &s->area.rect;
+        if (r->width <= 0 || r->height <= 0 || x < r->x || y < r->y || x >= r->x + r->width || y >= r->y + r->height) continue;
+        if (s->area.shape == RUBRAVIEW_AREA_ELLIPSE) {
+            double rx = r->width / 2.0, ry = r->height / 2.0, dx = (x + 0.5 - r->x - rx) / rx, dy = (y + 0.5 - r->y - ry) / ry;
+            if (dx * dx + dy * dy > 1.0) continue;
+        }
+        return (int32_t)i;
+    }
+    return -1;
 }
 
 rubraview_crop_rect_t rubraview_edit_rect_rebase(rubraview_crop_rect_t r, int32_t from_w, int32_t from_h, int32_t to_w, int32_t to_h) {
@@ -894,6 +929,111 @@ static rubraview_pixbuf_t plugin_run(proven_arena_t *arena, const rubraview_edit
     return g_plugin_runner ? g_plugin_runner(g_plugin_runner_user, arena, step, src) : empty;
 }
 
+/* ---- RV-324 (R371, R372): boxes and words drawn on the picture ---- */
+
+static rubraview_text_runner_fn g_text_runner;
+static void *g_text_runner_user;
+
+void rubraview_edit_set_text_runner(rubraview_text_runner_fn runner, void *user) {
+    g_text_runner = runner;
+    g_text_runner_user = user;
+}
+
+/* `ink` (0xAARRGGBB) over a pixel by `cover` (0..1) of it, in the picture's channel order. */
+static void ink_over(uint8_t *p, uint32_t ink, float cover, bool bgra) {
+    float a = cover * (float)(ink >> 24) / 255.0f;
+    if (a <= 0.0f) return;
+    if (a > 1.0f) a = 1.0f;
+    uint8_t r = (uint8_t)(ink >> 16), g = (uint8_t)(ink >> 8), b = (uint8_t)ink;
+    uint8_t c0 = bgra ? b : r, c2 = bgra ? r : b;
+    p[0] = (uint8_t)lroundf(p[0] + (c0 - p[0]) * a);
+    p[1] = (uint8_t)lroundf(p[1] + (g - p[1]) * a);
+    p[2] = (uint8_t)lroundf(p[2] + (c2 - p[2]) * a);
+    p[3] = (uint8_t)lroundf(p[3] + (255 - p[3]) * a);
+}
+
+/* Whether a point is in the box: its rectangle or ellipse, filled or its outline `s` wide inside the edge. */
+static bool box_has(double x, double y, double x0, double y0, double x1, double y1, bool ellipse, bool fill, double s) {
+    if (!ellipse) {
+        if (x < x0 || x >= x1 || y < y0 || y >= y1) return false;
+        return fill || x < x0 + s || x >= x1 - s || y < y0 + s || y >= y1 - s;
+    }
+    double cx = (x0 + x1) * 0.5, cy = (y0 + y1) * 0.5, rx = (x1 - x0) * 0.5, ry = (y1 - y0) * 0.5;
+    if (rx <= 0.0 || ry <= 0.0) return false;
+    double dx = (x - cx) / rx, dy = (y - cy) / ry;
+    if (dx * dx + dy * dy > 1.0) return false;
+    if (fill || rx <= s || ry <= s) return true;
+    double ix = (x - cx) / (rx - s), iy = (y - cy) / (ry - s);
+    return ix * ix + iy * iy > 1.0;
+}
+
+static rubraview_pixbuf_t draw_box(proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_edit_area_t *area,
+                                   const rubraview_pixbuf_t *src, double scale) {
+    rubraview_pixbuf_t out = rubraview_pixbuf_clone(arena, src);
+    if (!rubraview_pixbuf_is_valid(&out) || (out.format != RUBRAVIEW_PIXFMT_RGBA8 && out.format != RUBRAVIEW_PIXFMT_BGRA8)) return out;
+    double x0 = area->rect.x, y0 = area->rect.y, x1 = x0 + area->rect.width, y1 = y0 + area->rect.height;
+    if (area->shape == RUBRAVIEW_AREA_ALL || area->rect.width <= 0 || area->rect.height <= 0) { x0 = 0; y0 = 0; x1 = src->width; y1 = src->height; }
+    double s = step->stroke * scale;
+    if (!step->fill && s < 1.0) s = 1.0;
+    bool ellipse = area->shape == RUBRAVIEW_AREA_ELLIPSE, bgra = out.format == RUBRAVIEW_PIXFMT_BGRA8;
+    int32_t px0 = clamp_i((int32_t)floor(x0), 0, src->width), py0 = clamp_i((int32_t)floor(y0), 0, src->height);
+    int32_t px1 = clamp_i((int32_t)ceil(x1), 0, src->width), py1 = clamp_i((int32_t)ceil(y1), 0, src->height);
+    for (int32_t y = py0; y < py1; ++y) {
+        uint8_t *row = out.pixels + (size_t)y * (size_t)out.stride;
+        for (int32_t x = px0; x < px1; ++x) {
+            int in = 0;   /* 4 x 4 samples a pixel: smooth edges */
+            for (int sy = 0; sy < 4; ++sy)
+                for (int sx = 0; sx < 4; ++sx)
+                    in += box_has(x + (sx + 0.5) / 4.0, y + (sy + 0.5) / 4.0, x0, y0, x1, y1, ellipse, step->fill, s) ? 1 : 0;
+            if (in) ink_over(row + (size_t)x * 4u, step->ink, (float)in / 16.0f, bgra);
+        }
+    }
+    return out;
+}
+
+static rubraview_pixbuf_t draw_text(proven_arena_t *arena, const rubraview_edit_step_t *step, const rubraview_edit_area_t *area,
+                                    const rubraview_pixbuf_t *src, double scale) {
+    rubraview_pixbuf_t out = rubraview_pixbuf_clone(arena, src);
+    if (!rubraview_pixbuf_is_valid(&out) || (out.format != RUBRAVIEW_PIXFMT_RGBA8 && out.format != RUBRAVIEW_PIXFMT_BGRA8)) return out;
+    rubraview_text_mask_t m = { 0 };
+    double px = step->size * scale;
+    if (px < 1.0 || !g_text_runner || !g_text_runner(g_text_runner_user, arena, step->command, step->plugin, px, step->bold, &m) ||
+        !m.coverage || m.width <= 0 || m.height <= 0) return out;
+    int32_t pad = (step->back >> 24) ? (int32_t)lround(px * 0.25) : 0;
+    int32_t x = area->rect.x, y = area->rect.y;
+    if (area->shape == RUBRAVIEW_AREA_ALL || area->rect.width <= 0) { x = (src->width - m.width) / 2; y = (src->height - m.height) / 2; }
+    else { x += pad; y += pad; }
+    bool bgra = out.format == RUBRAVIEW_PIXFMT_BGRA8;
+    if (pad > 0 || (step->back >> 24)) {   /* the background, a margin round the words */
+        int32_t bx0 = clamp_i(x - pad, 0, out.width), by0 = clamp_i(y - pad, 0, out.height);
+        int32_t bx1 = clamp_i(x + m.width + pad, 0, out.width), by1 = clamp_i(y + m.height + pad, 0, out.height);
+        for (int32_t yy = by0; yy < by1; ++yy)
+            for (int32_t xx = bx0; xx < bx1; ++xx) ink_over(out.pixels + (size_t)yy * (size_t)out.stride + (size_t)xx * 4u, step->back, 1.0f, bgra);
+    }
+    for (int32_t yy = 0; yy < m.height; ++yy) {
+        int32_t ty = y + yy;
+        if (ty < 0 || ty >= out.height) continue;
+        const uint8_t *c = m.coverage + (size_t)yy * (size_t)m.stride;
+        uint8_t *row = out.pixels + (size_t)ty * (size_t)out.stride;
+        for (int32_t xx = 0; xx < m.width; ++xx) {
+            int32_t tx = x + xx;
+            if (tx < 0 || tx >= out.width || c[xx] == 0) continue;
+            ink_over(row + (size_t)tx * 4u, step->ink, (float)c[xx] / 255.0f, bgra);
+        }
+    }
+    return out;
+}
+
+bool rubraview_edit_text_extent(proven_arena_t *arena, const rubraview_edit_step_t *step, int32_t *width, int32_t *height) {
+    rubraview_text_mask_t m = { 0 };
+    if (!arena || !step || step->kind != RUBRAVIEW_STEP_TEXT || step->size < 1.0 || !step->command[0] || !g_text_runner ||
+        !g_text_runner(g_text_runner_user, arena, step->command, step->plugin, step->size, step->bold, &m) || m.width <= 0 || m.height <= 0) return false;
+    int32_t pad = (step->back >> 24) ? (int32_t)lround(step->size * 0.25) : 0;   /* as draw_text */
+    if (width) *width = m.width + 2 * pad;
+    if (height) *height = m.height + 2 * pad;
+    return true;
+}
+
 rubraview_pixbuf_t rubraview_edit_step_apply(proven_arena_t *arena, const rubraview_edit_step_t *step,
                                              const rubraview_pixbuf_t *src, double scale) {
     rubraview_pixbuf_t empty = {0};
@@ -906,6 +1046,8 @@ rubraview_pixbuf_t rubraview_edit_step_apply(proven_arena_t *arena, const rubrav
     area.rect.height = (int32_t)lround(area.rect.height * scale);
     area.feather = (int32_t)lround(area.feather * scale);
 
+    if (step->kind == RUBRAVIEW_STEP_BOX) return draw_box(arena, step, &area, src, scale);     /* RV-324 */
+    if (step->kind == RUBRAVIEW_STEP_TEXT) return draw_text(arena, step, &area, src, scale);
     if (step->kind == RUBRAVIEW_STEP_CROP) {
         int32_t x = clamp_i(area.rect.x, 0, src->width - 1), y = clamp_i(area.rect.y, 0, src->height - 1);
         int32_t w = clamp_i(area.rect.x + area.rect.width, x + 1, src->width) - x;
@@ -1080,7 +1222,7 @@ void rubraview_edit_auto_colour(rubraview_edit_session_t *session, const rubravi
 #define STEP_BOOLS(X) \
     X(blur_box, blur_box) X(sharpen_laplacian, sharpen_laplacian) X(resize_lock, resize_lock_aspect) X(resize_linear, resize_linear)
 
-static const char *const STEP_KINDS[] = { "adjust", "crop", "resize", "effect", "plugin", "gmic", "ffmpeg", "rotate", "flip" };
+static const char *const STEP_KINDS[] = { "adjust", "crop", "resize", "effect", "plugin", "gmic", "ffmpeg", "rotate", "flip", "box", "text" };
 static const char *const AREA_SHAPES[] = { "all", "rect", "ellipse" };
 static const char *const CURVE_NAMES[5] = { "curve_rgb", "curve_red", "curve_green", "curve_blue", "curve_luma" };
 static const char *const RATIO_WORDS[6] = { "x", "y", "w", "h", "rw", "rh" };
@@ -1125,7 +1267,7 @@ proven_u8str_view_t rubraview_edit_steps_serialize(proven_arena_t *arena, const 
         if (!proven_is_ok(m.err)) return PROVEN_LIT("");
         proven_sys_mem_copy(m.value.ptr, name, proven_cstr_len(name) + 1);
         proven_u8str_view_t sec = { .ptr = m.value.ptr, .size = proven_cstr_len(name) };
-        rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("kind"), steps_cstr(STEP_KINDS[st->kind <= RUBRAVIEW_STEP_FLIP ? st->kind : 0]));
+        rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("kind"), steps_cstr(STEP_KINDS[st->kind <= RUBRAVIEW_STEP_TEXT ? st->kind : 0]));
         rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("area"), steps_cstr(AREA_SHAPES[st->area.shape <= RUBRAVIEW_AREA_ELLIPSE ? st->area.shape : 0]));
         rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("x"), st->area.rect.x);
         rubraview_ini_set_int(arena, &doc, sec, PROVEN_LIT("y"), st->area.rect.y);
@@ -1201,6 +1343,39 @@ proven_u8str_view_t rubraview_edit_steps_serialize(proven_arena_t *arena, const 
             size_t cn = bounded_len(st->command, sizeof(st->command) - 1);
             rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("command"), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)st->command, .size = cn });
         }
+        if (st->kind == RUBRAVIEW_STEP_BOX || st->kind == RUBRAVIEW_STEP_TEXT) {   /* RV-324 */
+            char hex[12];
+            rubraview_fmt(hex, sizeof hex, "#{:08X}", PROVEN_ARG((unsigned)st->ink));
+            proven_result_mem_mut_t hm = proven_arena_alloc(arena, 2 * sizeof hex);
+            if (!proven_is_ok(hm.err)) return PROVEN_LIT("");
+            proven_sys_mem_copy(hm.value.ptr, hex, sizeof hex);
+            rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("ink"), steps_cstr((const char *)hm.value.ptr));
+            if (st->kind == RUBRAVIEW_STEP_BOX) {
+                rubraview_ini_set_bool(arena, &doc, sec, PROVEN_LIT("fill"), st->fill);
+                steps_set_number(arena, &doc, sec, "stroke", st->stroke);
+            } else {
+                rubraview_fmt((char *)hm.value.ptr + sizeof hex, sizeof hex, "#{:08X}", PROVEN_ARG((unsigned)st->back));
+                rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("back"), steps_cstr((const char *)hm.value.ptr + sizeof hex));
+                rubraview_ini_set_bool(arena, &doc, sec, PROVEN_LIT("bold"), st->bold);
+                steps_set_number(arena, &doc, sec, "size", st->size);
+                size_t fn = bounded_len(st->plugin, sizeof(st->plugin) - 1);
+                rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("font"), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)st->plugin, .size = fn });
+                /* the words on one line: a line break written "\\n", a backslash "\\\\" */
+                size_t tn = bounded_len(st->command, sizeof(st->command) - 1);
+                proven_result_mem_mut_t tm = proven_arena_alloc(arena, 2 * tn + 1);
+                if (!proven_is_ok(tm.err)) return PROVEN_LIT("");
+                char *t = (char *)tm.value.ptr;
+                size_t w = 0;
+                for (size_t i = 0; i < tn; ++i) {
+                    char c = st->command[i];
+                    if (c == '\n') { t[w++] = '\\'; t[w++] = 'n'; }
+                    else if (c == '\\') { t[w++] = '\\'; t[w++] = '\\'; }
+                    else if (c != '\r') t[w++] = c;
+                }
+                t[w] = '\0';
+                rubraview_ini_set_string(arena, &doc, sec, PROVEN_LIT("text"), (proven_u8str_view_t){ .ptr = (const proven_byte_t *)t, .size = w });
+            }
+        }
     }
     proven_u8str_view_t body = rubraview_ini_serialize(arena, &doc);
     if (body.size == 0) return body;
@@ -1211,6 +1386,20 @@ proven_u8str_view_t rubraview_edit_steps_serialize(proven_arena_t *arena, const 
     proven_sys_mem_copy(out.value.ptr + sizeof(HEAD) - 1, body.ptr, body.size);
     out.value.ptr[sizeof(HEAD) - 1 + body.size] = '\0';
     return (proven_u8str_view_t){ .ptr = out.value.ptr, .size = sizeof(HEAD) - 1 + body.size };
+}
+
+/* "#AARRGGBB" (or "#RRGGBB", opaque) */
+static bool steps_colour(proven_u8str_view_t v, uint32_t *out) {
+    if ((v.size != 9 && v.size != 7) || v.ptr[0] != '#') return false;
+    uint32_t c = 0;
+    for (size_t i = 1; i < v.size; ++i) {
+        uint8_t h = v.ptr[i];
+        int d = h >= '0' && h <= '9' ? h - '0' : h >= 'a' && h <= 'f' ? h - 'a' + 10 : h >= 'A' && h <= 'F' ? h - 'A' + 10 : -1;
+        if (d < 0) return false;
+        c = c << 4 | (uint32_t)d;
+    }
+    *out = v.size == 7 ? 0xFF000000u | c : c;
+    return true;
 }
 
 static bool steps_word(proven_u8str_view_t v, const char *const *words, int count, int *out) {
@@ -1243,7 +1432,7 @@ bool rubraview_edit_steps_parse(proven_arena_t *arena, proven_u8str_view_t text,
         st.values = rubraview_edit_begin((int32_t)w, (int32_t)h);
         int kind = 0, shape = 0;
         const proven_u8str_view_t *k = rubraview_ini_get(&doc, sec, PROVEN_LIT("kind"));
-        if (!k || !steps_word(*k, STEP_KINDS, 9, &kind)) { *why = N_("a step of a kind this version has not"); return false; }
+        if (!k || !steps_word(*k, STEP_KINDS, 11, &kind)) { *why = N_("a step of a kind this version has not"); return false; }
         st.kind = (rubraview_edit_step_kind_t)kind;
         const proven_u8str_view_t *a = rubraview_ini_get(&doc, sec, PROVEN_LIT("area"));
         if (a && !steps_word(*a, AREA_SHAPES, 3, &shape)) { *why = N_("a step's area is of no shape this version has"); return false; }
@@ -1337,7 +1526,35 @@ bool rubraview_edit_steps_parse(proven_arena_t *arena, proven_u8str_view_t text,
                 while (*at == ' ') ++at;
             }
         }
-        const proven_u8str_view_t *cmd = rubraview_ini_get(&doc, sec, PROVEN_LIT("command"));
+        if (st.kind == RUBRAVIEW_STEP_BOX || st.kind == RUBRAVIEW_STEP_TEXT) {   /* RV-324 */
+            const proven_u8str_view_t *ink = rubraview_ini_get(&doc, sec, PROVEN_LIT("ink"));
+            const proven_u8str_view_t *back = rubraview_ini_get(&doc, sec, PROVEN_LIT("back"));
+            if (!ink || !steps_colour(*ink, &st.ink) || (back && !steps_colour(*back, &st.back))) { *why = N_("a mark's colour is not #AARRGGBB"); return false; }
+            st.fill = rubraview_ini_get_bool(&doc, sec, PROVEN_LIT("fill"), false);
+            st.bold = rubraview_ini_get_bool(&doc, sec, PROVEN_LIT("bold"), false);
+            st.stroke = held_d(rubraview_ini_get_float(&doc, sec, PROVEN_LIT("stroke"), 0.0), 0.0, 1000.0);
+            st.size = held_d(rubraview_ini_get_float(&doc, sec, PROVEN_LIT("size"), 0.0), 0.0, 2000.0);
+            const proven_u8str_view_t *font = rubraview_ini_get(&doc, sec, PROVEN_LIT("font"));
+            if (font) {
+                if (font->size >= sizeof(st.plugin)) { *why = N_("a font's name is too long"); return false; }
+                if (font->size) proven_sys_mem_copy(st.plugin, font->ptr, font->size);
+                st.plugin[font->size] = '\0';
+            }
+            const proven_u8str_view_t *text = rubraview_ini_get(&doc, sec, PROVEN_LIT("text"));
+            if (text) {
+                size_t w = 0;
+                for (size_t i = 0; i < text->size; ++i) {
+                    if (w + 1 >= sizeof(st.command)) { *why = N_("a step's words are longer than Edit takes (1 KiB)"); return false; }
+                    char c = (char)text->ptr[i];
+                    if (c == '\\' && i + 1 < text->size && (text->ptr[i + 1] == 'n' || text->ptr[i + 1] == '\\')) {
+                        st.command[w++] = text->ptr[i + 1] == 'n' ? '\n' : '\\';
+                        i++;
+                    } else st.command[w++] = c;
+                }
+                st.command[w] = '\0';
+            }
+        }
+        const proven_u8str_view_t *cmd = st.kind == RUBRAVIEW_STEP_TEXT ? NULL : rubraview_ini_get(&doc, sec, PROVEN_LIT("command"));
         if (cmd) {
             if (cmd->size >= sizeof(st.command)) { *why = N_("a step's command is longer than Edit takes (1 KiB)"); return false; }
             if (cmd->size > 0) proven_sys_mem_copy(st.command, cmd->ptr, cmd->size);   /* `command = ""`: no bytes (fuzz, 2026-10-31) */
@@ -1385,6 +1602,9 @@ bool rubraview_edit_steps_equal(const rubraview_edit_steps_t *a, const rubraview
             for (int32_t p = 0; p < x->plugin_param_count; ++p) if (x->plugin_params[p] != y->plugin_params[p]) return false;
         }
         if ((x->kind == RUBRAVIEW_STEP_GMIC || x->kind == RUBRAVIEW_STEP_FFMPEG) && rubraview_cstr_cmp(x->command, y->command) != 0) return false;
+        if (x->kind == RUBRAVIEW_STEP_BOX && (x->ink != y->ink || x->fill != y->fill || x->stroke != y->stroke)) return false;   /* RV-324 */
+        if (x->kind == RUBRAVIEW_STEP_TEXT && (x->ink != y->ink || x->back != y->back || x->bold != y->bold || x->size != y->size ||
+                                               rubraview_cstr_cmp(x->command, y->command) != 0 || rubraview_cstr_cmp(x->plugin, y->plugin) != 0)) return false;
     }
     return true;
 }

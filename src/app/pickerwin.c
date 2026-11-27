@@ -302,6 +302,12 @@ int32_t picker_bottom_list(const app_state_t *app, picker_button_t *out) {
         uint32_t need = b == PICKER_BTN_PLAYLIST ? RUBRAVIEW_PICKER_SHOW_LIST : b == PICKER_BTN_EXTRACT ? RUBRAVIEW_PICKER_SHOW_EXTRACT
                       : b == PICKER_BTN_COMPRESS ? RUBRAVIEW_PICKER_SHOW_COMPRESS
                       : b == PICKER_BTN_RECYCLE || b == PICKER_BTN_MOVE || b == PICKER_BTN_COPY ? RUBRAVIEW_PICKER_SHOW_FILES : 0;
+        if (b == PICKER_BTN_NEWFOLDER) {   /* RV-327: wherever a folder can be made */
+            proven_u8str_view_t d = app->picker_dir;
+            if (!place.in_book && !place.in_archive && d.size && !rubraview_picker_is_places(d) && !rubraview_picker_is_recent(d) &&
+                rubraview_path_unc(d, NULL, NULL) != RUBRAVIEW_UNC_SERVER) out[n++] = b;
+            continue;
+        }
         if (need == 0 || (shows & need)) out[n++] = b;
     }
     return n;
@@ -1172,6 +1178,7 @@ void picker_button(app_state_t *app, picker_button_t button) {
         return;
     }
     if (button == PICKER_BTN_OPEN) { picker_open_picked(app); return; }
+    if (button == PICKER_BTN_NEWFOLDER) { picker_new_folder(app); return; }   /* RV-327 */
     if (app->picker_in_book && button != PICKER_BTN_CLEAR && button != PICKER_BTN_VIEW) {
         osd_say(app, TU8("inside a book: tap a page to go to it"));
         return;

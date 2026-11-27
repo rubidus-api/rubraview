@@ -301,7 +301,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
             if (book_ask_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-276 */
             if (list_del_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-256 */
             if (arcadd_press(app, event->mouse.x, event->mouse.y)) break;     /* RV-260 */
-            if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)) &&
+            if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply || app->rename_is_mark)) &&
                 rename_box_press(app, CARD_HOST_MAIN, event->mouse.x, event->mouse.y)) break;   /* 1.24.0: the box's buttons; RV-265: the card */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && ab_card_press(app, event->mouse.x, event->mouse.y)) break;   /* RV-267: the A-B card */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && app->px_edit_open && !(app->edit_window && edit_panel_open(app)) &&
@@ -545,15 +545,20 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 listwin_press(app, event->mouse.x, event->mouse.y, event->mouse.button == RUBRAVIEW_MOUSE_RIGHT)) break;
             /* RV-137 (owner, 2026-10-18): in its own window, Edit chooses an area only after its button. */
             bool choosing = app->sel_mode;   /* only after the button (owner, 2026-10-18: a drag moved boxes too) */
-            if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(app) && choosing &&
-                (edit_away || !rubraview_rect_contains(app->panel.bounds, event->mouse.x, event->mouse.y))) {
+            bool on_picture = event->mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(app) &&
+                              (edit_away || !rubraview_rect_contains(app->panel.bounds, event->mouse.x, event->mouse.y));
+            if (on_picture && (choosing || edit_mark_held(app))) {   /* RV-325: a held mark's box is dragged as the selection */
                 int32_t hit = sel_hit(app, event->mouse.x, event->mouse.y);
                 if (hit && crop_point_to_image(app, event->mouse.x, event->mouse.y, &app->sel_grab_x, &app->sel_grab_y)) {
                     app->sel_grab = hit;
                     app->sel_grab_rect = app->edit.crop;
+                    app->mark_hand_size0 = app->mark_size;
                     break;
                 }
             }
+            /* RV-325 (R374): not choosing an area, a press on a box, words or a mosaic takes it; beside them, lets go */
+            if (on_picture && edit_away && !choosing && edit_mark_take_at(app, event->mouse.x, event->mouse.y)) break;   /* the viewer's own boxes are in the other window then */
+            if (on_picture && choosing && app->mark_hand) edit_mark_let_go(app);   /* a new area: the next mark a new one */
             if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && edit_panel_open(app) && choosing &&
                 (edit_away || !rubraview_rect_contains(app->panel.bounds, event->mouse.x, event->mouse.y)) &&
                 !point_in_curve_widget(app, event->mouse.x, event->mouse.y) &&

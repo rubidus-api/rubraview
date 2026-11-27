@@ -575,16 +575,10 @@ static IWICBitmapDecoder *decoder_from_other(IWICImagingFactory *factory, proven
 
 static IWICBitmapDecoder *decoder_for_path(proven_u8str_view_t path) {
     IWICImagingFactory *factory = wic_factory();
-    if (!factory || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
+    if (!factory || path.size == 0) return NULL;
 
-    char narrow[MAX_PATH * 4];
-    proven_sys_mem_copy(narrow, path.ptr, path.size);
-    narrow[path.size] = '\0';
-
-    WCHAR wide[MAX_PATH * 2];
-    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) {
-        return NULL;
-    }
+    WCHAR wide[4096];
+    if (!rubraview_pal_path_wide(path, wide, 4096)) return NULL;   /* RV-328: Windows' literal form when needed */
 
     HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                               NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
@@ -918,12 +912,9 @@ static double anim_delay(double seconds) {
 /* The file whole, read with full sharing and closed at once (see decoder_for_path). */
 static uint8_t *file_read_whole(proven_u8str_view_t path, size_t *out_size) {
     *out_size = 0;
-    if (path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
-    char narrow[MAX_PATH * 4];
-    proven_sys_mem_copy(narrow, path.ptr, path.size);
-    narrow[path.size] = '\0';
-    WCHAR wide[MAX_PATH * 2];
-    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return NULL;
+    if (path.size == 0) return NULL;
+    WCHAR wide[4096];
+    if (!rubraview_pal_path_wide(path, wide, 4096)) return NULL;   /* RV-328 */
 
     HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                               NULL, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, NULL);
@@ -1575,16 +1566,10 @@ static const GUID *container_for_format(rubraview_export_format_t format) {
 
 /* Opens a file stream for writing, converting the path at the boundary. */
 static IWICStream *writable_stream(IWICImagingFactory *factory, proven_u8str_view_t path) {
-    if (!factory || path.size == 0 || path.size >= MAX_PATH * 4) return NULL;
+    if (!factory || path.size == 0) return NULL;
 
-    char narrow[MAX_PATH * 4];
-    proven_sys_mem_copy(narrow, path.ptr, path.size);
-    narrow[path.size] = '\0';
-
-    WCHAR wide[MAX_PATH * 2];
-    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) {
-        return NULL;
-    }
+    WCHAR wide[4096];
+    if (!rubraview_pal_path_wide(path, wide, 4096)) return NULL;   /* RV-328: Windows' literal form when needed */
 
     IWICStream *stream = NULL;
     if (FAILED(IWICImagingFactory_CreateStream(factory, &stream)) || !stream) return NULL;
@@ -2189,6 +2174,11 @@ static rubraview_pixbuf_t text_mask_in(proven_arena_t *arena, proven_u8str_view_
 
 rubraview_pixbuf_t rubraview_pal_text_mask(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px) {
     return text_mask_in(arena, text, font, px, 0, 0, FW_SEMIBOLD);
+}
+
+/* RV-324 (R372): Edit's words, normal or bold */
+rubraview_pixbuf_t rubraview_pal_text_mask_weight(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px, bool bold) {
+    return text_mask_in(arena, text, font, px, 0, 0, bold ? FW_BOLD : FW_NORMAL);
 }
 
 rubraview_pixbuf_t rubraview_pal_text_mask_box(proven_arena_t *arena, proven_u8str_view_t text, proven_u8str_view_t font, int32_t px,

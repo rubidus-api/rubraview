@@ -3,6 +3,8 @@
 #include "rubraview/audio_exts.h"
 #include "rubraview/path.h"
 #include "rubraview/number.h"
+#include "rubraview/media_head.h"   /* R367: a Wave64's chunks */
+#include "rubraview/adpcm.h"
 #include <string.h>
 
 /* Five formats keep their tags in five different places, and every one of
@@ -861,13 +863,16 @@ static void read_wav(proven_arena_t *arena, const uint8_t *p, size_t len, const 
     out->codec = PROVEN_LIT("WAV");
     if (whole && whole_len >= len) { p = whole; len = whole_len; }
     size_t at = 12;
+    uint32_t tag = 1, fact = 0;   /* R367: a compressed sound's length is its fact chunk's frames */
     while (at + 8 <= len) {
         uint32_t size = le32(p + at + 4);
         const uint8_t *body = p + at + 8;
         /* With the head only, `data` — the whole recording — is nearly always longer than what is held: its
            *declared* length gives the length, and nothing after it is read. */
         if (four(p + at, "data")) {
-            if (out->sample_rate > 0 && out->channels > 0 && out->bits_per_sample > 0) {
+            if (tag != 1 && tag != 3 && tag != 0xFFFE && fact > 0 && out->sample_rate > 0) {
+                out->duration_seconds = (double)fact / (double)out->sample_rate;
+            } else if (out->sample_rate > 0 && out->channels > 0 && out->bits_per_sample > 0) {
                 double frame = (double)out->channels * (double)out->bits_per_sample / 8.0;
                 if (frame > 0.0) out->duration_seconds = (double)size / frame / (double)out->sample_rate;
             }
@@ -880,8 +885,16 @@ static void read_wav(proven_arena_t *arena, const uint8_t *p, size_t len, const 
             out->channels = le16(body + 2);
             out->sample_rate = le32(body + 4);
             out->bits_per_sample = le16(body + 14);
+            tag = le16(body);   /* R366: the recorders' ADPCM named as what it is */
+            if (tag == 0x0011) out->codec = PROVEN_LIT("IMA ADPCM");
+            else if (tag == 0x0002) out->codec = PROVEN_LIT("MS ADPCM");
             uint32_t bytes_per_second = le32(body + 8);
+            rubraview_adpcm_t a;   /* R368: an encoder may write a PCM's byte rate there; the blocks say the real one */
+            if ((tag == 0x0011 || tag == 0x0002) && rubraview_adpcm_from_fmt(body, size, &a) && a.frames_per_block)
+                bytes_per_second = (uint32_t)((uint64_t)a.block_align * a.rate / a.frames_per_block);
             if (bytes_per_second > 0) out->bitrate_kbps = bytes_per_second * 8 / 1000;
+        } else if (four(p + at, "fact") && size >= 4) {
+            fact = le32(body);
         } else if (four(p + at, "LIST") && size >= 4 && four(body, "INFO")) {
             size_t in = 4;
             while (in + 8 <= size) {
@@ -902,6 +915,222 @@ static void read_wav(proven_arena_t *arena, const uint8_t *p, size_t len, const 
             read_id3v2(arena, rubraview_mem_view(body, size), out, &end);
         }
         at += 8 + (size_t)size + (size & 1);           /* chunks are padded to an even length */
+    }
+}
+
+/* ---- R367 (RV-319): the songs FFmpeg plays, and AIFF and Wave64: what each says of itself ----
+   Before these, any file that was none of the kinds above was scanned for MPEG frames, and the stray 0xFFE bytes
+   of a PCM or a lossless stream were taken for one ("MP3 · 160 kbps" on an AIFF). */
+
+static uint64_t be64(const uint8_t *p) { return (uint64_t)be32(p) << 32 | be32(p + 4); }
+static uint64_t le64(const uint8_t *p) { return (uint64_t)le32(p + 4) << 32 | le32(p); }
+
+static void set_length(rubraview_tags_t *out, uint64_t frames) {
+    if (out->sample_rate > 0 && frames > 0) out->duration_seconds = (double)frames / (double)out->sample_rate;
+}
+
+/* AIFF and AIFF-C: FORM, then chunks of a big-endian size, padded to even; COMM says the sound, "ID3 " the tags */
+static void read_aiff(proven_arena_t *arena, const uint8_t *p, size_t len, const uint8_t *whole, size_t whole_len,
+                      rubraview_tags_t *out) {
+    out->codec = PROVEN_LIT("AIFF");
+    if (whole && whole_len >= len) { p = whole; len = whole_len; }
+    for (size_t at = 12; at + 8 <= len;) {
+        uint32_t size = be32(p + at + 4);
+        const uint8_t *body = p + at + 8;
+        bool fits = size <= len - at - 8;
+        if (four(p + at, "COMM") && fits && size >= 18) {
+            out->channels = be16(body);
+            out->bits_per_sample = be16(body + 6);
+            int e = (int)(be16(body + 8) & 0x7FFF) - 16383;   /* the rate, an 80-bit float */
+            uint64_t m = be64(body + 10);
+            out->sample_rate = e >= 0 && e < 32 ? (uint32_t)(m >> (63 - e)) : 0;
+            set_length(out, be32(body + 2));
+            if (out->sample_rate && out->channels && out->bits_per_sample)
+                out->bitrate_kbps = (uint32_t)(((uint64_t)out->sample_rate * out->channels * out->bits_per_sample + 500) / 1000);
+        } else if ((four(p + at, "ID3 ") || four(p + at, "id3 ")) && fits && size >= 10) {
+            size_t end = 0;
+            read_id3v2(arena, rubraview_mem_view(body, size), out, &end);
+        } else if (!fits) {
+            break;   /* the sound, longer than what is held; what follows is not read */
+        }
+        at += 8 + (size_t)size + (size & 1u);
+    }
+}
+
+/* Wave64: its fmt as a WAVE's */
+static void read_w64(const uint8_t *p, size_t len, uint64_t file_size, rubraview_tags_t *out) {
+    out->codec = PROVEN_LIT("W64");
+    rubraview_wave_chunks_t c;
+    if (!rubraview_media_wave_chunks(p, len, file_size ? file_size : len, &c)) return;
+    out->channels = le16(c.fmt + 2);
+    out->sample_rate = le32(c.fmt + 4);
+    out->bits_per_sample = le16(c.fmt + 14);
+    uint32_t bytes_per_second = le32(c.fmt + 8), align = le16(c.fmt + 12);
+    if (bytes_per_second > 0) out->bitrate_kbps = bytes_per_second * 8 / 1000;
+    if (align) set_length(out, c.data_len / align);
+}
+
+/* WavPack: a block's 32-byte header: its samples and the flags' bytes a sample, mono and rate */
+static void read_wavpack(const uint8_t *p, size_t len, rubraview_tags_t *out) {
+    static const uint32_t RATES[15] = { 6000, 8000, 9600, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000, 64000, 88200, 96000, 192000 };
+    out->codec = PROVEN_LIT("WavPack");
+    if (len < 32) return;
+    uint32_t flags = le32(p + 24), total = le32(p + 12), ri = (flags >> 23) & 15u;
+    out->bits_per_sample = (flags & 3u) * 8u + 8u;
+    out->channels = (flags & 4u) ? 1u : 2u;
+    out->sample_rate = ri < 15 ? RATES[ri] : 0;
+    if (total != 0xFFFFFFFFu) set_length(out, total);
+}
+
+/* TTA: "TTA1", format, channels, bits, rate, samples */
+static void read_tta(const uint8_t *p, size_t len, rubraview_tags_t *out) {
+    out->codec = PROVEN_LIT("TTA");
+    if (len < 18) return;
+    out->channels = le16(p + 6);
+    out->bits_per_sample = le16(p + 8);
+    out->sample_rate = le32(p + 10);
+    set_length(out, le32(p + 14));
+}
+
+/* Monkey's Audio: "MAC ", its version; from 3.98 a descriptor, then the header */
+static void read_ape(const uint8_t *p, size_t len, rubraview_tags_t *out) {
+    out->codec = PROVEN_LIT("APE");
+    if (len < 8) return;
+    uint32_t version = le16(p + 4);
+    if (version >= 3980) {
+        uint32_t desc = len >= 12 ? le32(p + 8) : 0;
+        if (desc < 52 || desc > len || len - desc < 24) return;
+        const uint8_t *h = p + desc;
+        uint32_t per_frame = le32(h + 4), last = le32(h + 8), frames = le32(h + 12);
+        out->bits_per_sample = le16(h + 16);
+        out->channels = le16(h + 18);
+        out->sample_rate = le32(h + 20);
+        if (frames) set_length(out, (uint64_t)(frames - 1) * per_frame + last);
+    } else if (len >= 32) {
+        out->channels = le16(p + 10);
+        out->sample_rate = le32(p + 12);
+        out->bits_per_sample = (le16(p + 8) & 1u) ? 8u : (le16(p + 8) & 8u) ? 24u : 16u;
+        uint32_t frames = le32(p + 24), last = le32(p + 28);
+        uint32_t per_frame = version >= 3950 ? 73728u * 4u : version >= 3900 ? 73728u : 9216u;
+        if (frames) set_length(out, (uint64_t)(frames - 1) * per_frame + last);
+    }
+}
+
+/* DSF: "DSD " chunk, then "fmt ": channels, the 1-bit rate, the samples; the ID3v2 tag where the header points */
+static void read_dsf(proven_arena_t *arena, const uint8_t *p, size_t len, const uint8_t *whole, size_t whole_len,
+                     rubraview_tags_t *out) {
+    out->codec = PROVEN_LIT("DSD");
+    if (len < 80 || !four(p + 28, "fmt ")) return;
+    out->channels = le32(p + 52);
+    out->sample_rate = le32(p + 56);
+    out->bits_per_sample = 1;
+    set_length(out, le64(p + 64));
+    uint64_t meta = le64(p + 20);
+    if (whole && meta > 0 && meta < whole_len && whole_len - meta >= 10) {
+        size_t end = 0;
+        read_id3v2(arena, rubraview_mem_view(whole + meta, (size_t)(whole_len - meta)), out, &end);
+    }
+}
+
+/* DSDIFF: "FRM8", 8-byte big-endian sizes; PROP's "SND " holds FS (the rate) and CHNL (the channels) */
+static void read_dff(const uint8_t *p, size_t len, rubraview_tags_t *out) {
+    out->codec = PROVEN_LIT("DSD");
+    out->bits_per_sample = 1;
+    for (size_t at = 16; at + 12 <= len;) {
+        uint64_t size = be64(p + at + 4);
+        if (size > len - at - 12) size = len - at - 12;
+        if (four(p + at, "PROP") && size >= 4 && four(p + at + 12, "SND ")) {
+            for (size_t in = at + 16; in + 12 <= at + 12 + size;) {
+                uint64_t n = be64(p + in + 4);
+                if (n > at + 12 + size - in - 12) break;
+                if (four(p + in, "FS  ") && n >= 4) out->sample_rate = be32(p + in + 12);
+                else if (four(p + in, "CHNL") && n >= 2) out->channels = be16(p + in + 12);
+                in += 12 + (size_t)n + (size_t)(n & 1u);
+            }
+        }
+        if (four(p + at, "DSD ") && out->sample_rate && out->channels) set_length(out, be64(p + at + 4) * 8u / out->channels);
+        at += 12 + (size_t)size + (size_t)(size & 1u);
+    }
+}
+
+/* Matroska sound: the first track's CodecID ("A_FLAC" and such, element 0x86) names it */
+static void read_mka(const uint8_t *p, size_t len, rubraview_tags_t *out) {
+    static const struct { const char *id; const char *name; } NAMES[] = {
+        { "A_FLAC", "FLAC" }, { "A_OPUS", "Opus" }, { "A_VORBIS", "Vorbis" }, { "A_AAC", "AAC" }, { "A_MPEG/L3", "MP3" },
+        { "A_AC3", "AC-3" }, { "A_EAC3", "E-AC-3" }, { "A_DTS", "DTS" }, { "A_TRUEHD", "TrueHD" }, { "A_PCM", "PCM" },
+        { "A_ALAC", "ALAC" }, { "A_WAVPACK4", "WavPack" }, { "A_TTA1", "TTA" },
+    };
+    out->codec = PROVEN_LIT("Matroska");
+    size_t limit = len < 65536 ? len : 65536;
+    for (size_t i = 0; i + 4 < limit; ++i) {
+        if (p[i] != 0x86 || (p[i + 1] & 0x80) == 0) continue;
+        size_t n = p[i + 1] & 0x7Fu;
+        if (n < 3 || i + 2 + n > limit || p[i + 2] != 'A' || p[i + 3] != '_') continue;
+        for (size_t k = 0; k < sizeof NAMES / sizeof NAMES[0]; ++k) {
+            size_t m = proven_cstr_len(NAMES[k].id);
+            if (n >= m && proven_sys_mem_cmp(p + i + 2, NAMES[k].id, m) == 0) { out->codec = proven_u8str_view_from_cstr(NAMES[k].name); return; }
+        }
+        return;
+    }
+}
+
+/* ---- R368 (RV-319): APEv2, at the end of a Monkey's Audio, WavPack, TTA or TAK file (and of some MP3s) ----
+   A 32-byte footer ("APETAGEX", version, the tag's size counting the items and the footer, the items' count),
+   before an ID3v1 tag when there is one; each item its value's size, flags, a key ended by NUL and the value:
+   UTF-8 text (several values NUL-separated: the first), or binary — "Cover Art (Front)" a file name ended by NUL,
+   then the picture. A field another tag of the file already gave is kept. */
+static void read_apev2(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
+    if (!p || len < 32) return;
+    size_t foot = len - 32;
+    if (proven_sys_mem_cmp(p + foot, "APETAGEX", 8) != 0) {
+        if (len < 160 || proven_sys_mem_cmp(p + len - 128, "TAG", 3) != 0) return;   /* behind an ID3v1 tag */
+        foot = len - 160;
+        if (proven_sys_mem_cmp(p + foot, "APETAGEX", 8) != 0) return;
+    }
+    uint32_t size = le32(p + foot + 12), count = le32(p + foot + 16);
+    if (size < 32 || size > foot + 32) return;
+    size_t at = foot + 32 - size, end = foot;
+    bool front = false;
+    for (uint32_t k = 0; k < count && k < 1000 && at + 8 < end; ++k) {
+        uint32_t vsize = le32(p + at), flags = le32(p + at + 4);
+        size_t key = at + 8, kend = key;
+        while (kend < end && p[kend] != 0) kend++;
+        if (kend >= end || kend - key < 2 || kend - key > 255 || vsize > end - kend - 1) return;
+        proven_u8str_view_t name = { .ptr = (const proven_byte_t *)(p + key), .size = kend - key };
+        const uint8_t *v = p + kend + 1;
+        at = kend + 1 + vsize;
+        uint32_t kind = (flags >> 1) & 3u;
+        if (kind == 1) {   /* binary: a cover, the front first */
+            bool is_front = same_ci(name, "COVER ART (FRONT)");
+            if (!is_front && !same_ci(name, "COVER ART (OTHER)")) continue;
+            if (out->art_size > 0 && (front || !is_front)) continue;
+            size_t n = 0;
+            while (n < vsize && v[n] != 0) n++;
+            if (n >= vsize) continue;
+            const uint8_t *img = v + n + 1;
+            size_t img_len = vsize - n - 1;
+            bool png = img_len > 8 && img[0] == 0x89 && img[1] == 'P';
+            bool jpeg = img_len > 3 && img[0] == 0xFF && img[1] == 0xD8;
+            if ((!png && !jpeg) || img_len > RUBRAVIEW_TAGS_MAX_ART) continue;
+            out->art = img;
+            out->art_size = img_len;
+            out->art_mime = png ? PROVEN_LIT("image/png") : PROVEN_LIT("image/jpeg");
+            front = is_front;
+            continue;
+        }
+        if (kind != 0) continue;
+        size_t first = 0;
+        while (first < vsize && v[first] != 0) first++;   /* the first of several values */
+        proven_u8str_view_t text = { .ptr = (const proven_byte_t *)v, .size = first };
+        if (same_ci(name, "TITLE") && out->title.size == 0) out->title = trim(arena, v, first);
+        else if (same_ci(name, "ARTIST") && out->artist.size == 0) out->artist = trim(arena, v, first);
+        else if (same_ci(name, "ALBUM") && out->album.size == 0) out->album = trim(arena, v, first);
+        else if ((same_ci(name, "YEAR") || same_ci(name, "DATE")) && out->year.size == 0) out->year = trim(arena, v, first);
+        else if (same_ci(name, "TRACK") && out->track_number.size == 0) out->track_number = trim(arena, v, first);
+        else if (same_ci(name, "GENRE") && out->genre.size == 0) out->genre = trim(arena, v, first);
+        else if ((same_ci(name, "LYRICS") || same_ci(name, "UNSYNCEDLYRICS")) && out->lyrics_text.size == 0)
+            out->lyrics_text = trim(arena, v, vsize);
+        else replaygain_value(out, name, text);
     }
 }
 
@@ -946,7 +1175,6 @@ static const uint8_t ASF_EXT_CONTENT[16] = { 0x40, 0xA4, 0xD0, 0xD2, 0x07, 0xE3,
 static const uint8_t ASF_HEADER_EXT[16] = { 0xB5, 0x03, 0xBF, 0x5F, 0x2E, 0xA9, 0xCF, 0x11, 0x8E, 0xE3, 0x00, 0xC0, 0x0C, 0x20, 0x53, 0x65 };
 static const uint8_t ASF_METADATA_LIB[16] = { 0x94, 0x1C, 0x23, 0x44, 0x98, 0x94, 0xD1, 0x49, 0xA1, 0x41, 0x1D, 0x13, 0x4E, 0x45, 0x70, 0x54 };
 
-static uint64_t le64(const uint8_t *p) { return (uint64_t)le32(p + 4) << 32 | le32(p); }
 
 /* Is this UTF-16LE name, its NUL left off, the ASCII `want`? */
 static bool asf_name_is(const uint8_t *p, size_t len, const char *want) {
@@ -1121,7 +1349,6 @@ static void read_mp3_frame(proven_mem_view_t p_view, size_t from, rubraview_tags
     static const uint32_t BITRATE_V2_L3[16] = { 0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0 };
     static const uint32_t RATE_V1[4] = { 44100, 48000, 32000, 0 };
 
-    out->codec = PROVEN_LIT("MP3");
     size_t limit = from + 65536 < len ? from + 65536 : len;
     for (size_t i = from; i + 4 <= limit; ++i) {
         if (p[i] != 0xFF || (p[i + 1] & 0xE0) != 0xE0) continue;
@@ -1136,6 +1363,7 @@ static void read_mp3_frame(proven_mem_view_t p_view, size_t from, rubraview_tags
         out->sample_rate = rate;
         out->bitrate_kbps = version == 3 ? BITRATE_V1_L3[bitrate_index] : BITRATE_V2_L3[bitrate_index];
         out->channels = ((p[i + 3] >> 6) & 0x03) == 3 ? 1u : 2u;
+        out->codec = PROVEN_LIT("MP3");   /* R367: only when a frame is there */
         return;
     }
 }
@@ -1172,10 +1400,31 @@ rubraview_tags_t rubraview_tags_read(proven_arena_t *arena, rubraview_tags_sourc
         read_wav(arena, p, len, source.whole, source.whole_size, &out);
     } else if (len >= 16 && proven_sys_mem_cmp(p, ASF_HEADER, 16) == 0) {
         read_asf(arena, p, len, &out);
+    } else if (four(p, "FORM") && (four(p + 8, "AIFF") || four(p + 8, "AIFC"))) {   /* R367 */
+        read_aiff(arena, p, len, source.whole, source.whole_size, &out);
+    } else if (rubraview_media_w64_is(p, len)) {
+        read_w64(p, len, source.file_size, &out);
+    } else if (four(p, "wvpk")) {
+        read_wavpack(p, len, &out);
+    } else if (four(p, "TTA1")) {
+        read_tta(p, len, &out);
+    } else if (four(p, "MAC ")) {
+        read_ape(p, len, &out);
+    } else if (four(p, "tBaK")) {
+        out.codec = PROVEN_LIT("TAK");
+    } else if (four(p, "DSD ")) {
+        read_dsf(arena, p, len, source.whole, source.whole_size, &out);
+    } else if (four(p, "FRM8") && four(p + 12, "DSD ")) {
+        read_dff(p, len, &out);
+    } else if (p[0] == 0x1A && p[1] == 0x45 && p[2] == 0xDF && p[3] == 0xA3) {
+        read_mka(p, len, &out);
+    } else if (four(p, ".ra\xFD") || four(p, ".RMF")) {
+        out.codec = PROVEN_LIT("RealAudio");
     } else if (!read_adts(p, len, after_id3 < len ? after_id3 : 0, &out)) {
         read_mp3_frame(rubraview_mem_view(p, len), after_id3 < len ? after_id3 : 0, &out);
     }
 
+    if (source.whole && source.whole_size >= 32) read_apev2(arena, source.whole, source.whole_size, &out);   /* R368 */
     read_id3v1(arena, rubraview_mem_view(source.tail, source.tail_size), &out);
 
     /* When nothing measured it, the file's own size and length do. */

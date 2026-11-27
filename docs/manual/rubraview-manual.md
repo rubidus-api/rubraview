@@ -7,9 +7,9 @@ A viewer for images, comic archives and (later) video, for Windows.
 A build puts everything under `dist/`:
 
 ```
-dist/rubraview-v1.63.0.exe              the viewer, as built
-dist/rubraview-v1.63.0/                 the release bundle
-dist/rubraview-v1.63.0.zip              that bundle, zipped — the download
+dist/rubraview-v1.64.0.exe              the viewer, as built
+dist/rubraview-v1.64.0/                 the release bundle
+dist/rubraview-v1.64.0.zip              that bundle, zipped — the download
 dist/rubraview.exe                      the viewer on its own — the other download
 ```
 
@@ -2545,6 +2545,9 @@ listed under a later heading only means that while that is on screen.
 | Right click `Webtoon` | Layout: every page one under the other, one long strip |
 | Right click `Choose subtitles` | Choose the subtitles from a list |
 | Right click `Extract subtitles` | Write the text subtitles held inside a Matroska film as files beside it (`film.kor.srt`, `film.eng.ass`); the film is not changed |
+| Right click `Find lyrics online...` | Look the song's lyrics up at LRCLIB and pick one to keep beside it |
+| Right click `Edit lyrics` | The song's .lrc in Notepad; what is saved shows at once |
+| Right click `Upload lyrics to LRCLIB...` | Send the song's .lrc to LRCLIB, for everyone (no account) |
 | Title bar ☰ `Align the Floating Icon Group` | The Floating Icon Group back in the bottom-right corner, over the information bar when it is shown |
 
 <!-- keys:end -->

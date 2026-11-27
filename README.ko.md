@@ -1,4 +1,4 @@
-**한국어** | [English](README.md) — **Rubraview v1.63.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.63.0/rubraview-v1.63.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.63.0/rubraview-v1.63.0.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.63.0/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
+**한국어** | [English](README.md) — **Rubraview v1.64.0** — [ZIP(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.64.0/rubraview-v1.64.0.zip) · [설치 파일 MSI(x64)](https://github.com/rubidus-api/rubraview/releases/download/v1.64.0/rubraview-v1.64.0.msi) · [EXE](https://github.com/rubidus-api/rubraview/releases/download/v1.64.0/rubraview.exe) · [Microsoft Store v1.39.43](https://apps.microsoft.com/detail/9n99b2x63k7x) · [EXE만](https://github.com/rubidus-api/rubraview/releases/latest/download/rubraview.exe)
 
 # Rubraview
 
@@ -312,6 +312,9 @@
 | 오른쪽 클릭 `Webtoon` | 보기 방식: 모든 쪽을 세로로 이어서(웹툰) |
 | 오른쪽 클릭 `Choose subtitles` | 목록에서 자막 고르기 |
 | 오른쪽 클릭 `Extract subtitles` | Matroska 영상 안의 글자 자막을 영상 옆 파일로 빼내기(`film.kor.srt`, `film.eng.ass`) — 영상은 바꾸지 않음 |
+| 오른쪽 클릭 `Find lyrics online...` | LRCLIB에서 가사를 찾아 골라 곡 옆에 저장 |
+| 오른쪽 클릭 `Edit lyrics` | 곡의 .lrc를 메모장에서 편집, 저장하면 바로 반영 |
+| 오른쪽 클릭 `Upload lyrics to LRCLIB...` | 곡의 .lrc를 LRCLIB에 올림 (계정 불필요, 누구나 볼 수 있음) |
 | 제목 표시줄 ☰ `Align the Floating Icon Group` | 플로팅 아이콘 그룹을 오른쪽 아래 구석으로 (정보 바가 있으면 그 위로) |
 
 <!-- keys:end -->

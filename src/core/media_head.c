@@ -1304,6 +1304,204 @@ const char *rubraview_media_mf_content_type(proven_u8str_view_t name) {
     return name_is(name, "m4b") ? "audio/mp4" : NULL;
 }
 
+/* ---- RV-319 (R365): Sony Wave64 ---- */
+/* The GUIDs' last twelve bytes after the four letters: riff and list one kind, the rest another. */
+static const uint8_t W64_RIFF[16] = { 'r', 'i', 'f', 'f', 0x2E, 0x91, 0xCF, 0x11, 0xA5, 0xD6, 0x28, 0xDB, 0x04, 0xC1, 0x00, 0x00 };
+static const uint8_t W64_TAIL[12] = { 0xF3, 0xAC, 0xD3, 0x11, 0x8C, 0xD1, 0x00, 0xC0, 0x4F, 0x8E, 0xDB, 0x8A };
+
+static bool w64_named(const uint8_t *g, const char *four) {
+    return proven_sys_mem_cmp(g, four, 4) == 0 && proven_sys_mem_cmp(g + 4, W64_TAIL, 12) == 0;
+}
+
+bool rubraview_media_w64_is(const uint8_t *head, size_t head_len) {
+    return head && head_len >= 40 && proven_sys_mem_cmp(head, W64_RIFF, 16) == 0 && w64_named(head + 24, "wave");
+}
+
+static void put32(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24); }
+static void put64(uint8_t *p, uint64_t v) { put32(p, (uint32_t)v); put32(p + 4, (uint32_t)(v >> 32)); }
+
+bool rubraview_media_wave_chunks(const uint8_t *head, size_t head_len, uint64_t file_size, rubraview_wave_chunks_t *out) {
+    if (!out || !head) return false;
+    proven_sys_mem_set(out, 0, sizeof *out);
+    bool w64 = rubraview_media_w64_is(head, head_len);
+    bool riff = !w64 && head_len >= 12 && (proven_sys_mem_cmp(head, "RIFF", 4) == 0 || proven_sys_mem_cmp(head, "RF64", 4) == 0) &&
+                proven_sys_mem_cmp(head + 8, "WAVE", 4) == 0;
+    if (!w64 && !riff) return false;
+    out->w64 = w64;
+    uint64_t at = w64 ? 40 : 12, data64 = 0;
+    size_t hdr = w64 ? 24 : 8;
+    bool have_data = false;
+    for (unsigned guard = 0; guard < 256 && at + hdr <= head_len; ++guard) {
+        const uint8_t *c = head + at;
+        uint64_t body = w64 ? le64(c + 16) : le32(c + 4);
+        if (w64) { if (body < 24) return false; body -= 24; }   /* a Wave64 size counts its own header */
+        bool is_fmt = w64 ? w64_named(c, "fmt ") : proven_sys_mem_cmp(c, "fmt ", 4) == 0;
+        bool is_data = w64 ? w64_named(c, "data") : proven_sys_mem_cmp(c, "data", 4) == 0;
+        bool is_fact = w64 ? w64_named(c, "fact") : proven_sys_mem_cmp(c, "fact", 4) == 0;
+        if (is_fmt) {
+            if (body < 16 || body > 256 || at + hdr + body > head_len) return false;
+            out->fmt = c + hdr;
+            out->fmt_len = (uint32_t)body;
+        } else if (!w64 && proven_sys_mem_cmp(c, "ds64", 4) == 0 && at + hdr + 24 <= head_len) {
+            data64 = le64(c + hdr + 8);
+            out->fact = le64(c + hdr + 16);
+        } else if (is_fact && at + hdr + 4 <= head_len && out->fact == 0) {
+            out->fact = le32(c + hdr);
+        } else if (is_data) {
+            out->data_at = at + hdr;
+            out->data_len = !w64 && body == 0xFFFFFFFFu && data64 ? data64 : body;
+            have_data = true;
+            break;
+        }
+        uint64_t next = w64 ? at + hdr + ((body + 7u) & ~(uint64_t)7u) : at + hdr + body + (body & 1u);   /* Wave64 on 8 bytes */
+        if (next <= at) return false;
+        at = next;
+    }
+    if (!out->fmt || !have_data || out->data_at > file_size) return false;
+    if (out->data_len == 0 || (!w64 && out->data_len == 0xFFFFFFFFu) || out->data_len > file_size - out->data_at)
+        out->data_len = file_size - out->data_at;   /* written while recording */
+    return true;
+}
+
+uint32_t rubraview_media_wave_head(uint8_t *h, size_t cap, const uint8_t *fmt, uint32_t fmt_len, uint64_t data_len,
+                                   uint16_t block_align) {
+    uint32_t fl = fmt_len + (fmt_len & 1u);
+    bool big = 4u + 8u + 28u + 8u + fl + 8u + data_len > 0xFFFFFFFFull;
+    uint32_t need = 12u + (big ? 36u : 0u) + 8u + fl + 8u;
+    if (!h || !fmt || fmt_len < 16 || cap < need) return 0;
+    uint64_t riff = 4u + (big ? 36u : 0u) + 8u + fl + 8u + data_len;   /* after "RIFF" and its size */
+    proven_sys_mem_copy(h, big ? "RF64" : "RIFF", 4);
+    put32(h + 4, big ? 0xFFFFFFFFu : (uint32_t)riff);
+    proven_sys_mem_copy(h + 8, "WAVE", 4);
+    uint32_t n = 12;
+    if (big) {   /* EBU Tech 3306: the sizes that do not fit, in ds64 */
+        proven_sys_mem_copy(h + n, "ds64", 4);
+        put32(h + n + 4, 28);
+        put64(h + n + 8, riff);
+        put64(h + n + 16, data_len);
+        put64(h + n + 24, block_align ? data_len / block_align : 0);
+        put32(h + n + 32, 0);
+        n += 36;
+    }
+    proven_sys_mem_copy(h + n, "fmt ", 4);
+    put32(h + n + 4, fmt_len);
+    proven_sys_mem_copy(h + n + 8, fmt, fmt_len);
+    if (fmt_len & 1u) h[n + 8 + fmt_len] = 0;
+    n += 8u + fl;
+    proven_sys_mem_copy(h + n, "data", 4);
+    put32(h + n + 4, big ? 0xFFFFFFFFu : (uint32_t)data_len);
+    return n + 8;
+}
+
+bool rubraview_media_w64_wave(const uint8_t *head, size_t head_len, uint64_t file_size, rubraview_w64_wave_t *out) {
+    if (!out || !rubraview_media_w64_is(head, head_len)) return false;
+    proven_sys_mem_set(out, 0, sizeof *out);
+    rubraview_wave_chunks_t c;
+    if (!rubraview_media_wave_chunks(head, head_len, file_size, &c)) return false;
+    out->data_at = c.data_at;
+    out->data_len = c.data_len;
+    out->format_tag = le16(c.fmt);
+    out->rate = le32(c.fmt + 4);
+    out->byte_rate = le32(c.fmt + 8);
+    out->block_align = le16(c.fmt + 12);
+    out->header_len = rubraview_media_wave_head(out->header, sizeof out->header, c.fmt, c.fmt_len, c.data_len, out->block_align);
+    return out->header_len > 0;
+}
+
+bool rubraview_media_aiff_wave(const uint8_t *head, size_t head_len, uint64_t file_size, rubraview_aiff_wave_t *out) {
+    if (!out || !head || head_len < 12) return false;
+    proven_sys_mem_set(out, 0, sizeof *out);
+    bool aifc = proven_sys_mem_cmp(head + 8, "AIFC", 4) == 0;
+    if (proven_sys_mem_cmp(head, "FORM", 4) != 0 || (!aifc && proven_sys_mem_cmp(head + 8, "AIFF", 4) != 0)) return false;
+    uint32_t channels = 0, bits = 0, rate = 0;
+    const uint8_t *kind = (const uint8_t *)"NONE";
+    bool have_comm = false, have_sound = false;
+    for (uint64_t at = 12; at + 8 <= head_len;) {
+        const uint8_t *c = head + at;
+        uint32_t size = be32(c + 4);
+        if (proven_sys_mem_cmp(c, "COMM", 4) == 0) {
+            if (size < 18 || at + 8 + size > head_len) return false;
+            channels = be16(c + 8);
+            bits = be16(c + 14);
+            int e = (int)(be16(c + 16) & 0x7FFF) - 16383;   /* an 80-bit float */
+            uint64_t m = ((uint64_t)be32(c + 18) << 32) | be32(c + 22);
+            rate = e >= 0 && e < 32 ? (uint32_t)(m >> (63 - e)) : 0;
+            if (aifc) { if (size < 22) return false; kind = c + 26; }
+            have_comm = true;
+        } else if (proven_sys_mem_cmp(c, "SSND", 4) == 0) {
+            if (at + 16 > head_len || size < 8) return false;
+            uint32_t offset = be32(c + 8);
+            out->data_at = at + 16 + offset;
+            out->data_len = size - 8 >= offset ? (uint64_t)(size - 8 - offset) : 0;
+            have_sound = true;
+            break;
+        }
+        uint64_t next = at + 8 + size + (size & 1u);
+        if (next <= at) return false;
+        at = next;
+    }
+    if (!have_comm || !have_sound || channels == 0 || channels > 32 || rate == 0 || out->data_at > file_size) return false;
+    if (out->data_len == 0 || out->data_len > file_size - out->data_at) out->data_len = file_size - out->data_at;
+    uint16_t tag = 1;
+    if (proven_sys_mem_cmp(kind, "NONE", 4) == 0 || proven_sys_mem_cmp(kind, "twos", 4) == 0) {
+        if (bits == 0 || bits > 32) return false;
+        out->sample_bytes = (uint16_t)((bits + 7u) / 8u);
+        out->swap = out->sample_bytes > 1;
+        out->sign8 = out->sample_bytes == 1;
+    } else if (proven_sys_mem_cmp(kind, "sowt", 4) == 0) {
+        if (bits == 0 || bits > 32) return false;
+        out->sample_bytes = (uint16_t)((bits + 7u) / 8u);
+        out->sign8 = out->sample_bytes == 1;
+    } else if (proven_sys_mem_cmp(kind, "fl32", 4) == 0 || proven_sys_mem_cmp(kind, "FL32", 4) == 0) {
+        out->sample_bytes = 4; out->swap = true; tag = 3;
+    } else if (proven_sys_mem_cmp(kind, "fl64", 4) == 0 || proven_sys_mem_cmp(kind, "FL64", 4) == 0) {
+        out->sample_bytes = 8; out->swap = true; tag = 3;
+    } else {
+        return false;   /* ulaw, alaw, ima4 and the rest: FFmpeg's */
+    }
+    uint32_t align = channels * out->sample_bytes;
+    out->data_len -= out->data_len % align;   /* whole frames */
+    uint8_t fmt[16];
+    uint32_t byte_rate = rate * align;
+    uint16_t container = (uint16_t)(out->sample_bytes * 8u);
+    put32(fmt, (uint32_t)tag | ((uint32_t)channels << 16));
+    put32(fmt + 4, rate);
+    put32(fmt + 8, byte_rate);
+    put32(fmt + 12, align | ((uint32_t)container << 16));
+    out->header_len = rubraview_media_wave_head(out->header, sizeof out->header, fmt, 16, out->data_len, (uint16_t)align);
+    return out->header_len > 0;
+}
+
+void rubraview_media_aiff_fix(const rubraview_aiff_wave_t *w, uint8_t *buf, size_t len) {
+    if (!w || !buf) return;
+    if (w->sign8) { for (size_t i = 0; i < len; ++i) buf[i] ^= 0x80u; return; }
+    if (!w->swap || w->sample_bytes < 2) return;
+    size_t b = w->sample_bytes;
+    for (size_t i = 0; i + b <= len; i += b)
+        for (size_t lo = i, hi = i + b - 1; lo < hi; ++lo, --hi) { uint8_t t = buf[lo]; buf[lo] = buf[hi]; buf[hi] = t; }
+}
+
+static bool read_aiff_facts(rubraview_head_src_t *src, rubraview_media_facts_t *out) {   /* R367 */
+    out->format = "aiff";
+    size_t got = 0;
+    const uint8_t *p = rubraview_head_view(src, 0, 65536, &got);
+    rubraview_aiff_wave_t w;
+    if (!p || !rubraview_media_aiff_wave(p, got, src->size, &w)) return true;
+    uint32_t byte_rate = (uint32_t)(w.header[28] | (w.header[29] << 8) | (w.header[30] << 16) | ((uint32_t)w.header[31] << 24));
+    if (proven_sys_mem_cmp(w.header, "RIFF", 4) == 0 && byte_rate) set_seconds(out, (double)w.data_len / byte_rate, false);
+    return true;
+}
+
+static bool read_w64(rubraview_head_src_t *src, rubraview_media_facts_t *out) {
+    out->format = "w64";
+    size_t got = 0;
+    const uint8_t *p = rubraview_head_view(src, 0, 65536, &got);
+    rubraview_w64_wave_t w;
+    if (!p || !rubraview_media_w64_wave(p, got, src->size, &w)) return true;
+    if (w.byte_rate) set_seconds(out, (double)w.data_len / w.byte_rate, false);
+    return true;
+}
+
 static bool image_brand(const uint8_t *b) {
     static const char *const brands[] = { "avif", "avis", "heic", "heix", "heim", "heis", "mif1", "msf1" };
     for (size_t i = 0; i < sizeof(brands) / sizeof(brands[0]); ++i) if (proven_sys_mem_cmp(b, brands[i], 4) == 0) return true;
@@ -1346,6 +1544,9 @@ bool rubraview_media_head_read(rubraview_head_src_t *src, proven_u8str_view_t na
         if (proven_sys_mem_cmp(h + 8, "AVI ", 4) == 0) return read_avi(src, out);
         if (proven_sys_mem_cmp(h + 8, "WAVE", 4) == 0) return read_wav(src, out);
     }
+    if (n >= 40 && rubraview_media_w64_is(h, n)) return read_w64(src, out);   /* R365 */
+    if (n >= 12 && proven_sys_mem_cmp(h, "FORM", 4) == 0 && (proven_sys_mem_cmp(h + 8, "AIFF", 4) == 0 || proven_sys_mem_cmp(h + 8, "AIFC", 4) == 0))
+        return read_aiff_facts(src, out);   /* R367 */
     if (n >= 12 && proven_sys_mem_cmp(h, "\0\0\0\x0CJXL \r\n\x87\n", 12) == 0) return read_jxl(src, out, true);
     if (h[0] == 0xFF && h[1] == 0x0A) return read_jxl(src, out, false);
     if (n >= 12 && proven_sys_mem_cmp(h + 4, "ftyp", 4) == 0) return image_brand(h + 8) ? read_heif(src, out, proven_sys_mem_cmp(h + 8, "avi", 3) == 0 ? "avif" : "heif") : read_mp4(src, out);

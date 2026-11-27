@@ -273,6 +273,7 @@ void rename_end(app_state_t *app) {
     app->rename_is_archive = false;
     app->rename_is_extension = false;
     app->rename_is_picker = false;
+    app->rename_is_newfolder = false;
     app->rename_is_path = false;
     app->rename_is_filter = false;
     app->rename_is_listfilter = false;
@@ -284,6 +285,8 @@ void rename_end(app_state_t *app) {
     app->rename_is_gmic = false;
     app->rename_is_ffmpeg = false;
     app->rename_is_address = false;
+    app->rename_is_lyrics = false;
+    app->rename_is_mark = false;
     app->batch_typing = 0;
     app->rename_is_apply = false;
     app->target_offered_len = 0;
@@ -367,6 +370,25 @@ void picker_path_begin(app_state_t *app) {
 
 /* Enter in the path box: a folder is shown, a file is opened, and a path
    that is not there is said, with the box left open to put it right. */
+/* RV-326 (R375, D-413; owner, 2026-11-27: "\\smb_server 와 같이 smb 서버 주소가 입력되면, 열수 있으면 열고 로그인 필요하면
+   로그인하게 (시스템 전역으로)"): a "\\server" or "\\server\share" place reached, Windows' sign-in asked when it refuses;
+   false (and said) when it cannot be. Any other path: true at once. */
+bool net_place_reach(app_state_t *app, proven_u8str_view_t path) {
+    char why[256];
+    switch (rubraview_pal_net_reach(rubraview_pal_window_native_handle(app->window), path, why, sizeof why)) {
+        case RUBRAVIEW_NET_NOT_UNC: case RUBRAVIEW_NET_OPEN: return true;
+        case RUBRAVIEW_NET_LOGGED_IN: osd_say(app, TU8("signed in to the network place")); return true;
+        case RUBRAVIEW_NET_CANCELLED: osd_say(app, TU8("not signed in: the network place stays closed")); return false;
+        case RUBRAVIEW_NET_NOT_FOUND: osd_say(app, TU8("no such network place (the server or its shared folder)")); return false;
+        case RUBRAVIEW_NET_FAILED: default: {
+            char said[400];
+            int n = rubraview_fmt(said, sizeof said, T("the network place refused: {}"), PROVEN_ARG(why));
+            if (n > 0) osd_say(app, rubraview_bytes_view(said, n));
+            return false;
+        }
+    }
+}
+
 static void picker_path_commit(app_state_t *app) {
     rename_insert(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)app->rename_composing, .size = app->rename_composing_length });
     app->rename_composing_length = 0;
@@ -375,6 +397,7 @@ static void picker_path_commit(app_state_t *app) {
                              : app->picker_dir;
     proven_u8str_view_t path = rubraview_picker_typed_path(app->arena, rubraview_textedit_text(&app->rename_ec.te), base);
     if (path.size == 0) { rename_end(app); return; }
+    if (!net_place_reach(app, path)) return;   /* RV-326 (R375): a network place, signed into when it asks */
     rubraview_fs_entry_t found;
     if (!rubraview_pal_fs_stat(app->arena, path, &found)) {
         osd_say(app, TU8("no such folder or file"));
@@ -686,10 +709,13 @@ void rename_commit(app_state_t *app) {
     if (app->rename_is_gmic) { gmic_typed(app); return; }   /* RFC-0009 C */
     if (app->rename_is_ffmpeg) { ffmpeg_typed(app); return; }   /* RFC-0009 D */
     if (app->rename_is_address) { address_typed(app); return; }   /* RV-158 */
+    if (app->rename_is_lyrics) { lyricsnet_typed(app); return; }   /* RV-323 */
     if (app->batch_typing) { batch_typed(app); return; }
     if (app->rename_is_apply) { apply_all_typed(app); return; }
+    if (app->rename_is_mark) { edit_mark_typed(app); return; }   /* RV-324 */
     if (app->rename_is_extension) { rename_extension_commit(app); return; }
     if (app->rename_is_picker) { rename_picker_commit(app); return; }
+    if (app->rename_is_newfolder) { picker_new_folder_typed(app); return; }   /* RV-327 */
     if (app->rename_is_path) { picker_path_commit(app); return; }
     if (app->rename_is_filter) { picker_filter_follow(app); rename_end(app); return; }   /* 1.22.0: kept */
     if (app->rename_is_listfilter) { list_filter_follow(app); rename_end(app); return; }   /* 1.25.0: kept */

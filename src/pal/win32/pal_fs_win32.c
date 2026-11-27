@@ -14,6 +14,7 @@
 #include "rubraview/pal/pal_fs.h"
 #include "rubraview/path.h"
 #include "rubraview/picker.h"
+#include "rubraview/pal/pal_net.h"
 
 /* Windows FILETIME counts 100-nanosecond intervals since 1601-01-01;
    the Unix epoch is 11644473600 seconds later. */
@@ -55,6 +56,34 @@ static WCHAR *utf8_to_wide(proven_arena_t *arena, proven_u8str_view_t utf8) {
     return wide;
 }
 
+/* RV-328 (R377, D-414): a path for kernel32's own file calls (not the shell's): Windows' literal "\\?\" form when it
+   needs it (past 247 bytes, a name ending in a dot or a space, a device's name), as 7-Zip's file manager does; as
+   it is otherwise. Into `out` of `cap` units. */
+#define RV_WPATH 4096
+bool rubraview_pal_path_wide(proven_u8str_view_t path, wchar_t *out, size_t cap) {
+    if (!path.ptr || path.size == 0 || cap == 0) return false;
+    char lit[RV_WPATH * 3];
+    const char *src = NULL;
+    size_t n = 0;
+    if (rubraview_path_win_wants_literal(path) && (n = rubraview_path_win_literal(path, lit, sizeof lit)) > 0) src = lit;
+    else {
+        if (path.size >= sizeof lit) return false;
+        proven_sys_mem_copy(lit, path.ptr, path.size);
+        lit[path.size] = '\0';
+        src = lit;
+        n = path.size;
+    }
+    (void)n;
+    return MultiByteToWideChar(CP_UTF8, 0, src, -1, out, (int)cap) > 0;
+}
+static bool path_to_wide(proven_u8str_view_t path, WCHAR *out, size_t cap) { return rubraview_pal_path_wide(path, out, cap); }
+static WCHAR *path_to_wide_arena(proven_arena_t *arena, proven_u8str_view_t path) {
+    proven_result_mem_mut_t r = rubraview_arena_alloc_array(arena, RV_WPATH, sizeof(WCHAR));
+    if (!proven_is_ok(r.err)) return NULL;
+    WCHAR *w = (WCHAR *)(void *)r.value.ptr;
+    return path_to_wide(path, w, RV_WPATH) ? w : NULL;
+}
+
 static proven_u8str_view_t wide_to_u8str(proven_arena_t *arena, const WCHAR *wide) {
     if (!wide) return PROVEN_LIT("");
     int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wide, -1, NULL, 0, NULL, NULL);
@@ -92,10 +121,11 @@ rubraview_fs_listing_t rubraview_pal_fs_list_dir(proven_arena_t *arena, proven_u
 
     proven_u8str_view_t dir_z = arena_dup(arena, rubraview_bytes_view((const char *)dir_path.ptr, dir_path.size));
     if (dir_z.size == 0) return listing;
+    if (rubraview_path_unc(dir_z, NULL, NULL) == RUBRAVIEW_UNC_SERVER) return rubraview_pal_net_shares(arena, dir_z);   /* RV-326 */
 
     /* FindFirstFileW needs a wildcard pattern: "<dir>\*". */
     proven_u8str_view_t pattern = rubraview_path_join(arena, dir_z, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)"*", .size = 1 });
-    WCHAR *wide_pattern = utf8_to_wide(arena, pattern);
+    WCHAR *wide_pattern = path_to_wide_arena(arena, pattern);
     if (!wide_pattern) return listing;
 
     WIN32_FIND_DATAW find_data;
@@ -327,9 +357,15 @@ bool rubraview_pal_fs_stat(proven_arena_t *arena, proven_u8str_view_t path, rubr
     proven_u8str_view_t path_z = arena_dup(arena, rubraview_bytes_view((const char *)path.ptr, path.size));
     if (path_z.size == 0) return false;
 
-    WCHAR *wide_path = utf8_to_wide(arena, path_z);
+    WCHAR *wide_path = path_to_wide_arena(arena, path_z);
     if (!wide_path) return false;
 
+    if (rubraview_path_unc(path_z, NULL, NULL) == RUBRAVIEW_UNC_SERVER) {   /* RV-326: a server alone is a folder of its shares */
+        rubraview_fs_listing_t shares = rubraview_pal_net_shares(arena, path_z);
+        if (!shares.entries) return false;
+        *out_entry = (rubraview_fs_entry_t){ .path = path_z, .name = path_z, .is_directory = true };
+        return true;
+    }
     WIN32_FILE_ATTRIBUTE_DATA attrs;
     if (!GetFileAttributesExW(wide_path, GetFileExInfoStandard, &attrs)) return false;
 
@@ -409,17 +445,9 @@ proven_u8str_view_t rubraview_pal_encode_codepage(proven_arena_t *arena, proven_
 }
 
 bool rubraview_pal_fs_exists(proven_u8str_view_t path) {
-    if (path.size == 0 || !path.ptr || path.size >= MAX_PATH * 4) return false;
-
-    /* The caller's slice need not be NUL-terminated, so convert from a
-       bounded stack copy rather than reading past path.len. */
-    char narrow[MAX_PATH * 4];
-    proven_sys_mem_copy(narrow, path.ptr, path.size);
-    narrow[path.size] = '\0';
-
-    WCHAR wide[MAX_PATH * 2];
-    int wide_len = MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0])));
-    if (wide_len <= 0) return false;
+    if (path.size == 0 || !path.ptr) return false;
+    WCHAR wide[RV_WPATH];
+    if (!path_to_wide(path, wide, RV_WPATH)) return false;   /* RV-328 */
 
     return GetFileAttributesW(wide) != INVALID_FILE_ATTRIBUTES;
 }
@@ -432,8 +460,8 @@ proven_u8str_view_t rubraview_pal_fs_read_file(proven_arena_t *arena, proven_u8s
     if (path_z.size == 0) return empty;
 
     /* UTF-16 for the same reason as writing: a Hangul user name. */
-    WCHAR wide[4096];
-    if (MultiByteToWideChar(CP_UTF8, 0, (LPCCH)path_z.ptr, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return empty;
+    WCHAR wide[RV_WPATH];
+    if (!path_to_wide(path_z, wide, RV_WPATH)) return empty;
     FILE *file = _wfopen(wide, L"rb");
     if (!file) return empty;
 
@@ -456,11 +484,8 @@ bool rubraview_pal_fs_writer_open(rubraview_fs_writer_t *writer, proven_u8str_vi
     if (!writer) return false;
     *writer = (rubraview_fs_writer_t){0};
     if (path.size == 0 || !path.ptr || path.size >= 4096) return false;
-    WCHAR wide[4096];
-    char path_z[4096];
-    proven_sys_mem_copy(path_z, path.ptr, path.size);
-    path_z[path.size] = '\0';
-    if (MultiByteToWideChar(CP_UTF8, 0, path_z, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return false;
+    WCHAR wide[RV_WPATH];
+    if (!path_to_wide(path, wide, RV_WPATH)) return false;
     /* CREATE_NEW: a file of that name already there is never written over. */
     HANDLE h = CreateFileW(wide, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
     if (h == INVALID_HANDLE_VALUE) return false;
@@ -702,12 +727,8 @@ bool rubraview_pal_fs_mapping_lost(const rubraview_fs_mapping_t *mapping) {
 bool rubraview_pal_fs_map(proven_u8str_view_t path, rubraview_fs_mapping_t *out) {
     if (!out) return false;
     *out = (rubraview_fs_mapping_t){0};
-    WCHAR wide[MAX_PATH * 2];
-    char narrow[MAX_PATH * 4];
-    if (path.size == 0 || path.size >= sizeof(narrow)) return false;
-    proven_sys_mem_copy(narrow, path.ptr, path.size);
-    narrow[path.size] = '\0';
-    if (MultiByteToWideChar(CP_UTF8, 0, narrow, -1, wide, (int)(sizeof(wide) / sizeof(wide[0]))) <= 0) return false;
+    WCHAR wide[RV_WPATH];
+    if (path.size == 0 || !path_to_wide(path, wide, RV_WPATH)) return false;
     HANDLE file = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                               NULL, OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, NULL);
     if (file == INVALID_HANDLE_VALUE) return false;
@@ -785,8 +806,8 @@ bool rubraview_pal_fs_recycle(proven_u8str_view_t path) {
 }
 
 bool rubraview_pal_fs_delete(proven_u8str_view_t path) {
-    WCHAR wide[MAX_PATH * 2];
-    if (!utf8_to_wide_buf(path, wide, sizeof(wide) / sizeof(wide[0]))) return false;
+    WCHAR wide[RV_WPATH];
+    if (!path_to_wide(path, wide, RV_WPATH)) return false;
     return DeleteFileW(wide) != 0;
 }
 
@@ -804,9 +825,9 @@ bool rubraview_pal_fs_restore_last_recycled(proven_u8str_view_t original_path) {
 }
 
 bool rubraview_pal_fs_move(proven_u8str_view_t from, proven_u8str_view_t to) {
-    WCHAR wfrom[MAX_PATH * 2], wto[MAX_PATH * 2];
-    if (!utf8_to_wide_buf(from, wfrom, sizeof(wfrom) / sizeof(wfrom[0]))) return false;
-    if (!utf8_to_wide_buf(to, wto, sizeof(wto) / sizeof(wto[0]))) return false;
+    WCHAR wfrom[RV_WPATH], wto[RV_WPATH];
+    if (!path_to_wide(from, wfrom, RV_WPATH)) return false;
+    if (!path_to_wide(to, wto, RV_WPATH)) return false;
 
     /* COPY_ALLOWED lets the move cross volumes; on the same volume it is
        a directory-entry update and costs nothing (§3.18.3). */
@@ -814,18 +835,17 @@ bool rubraview_pal_fs_move(proven_u8str_view_t from, proven_u8str_view_t to) {
 }
 
 bool rubraview_pal_fs_replace(proven_u8str_view_t from, proven_u8str_view_t to) {
-    WCHAR wfrom[MAX_PATH * 2], wto[MAX_PATH * 2];
-    if (!utf8_to_wide_buf(from, wfrom, sizeof(wfrom) / sizeof(wfrom[0]))) return false;
-    if (!utf8_to_wide_buf(to, wto, sizeof(wto) / sizeof(wto[0]))) return false;
+    WCHAR wfrom[RV_WPATH], wto[RV_WPATH];
+    if (!path_to_wide(from, wfrom, RV_WPATH)) return false;
+    if (!path_to_wide(to, wto, RV_WPATH)) return false;
     /* On one volume this is the directory's entry changed: the old file is
        there until the new one has its name. */
     return MoveFileExW(wfrom, wto, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
 }
 
 bool rubraview_pal_fs_replace_keeping(proven_u8str_view_t target, proven_u8str_view_t replacement, proven_u8str_view_t backup) {
-    WCHAR wt[MAX_PATH * 2], wr[MAX_PATH * 2], wb[MAX_PATH * 2];
-    if (!utf8_to_wide_buf(target, wt, sizeof(wt) / sizeof(wt[0])) || !utf8_to_wide_buf(replacement, wr, sizeof(wr) / sizeof(wr[0])) ||
-        !utf8_to_wide_buf(backup, wb, sizeof(wb) / sizeof(wb[0]))) return false;
+    WCHAR wt[RV_WPATH], wr[RV_WPATH], wb[RV_WPATH];
+    if (!path_to_wide(target, wt, RV_WPATH) || !path_to_wide(replacement, wr, RV_WPATH) || !path_to_wide(backup, wb, RV_WPATH)) return false;
     if (GetFileAttributesW(wt) == INVALID_FILE_ATTRIBUTES) return MoveFileExW(wr, wt, MOVEFILE_WRITE_THROUGH) != 0;
     (void)DeleteFileW(wb);   /* an older backup gives way (ReplaceFileW will not overwrite one that is read-only) */
     return ReplaceFileW(wt, wr, wb, REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS, NULL, NULL) != 0;
@@ -841,9 +861,9 @@ bool rubraview_pal_fs_free_bytes(proven_u8str_view_t dir, uint64_t *out_bytes) {
 }
 
 bool rubraview_pal_fs_copy(proven_u8str_view_t from, proven_u8str_view_t to) {
-    WCHAR wfrom[MAX_PATH * 2], wto[MAX_PATH * 2];
-    if (!utf8_to_wide_buf(from, wfrom, sizeof(wfrom) / sizeof(wfrom[0]))) return false;
-    if (!utf8_to_wide_buf(to, wto, sizeof(wto) / sizeof(wto[0]))) return false;
+    WCHAR wfrom[RV_WPATH], wto[RV_WPATH];
+    if (!path_to_wide(from, wfrom, RV_WPATH)) return false;
+    if (!path_to_wide(to, wto, RV_WPATH)) return false;
 
     /* The last argument is "fail if it exists": curation must never
        silently overwrite a file already in the target folder. */
@@ -873,26 +893,20 @@ bool rubraview_pal_fs_delete_tree(proven_u8str_view_t path) {
     return SHFileOperationW(&op) == 0 && !op.fAnyOperationsAborted && GetFileAttributesW(wide) == INVALID_FILE_ATTRIBUTES;
 }
 
+/* RV-327 (R376): a folder and the ones above it that are not there yet, made from the deepest up: a level already
+   there is never asked to be made again (a share's "\\\\server\\share", or a folder whose parent the user may not
+   write in, refused that and failed the whole). The path in Windows' literal form when it needs it (RV-328). */
 bool rubraview_pal_fs_make_dirs(proven_u8str_view_t path) {
-    WCHAR wide[MAX_PATH * 2];
-    if (!utf8_to_wide_buf(path, wide, sizeof(wide) / sizeof(wide[0]))) return false;
-
-    /* Walk the path creating each level; an existing level is not an
-       error, which is what makes this idempotent. */
-    for (size_t i = 0; wide[i] != L'\0'; ++i) {
-        if (wide[i] != L'\\' && wide[i] != L'/') continue;
-        if (i == 0) continue;
-        if (i == 2 && wide[1] == L':') continue;   /* "C:\" is not a directory to create */
-
-        WCHAR saved = wide[i];
-        wide[i] = L'\0';
-        if (!CreateDirectoryW(wide, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
-            wide[i] = saved;
-            return false;
-        }
-        wide[i] = saved;
-    }
-
+    while (path.size > 1 && rubraview_path_is_sep((char)path.ptr[path.size - 1]) && !(path.size == 3 && path.ptr[1] == ':')) path.size--;
+    WCHAR wide[RV_WPATH];
+    if (path.size == 0 || !path_to_wide(path, wide, RV_WPATH)) return false;
+    DWORD attrs = GetFileAttributesW(wide);
+    if (attrs != INVALID_FILE_ATTRIBUTES) return (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    if (CreateDirectoryW(wide, NULL) || GetLastError() == ERROR_ALREADY_EXISTS) return true;
+    if (GetLastError() != ERROR_PATH_NOT_FOUND) return false;
+    proven_u8str_view_t parent = rubraview_path_dirname(path);
+    if (parent.size == 0 || parent.size >= path.size || rubraview_path_unc(parent, NULL, NULL) == RUBRAVIEW_UNC_SERVER) return false;
+    if (!rubraview_pal_fs_make_dirs(parent)) return false;
     return CreateDirectoryW(wide, NULL) != 0 || GetLastError() == ERROR_ALREADY_EXISTS;
 }
 
@@ -922,8 +936,8 @@ bool rubraview_pal_fs_set_mtime(proven_u8str_view_t path, int64_t mtime) {
     uint8_t mem[8192];
     proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = mem, .size = sizeof(mem) });
     proven_u8str_view_t path_z = arena_dup(&arena, rubraview_bytes_view((const char *)path.ptr, path.size));
-    WCHAR *wide = path_z.size ? utf8_to_wide(&arena, path_z) : NULL;
-    if (!wide) return false;
+    WCHAR wide[RV_WPATH];
+    if (!path_z.size || !path_to_wide(path_z, wide, RV_WPATH)) return false;
     HANDLE h = CreateFileW(wide, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     if (h == INVALID_HANDLE_VALUE) return false;
     ULARGE_INTEGER u = { .QuadPart = (ULONGLONG)(mtime + 11644473600LL) * 10000000ULL };   /* 1601 to 1970, in 100 ns */

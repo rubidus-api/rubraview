@@ -889,6 +889,7 @@ int run_batch(proven_arena_t *arena, const rubraview_cli_result_t *cli) {
             if (st->kind == RUBRAVIEW_STEP_FFMPEG) { rubraview_fmt(line, sizeof(line), "rubraview: step {} runs the FFmpeg filter {}", PROVEN_ARG((unsigned)(i + 1)), PROVEN_ARG(st->command)); console_line(line); }
         }
         rubraview_edit_set_plugin_runner(plugin_runner, NULL);
+        rubraview_edit_set_text_runner(edit_text_runner, NULL);   /* RV-324 */
     }
 
     /* RFC-0007: --plugin's folder (--plugin-folder, else the default one), looked in once */

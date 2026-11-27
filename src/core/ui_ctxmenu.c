@@ -187,6 +187,7 @@ static const struct { const char *action; int category; } MENUCAT_OF[] = {
 static const struct { const char *prefix; int category; } MENUCAT_PREFIX[] = {
     { "picker_extract", RUBRAVIEW_MENUCAT_ARCHIVES }, { "picker_compress", RUBRAVIEW_MENUCAT_ARCHIVES },
     { "picker_", RUBRAVIEW_MENUCAT_FILES }, { "subtitle_", RUBRAVIEW_MENUCAT_SUBTITLES }, { "media_", RUBRAVIEW_MENUCAT_PLAY },
+    { "music_lyrics_", RUBRAVIEW_MENUCAT_PLAY },   /* RV-323: a song's words found, edited, uploaded */
     { "layout_", RUBRAVIEW_MENUCAT_VIEW }, { "text_", RUBRAVIEW_MENUCAT_VIEW }, { "zoom_", RUBRAVIEW_MENUCAT_VIEW }, { "fit_", RUBRAVIEW_MENUCAT_VIEW },
     { "rotate_", RUBRAVIEW_MENUCAT_VIEW }, { "flip_", RUBRAVIEW_MENUCAT_VIEW },
 };

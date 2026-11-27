@@ -946,17 +946,19 @@ int32_t card_kind_now(const app_state_t *app) {
     if (app->rename_is_extension) return CARD_EXTENSIONS;
     if (app->rename_is_password) return CARD_PASSWORD;
     if (app->rename_is_address) return CARD_ADDRESS;
+    if (app->rename_is_lyrics) return CARD_LYRICS;   /* RV-323 */
     if (app->rename_is_apply) return CARD_COPIES;
+    if (app->rename_is_mark) return CARD_VALUE;   /* RV-324 */
     if (app->rename_is_number) return app->number_target == NUMBER_VOLUME ? CARD_VOLUME : CARD_DELAY;   /* RV-267 */
     if (app->rename_is_value || app->rename_is_gmic || app->rename_is_ffmpeg || app->batch_typing) return CARD_VALUE;
     if (app->rename_is_archive) return CARD_ARCHIVE_PAGE;
-    if (app->rename_is_picker) return CARD_PICKER_NAME;
+    if (app->rename_is_picker || app->rename_is_newfolder) return CARD_PICKER_NAME;
     if (app->rename_favorite >= 0) return CARD_FAVORITE;
     return CARD_RENAME;
 }
 
 static const char *const CARD_KEY[CARD_KINDS] = { "rename", "archive_page", "name", "extensions", "target", "extract", "password",
-                                                  "find", "list_filter", "address", "copies", "value", "favorite", "size", "progress",
+                                                  "find", "list_filter", "address", "lyrics", "copies", "value", "favorite", "size", "progress",
                                                   "volume", "delay", "repeat" };
 const char *card_kind_key(int32_t kind) { return kind >= 0 && kind < CARD_KINDS ? CARD_KEY[kind] : ""; }
 
@@ -1091,7 +1093,9 @@ static void rename_card_words(const app_state_t *app, char *title, size_t capaci
         return;
     }
     else if (app->rename_is_address) { t = T("Add a station"); *hint = T("Its address, then a space and its title if you like"); }
+    else if (app->rename_is_lyrics) { t = T("Find lyrics online"); *hint = T("The artist and the title, or any words of it  ·  Enter looks at LRCLIB  ·  Esc leaves it"); }
     else if (app->rename_is_apply) { t = T("Name of the copies"); *hint = T("* is the picture's own name: *_edit, edited_*"); }
+    else if (app->rename_is_mark) { t = T("Words on the picture"); *hint = T("// breaks the line  ·  Enter keeps them  ·  Esc leaves them"); }
     else if (app->rename_is_number && app->number_target == NUMBER_VOLUME) { t = T("Volume"); *hint = T("A percent, 0 to 100  ·  Enter keeps it  ·  Esc leaves it"); }
     else if (app->rename_is_number) { t = T("Slide show delay"); *hint = T("Seconds, 0.1 to 300  ·  Enter keeps it  ·  Esc leaves it"); }
     else if (app->rename_is_value || app->rename_is_gmic || app->rename_is_ffmpeg || app->batch_typing) {
@@ -1099,6 +1103,7 @@ static void rename_card_words(const app_state_t *app, char *title, size_t capaci
     }
     else if (app->rename_is_archive) { t = T("Rename the page"); *hint = T("Inside the archive  ·  Enter renames  ·  Esc leaves it"); }
     else if (app->rename_is_picker) { t = T("Name"); *hint = T("Enter keeps it  ·  Esc leaves it"); }
+    else if (app->rename_is_newfolder) { t = T("New folder"); *hint = T("Its name  ·  Enter makes it  ·  Esc leaves it"); }   /* RV-327 */
     rubraview_fmt(title, capacity, "{}", PROVEN_ARG(t));
 }
 
@@ -1651,7 +1656,7 @@ void draw_chrome_answers(app_state_t *app, double win_w, double win_h) {
         rubraview_pal_render_draw_text(app->renderer, note, foot, 13.0 * chrome_dpi, 0xB0F0F0F0u, RUBRAVIEW_TEXT_CENTER);
     }
     /* RV-137: a value typed, or the copies' name, asked for in the Edit window is drawn there */
-    if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply)) &&
+    if (!(app->edit_window && edit_panel_open(app) && (app->rename_is_value || app->rename_is_apply || app->rename_is_mark)) &&
         !(app->batch_typing && app->batch_window)) draw_rename_box(app, CARD_HOST_MAIN, win_w, win_h, chrome_dpi);   /* RV-194: Batch's in its window */
     draw_ab_edit_box(app, win_w, win_h, chrome_dpi);
     if (!(app->edit_window && edit_panel_open(app))) draw_px_edit_box(app, CARD_HOST_MAIN, win_w, win_h, chrome_dpi);   /* RV-137: else in the Edit window */

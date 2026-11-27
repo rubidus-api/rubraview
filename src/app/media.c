@@ -280,6 +280,22 @@ rubraview_tags_t music_tags_of(rubraview_region_t *region, proven_arena_t *fallb
     return tags;
 }
 
+/* RV-323 (R369): words for the song on screen from elsewhere (found online, or its .lrc edited): read as LRC, or as
+   plain lines when they carry no times. */
+void music_lyrics_take(app_state_t *app, proven_u8str_view_t text) {
+    proven_arena_t *ma = media_arena(app, text.size * 4u + (64u << 10));
+    /* The lines are views into the text: it is kept with them, for the caller's goes (RV-323: a reply freed after this
+       showed what came to lie in its memory, the sound's samples). */
+    proven_result_mem_mut_t keep = proven_arena_alloc(ma, text.size + 1);
+    if (!proven_is_ok(keep.err)) return;
+    if (text.size) proven_sys_mem_copy(keep.value.ptr, text.ptr, text.size);
+    keep.value.ptr[text.size] = '\0';
+    text = (proven_u8str_view_t){ .ptr = keep.value.ptr, .size = text.size };
+    rubraview_lyrics_t l = rubraview_lyrics_parse(ma, text);
+    if (l.count == 0) l = rubraview_lyrics_from_text(ma, text);
+    app->music_lyrics = l;
+}
+
 /* Read the file's own words once per track. */
 static void music_load(app_state_t *app, proven_u8str_view_t path) {
     music_clear(app);
@@ -302,6 +318,7 @@ static void music_load(app_state_t *app, proven_u8str_view_t path) {
     if (app->music_lyrics.count == 0 && app->music_tags.lyrics_text.size > 0) {
         app->music_lyrics = rubraview_lyrics_from_text(ma, app->music_tags.lyrics_text);
     }
+    lyricsnet_song(app, path, app->music_lyrics.count > 0);   /* RV-323: none here: looked for online */
     ma = media_arena(app, 3u << 20);   /* the sheet: the same */
     /* A `.cue` of the same name: one file cut into the record's tracks.
        Else a sheet of any name beside it whose FILE names this file

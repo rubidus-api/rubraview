@@ -321,6 +321,9 @@ typedef enum rubraview_edit_step_kind {
     RUBRAVIEW_STEP_FFMPEG,       /* RFC-0009 D: an FFmpeg filter graph (`command`), run by avfilter, on the area */
     RUBRAVIEW_STEP_ROTATE,       /* RV-265 (D-321): the whole picture turned `effect` quarter turns clockwise (1, 2, 3) */
     RUBRAVIEW_STEP_FLIP,         /* RV-265 (D-321): the whole picture mirrored, `effect` 0 left to right, 1 upside down */
+    RUBRAVIEW_STEP_BOX,          /* RV-324 (R371): the area's rectangle or ellipse drawn in `ink`: filled, or a `stroke` wide outline */
+    RUBRAVIEW_STEP_TEXT,         /* RV-324 (R372): `command`'s words in `plugin`'s font, `size` pixels high, `ink`, `bold`; on `back`
+                                    when it is not clear; at the area's top left (the picture's middle for the whole) */
 } rubraview_edit_step_kind_t;
 
 /** A G'MIC step's command and its arguments, or an FFmpeg step's filter graph, NUL included. */
@@ -346,6 +349,11 @@ typedef struct rubraview_edit_step {
        of any picture; a size in pixels stays those pixels, held inside the picture. */
     uint32_t                   ratio;
     double                     frac[6];
+    /* RV-324: BOX and TEXT's colours (0xAARRGGBB; `back` 0: none), BOX's outline width (pixels; filled when `fill`),
+       TEXT's height in pixels and its weight. Pixel sizes follow a preview's scale. */
+    uint32_t                   ink, back;
+    double                     stroke, size;
+    bool                       fill, bold;
 } rubraview_edit_step_t;
 
 enum {
@@ -373,6 +381,19 @@ typedef rubraview_pixbuf_t (*rubraview_plugin_runner_fn)(void *user, proven_aren
                                                          const rubraview_pixbuf_t *src);
 void rubraview_edit_set_plugin_runner(rubraview_plugin_runner_fn runner, void *user);
 
+/**
+ * RV-324 (R372): what draws a TEXT step's words — the viewer's (DirectWrite): their coverage, 0..255 a pixel, one
+ * byte a pixel, `width` x `height`, lines broken at "\n", into `arena`. False when it cannot (the step then draws
+ * nothing). Unset (the host's tests set their own), a TEXT step draws nothing.
+ */
+typedef struct rubraview_text_mask {
+    uint8_t *coverage;
+    int32_t  width, height, stride;
+} rubraview_text_mask_t;
+typedef bool (*rubraview_text_runner_fn)(void *user, proven_arena_t *arena, const char *text, const char *font, double px,
+                                         bool bold, rubraview_text_mask_t *out);
+void rubraview_edit_set_text_runner(rubraview_text_runner_fn runner, void *user);
+
 #define RUBRAVIEW_EDIT_MAX_STEPS 64
 
 /* The steps made, and how many of them are in force: undo moves `cursor`
@@ -393,6 +414,24 @@ bool rubraview_edit_steps_push(rubraview_edit_steps_t *steps, const rubraview_ed
  * when no step is in force.
  */
 bool rubraview_edit_steps_set_last(rubraview_edit_steps_t *steps, const rubraview_edit_step_t *step);
+/**
+ * RV-325 (R374): a mark taken again (a box, words, a mosaic): the step at `index`, one in force, put in `step`'s
+ * place, the steps after it kept; those undone go. False when `index` is not in force or `step` does nothing.
+ */
+bool rubraview_edit_steps_set(rubraview_edit_steps_t *steps, size_t index, const rubraview_edit_step_t *step);
+/** RV-325: a step that can be taken again on the picture: a box, words, or a mosaic (pixelize) on an area. */
+bool rubraview_edit_step_is_mark(const rubraview_edit_step_t *step);
+/**
+ * RV-325: the mark in force at the picture's point `x`, `y` (the picture as the steps in force leave it): the last
+ * one whose area holds it (an ellipse by its outline), looked for back from the newest and only after the last
+ * crop, resize, turn or mirror (before one, its place is another). -1 when there is none.
+ */
+int32_t rubraview_edit_steps_mark_at(const rubraview_edit_steps_t *steps, int32_t x, int32_t y);
+/**
+ * RV-325: how much room words take, their background's margin included (the box they are drawn in from the area's
+ * top left), measured by the text runner at `step->size`. False without a runner or words.
+ */
+bool rubraview_edit_text_extent(proven_arena_t *arena, const rubraview_edit_step_t *step, int32_t *width, int32_t *height);
 /**
  * The steps made on one picture, for another of `width` x `height` (RV-187, D-220; changes D-160): step by step,
  * on the size the steps before it leave, a ratio is the same part of the picture and a size in pixels stays those

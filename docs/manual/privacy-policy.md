@@ -1,12 +1,12 @@
 # Rubraview Privacy Policy
 
-Effective date: October 31, 2026
+Effective date: November 27, 2026
 
 This policy covers Rubraview, an image, comic book and video viewer for Windows, whether you get it from the Microsoft Store, the installer or the standalone download.
 
 ## Summary
 
-Rubraview does not collect, send or share any personal information. It works only with files on your device, or on drives you open from it, and it does not connect to the internet.
+Rubraview does not collect, send or share any personal information. It works with files on your device, or on drives you open from it. It connects to the internet only to look up song lyrics at LRCLIB (which you can turn off), to upload lyrics there when you ask, and to play internet radio stations you add.
 
 ## Information we collect
 
@@ -33,6 +33,12 @@ Rubraview reads the pictures, videos, subtitles and archives you open, including
 Passwords you enter for encrypted archives are kept in memory only while the archive is open. They are never written to disk.
 
 Rubraview changes, moves, copies or deletes your files only when you ask it to.
+
+## Lyrics from LRCLIB
+
+When a song you play has no lyrics beside it or in its tags, Rubraview asks LRCLIB (lrclib.net, a free, open lyrics database) for them. It sends only the song's artist, title, album and length, as written in its tags or file name, and a client name ("Rubraview" and its version); never the file, its sound, or anything about you. Found lyrics are saved as a `.lrc` file beside the song. You can turn this off in Settings › Audio ("Find missing lyrics online").
+
+When you choose "Find lyrics online…", the words you type are sent to LRCLIB to search. When you choose "Upload lyrics to LRCLIB…" and confirm, the song's artist, title, album, length and the lyrics in its `.lrc` are published at LRCLIB for anyone to read; no account is used. LRCLIB's own terms and privacy policy apply to what it receives; like any web server, it sees your IP address.
 
 ## Windows integration
 

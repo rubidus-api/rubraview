@@ -110,7 +110,7 @@ typedef struct editbox_view {   /* RV-293 E2: a field as drawn: its box, the siz
 
 /* RV-265: the kinds of question the input card asks, each with its place kept, and the windows it is drawn in. */
 enum { CARD_RENAME, CARD_ARCHIVE_PAGE, CARD_PICKER_NAME, CARD_EXTENSIONS, CARD_TARGET, CARD_EXTRACT, CARD_PASSWORD,
-       CARD_FIND, CARD_LIST_FILTER, CARD_ADDRESS, CARD_COPIES, CARD_VALUE, CARD_FAVORITE, CARD_SIZE, CARD_PROGRESS, CARD_VOLUME, CARD_DELAY, CARD_REPEAT, CARD_KINDS };
+       CARD_FIND, CARD_LIST_FILTER, CARD_ADDRESS, CARD_LYRICS, CARD_COPIES, CARD_VALUE, CARD_FAVORITE, CARD_SIZE, CARD_PROGRESS, CARD_VOLUME, CARD_DELAY, CARD_REPEAT, CARD_KINDS };
 enum { NUMBER_VOLUME = 1, NUMBER_DELAY };   /* RV-267 */
 /* RV-268: who fills the progress card */
 enum { PROGRESS_NONE = 0, PROGRESS_ARCHWORK, PROGRESS_ARCEDIT };   /* RV-289: a copy's progress is in its own process's window */
@@ -164,6 +164,7 @@ enum { CARD_HOST_NONE = 0, CARD_HOST_MAIN, CARD_HOST_EDIT, CARD_HOST_BATCH, CARD
 #include "rubraview/pal/pal_render.h"
 #include "rubraview/pal/pal_image.h"
 #include "rubraview/pal/pal_fs.h"
+#include "rubraview/pal/pal_net.h"
 #include "rubraview/pal/pal_time.h"
 #include "rubraview/pal/pal_media.h"
 #include "rubraview/pal/pal_audio.h"
@@ -442,7 +443,8 @@ typedef struct apply_all_job {
 /* 1.24.0 (owner, 2026-10-19): the list a one-of-many choice opens, in the window where it was pressed. */
 enum { CHOOSE_TILE = 1, CHOOSE_PANEL, CHOOSE_SETTING, CHOOSE_SORT, CHOOSE_LISTEXT, CHOOSE_LISTSORT, CHOOSE_SHAPE,
        CHOOSE_PICKEXT /* RV-204 */, CHOOSE_PICKER_SELECT /* RV-317 */, CHOOSE_PICKER_VIEW /* RV-317 */,
-       CHOOSE_BASKET /* RV-227 */, CHOOSE_BASKET_FILES /* D-286 */, CHOOSE_DROP /* RV-286 */, CHOOSE_EDITMENU /* RV-293 */ };
+       CHOOSE_BASKET /* RV-227 */, CHOOSE_BASKET_FILES /* D-286 */, CHOOSE_DROP /* RV-286 */, CHOOSE_EDITMENU /* RV-293 */,
+       CHOOSE_LYRICS /* RV-323 */ };
 enum { SHAPE_FOR_PICKER = 1, SHAPE_FOR_LIST };   /* RV-192 */
 /* RV-202: what a reading of sizes and lengths is for: the shape's choice, the list sorted by length, the open-file
    screen sorted by length or by resolution */
@@ -787,6 +789,8 @@ typedef struct app_state {
     bool                       media_closing_for_next;   /* media_close keeps the film ahead and closes off this thread */
     char                      station_title[256];   /* RV-158: what the station playing says is on (ICY); "" none */
     bool                      rename_is_address;    /* RV-158: the box takes an address and its title for the list */
+    bool                      rename_is_lyrics;     /* RV-323: the box takes words to look a song's lyrics up by */
+    bool                      rename_is_mark;       /* RV-324: the box takes the words Edit's Text puts on the picture */
     rubraview_media_info_t     bgm_info;
     int32_t                    bgm_page;
     double                     bgm_position;
@@ -1250,6 +1254,17 @@ typedef struct app_state {
     uint32_t                  edit_rev, edit_shown_rev;
     int32_t                   typed_panel, typed_id;   /* a value typed: 1 the edit panel, 2 the numbers; its row */
     int32_t                   effect_choice;           /* the effect chosen (effects.h), shown on the preview until applied */
+    /* RV-324 (R371, R372): Adjust's mark: the tool (0 box, 1 text, 2 mosaic), the box's outline or fill, a colour of
+       MARK_COLOURS, its line and see-through, the words, their font of MARK_FONTS, size, weight and background (0 none,
+       else a colour + 1), the mosaic's block */
+    int32_t                   mark_tool, mark_fill, mark_colour, mark_font, mark_back;
+    double                    mark_stroke, mark_opacity, mark_size, mark_block;
+    bool                      mark_bold;
+    char                      mark_text[RUBRAVIEW_EDIT_COMMAND_MAX];
+    /* RV-325 (R374): the mark taken again (on the picture, or just put): its step's index + 1, 0 none; while held, a
+       drag of the selection moves or sizes it and the rows change it. The words' size when its corner was taken. */
+    int32_t                   mark_hand;
+    double                    mark_hand_size0;
     int32_t                   plugin_choice;           /* RFC-0007: 1.. a usable plug-in in the Edit window's list; 0 none */
     double                    plugin_values[8];        /* its parameters as set there */
     /* RFC-0009 C: G'MIC in the Edit window */
@@ -1299,6 +1314,8 @@ typedef struct app_state {
     SRWLOCK                source_lock;/* held around every read of the page source */
     bool                   rename_is_extension;   /* the box is taking an extension for the picked files */
     bool                   rename_is_picker;      /* 1.23.0: the box is naming a file or folder of the open-file screen */
+    bool                   rename_is_newfolder;   /* RV-327 (R376): the box names a folder to be made in newfolder_dir */
+    char                   newfolder_dir[1024];
     /* 1.24.0 (owner, 2026-10-19): Change extensions, a row an extension the picked files have; the box edits row ext_at */
     char                   ext_from[16][24];
     char                   ext_to[16][64];
@@ -1789,6 +1806,9 @@ enum {
     PANEL_PLUGIN_P4, PANEL_PLUGIN_P5, PANEL_PLUGIN_P6, PANEL_PLUGIN_P7, PANEL_PLUGIN_APPLY,
     PANEL_GMIC_CATEGORY, PANEL_GMIC_FILTER, PANEL_GMIC_TYPE, PANEL_GMIC_APPLY,   /* RFC-0009 C */
     PANEL_FFMPEG_GROUP, PANEL_FFMPEG_FILTER, PANEL_FFMPEG_TYPE, PANEL_FFMPEG_APPLY,   /* RFC-0009 D */
+    /* RV-324: Adjust's box, text and mosaic */
+    PANEL_MARK_TOOL, PANEL_MARK_SHAPE, PANEL_MARK_FILL, PANEL_MARK_COLOUR, PANEL_MARK_STROKE, PANEL_MARK_OPACITY,
+    PANEL_MARK_TEXT, PANEL_MARK_FONT, PANEL_MARK_SIZE, PANEL_MARK_BOLD, PANEL_MARK_BACK, PANEL_MARK_BLOCK, PANEL_MARK_APPLY, PANEL_MARK_DONE, PANEL_MARK_REMOVE,
     PANEL_GMIC_P0 = 800,       /* + the parameter's row, below PANEL_FFMPEG_P0 */
     PANEL_FFMPEG_P0 = 850,     /* + the option's row, below PANEL_CLS_FOLDER */
     PANEL_CLS_FOLDER = 900,    /* + 1 .. 9: a curation folder's row */
@@ -1871,17 +1891,18 @@ typedef enum picker_button {
     PICKER_BTN_EXTRACT,      /* RV-207: the picked archives, or what is picked inside one, the way Settings says */
     PICKER_BTN_COMPRESS,     /* RV-207: the picked files and folders, through the Compress box */
     PICKER_BTN_WINDOWS,      /* RV-314: choosing: Windows' own window instead */
+    PICKER_BTN_NEWFOLDER,    /* RV-327 (owner, 2026-11-27: "파일 브라우저 아래의 기능 버튼에 새 폴더") */
     PICKER_BTN_COUNT,
 } picker_button_t;
 
 static const char *const PICKER_BUTTON_LABEL[PICKER_BTN_COUNT] = {
     N_("Open"), N_("Individual"), N_("Range"), N_("Same type"), N_("Media"), N_("Change ext"),
     N_("Playlist"), N_("Recycle"), N_("Move to"), N_("Copy to"), N_("Deselect all"), N_("Details"), N_("Cancel"),
-    N_("Extract"), N_("Compress"), N_("Windows' window"),
+    N_("Extract"), N_("Compress"), N_("Windows' window"), N_("New folder"),
 };
 /* RV-207 (owner: "파일 관리자를 더 중심적인 기능으로"): the list, the archiver, the file moves, then Cancel and Open */
 static const picker_button_t PICKER_BOTTOM[] = { PICKER_BTN_PLAYLIST, PICKER_BTN_EXTRACT, PICKER_BTN_COMPRESS, PICKER_BTN_RECYCLE,
-                                                 PICKER_BTN_MOVE, PICKER_BTN_COPY, PICKER_BTN_CANCEL, PICKER_BTN_OPEN };
+                                                 PICKER_BTN_MOVE, PICKER_BTN_COPY, PICKER_BTN_NEWFOLDER, PICKER_BTN_CANCEL, PICKER_BTN_OPEN };
 #define PICKER_BOTTOM_COUNT ((int32_t)(sizeof(PICKER_BOTTOM) / sizeof(PICKER_BOTTOM[0])))
 #define PICKER_CRUMB_START (8.0 + 3.0 * (PICKER_NAV_W + 4.0) + 6.0)
 enum { PICKER_TOOL_FAVS = 0,  /* RV-317: Favourites + Places 2-column popup */
@@ -2018,6 +2039,8 @@ rubraview_pal_rect_t ab_part_rect(const app_state_t *app, int32_t side, int32_t 
 rubraview_action_facts_t action_facts(const app_state_t *app);
 void address_begin(app_state_t *app);
 void address_typed(app_state_t *app);
+bool net_place_reach(app_state_t *app, proven_u8str_view_t path);   /* RV-326 */
+void picker_new_folder_typed(app_state_t *app);   /* RV-327 */
 proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_panel_row_t *row, proven_mem_mut_t buffer_view);
 int anim_end_mode(const app_state_t *app);
 bool anim_plays(const app_state_t *app);
@@ -2626,6 +2649,25 @@ bool picker_operand_has(const app_state_t *app, const rubraview_picker_operand_t
 size_t picker_operand_count(const app_state_t *app);
 void picker_act_alone(app_state_t *app, size_t index);
 void picker_alone_forget(app_state_t *app);
+/* RV-323 (R369, R370, D-411): a song's words looked for, edited and uploaded at LRCLIB (src/app/lyricsnet.c) */
+void music_lyrics_take(app_state_t *app, proven_u8str_view_t text);
+void edit_mark_typed(app_state_t *app);   /* RV-324 */
+void edit_mark_text_begin(app_state_t *app);
+void edit_mark_apply(app_state_t *app);
+void edit_mark_changed(app_state_t *app);               /* RV-325: a row of the mark moved: the mark in hand follows */
+bool edit_mark_held(const app_state_t *app);
+bool edit_mark_take_at(app_state_t *app, double px, double py);   /* a press on the picture: a mark taken, or the one held let go */
+void edit_mark_let_go(app_state_t *app);
+void edit_mark_remove(app_state_t *app);
+bool edit_text_runner(void *user, proven_arena_t *arena, const char *text, const char *font, double px, bool bold, rubraview_text_mask_t *out);   /* RV-324 */
+void lyricsnet_song(app_state_t *app, proven_u8str_view_t path, bool has_words);
+void lyricsnet_poll(app_state_t *app);
+void lyricsnet_find(app_state_t *app);
+void lyricsnet_typed(app_state_t *app);
+void lyricsnet_pick(app_state_t *app, size_t index);
+void lyricsnet_edit(app_state_t *app);
+void lyricsnet_upload(app_state_t *app);
+void chooser_open_lyrics(app_state_t *app, const char *const *rows, size_t count);
 void picker_add_to_list(app_state_t *app);
 void picker_button(app_state_t *app, picker_button_t button);
 rubraview_pal_rect_t picker_button_rect(double win_w, double win_h, double dpi, int32_t index);

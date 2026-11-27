@@ -280,6 +280,13 @@ bool rubraview_pal_fs_delete_tree(proven_u8str_view_t path);
 /** Create a directory, and any missing parent of it. */
 bool rubraview_pal_fs_make_dirs(proven_u8str_view_t path);
 
+#ifdef _WIN32
+#include <wchar.h>
+/* RV-328 (R377, D-414): a UTF-8 path as kernel32's file calls take it, in Windows' literal "\\?\" form when it needs
+   it (rubraview_path_win_wants_literal): past 247 bytes, a name ending in a dot or a space, a device's name. */
+bool rubraview_pal_path_wide(proven_u8str_view_t path, wchar_t *out, size_t cap);
+#endif
+
 /** RV-258 (D-310): the file system as rubraview_fileop needs it — identity by volume serial and file id, a copy that
     never overwrites (CopyFileExW), a rename never over a name, a swap that recycles what it replaced (ReplaceFileW),
     bytes compared, a file flushed to the disk. One for the program; its calls are safe from any one thread.

@@ -235,13 +235,14 @@ static uint8_t *decode_small_bgra(IWICImagingFactory *factory, proven_mem_view_t
 
 /* RV-110: a file the shell has no picture for, when it is one the
    viewer reads without Windows' codec (the shell needs it; an AVIF, a
-   JPEG XL) or by rewriting it first (a BigTIFF). */
+   JPEG XL) or by rewriting it first (a BigTIFF); RV-328: any picture at a path the shell cannot take. */
 static uint8_t *own_file_small(IWICImagingFactory *factory, proven_u8str_view_t path, int32_t *out_w, int32_t *out_h) {
     uint8_t *result = NULL;
     rubraview_fs_mapping_t map = {0};
     if (!rubraview_pal_fs_map(path, &map)) return NULL;
     if (map.size <= OWN_FILE_MAX &&
-        (rubraview_avif_is(rubraview_mem_view(map.data, (size_t)map.size)) || rubraview_image_is_jxl(rubraview_mem_view(map.data, (size_t)map.size)) ||
+        (rubraview_path_win_wants_literal(path) ||   /* RV-328: a path the shell cannot take (long, a name ending in a dot) */
+         rubraview_avif_is(rubraview_mem_view(map.data, (size_t)map.size)) || rubraview_image_is_jxl(rubraview_mem_view(map.data, (size_t)map.size)) ||
          rubraview_bigtiff_is(rubraview_mem_view(map.data, (size_t)map.size)))) {
         result = decode_small_bgra(factory, rubraview_mem_view(map.data, (size_t)map.size), THUMB_DECODE_SIDE, out_w, out_h);
     }

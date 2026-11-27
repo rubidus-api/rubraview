@@ -186,6 +186,18 @@ void panel_apply_row(app_state_t *app, int32_t index) {
             break;
         }
         case PANEL_EFFECT_AMOUNT: app->effect_amount = v; break;
+        /* RV-324: Adjust's box, words and mosaic */
+        case PANEL_MARK_TOOL:   app->mark_tool = (int32_t)lround(v) % 3; app->mark_hand = 0; panel_build_edit(app); break;
+        case PANEL_MARK_SHAPE:  app->sel_shape = lround(v) == 1 ? RUBRAVIEW_AREA_ELLIPSE : RUBRAVIEW_AREA_RECT; edit_mark_changed(app); break;
+        case PANEL_MARK_FILL:   app->mark_fill = (int32_t)lround(v) & 1; panel_build_edit(app); edit_mark_changed(app); break;
+        case PANEL_MARK_COLOUR: app->mark_colour = (int32_t)lround(v); edit_mark_changed(app); break;
+        case PANEL_MARK_STROKE: app->mark_stroke = v; edit_mark_changed(app); break;
+        case PANEL_MARK_OPACITY: app->mark_opacity = v; edit_mark_changed(app); break;
+        case PANEL_MARK_FONT:   app->mark_font = (int32_t)lround(v); edit_mark_changed(app); break;
+        case PANEL_MARK_SIZE:   app->mark_size = v; edit_mark_changed(app); break;
+        case PANEL_MARK_BOLD:   app->mark_bold = v > 0.5; edit_mark_changed(app); break;
+        case PANEL_MARK_BACK:   app->mark_back = (int32_t)lround(v); edit_mark_changed(app); break;
+        case PANEL_MARK_BLOCK:  app->mark_block = v; edit_mark_changed(app); break;
         case PANEL_PLUGIN: {   /* RFC-0007: another plug-in, its parameters at their defaults */
             const rubraview_plugin_t *list[RUBRAVIEW_PLUGIN_MAX];
             size_t n = plugins_usable(list, RUBRAVIEW_PLUGIN_MAX);
@@ -336,6 +348,10 @@ void panel_button(app_state_t *app, int32_t index) {
             break;
         case PANEL_APPLY_SEL:    (void)edit_apply_pending(app, true); break;
         case PANEL_EFFECT_APPLY: edit_effect_apply(app); break;
+        case PANEL_MARK_APPLY:   edit_mark_apply(app); break;        /* RV-324 */
+        case PANEL_MARK_DONE:    edit_mark_let_go(app); break;       /* RV-325 */
+        case PANEL_MARK_REMOVE:  edit_mark_remove(app); break;
+        case PANEL_MARK_TEXT:    edit_mark_text_begin(app); break;
         case PANEL_PLUGIN_APPLY: edit_plugin_apply(app); break;   /* RFC-0007 */
         case PANEL_GMIC_APPLY: case PANEL_GMIC_TYPE: (void)gmic_button(app, app->panel.rows[index].id); break;   /* RFC-0009 C */
         case PANEL_FFMPEG_APPLY: case PANEL_FFMPEG_TYPE: (void)ffmpeg_button(app, app->panel.rows[index].id); break;   /* RFC-0009 D */
@@ -560,6 +576,7 @@ bool edit_side_press(app_state_t *app, double px, double py) {
         } else if (ev == RUBRAVIEW_PANEL_VALUE_CHANGED) {
             edit_sel_apply_row(app, row);
         } else if (ev == RUBRAVIEW_PANEL_BUTTON_PRESSED && id == PANEL_SEL_ALL) {
+            app->mark_hand = 0;   /* RV-325: no area, no mark held */
             app->edit.crop_active = false;
             app->edit_rev++;
             app->edit_shown_valid = false;
@@ -640,7 +657,7 @@ void draw_panel(app_state_t *app) {
 static bool panel_adds_step(int32_t id) {
     switch (id) {
         case PANEL_AUTO_COLOUR: case PANEL_APPLY_SEL: case PANEL_EFFECT_APPLY: case PANEL_PLUGIN_APPLY: case PANEL_GMIC_APPLY:
-        case PANEL_FFMPEG_APPLY: case PANEL_CROP_SEL: case PANEL_TURN_LEFT: case PANEL_TURN_RIGHT: case PANEL_TURN_OVER:
+        case PANEL_FFMPEG_APPLY: case PANEL_CROP_SEL: case PANEL_TURN_LEFT: case PANEL_TURN_RIGHT: case PANEL_TURN_OVER: case PANEL_MARK_APPLY:
         case PANEL_MIRROR_H: case PANEL_MIRROR_V: case PANEL_RESIZE_APPLY:
             return true;
         default:

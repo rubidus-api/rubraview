@@ -5,6 +5,20 @@
  */
 #include "app.h"
 
+/* RV-324 (R372): Edit's TEXT steps drawn by the platform's text mask (the one Batch's watermark uses), normal or bold */
+bool edit_text_runner(void *user, proven_arena_t *arena, const char *text, const char *font, double px, bool bold,
+                      rubraview_text_mask_t *out) {
+    (void)user;
+    rubraview_pixbuf_t m = rubraview_pal_text_mask_weight(arena, proven_u8str_view_from_cstr(text), proven_u8str_view_from_cstr(font ? font : ""),
+                                                         (int32_t)lround(px), bold);
+    if (!rubraview_pixbuf_is_valid(&m) || m.format != RUBRAVIEW_PIXFMT_GRAY8) return false;
+    out->coverage = m.pixels;
+    out->width = m.width;
+    out->height = m.height;
+    out->stride = m.stride;
+    return true;
+}
+
 /* ---- The Adjust panel's size in pixels (owner, 2026-10-15) ---- */
 
 static void px_edit_fill(app_state_t *app, int32_t field, int32_t value) {
@@ -614,6 +628,7 @@ void edit_values_fresh(app_state_t *app) {
 
 /* After any change of the steps: the picture's size, the panels, the preview. */
 void edit_steps_changed(app_state_t *app) {
+    app->mark_hand = 0;   /* RV-325: steps changed elsewhere (undone, removed, moved): the mark is let go */
     int32_t w = 0, h = 0;
     edit_cur_size(app, &w, &h);
     app->edit.image_width = w;
@@ -788,7 +803,7 @@ static const char *edit_adjust_words(const rubraview_edit_step_t *s, char *buf, 
 /* RV-265 (owner 2026-11-10: "효과 목록에 추가되는 버튼의 경우에는 추가: (효과설명) 이렇게"): a button that adds a step
    says so, and what it adds. A slot each, the panel keeping the view. */
 enum { ADD_AUTO, ADD_ADJUST, ADD_EFFECT, ADD_PLUGIN, ADD_GMIC, ADD_FFMPEG, ADD_CROP, ADD_RESIZE, ADD_TURN_L, ADD_TURN_R,
-       ADD_TURN_2, ADD_FLIP_H, ADD_FLIP_V, ADD_SLOTS };
+       ADD_TURN_2, ADD_FLIP_H, ADD_FLIP_V, ADD_MARK, ADD_SLOTS };
 static proven_u8str_view_t add_label(int slot, proven_u8str_view_t what) {
     static char labels[ADD_SLOTS][192];
     int n = rubraview_fmt(labels[slot], sizeof(labels[slot]), T("Add: {}"), PROVEN_ARG(what));
@@ -809,6 +824,8 @@ static proven_u8str_view_t edit_step_words(const rubraview_edit_step_t *s, size_
                      : s->kind == RUBRAVIEW_STEP_GMIC ? gmic_step_name(s)   /* RFC-0009 C: its filter's name, or the command */
                      : s->kind == RUBRAVIEW_STEP_FFMPEG ? s->command   /* RFC-0009 D: the graph */
                      : (s->kind == RUBRAVIEW_STEP_ROTATE || s->kind == RUBRAVIEW_STEP_FLIP) ? turn_word(s)   /* RV-265 */
+                     : s->kind == RUBRAVIEW_STEP_BOX ? (s->fill ? T("Filled box") : T("Box outline"))   /* RV-324 */
+                     : s->kind == RUBRAVIEW_STEP_TEXT ? s->command
                      : edit_adjust_words(s, moved, sizeof(moved));
     if (!what) what = T("Adjust");
     const char *where = s->area.shape == RUBRAVIEW_AREA_ELLIPSE ? T("ellipse") : s->area.shape == RUBRAVIEW_AREA_RECT ? T("rectangle") : T("whole");
@@ -890,7 +907,8 @@ static void edit_sel_build(app_state_t *app) {
 
 /* The numbers follow the selection drawn or moved on the picture. */
 void edit_sel_sync(app_state_t *app) {
-    if (!app->edit_live_busy) edit_live_close(app);   /* another selection: the next change is a step of its own */
+    if (edit_mark_held(app)) edit_mark_changed(app);   /* RV-325: the held mark moved or sized with it */
+    else if (!app->edit_live_busy) edit_live_close(app);   /* another selection: the next change is a step of its own */
     if (!app->sel_panel.open) return;
     edit_sel_build(app);
 }
@@ -923,6 +941,7 @@ void edit_sel_apply_row(app_state_t *app, int32_t index) {
         rubraview_panel_set_value(&app->sel_panel, PANEL_SEL_W, app->edit.crop.width);
         rubraview_panel_set_value(&app->sel_panel, PANEL_SEL_H, app->edit.crop.height);
     }
+    edit_mark_changed(app);   /* RV-325: a held mark goes with the numbers */
 }
 
 void edit_sel_toggle(app_state_t *app) {
@@ -1131,6 +1150,322 @@ rubraview_pixbuf_t plugin_runner(void *user, proven_arena_t *arena, const rubrav
 }
 
 static void edit_rows_plugins(app_state_t *app);
+
+/* ---- RV-324 (R371, R372, owner 2026-11-27: "박스(속이 찬거/테두리만 있는거), 글자(텍스트박스), 모자이크", "모자이크는
+   원형으로도"): Adjust's first section: a box, words or a mosaic put on the area chosen, each a step ---- */
+
+static const uint32_t MARK_COLOURS[8] = { 0xFF000000u, 0xFFFFFFFFu, 0xFFE53935u, 0xFFFB8C00u, 0xFFFDD835u, 0xFF43A047u, 0xFF1E88E5u, 0xFF8E24AAu };
+static const char *const MARK_FONTS[8] = { "Malgun Gothic", "Gulim", "Batang", "Segoe UI", "Arial", "Times New Roman", "Consolas", "Impact" };
+
+static const char *mark_colour_word(int32_t i) {
+    const char *const W[8] = { T("black"), T("white"), T("red"), T("orange"), T("yellow"), T("green"), T("blue"), T("purple") };
+    return i >= 0 && i < 8 ? W[i] : NULL;
+}
+
+static void mark_defaults(app_state_t *app) {
+    if (app->mark_size > 0.0) return;
+    app->mark_colour = 2;   /* red: what marks a thing */
+    app->mark_stroke = 4.0;
+    app->mark_opacity = 100.0;
+    app->mark_size = 48.0;
+    app->mark_block = 12.0;
+}
+
+static void edit_rows_mark(app_state_t *app) {
+    rubraview_panel_t *p = &app->panel;
+    mark_defaults(app);
+    rubraview_panel_add_choice(p, PANEL_MARK_TOOL, TU8("Put on"), app->mark_tool, 3);
+    if (app->mark_tool != 1) rubraview_panel_add_choice(p, PANEL_MARK_SHAPE, TU8("Shape"), app->sel_shape == RUBRAVIEW_AREA_ELLIPSE ? 1 : 0, 2);
+    if (app->mark_tool == 0) {
+        rubraview_panel_add_choice(p, PANEL_MARK_FILL, TU8("Box"), app->mark_fill, 2);
+        rubraview_panel_add_choice(p, PANEL_MARK_COLOUR, TU8("Colour"), app->mark_colour, 8);
+        if (!app->mark_fill) rubraview_panel_add_slider(p, PANEL_MARK_STROKE, TU8("Line"), app->mark_stroke, 1.0, 60.0, 1.0);
+        rubraview_panel_add_slider(p, PANEL_MARK_OPACITY, TU8("Opacity"), app->mark_opacity, 10.0, 100.0, 1.0);
+    } else if (app->mark_tool == 1) {
+        char words[96];
+        size_t n = 0;
+        while (app->mark_text[n] && n < 40) n++;
+        while (n > 0 && n < 40 && ((uint8_t)app->mark_text[n] & 0xC0) == 0x80) n--;   /* never half a character */
+        int k = app->mark_text[0] ? rubraview_fmt(words, sizeof words, T("Words: {}{}"), PROVEN_ARG(rubraview_bytes_view(app->mark_text, (int)n)),
+                                                  PROVEN_ARG(app->mark_text[n] ? "..." : ""))
+                                  : rubraview_fmt(words, sizeof words, "{}", PROVEN_ARG(T("Type the words...")));
+        static char kept[96];
+        proven_sys_mem_copy(kept, words, k > 0 ? (size_t)k + 1 : 1);
+        rubraview_panel_add_button(p, PANEL_MARK_TEXT, cstr(kept));
+        rubraview_panel_add_choice(p, PANEL_MARK_FONT, TU8("Font"), app->mark_font, 8);
+        rubraview_panel_add_slider(p, PANEL_MARK_SIZE, TU8("Size"), app->mark_size, 8.0, 400.0, 1.0);
+        rubraview_panel_add_choice(p, PANEL_MARK_COLOUR, TU8("Colour"), app->mark_colour, 8);
+        rubraview_panel_add_toggle(p, PANEL_MARK_BOLD, TU8("Bold"), app->mark_bold);
+        rubraview_panel_add_choice(p, PANEL_MARK_BACK, TU8("Background"), app->mark_back, 9);
+    } else {
+        rubraview_panel_add_slider(p, PANEL_MARK_BLOCK, TU8("Block"), app->mark_block, 2.0, 100.0, 1.0);
+    }
+    if (edit_mark_held(app)) {   /* RV-325: the rows above change the one held */
+        rubraview_panel_add_button(p, PANEL_MARK_DONE, TU8("Done with this one: the next is a new one"));
+        rubraview_panel_add_button(p, PANEL_MARK_REMOVE, TU8("Remove this one"));
+        return;
+    }
+    const char *what = app->mark_tool == 0 ? (app->mark_fill ? T("filled box") : T("box outline")) : app->mark_tool == 1 ? T("words") : T("mosaic");
+    rubraview_panel_add_button(p, PANEL_MARK_APPLY, add_label(ADD_MARK, cstr(what)));
+}
+
+static proven_u8str_view_t mark_choice_word(const app_state_t *app, int32_t id, int32_t i) {
+    (void)app;
+    const char *w = NULL;
+    switch (id) {
+        case PANEL_MARK_TOOL: w = i == 0 ? T("a box") : i == 1 ? T("words") : i == 2 ? T("a mosaic") : NULL; break;
+        case PANEL_MARK_SHAPE: w = i == 1 ? T("ellipse") : i == 0 ? T("rectangle") : NULL; break;
+        case PANEL_MARK_FILL: w = i == 1 ? T("filled") : i == 0 ? T("outline") : NULL; break;
+        case PANEL_MARK_COLOUR: w = mark_colour_word(i); break;
+        case PANEL_MARK_FONT: w = i >= 0 && i < 8 ? MARK_FONTS[i] : NULL; break;
+        case PANEL_MARK_BACK: w = i == 0 ? T("none") : mark_colour_word(i - 1); break;
+        default: break;
+    }
+    return w ? cstr(w) : PROVEN_LIT("");
+}
+
+void edit_mark_text_begin(app_state_t *app) {
+    if (app->rename_active) rename_end(app);
+    rename_field_begin(app);
+    char shown[RUBRAVIEW_EDIT_COMMAND_MAX * 2];   /* a line break shown as //, to be typed so */
+    size_t w = 0;
+    for (size_t i = 0; app->mark_text[i] && w + 2 < sizeof shown; ++i) {
+        if (app->mark_text[i] == '\n') { shown[w++] = '/'; shown[w++] = '/'; }
+        else shown[w++] = app->mark_text[i];
+    }
+    shown[w] = '\0';
+    rubraview_textedit_set(&app->rename_ec.te, cstr(shown));
+    rubraview_textedit_select_all(&app->rename_ec.te);
+    app->rename_active = true;
+    app->rename_is_mark = true;
+    app->rename_composing_length = 0;
+    rubraview_pal_window_text_input(app->window, true);
+}
+
+void edit_mark_typed(app_state_t *app) {
+    proven_u8str_view_t t = rubraview_textedit_text(&app->rename_ec.te);
+    size_t w = 0;
+    for (size_t i = 0; i < t.size && w + 1 < sizeof app->mark_text; ++i) {
+        if (t.ptr[i] == '/' && i + 1 < t.size && t.ptr[i + 1] == '/') { app->mark_text[w++] = '\n'; i++; }   /* "//": a new line */
+        else app->mark_text[w++] = (char)t.ptr[i];
+    }
+    app->mark_text[w] = '\0';
+    rename_end(app);
+    if (edit_mark_held(app)) {   /* RV-325: the held words typed again; none typed, they stay */
+        if (w) edit_mark_changed(app);
+        else rubraview_fmt(app->mark_text, sizeof app->mark_text, "{}", PROVEN_ARG(app->edit_steps.steps[app->mark_hand - 1].command));
+        panel_build_edit(app);
+        return;
+    }
+    panel_build_edit(app);
+    if (w && app->edit.crop_active) edit_mark_apply(app);   /* words and an area: put them at once */
+    else if (w) osd_say(app, TU8("choose where they go on the picture (an area: its top left), then Add"));
+}
+
+/* RV-325 (R374): the words' box, their background's margin included, measured where they start; false when they
+   cannot be measured (the area is then kept as it was). */
+static bool mark_text_fit(rubraview_edit_step_t *s, int32_t pic_w, int32_t pic_h) {
+    size_t bytes = 32u << 20;
+    void *mem = rubraview_alloc(bytes);
+    if (!mem) return false;
+    proven_arena_t arena = proven_arena_create((proven_mem_mut_t){ .ptr = (proven_byte_t *)mem, .size = bytes });
+    int32_t w = 0, h = 0;
+    bool ok = rubraview_edit_text_extent(&arena, s, &w, &h);
+    rubraview_free(mem);
+    if (!ok) return false;
+    if (s->area.shape == RUBRAVIEW_AREA_ALL || s->area.rect.width <= 0) {   /* no place chosen: the picture's middle */
+        s->area.rect.x = (pic_w - w) / 2;
+        s->area.rect.y = (pic_h - h) / 2;
+    }
+    s->area.shape = RUBRAVIEW_AREA_RECT;
+    s->area.rect.width = w;
+    s->area.rect.height = h;
+    return true;
+}
+
+/* The step the rows make on `area`: a box, words or a mosaic. */
+static void mark_step_make(app_state_t *app, rubraview_edit_area_t area, bool measure, rubraview_edit_step_t *s) {
+    *s = (rubraview_edit_step_t){ .area = area };
+    s->area.feather = 0;   /* a mark's edge is its own */
+    uint32_t colour = MARK_COLOURS[app->mark_colour >= 0 && app->mark_colour < 8 ? app->mark_colour : 2];
+    if (app->mark_tool == 0) {
+        s->kind = RUBRAVIEW_STEP_BOX;
+        uint32_t a = (uint32_t)lround(app->mark_opacity * 2.55);
+        s->ink = (colour & 0x00FFFFFFu) | ((a > 255 ? 255 : a) << 24);
+        s->fill = app->mark_fill == 1;
+        s->stroke = app->mark_stroke;
+    } else if (app->mark_tool == 1) {
+        s->kind = RUBRAVIEW_STEP_TEXT;
+        s->ink = colour;
+        s->back = app->mark_back > 0 && app->mark_back <= 8 ? MARK_COLOURS[app->mark_back - 1] : 0;
+        s->size = app->mark_size;
+        s->bold = app->mark_bold;
+        rubraview_fmt(s->command, sizeof s->command, "{}", PROVEN_ARG(app->mark_text));
+        rubraview_fmt(s->plugin, sizeof s->plugin, "{}", PROVEN_ARG(MARK_FONTS[app->mark_font >= 0 && app->mark_font < 8 ? app->mark_font : 0]));
+        int32_t w = 0, h = 0;
+        edit_cur_size(app, &w, &h);
+        if (measure) (void)mark_text_fit(s, w, h);   /* moved only: the box it had */
+    } else {
+        s->kind = RUBRAVIEW_STEP_EFFECT;
+        s->effect = RUBRAVIEW_EFFECT_PIXELIZE;
+        s->amount = app->mark_block;
+    }
+}
+
+static int32_t mark_colour_of(uint32_t ink) {   /* the nearest of MARK_COLOURS */
+    int32_t best = 0;
+    long best_d = -1;
+    for (int32_t i = 0; i < 8; ++i) {
+        long d = 0;
+        for (int sh = 0; sh < 24; sh += 8) { long e = (long)((ink >> sh) & 0xFF) - (long)((MARK_COLOURS[i] >> sh) & 0xFF); d += e * e; }
+        if (best_d < 0 || d < best_d) { best_d = d; best = i; }
+    }
+    return best;
+}
+
+/* The rows set from a mark taken again. */
+static void mark_rows_from(app_state_t *app, const rubraview_edit_step_t *s) {
+    mark_defaults(app);
+    app->sel_shape = s->area.shape == RUBRAVIEW_AREA_ELLIPSE ? RUBRAVIEW_AREA_ELLIPSE : RUBRAVIEW_AREA_RECT;
+    if (s->kind == RUBRAVIEW_STEP_BOX) {
+        app->mark_tool = 0;
+        app->mark_fill = s->fill ? 1 : 0;
+        app->mark_colour = mark_colour_of(s->ink);
+        app->mark_opacity = (double)lround((s->ink >> 24) / 2.55);
+        if (app->mark_opacity < 10.0) app->mark_opacity = 10.0;
+        if (s->stroke > 0.0) app->mark_stroke = s->stroke;
+    } else if (s->kind == RUBRAVIEW_STEP_TEXT) {
+        app->mark_tool = 1;
+        app->mark_colour = mark_colour_of(s->ink);
+        app->mark_back = (s->back >> 24) ? mark_colour_of(s->back) + 1 : 0;
+        app->mark_size = s->size;
+        app->mark_bold = s->bold;
+        rubraview_fmt(app->mark_text, sizeof app->mark_text, "{}", PROVEN_ARG(s->command));
+        app->mark_font = 0;
+        for (int32_t i = 0; i < 8; ++i)
+            if (proven_cstr_len(MARK_FONTS[i]) == proven_cstr_len(s->plugin) &&
+                proven_sys_mem_cmp(MARK_FONTS[i], s->plugin, proven_cstr_len(s->plugin)) == 0) app->mark_font = i;
+    } else {
+        app->mark_tool = 2;
+        app->mark_block = s->amount;
+    }
+}
+
+/* The mark held, if it still is one in force of the tool shown. */
+static rubraview_edit_step_t *mark_held_step(const app_state_t *app) {
+    if (app->mark_hand <= 0 || (size_t)app->mark_hand > app->edit_steps.cursor) return NULL;
+    rubraview_edit_step_t *s = (rubraview_edit_step_t *)&app->edit_steps.steps[app->mark_hand - 1];
+    if (!rubraview_edit_step_is_mark(s)) return NULL;
+    int32_t tool = s->kind == RUBRAVIEW_STEP_BOX ? 0 : s->kind == RUBRAVIEW_STEP_TEXT ? 1 : 2;
+    return tool == app->mark_tool ? s : NULL;
+}
+
+bool edit_mark_held(const app_state_t *app) { return mark_held_step(app) != NULL; }
+
+/* Let go: its box was the selection, which goes with it (the next change is on the whole picture again). */
+void edit_mark_let_go(app_state_t *app) {
+    if (!app->mark_hand) return;
+    app->mark_hand = 0;
+    app->edit.crop_active = false;
+    app->edit_rev++;
+    app->edit_shown_valid = false;
+    if (edit_panel_open(app)) panel_build_edit(app);
+}
+
+/* The steps' look again after the held mark changed: the list and the preview, the panel only when not dragged. */
+static void mark_shown_again(app_state_t *app) {
+    app->edit_rev++;
+    app->edit_shown_valid = false;
+    edit_steps_build(app);
+}
+
+/* A row moved, the selection dragged or sized, or the words typed: the held mark is made again from them. */
+void edit_mark_changed(app_state_t *app) {
+    rubraview_edit_step_t *held = mark_held_step(app);
+    if (!held) return;
+    rubraview_edit_area_t area = edit_area_now(app);
+    if (area.shape == RUBRAVIEW_AREA_ALL) area = held->area;
+    if (app->mark_tool == 1 && app->sel_grab >= 3 && app->sel_grab_rect.height > 0) {   /* the words' corner: their size */
+        double size = app->mark_hand_size0 * app->edit.crop.height / app->sel_grab_rect.height;
+        app->mark_size = size < 8.0 ? 8.0 : size > 400.0 ? 400.0 : (double)lround(size);
+    }
+    rubraview_edit_step_t s;
+    mark_step_make(app, area, !(app->mark_tool == 1 && app->sel_grab == 2), &s);
+    edit_step_units(app, &s);
+    if (!rubraview_edit_steps_set(&app->edit_steps, (size_t)app->mark_hand - 1, &s)) return;
+    if (s.area.shape != RUBRAVIEW_AREA_ALL && rubraview_edit_crop_set(&app->edit, s.area.rect.x, s.area.rect.y, s.area.rect.width, s.area.rect.height)) {
+        app->edit.crop_active = true;   /* the box round the words follows them */
+    }
+    mark_shown_again(app);
+}
+
+/* Take the held mark into the selection, ready to be dragged. */
+static void mark_hold(app_state_t *app, size_t index) {
+    const rubraview_edit_step_t *s = &app->edit_steps.steps[index];
+    edit_live_close(app);
+    mark_rows_from(app, s);
+    app->mark_hand = (int32_t)index + 1;
+    if (app->edit_tab != EDIT_TAB_ADJUST) {   /* its rows are Adjust's */
+        app->edit_tab = EDIT_TAB_ADJUST;
+        proven_sys_mem_set(app->panel.column_scroll, 0, sizeof(app->panel.column_scroll));
+    }
+    if (s->area.shape != RUBRAVIEW_AREA_ALL && rubraview_edit_crop_set(&app->edit, s->area.rect.x, s->area.rect.y, s->area.rect.width, s->area.rect.height))
+        app->edit.crop_active = true;
+    app->edit_rev++;
+    if (app->sel_mode) sel_mode_set(app, false);   /* a press on the picture is the mark's now, not a new area */
+}
+
+bool edit_mark_take_at(app_state_t *app, double px, double py) {
+    int32_t ix = 0, iy = 0;
+    if (!crop_point_to_image(app, px, py, &ix, &iy)) return false;
+    int32_t at = rubraview_edit_steps_mark_at(&app->edit_steps, ix, iy);
+    if (at < 0) {   /* beside every mark: the one held let go, and its box */
+        edit_mark_let_go(app);
+        return false;
+    }
+    mark_hold(app, (size_t)at);
+    app->sel_grab = 2;   /* held: a drag moves it at once */
+    app->sel_grab_x = ix;
+    app->sel_grab_y = iy;
+    app->sel_grab_rect = app->edit.crop;
+    app->mark_hand_size0 = app->mark_size;
+    if (edit_panel_open(app)) panel_build_edit(app);
+    osd_say(app, TU8("taken: drag it to move it, its corners to size it; the rows change it"));
+    return true;
+}
+
+void edit_mark_remove(app_state_t *app) {
+    if (!mark_held_step(app)) return;
+    bool gone[RUBRAVIEW_EDIT_MAX_STEPS] = { false };
+    gone[app->mark_hand - 1] = true;
+    app->mark_hand = 0;
+    if (rubraview_edit_steps_remove(&app->edit_steps, gone)) {
+        app->edit.crop_active = false;
+        edit_steps_changed(app);
+        osd_say(app, TU8("removed"));
+    }
+}
+
+void edit_mark_apply(app_state_t *app) {
+    mark_defaults(app);
+    rubraview_edit_area_t area = edit_area_now(app);
+    if (app->mark_tool != 1 && area.shape == RUBRAVIEW_AREA_ALL) {   /* a box or a mosaic needs its place */
+        sel_mode_set(app, true);
+        panel_build_edit(app);
+        osd_say(app, TU8("drag on the picture where it goes, then Add again"));
+        return;
+    }
+    if (app->mark_tool == 1 && !app->mark_text[0]) { edit_mark_text_begin(app); return; }
+    (void)edit_apply_pending(app, false);
+    rubraview_edit_step_t s;
+    mark_step_make(app, area, true, &s);
+    if (!edit_push(app, &s)) return;
+    edit_steps_changed(app);
+    mark_hold(app, app->edit_steps.cursor - 1);   /* RV-325: just put, it is held: moved or changed at once */
+    if (edit_panel_open(app)) panel_build_edit(app);
+    osd_say(app, app->mark_tool == 0 ? TU8("box added: drag it to move it (Ctrl+Z undoes it)") : app->mark_tool == 1 ? TU8("words added: drag them to move them (Ctrl+Z undoes them)")
+                                     : TU8("mosaic added: drag it to move it (Ctrl+Z undoes it)"));
+}
 
 static void edit_rows_effect(app_state_t *app) {
     /* By kind (owner, 2026-10-18): the kind, then its effects; 0 is none. */
@@ -2045,17 +2380,20 @@ static void edit_rows_choose(app_state_t *app) {
 static void edit_section_heading(app_state_t *app, const char *words) { rubraview_panel_add_heading(&app->panel, cstr(words)); }
 
 static void edit_rows_windowed(app_state_t *app) {
-    enum { CHOOSE, LIGHT, COLOUR, LEVELS, DETAIL, EFFECT, PLUGINS, GMIC, FFMPEG, AREA, CROP, RESIZE, HISTORY, MANY, NEXT, END };
+    enum { CHOOSE, LIGHT, COLOUR, LEVELS, DETAIL, EFFECT, PLUGINS, GMIC, FFMPEG, AREA, CROP, RESIZE, HISTORY, MANY, MARK, NEXT, END };
+    /* RV-324 (owner, 2026-11-27: "편집목록은 옆에 사이드바 형식으로 ... 폭이 넓을땐 사이드바, 폭이 좁을땐 별개의 탭"): Adjust begins with
+       the box, the words and the mosaic; in the widest band the History (the edits made) is every tab's last column, a
+       sidebar at the right, and its own tab is not shown */
     static const int ORDER[EDIT_TABS][3][12] = {
-        [EDIT_TAB_ADJUST]  = { { CHOOSE, LIGHT, COLOUR, LEVELS, DETAIL, END },
-                               { CHOOSE, LIGHT, COLOUR, NEXT, LEVELS, DETAIL, END },
-                               { CHOOSE, LIGHT, COLOUR, NEXT, LEVELS, NEXT, DETAIL, END } },
+        [EDIT_TAB_ADJUST]  = { { CHOOSE, MARK, LIGHT, COLOUR, LEVELS, DETAIL, END },
+                               { CHOOSE, MARK, LIGHT, NEXT, COLOUR, LEVELS, DETAIL, END },
+                               { CHOOSE, MARK, NEXT, LIGHT, COLOUR, LEVELS, DETAIL, NEXT, HISTORY, MANY, END } },
         [EDIT_TAB_EFFECTS] = { { CHOOSE, EFFECT, PLUGINS, GMIC, FFMPEG, END },
                                { CHOOSE, EFFECT, PLUGINS, NEXT, GMIC, FFMPEG, END },
-                               { CHOOSE, EFFECT, PLUGINS, NEXT, GMIC, NEXT, FFMPEG, END } },
+                               { CHOOSE, EFFECT, PLUGINS, NEXT, GMIC, FFMPEG, NEXT, HISTORY, MANY, END } },
         [EDIT_TAB_SIZE]    = { { AREA, CROP, RESIZE, END },
                                { AREA, NEXT, CROP, RESIZE, END },
-                               { AREA, NEXT, CROP, NEXT, RESIZE, END } },
+                               { AREA, NEXT, CROP, RESIZE, NEXT, HISTORY, MANY, END } },
         [EDIT_TAB_EDITS]   = { { HISTORY, MANY, END },
                                { HISTORY, NEXT, MANY, END },
                                { HISTORY, NEXT, MANY, END } },
@@ -2072,6 +2410,7 @@ static void edit_rows_windowed(app_state_t *app) {
                 if (p->row_count > app->edit_firsts[column]) app->edit_firsts[++column] = p->row_count;
                 continue;
             case CHOOSE: edit_section_heading(app, T("Where")); edit_rows_choose(app); break;
+            case MARK: edit_section_heading(app, T("Box, words, mosaic")); edit_rows_mark(app); break;   /* RV-324 */
             case LIGHT:
                 edit_section_heading(app, T("Light"));
                 rubraview_panel_add_slider(p, PANEL_EXPOSURE, TU8("Exposure"), app->edit.params.exposure_ev, -3.0, 3.0, 0.0);
@@ -2203,6 +2542,7 @@ void panel_open_edit(app_state_t *app) {
         app->edit_kept = false;
         app->edit = rubraview_edit_begin(real_w(&app->pages[page]), real_h(&app->pages[page]));
         rubraview_edit_steps_begin(&app->edit_steps, real_w(&app->pages[page]), real_h(&app->pages[page]));
+        app->mark_hand = 0;   /* RV-325 */
         app->sel_shape = RUBRAVIEW_AREA_RECT;
         app->sel_feather = 0;
     }
@@ -2331,6 +2671,10 @@ proven_u8str_view_t adjust_row_text(const app_state_t *app, const rubraview_pane
             break;
         }
         case PANEL_SEL_SHAPE:    word = i == 1 ? T("ellipse") : T("rectangle"); break;
+        case PANEL_MARK_TOOL: case PANEL_MARK_SHAPE: case PANEL_MARK_FILL: case PANEL_MARK_COLOUR: case PANEL_MARK_FONT: case PANEL_MARK_BACK: {
+            proven_u8str_view_t w = mark_choice_word(app, row->id, i);   /* RV-324 */
+            return w.size ? w : PROVEN_LIT("");
+        }
         case PANEL_GMIC_CATEGORY: case PANEL_GMIC_FILTER: return gmic_choice_word(app, row->id, i, rubraview_mem_mut(buffer, size));   /* RFC-0009 C */
         case PANEL_FFMPEG_GROUP: case PANEL_FFMPEG_FILTER: return ffmpeg_choice_word(app, row->id, i, rubraview_mem_mut(buffer, size));   /* RFC-0009 D */
         case PANEL_RESIZE_PRESET: word = resize_preset_word(i); break;
@@ -2570,6 +2914,7 @@ void edit_preview_open(app_state_t *app) {
             if (app->edit_live_kind == RUBRAVIEW_STEP_EFFECT) app->effect_choice = RUBRAVIEW_EFFECT_NONE; else edit_values_fresh(app);
         }
         int32_t ow = 0, oh = 0, nw = 0, nh = 0;
+        app->mark_hand = 0;   /* RV-325: another picture, another place */
         edit_cur_size(app, &ow, &oh);
         rubraview_edit_steps_rebase(&app->edit_steps, w, h);
         edit_cur_size(app, &nw, &nh);
@@ -3042,7 +3387,7 @@ static double edit_bar_height(const app_state_t *app) {
 }
 
 static proven_u8str_view_t edit_bar_word(const app_state_t *app, int32_t part, char *buf, size_t cap) {
-    static const char *const WORDS[EDIT_BAR_PARTS] = { N_("Adjust"), N_("Effects"), N_("Size"), N_("Edits"),
+    static const char *const WORDS[EDIT_BAR_PARTS] = { N_("Adjust"), N_("Effects"), N_("Size"), N_("History"),
                                                        N_("Undo"), N_("Redo"), N_("Save a copy"), N_("Save") };
     int n = part == EDIT_TAB_EDITS && app->edit_steps.count > 0
           ? rubraview_fmt(buf, cap, "{}  {}", PROVEN_ARG(rubraview_tr(WORDS[part])), PROVEN_ARG((size_t)app->edit_steps.count))
@@ -3068,6 +3413,7 @@ static void edit_bar_layout(app_state_t *app) {
         if (app->edit_renderer) (void)rubraview_pal_render_measure_text(app->edit_renderer, edit_bar_word(app, k, buf, sizeof(buf)), tab ? size : size * 0.95, &tw);
         w[k] = tw + (tab ? 2.0 * pad : 1.5 * pad);
         if (w[k] > room) w[k] = room;
+        if (k == EDIT_TAB_EDITS && app->edit_mode == 2) w[k] = 0.0;   /* RV-324: the History is the sidebar */
         if (tab) tabs_w += w[k] + (k > 0 ? gap : 0.0);
         else btns_w += w[k] + (k > EDIT_TABS ? gap : 0.0);
     }
@@ -3201,6 +3547,7 @@ void edit_window_layout(app_state_t *app) {
     int32_t mode = (double)w / dpi < 560.0 ? 0 : (double)w / dpi < 940.0 ? 1 : 2;
     if (mode != app->edit_mode) {   /* another width band: the rows in its order */
         app->edit_mode = mode;
+        if (mode == 2 && app->edit_tab == EDIT_TAB_EDITS) app->edit_tab = EDIT_TAB_ADJUST;   /* RV-324: its tab is the sidebar now */
         panel_build_edit(app);      /* lays itself out again through here */
         return;
     }
@@ -3446,10 +3793,10 @@ void draw_edit_window(app_state_t *app) {
         edit_heading(app, PANEL_SP_SEL, T("Selection"), 0);
         draw_panel_of(app, &app->sel_panel, true);
     }
-    edit_heading(app, PANEL_SP_CHANGES, T("Edits (Ctrl+Z undoes, Ctrl+Y redoes)"), app->edit_steps.count);
+    edit_heading(app, PANEL_SP_CHANGES, T("History (Ctrl+Z undoes, Ctrl+Y redoes)"), app->edit_steps.count);
     draw_changes(app);
     draw_curve_widget(app);
-    if (app->rename_active && (app->rename_is_value || app->rename_is_apply)) {
+    if (app->rename_active && (app->rename_is_value || app->rename_is_apply || app->rename_is_mark)) {
         int32_t ww = 0, wh = 0;
         rubraview_pal_window_get_size(app->edit_window, &ww, &wh);
         draw_rename_box(app, CARD_HOST_EDIT, (double)ww, (double)wh, rubraview_pal_window_dpi_scale(app->edit_window));
@@ -3514,7 +3861,7 @@ size_t edit_pump(app_state_t *app) {
             case RUBRAVIEW_WINDOW_EVENT_MOUSE_DOWN:
                 if (event.mouse.button == RUBRAVIEW_MOUSE_RIGHT) { (void)curve_widget_press(app, event.mouse.x, event.mouse.y, true); break; }
                 if (chooser_press(app, CHOOSE_IN_EDIT, event.mouse.x, event.mouse.y)) break;   /* 1.24.0 */
-                if ((app->rename_is_value || app->rename_is_apply) && rename_box_press(app, CARD_HOST_EDIT, event.mouse.x, event.mouse.y)) break;
+                if ((app->rename_is_value || app->rename_is_apply || app->rename_is_mark) && rename_box_press(app, CARD_HOST_EDIT, event.mouse.x, event.mouse.y)) break;
                 if (event.mouse.button != RUBRAVIEW_MOUSE_LEFT) break;
                 if (px_box_press(app, event.mouse.x, event.mouse.y)) { app->edit_dirty = true; break; }   /* RV-187: its box is here too */
                 if (edit_bar_press(app, event.mouse.x, event.mouse.y)) break;   /* RV-188: the tabs, undo, redo, saving */

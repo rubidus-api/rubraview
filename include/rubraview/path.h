@@ -25,6 +25,35 @@ static inline bool rubraview_path_is_sep(char c) {
 proven_u8str_view_t rubraview_path_dirname(proven_u8str_view_t path);
 
 /**
+ * RV-326 (R375): a network (SMB) path's parts: "\\server" or "\\server\share\..." (either separator). Returns
+ * RUBRAVIEW_UNC_NONE for any other path (a drive, a relative one, a device's "\\?\" or "\\.\"),
+ * RUBRAVIEW_UNC_SERVER for the server alone, RUBRAVIEW_UNC_SHARE for a share or below it. `server` and `share`
+ * (either may be NULL) are slices of `path`, `share` empty for the server alone.
+ */
+/**
+ * RV-327 (R376): whether `name` can be a new file's or folder's name on Windows as Explorer allows it: not empty,
+ * none of \ / : * ? " < > | or a control character, not "." or "..", not ending in a space or a dot, not a
+ * device's name (CON, PRN, AUX, NUL, COM1-9, LPT1-9, with or without an extension). Its UTF-8 at most 255 bytes.
+ */
+bool rubraview_path_name_ok(proven_u8str_view_t name);
+
+/**
+ * RV-328 (R377, D-414): Windows' literal path form, as 7-Zip's file manager uses it: "\\?\C:\a\b" for a drive's,
+ * "\\?\UNC\server\share\a" for a network one. Windows then takes the path as it is: past 260 characters (to
+ * about 32,767), and names it otherwise changes or refuses (ending in a dot or a space, "CON", "aux.txt").
+ * `rubraview_path_win_literal` writes it, NUL-ended, the separators made '\\', empty and "." parts dropped and
+ * ".." taken back (Windows no longer does it then); a path already "\\?\" or "\\.\" is copied as it is. 0 for
+ * a relative path or when `cap` is short.
+ * `rubraview_path_win_wants_literal`: an absolute path that needs it: 248 bytes or more (a folder's limit), or a part
+ * ending in a dot or a space, or a device's name.
+ */
+size_t rubraview_path_win_literal(proven_u8str_view_t path, char *out, size_t cap);
+bool rubraview_path_win_wants_literal(proven_u8str_view_t path);
+
+typedef enum rubraview_unc_kind { RUBRAVIEW_UNC_NONE = 0, RUBRAVIEW_UNC_SERVER, RUBRAVIEW_UNC_SHARE } rubraview_unc_kind_t;
+rubraview_unc_kind_t rubraview_path_unc(proven_u8str_view_t path, proven_u8str_view_t *server, proven_u8str_view_t *share);
+
+/**
  * Extract filename portion of path with extension (Zero-copy slice).
  * E.g. "D:/Photos/vacation/img.jpg" -> "img.jpg"
  */

@@ -18,6 +18,7 @@
 #include "rubraview/lang.h"
 #include "rubraview/mediaclock.h"
 #include "rubraview/media_head.h"   /* RV-319: rubraview_media_mf_content_type */
+#include "rubraview/adpcm.h"        /* RV-319 (R366) */
 #include "rubraview/pal/pal_filmcache.h"
 #include <stdio.h>
 
@@ -536,6 +537,234 @@ static void video_processor_keeps_every_picture(IMFSourceReader *reader, DWORD s
     IMFSourceReaderEx_Release(ex);
 }
 
+/* ---- RV-319 (R365, R366): a WAVE Media Foundation cannot read, read as one it can ----
+   Media Foundation has no handler for Sony's Wave64 (".w64") and no decoder for the ADPCM voice recorders write.
+   The stream below is a RIFF WAVE head (RF64 past 4 GB) and then the sound: a Wave64's own bytes, read where they
+   lie (rubraview_media_w64_wave), or an ADPCM file's blocks decoded to 16-bit PCM as they are read, a block at a
+   time (rubraview_adpcm_wave). */
+typedef struct w64_istream {
+    IStream face;
+    LONG refs;
+    HANDLE file;
+    bool adpcm, aiff;
+    rubraview_aiff_wave_t fw;         /* R367: an AIFF's head and sound, its samples turned as they are read */
+    rubraview_w64_wave_t w;           /* the Wave64's head and sound, when not ADPCM */
+    rubraview_adpcm_wave_t aw;        /* the ADPCM's, when it is */
+    const uint8_t *head;
+    uint32_t head_len;
+    uint64_t body_len;
+    uint64_t at;
+    uint8_t *block;                   /* ADPCM: a block's bytes, and what it decodes to */
+    int16_t *pcm;
+    uint64_t pcm_block;               /* the block in `pcm`; UINT64_MAX none */
+    uint32_t pcm_frames;
+    WCHAR name[MAX_PATH * 2 + 8];   /* the path with ".wav" after it: the kind Media Foundation reads it as */
+} w64_istream_t;
+
+static uint64_t w64_size(const w64_istream_t *c) { return c->head_len + c->body_len; }
+
+/* AIFF: `want` bytes of the sound at `off` (past the head) into `to`, its samples turned; read from a sample's start
+   through `block` (64 KB); how many (0 at a read fault). */
+static size_t w64_aiff(w64_istream_t *c, uint64_t off, uint8_t *to, size_t want) {
+    uint64_t b = c->fw.sample_bytes, from = off - off % b, skip = off - from;
+    uint64_t room = 65536 - 65536 % b, end = off + want;
+    if (end > c->fw.data_len) end = c->fw.data_len;
+    if (end <= off) return 0;
+    uint64_t span = end - from;
+    span += (b - span % b) % b;   /* to a sample's end */
+    if (span > room) span = room;
+    if (from + span > c->fw.data_len) span = c->fw.data_len - from;
+    uint64_t at = c->fw.data_at + from;
+    DWORD got = 0;
+    OVERLAPPED ov = { 0 };
+    ov.Offset = (DWORD)at;
+    ov.OffsetHigh = (DWORD)(at >> 32);
+    if (!ReadFile(c->file, c->block, (DWORD)span, &got, &ov) || got <= skip) return 0;
+    rubraview_media_aiff_fix(&c->fw, c->block, got - got % b);
+    size_t n = (size_t)(got - skip);
+    if (n > want) n = want;
+    proven_sys_mem_copy(to, c->block + skip, n);
+    return n;
+}
+
+/* ADPCM: `want` bytes of the PCM at `off` (past the head) into `to`; how many (0 at a read fault). */
+static size_t w64_pcm(w64_istream_t *c, uint64_t off, uint8_t *to, size_t want) {
+    const rubraview_adpcm_t *a = &c->aw.a;
+    uint64_t frame_bytes = 2u * a->channels, per_block = (uint64_t)a->frames_per_block * frame_bytes;
+    uint64_t b = off / per_block;
+    if (b != c->pcm_block) {
+        uint64_t from = c->aw.data_at + b * a->block_align, end = c->aw.data_at + c->aw.data_len;
+        DWORD len = from >= end ? 0 : (DWORD)(end - from < a->block_align ? end - from : a->block_align), got = 0;
+        OVERLAPPED ov = { 0 };
+        ov.Offset = (DWORD)from;
+        ov.OffsetHigh = (DWORD)(from >> 32);
+        if (len && !ReadFile(c->file, c->block, len, &got, &ov)) return 0;
+        c->pcm_frames = rubraview_adpcm_decode_block(a, c->block, got, c->pcm);
+        c->pcm_block = b;
+    }
+    uint64_t in = off - b * per_block, have = (uint64_t)c->pcm_frames * frame_bytes;
+    size_t n = (size_t)(per_block - in < want ? per_block - in : want);
+    for (size_t i = 0; i < n; ++i) {   /* past what the block held (a short last one): silence */
+        uint64_t k = in + i;
+        to[i] = k < have ? ((const uint8_t *)c->pcm)[k] : 0;
+    }
+    return n;
+}
+
+static HRESULT STDMETHODCALLTYPE w64_query(IStream *self, REFIID riid, void **out) {
+    if (!out) return E_POINTER;
+    if (IsEqualIID(riid, &IID_IUnknown) || IsEqualIID(riid, &IID_ISequentialStream) || IsEqualIID(riid, &IID_IStream)) {
+        *out = self;
+        IStream_AddRef(self);
+        return S_OK;
+    }
+    *out = NULL;
+    return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE w64_addref(IStream *self) { return (ULONG)InterlockedIncrement(&((w64_istream_t *)self)->refs); }
+static ULONG STDMETHODCALLTYPE w64_release(IStream *self) {
+    w64_istream_t *c = (w64_istream_t *)self;
+    LONG left = InterlockedDecrement(&c->refs);
+    if (left == 0) { CloseHandle(c->file); rubraview_free(c->block); rubraview_free(c->pcm); rubraview_free(c); }
+    return (ULONG)left;
+}
+static HRESULT STDMETHODCALLTYPE w64_read(IStream *self, void *dst, ULONG len, ULONG *read) {
+    w64_istream_t *c = (w64_istream_t *)self;
+    uint8_t *to = (uint8_t *)dst;
+    ULONG done = 0;
+    uint64_t size = w64_size(c);
+    while (done < len && c->at < size) {
+        if (c->at < c->head_len) {   /* the WAVE head made for it */
+            size_t n = (size_t)(c->head_len - c->at);
+            if (n > len - done) n = len - done;
+            proven_sys_mem_copy(to + done, c->head + c->at, n);
+            done += (ULONG)n;
+            c->at += n;
+            continue;
+        }
+        uint64_t left = size - c->at;
+        if (c->adpcm || c->aiff) {
+            size_t want = (size_t)((uint64_t)(len - done) < left ? (uint64_t)(len - done) : left);
+            size_t n = c->adpcm ? w64_pcm(c, c->at - c->head_len, to + done, want) : w64_aiff(c, c->at - c->head_len, to + done, want);
+            if (n == 0) { if (read) *read = done; return STG_E_READFAULT; }
+            done += (ULONG)n;
+            c->at += n;
+            continue;
+        }
+        uint64_t off = c->w.data_at + (c->at - c->head_len);
+        DWORD want = (DWORD)((uint64_t)(len - done) < left ? (uint64_t)(len - done) : left), got = 0;
+        OVERLAPPED ov = { 0 };
+        ov.Offset = (DWORD)off;
+        ov.OffsetHigh = (DWORD)(off >> 32);
+        if (!ReadFile(c->file, to + done, want, &got, &ov)) { if (read) *read = done; return STG_E_READFAULT; }
+        if (got == 0) break;
+        done += got;
+        c->at += got;
+    }
+    if (read) *read = done;
+    return done < len ? S_FALSE : S_OK;
+}
+static HRESULT STDMETHODCALLTYPE w64_write(IStream *self, const void *src, ULONG len, ULONG *written) {
+    (void)self; (void)src; (void)len;
+    if (written) *written = 0;
+    return STG_E_ACCESSDENIED;
+}
+static HRESULT STDMETHODCALLTYPE w64_seek(IStream *self, LARGE_INTEGER move, DWORD origin, ULARGE_INTEGER *now) {
+    w64_istream_t *c = (w64_istream_t *)self;
+    int64_t base = origin == STREAM_SEEK_SET ? 0 : origin == STREAM_SEEK_CUR ? (int64_t)c->at
+                 : origin == STREAM_SEEK_END ? (int64_t)w64_size(c) : -1;
+    if (base < 0 && origin != STREAM_SEEK_SET) return STG_E_INVALIDFUNCTION;
+    int64_t to = base + move.QuadPart;
+    if (to < 0) return STG_E_INVALIDFUNCTION;
+    c->at = (uint64_t)to;
+    if (now) now->QuadPart = c->at;
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE w64_setsize(IStream *self, ULARGE_INTEGER size) { (void)self; (void)size; return STG_E_ACCESSDENIED; }
+static HRESULT STDMETHODCALLTYPE w64_copyto(IStream *self, IStream *to, ULARGE_INTEGER n, ULARGE_INTEGER *r, ULARGE_INTEGER *w) {
+    (void)self; (void)to; (void)n; (void)r; (void)w; return E_NOTIMPL;
+}
+static HRESULT STDMETHODCALLTYPE w64_commit(IStream *self, DWORD flags) { (void)self; (void)flags; return S_OK; }
+static HRESULT STDMETHODCALLTYPE w64_revert(IStream *self) { (void)self; return E_NOTIMPL; }
+static HRESULT STDMETHODCALLTYPE w64_lock(IStream *self, ULARGE_INTEGER at, ULARGE_INTEGER n, DWORD kind) {
+    (void)self; (void)at; (void)n; (void)kind; return STG_E_INVALIDFUNCTION;
+}
+static HRESULT STDMETHODCALLTYPE w64_stat(IStream *self, STATSTG *st, DWORD flags) {
+    w64_istream_t *c = (w64_istream_t *)self;
+    if (!st) return STG_E_INVALIDPOINTER;
+    proven_sys_mem_set(st, 0, sizeof *st);
+    st->type = STGTY_STREAM;
+    st->cbSize.QuadPart = w64_size(c);
+    st->grfMode = STGM_READ;
+    if (!(flags & STATFLAG_NONAME)) {
+        size_t n = 0;
+        while (c->name[n]) n++;
+        st->pwcsName = (LPOLESTR)CoTaskMemAlloc((n + 1) * sizeof(WCHAR));
+        if (st->pwcsName) proven_sys_mem_copy(st->pwcsName, c->name, (n + 1) * sizeof(WCHAR));
+    }
+    return S_OK;
+}
+static HRESULT STDMETHODCALLTYPE w64_clone(IStream *self, IStream **out) { (void)self; if (out) *out = NULL; return E_NOTIMPL; }
+
+static IStreamVtbl g_w64_vtbl = {
+    w64_query, w64_addref, w64_release, w64_read, w64_write, w64_seek, w64_setsize, w64_copyto,
+    w64_commit, w64_revert, w64_lock, w64_lock, w64_stat, w64_clone,
+};
+
+/* The stream for `path` when it is a Wave64 or an ADPCM WAVE ("*.w64", "*.wav") Media Foundation can read as a WAVE
+   this way; NULL otherwise. */
+static w64_istream_t *w64_open(const WCHAR *path) {
+    size_t len = 0;
+    while (path[len]) len++;
+    if (len < 5) return NULL;
+    bool w64 = path[len - 4] == L'.' && (path[len - 3] | 0x20) == L'w' && path[len - 2] == L'6' && path[len - 1] == L'4';
+    bool wav = path[len - 4] == L'.' && (path[len - 3] | 0x20) == L'w' && (path[len - 2] | 0x20) == L'a' && (path[len - 1] | 0x20) == L'v';
+    bool aif = path[len - 4] == L'.' && (path[len - 3] | 0x20) == L'a' && (path[len - 2] | 0x20) == L'i' && (path[len - 1] | 0x20) == L'f';
+    bool aiff = len >= 5 && path[len - 5] == L'.' && (path[len - 4] | 0x20) == L'a' && (path[len - 3] | 0x20) == L'i' &&
+                (path[len - 2] | 0x20) == L'f' && (path[len - 1] | 0x20) == L'f';
+    if (!w64 && !wav && !aif && !aiff) return NULL;
+    if (len + 5 > MAX_PATH * 2 + 8) return NULL;
+    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                              FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return NULL;
+    LARGE_INTEGER size;
+    w64_istream_t *c = (w64_istream_t *)rubraview_alloc_zero(1, sizeof *c);
+    uint8_t *head = (uint8_t *)rubraview_alloc(65536);
+    DWORD got = 0;
+    bool ok = c && head && GetFileSizeEx(file, &size) && ReadFile(file, head, 65536, &got, NULL);
+    if (ok && rubraview_adpcm_wave(head, got, (uint64_t)size.QuadPart, &c->aw)) {   /* R366: our decoder */
+        c->adpcm = true;
+        c->head = c->aw.header;
+        c->head_len = c->aw.header_len;
+        c->body_len = c->aw.frames * 2u * c->aw.a.channels;
+        c->pcm_block = UINT64_MAX;
+        c->block = (uint8_t *)rubraview_alloc(c->aw.a.block_align);
+        c->pcm = (int16_t *)rubraview_alloc((size_t)c->aw.a.frames_per_block * c->aw.a.channels * sizeof(int16_t));
+        ok = c->block && c->pcm;
+    } else if (ok && (aif || aiff) && rubraview_media_aiff_wave(head, got, (uint64_t)size.QuadPart, &c->fw)) {   /* R367 */
+        c->aiff = true;
+        c->head = c->fw.header;
+        c->head_len = c->fw.header_len;
+        c->body_len = c->fw.data_len;
+        c->block = (uint8_t *)rubraview_alloc(65536);
+        ok = c->block != NULL;
+    } else if (ok && w64 && rubraview_media_w64_wave(head, got, (uint64_t)size.QuadPart, &c->w)) {   /* R365 */
+        c->head = c->w.header;
+        c->head_len = c->w.header_len;
+        c->body_len = c->w.data_len;
+    } else {
+        ok = false;
+    }
+    rubraview_free(head);
+    if (!ok) { CloseHandle(file); if (c) { rubraview_free(c->block); rubraview_free(c->pcm); } rubraview_free(c); return NULL; }
+    c->face.lpVtbl = &g_w64_vtbl;
+    c->refs = 1;
+    c->file = file;
+    proven_sys_mem_copy(c->name, path, len * sizeof(WCHAR));
+    proven_sys_mem_copy(c->name + len, L".wav", 5 * sizeof(WCHAR));
+    return c;
+}
+
 static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu);
 /* RV-261 step 1: each opening of the reader timed in the media log. */
 static bool open_reader(mf_media_t *m, IMFSourceReader **out_reader, bool on_gpu) {
@@ -582,9 +811,27 @@ static bool open_reader_now(mf_media_t *m, IMFSourceReader **out_reader, bool on
         for (size_t i = 0; mime && mime[i] && i + 1 < sizeof(hint_type) / sizeof(hint_type[0]); ++i) hint_type[i] = (WCHAR)mime[i];
     }
     static const GUID CONTENT_TYPE = { 0xfc358289, 0x3cb6, 0x460c, { 0xa4, 0x24, 0xb6, 0x68, 0x12, 0x60, 0x37, 0x5a } };   /* MF_BYTESTREAM_CONTENT_TYPE */
-    /* RV-216 (D-249): a film on a network drive is read through its local copy, which fills as it is read. */
-    rubraview_filmcache_stream_t *cached = g_mf.stream_on_istream && g_mf.create_reader_stream ? rubraview_pal_filmcache_open_ex(m->path, m->gpu.open_ahead) : NULL;
     m->film = NULL;
+    /* RV-319 (R365, R366, R367): a Wave64, an ADPCM WAVE or an AIFF, read as the PCM WAVE file it is */
+    w64_istream_t *w64 = g_mf.stream_on_istream && g_mf.create_reader_stream ? w64_open(m->path) : NULL;
+    if (w64) {
+        IMFByteStream *stream = NULL;
+        if (SUCCEEDED(g_mf.stream_on_istream(&w64->face, &stream)) && stream) {
+            static const GUID ORIGIN_NAME = { 0xfc358288, 0x3cb6, 0x460c, { 0xa4, 0x24, 0xb6, 0x68, 0x12, 0x60, 0x37, 0x5a } };   /* MF_BYTESTREAM_ORIGIN_NAME */
+            IMFAttributes *named = NULL;
+            if (SUCCEEDED(IMFByteStream_QueryInterface(stream, &IID_IMFAttributes, (void **)&named)) && named) {
+                IMFAttributes_SetString(named, &ORIGIN_NAME, w64->name);
+                IMFAttributes_SetString(named, &CONTENT_TYPE, L"audio/wav");
+                IMFAttributes_Release(named);
+            }
+            hr = g_mf.create_reader_stream(stream, attrs, &reader);
+            IMFByteStream_Release(stream);
+        }
+        IStream_Release(&w64->face);   /* the byte stream holds it while the reader is */
+        if (FAILED(hr)) reader = NULL;
+    }
+    /* RV-216 (D-249): a film on a network drive is read through its local copy, which fills as it is read. */
+    rubraview_filmcache_stream_t *cached = !reader && g_mf.stream_on_istream && g_mf.create_reader_stream ? rubraview_pal_filmcache_open_ex(m->path, m->gpu.open_ahead) : NULL;
     if (cached) {
         IStream *is = (IStream *)rubraview_pal_filmcache_istream(cached);
         rubraview_pal_filmcache_close(cached);   /* the IStream holds it now */
