@@ -130,16 +130,12 @@ double picker_tools_end(const app_state_t *app, double dpi, double win_w) {
     return picker_basket_shown(app) ? picker_basket_rect(app, dpi, win_w, 0).x - 6.0 * dpi : win_w - 8.0 * dpi;
 }
 
-/* RV-317: always-accessible Edit Path button at Row 1 right. */
-bool picker_path_edit_labeled(double dpi, double win_w) {
-    return win_w >= 540.0 * dpi;
-}
-
+/* R364 (owner, 2026-11-27: "경로편집 버튼을 경로 표시 왼쪽으로 당기고, 아이콘도 그냥 펜 모양으로"): the Edit path button
+   is a pen alone, first in the path, right after Back/Up/Forward; its words are the hover hint. */
 rubraview_pal_rect_t picker_path_edit_rect(double dpi, double win_w, double top) {
-    double w = picker_path_edit_labeled(dpi, win_w) ? picker_chip_width(TU8("Edit path"), dpi) + 18.0 * dpi : PICKER_PATH_EDIT_W * dpi;
+    (void)win_w;
     double crumb_h = PICKER_CRUMB_HEIGHT * dpi;
-    double x = fmax(PICKER_CRUMB_START * dpi, win_w - 8.0 * dpi - w);
-    return (rubraview_pal_rect_t){ x, top + 6.0 * dpi, w, crumb_h - 12.0 * dpi };
+    return (rubraview_pal_rect_t){ PICKER_CRUMB_START * dpi, top + 6.0 * dpi, PICKER_PATH_EDIT_W * dpi, crumb_h - 12.0 * dpi };
 }
 
 static int picker_tool_count(const app_state_t *app) {
@@ -156,9 +152,9 @@ static double tool_chip_width(const app_state_t *app, int which, double dpi) {
 
 rubraview_hstrip_t picker_crumbs_strip(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double dpi, double win_w) {
     double top = picker_top(app);
-    double edit_x = picker_path_edit_rect(dpi, win_w, top).x;
-    double sx = PICKER_CRUMB_START * dpi;
-    double sw = fmax(0.0, edit_x - 6.0 * dpi - sx);
+    rubraview_pal_rect_t edit_r = picker_path_edit_rect(dpi, win_w, top);
+    double sx = edit_r.x + edit_r.width + 4.0 * dpi;   /* R364: the crumbs after the pen, to the right end */
+    double sw = fmax(0.0, win_w - 8.0 * dpi - sx);
     double content = 0.0, gap = 4.0 * dpi;
     for (size_t i = 0; i < crumbs->count; ++i) {
         content += picker_chip_width(crumbs->items[i].label, dpi);
@@ -287,8 +283,12 @@ rubraview_pal_rect_t picker_button_rect(double win_w, double win_h, double dpi, 
 int32_t picker_bottom_list(const app_state_t *app, picker_button_t *out) {
     if (choose_mode_on()) return choose_bottom_list(out);   /* RV-314 */
     rubraview_picker_place_t place = { .in_book = app->picker_in_book, .in_archive = picker_in_archive(app), .add_mode = app->picker_add_mode };
-    for (size_t i = 0; app->picker_selected && !place.in_archive && i < app->picker_listing.count; ++i) {
-        if (!app->picker_selected[i] || picker_is_up(app, i)) continue;
+    /* R364: the ticked, else the focus; never a menu's one row (the row acts on the ticked when pressed) */
+    size_t n_rows = app->picker_listing.count, f = app->picker.focus;
+    rubraview_picker_operand_t op = rubraview_picker_operand(app->picker_selected, n_rows, f,
+                                                             app->picker_focus_set && f < n_rows && !picker_is_up(app, f), SIZE_MAX);
+    for (size_t i = 0; !place.in_archive && i < app->picker_listing.count; ++i) {
+        if (!picker_operand_has(app, &op, i)) continue;
         const rubraview_fs_entry_t *e = &app->picker_listing.entries[i];
         place.picked++;
         if (e->is_directory) continue;
@@ -439,6 +439,8 @@ static void picker_reinstall(app_state_t *app) {
     for (size_t i = 0; i < n; ++i) {
         if (!app->picker_listing.entries[i].is_directory) { app->picker.focus = i; break; }
     }
+    app->picker_focus_set = false;   /* R364: rows anew, nothing chosen yet */
+    picker_alone_forget(app);
 }
 
 /* What is picked among the rows shown, written back to the folder's own rows: kept when the filter changes. */
@@ -619,13 +621,14 @@ void favpop_sb_to(app_state_t *app, int pane, size_t first, double win_w, double
 size_t favpop_picked_files(const app_state_t *app, size_t *out, size_t cap) {
     if (app->picker_in_book || picker_in_archive(app)) return 0;
     size_t n = 0;
+    rubraview_picker_operand_t op = picker_operand(app);   /* R364 */
     for (size_t i = 0; i < app->picker_listing.count; ++i) {
-        if (!app->picker_selected || !app->picker_selected[i] || app->picker_listing.entries[i].is_directory) continue;
+        if (!picker_operand_has(app, &op, i) || app->picker_listing.entries[i].is_directory) continue;
         if (out && n < cap) out[n] = i;
         n++;
     }
     size_t f = app->picker.focus;
-    if (n == 0 && f < app->picker_listing.count && !app->picker_listing.entries[f].is_directory && !picker_is_up(app, f)) {
+    if (n == 0 && !op.ticked && op.one == SIZE_MAX && f < app->picker_listing.count && !app->picker_listing.entries[f].is_directory && !picker_is_up(app, f)) {
         if (out && cap) out[0] = f;
         n = 1;
     }
@@ -660,11 +663,9 @@ static void favpop_activate_fav(app_state_t *app, size_t idx) {
         proven_u8str_view_t name = rubraview_path_basename(path);
         for (size_t i = 0; i < app->picker_listing.count; ++i) {
             if (!proven_u8str_view_eq(app->picker_listing.entries[i].name, name)) continue;
-            if (app->picker_selected) {
-                for (size_t k = 0; k < app->picker_listing.count; ++k) app->picker_selected[k] = false;
-                app->picker_selected[i] = true;
-            }
-            app->picker.focus = i;
+            app->picker.focus = i;   /* R364: the focus on it, the check boxes untouched */
+            app->picker_focus_set = true;
+            picker_alone_forget(app);
             rubraview_picker_reveal_focus(&app->picker);
             return;
         }
@@ -831,12 +832,37 @@ int picker_taps(app_state_t *app, size_t index) {
     return twice ? 2 : 1;
 }
 
-/* D-286 (owner, 2026-11-07: "클릭 한번에 폴더나 파일이 바로 열리는데, 더블클릭해야 열리게"; "그것 하나만 고르기"): one
-   click picks that one alone, the others let go; `..` is only where the focus is. */
-void picker_pick_alone(app_state_t *app, size_t index) {
-    if (!app->picker_selected || index >= app->picker_listing.count || picker_is_up(app, index)) return;
-    for (size_t i = 0; i < app->picker_listing.count; ++i) app->picker_selected[i] = i == index;
-    app->picker_anchor = index;
+/* R364 (D-410, owner, 2026-11-27: "파일/폴더 포커싱과 체크박스는 서로 별개"): a click moves the focus and leaves the
+   check boxes as they are; the actions act on the ticked rows, or — none ticked — on the focus (D-286's "one click
+   picks it alone" is gone). */
+rubraview_picker_operand_t picker_operand(const app_state_t *app) {
+    size_t n = app->picker_listing.count, f = app->picker.focus;
+    bool usable = app->picker_focus_set && f < n && !picker_is_up(app, f);
+    size_t alone = app->picker_alone < n && !picker_is_up(app, app->picker_alone) ? app->picker_alone : SIZE_MAX;
+    return rubraview_picker_operand(app->picker_selected, n, f, usable, alone);
+}
+
+bool picker_operand_has(const app_state_t *app, const rubraview_picker_operand_t *op, size_t index) {
+    return rubraview_picker_operand_has(op, app->picker_selected, app->picker_listing.count, index) && !picker_is_up(app, index);
+}
+
+size_t picker_operand_count(const app_state_t *app) {
+    rubraview_picker_operand_t op = picker_operand(app);
+    size_t n = 0;
+    for (size_t i = 0; i < app->picker_listing.count; ++i) n += picker_operand_has(app, &op, i) ? 1u : 0u;
+    return n;
+}
+
+/* A right click or a drag on a row not ticked, or a file key with none ticked: that row alone, the ticks kept. */
+void picker_act_alone(app_state_t *app, size_t index) {
+    if (index >= app->picker_listing.count || picker_is_up(app, index)) return;
+    app->picker.focus = index;
+    app->picker_focus_set = true;
+    app->picker_alone = index;
+}
+
+void picker_alone_forget(app_state_t *app) {
+    app->picker_alone = SIZE_MAX;
 }
 
 /* RV-263 (D-304 follow-up): the file keys on the open-file screen act on what is picked there, or — nothing picked —
@@ -846,13 +872,14 @@ bool picker_file_key(app_state_t *app, proven_u8str_view_t action) {
     bool del = proven_u8str_view_eq(action, PROVEN_LIT("delete_file")), ren = proven_u8str_view_eq(action, PROVEN_LIT("rename_file"));
     bool cpy = proven_u8str_view_eq(action, PROVEN_LIT("copy_to_folder")), mov = proven_u8str_view_eq(action, PROVEN_LIT("move_to_folder"));
     if (!del && !ren && !cpy && !mov) return false;
+    picker_alone_forget(app);   /* R364: a key acts on the ticked, or on the focus when none is */
     size_t focus = app->picker.focus;
     bool on_tile = focus < app->picker_listing.count && !picker_is_up(app, focus) && !rubraview_picker_is_places(app->picker_dir);
     if (ren) {
         if (on_tile) rename_picker_begin(app, focus);
         return true;
     }
-    if (picker_picked_count(app) == 0 && on_tile) picker_pick_alone(app, focus);
+    if (picker_picked_count(app) == 0 && on_tile) picker_act_alone(app, focus);   /* none ticked: the focus, as before */
     picker_button(app, del ? PICKER_BTN_RECYCLE : mov ? PICKER_BTN_MOVE : PICKER_BTN_COPY);
     return true;
 }
@@ -893,6 +920,7 @@ void picker_select_everything(app_state_t *app) {
         if (!app->picker_selected[i]) all = false;
     }
     for (size_t i = 0; i < app->picker_listing.count; ++i) app->picker_selected[i] = !all && !picker_is_up(app, i);
+    picker_alone_forget(app);   /* R364: the ticks are what is acted on now */
     char line[64];
     int k = all ? rubraview_fmt(line, sizeof(line), "{}", PROVEN_ARG(T("nothing picked"))) : rubraview_fmt(line, sizeof(line), T("{} picked"), PROVEN_ARG((size_t)rows));
     if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
@@ -916,6 +944,7 @@ static void picker_select_media(app_state_t *app) {
         const rubraview_fs_entry_t *e = &app->picker_listing.entries[i];
         if (!e->is_directory && rubraview_glob_match_list(e->name, cstr(KINDS))) app->picker_selected[i] = pick;
     }
+    picker_alone_forget(app);
     char line[96];
     int k = rubraview_fmt(line, sizeof(line), pick ? T("{} pictures, films, songs and texts picked") : T("{} let go"), PROVEN_ARG((size_t)found));
     if (k > 0) osd_say(app, (proven_u8str_view_t){ .ptr = (const proven_byte_t *)line, .size = (size_t)k });
@@ -977,12 +1006,11 @@ void picker_copy_paths(app_state_t *app) {
 /* A right click (or a long press) on a tile: one thing — that one, picked — or the many picked. */
 void picker_context(app_state_t *app, size_t index, double x, double y) {
     if (app->picker_in_book || index >= app->picker_listing.count || picker_is_up(app, index)) return;
-    bool many = app->picker_selected && app->picker_selected[index] && picker_picked_count(app) > 1;
-    if (!many && app->picker_selected) {
-        for (size_t i = 0; i < app->picker_listing.count; ++i) app->picker_selected[i] = false;
-        app->picker_selected[index] = true;
-    }
-    app->picker.focus = index;
+    /* R364 (D-410): on a ticked row, the ticked ones; on another, that row alone and the ticks kept */
+    bool ticked = app->picker_selected && app->picker_selected[index];
+    bool many = ticked && picker_picked_count(app) > 1;
+    if (ticked) { app->picker.focus = index; app->picker_focus_set = true; picker_alone_forget(app); }
+    else picker_act_alone(app, index);
     ctx_close(app);
     slidepop_close(app);
     if (explorer_shift_click_picker(app, index, x, y)) return;   /* RV-279: Shift, Explorer's classic menu at once */
@@ -1066,8 +1094,9 @@ void picker_hold_tick(app_state_t *app) {
 
 static void picker_open_picked(app_state_t *app) {
     size_t picked = 0, one = 0;
-    for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i)
-        if (app->picker_selected[i]) { if (picked++ == 0) one = i; }
+    rubraview_picker_operand_t op = picker_operand(app);   /* R364 */
+    for (size_t i = 0; i < app->picker_listing.count; ++i)
+        if (picker_operand_has(app, &op, i)) { if (picked++ == 0) one = i; }
     if (picked == 0) {
         if (app->picker.focus < app->picker_listing.count) picker_activate(app, app->picker.focus);
         else osd_say(app, TU8("pick something to open first"));

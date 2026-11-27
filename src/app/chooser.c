@@ -552,6 +552,7 @@ static void picker_ext_pick(app_state_t *app, size_t k) {
             if (pass == 0) { total++; if (app->picker_selected[i]) on++; }
             else app->picker_selected[i] = pick;
         }
+        if (pass == 1) picker_alone_forget(app);   /* R364 */
         if (pass == 0 && total == 0) return;
         if (pass == 1) {
             if (app->picker.mode == RUBRAVIEW_PICK_SINGLE) rubraview_picker_set_mode(&app->picker, RUBRAVIEW_PICK_INDIVIDUAL);   /* as Same type does */
@@ -711,6 +712,7 @@ static void chooser_pick(app_state_t *app, int32_t index) {
         }
         case CHOOSE_PICKER_SELECT: {
             int val = (int)lround(c->values[index]);
+            picker_alone_forget(app);   /* R364: the ticks change; they are what is acted on */
             double dpi = rubraview_pal_window_dpi_scale(app->window);
             rubraview_pal_rect_t tr = picker_tool_rect(app, PICKER_TOOL_SELECT, dpi);
             switch (val) {

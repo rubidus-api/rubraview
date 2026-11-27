@@ -71,10 +71,7 @@ static size_t picked_indices(app_state_t *app, size_t pressed, size_t **out) {
     for (size_t i = 0; app->picker_selected && i < n; ++i) picked += app->picker_selected[i] && !picker_is_up(app, i);
     if (pressed < n && !pressed_picked) {
         if (picker_is_up(app, pressed) || rubraview_picker_is_places(app->picker_dir)) return 0;
-        if (app->picker_selected) {
-            for (size_t i = 0; i < n; ++i) app->picker_selected[i] = false;
-            app->picker_selected[pressed] = true;
-        }
+        picker_act_alone(app, pressed);   /* R364: the ticks kept */
         *out = rubraview_alloc(sizeof **out);
         if (!*out) return 0;
         (*out)[0] = pressed;
@@ -584,9 +581,8 @@ static void clip_forget(void) {
 void picker_clip_put_archive(app_state_t *app, bool moving) {
     if (g_clip_job) { osd_say(app, TU8("still taking the last ones out (Esc stops it)")); return; }
     size_t focus = app->picker.focus;
-    bool any = false;
-    for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i) any = any || (app->picker_selected[i] && !picker_is_up(app, i));
-    pick_t *p = pick_make(app, any ? SIZE_MAX : focus);
+    rubraview_picker_operand_t op = picker_operand(app);   /* R364 */
+    pick_t *p = pick_make(app, op.ticked ? SIZE_MAX : op.one != SIZE_MAX ? op.one : focus);
     if (!p) { osd_say(app, TU8("pick some files first")); return; }
     if (moving && !p->movable) {
         pick_free(p);

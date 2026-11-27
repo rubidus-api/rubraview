@@ -566,8 +566,9 @@ void ext_switch(app_state_t *app, int32_t row) {
 
 void rename_extension_begin(app_state_t *app) {
     app->ext_n = 0;
+    rubraview_picker_operand_t op = picker_operand(app);   /* R364 */
     for (size_t i = 0; i < app->picker_listing.count && app->ext_n < 16; ++i) {
-        if (!app->picker_selected || !app->picker_selected[i] || app->picker_listing.entries[i].is_directory) continue;
+        if (!picker_operand_has(app, &op, i) || app->picker_listing.entries[i].is_directory) continue;
         proven_u8str_view_t ext = rubraview_path_ext(app->picker_listing.entries[i].name);
         if (ext.size == 0 || ext.size >= sizeof(app->ext_from[0])) continue;
         bool seen = false;
@@ -593,8 +594,9 @@ void rename_extension_apply(app_state_t *app) {
     ext_store(app);
     size_t done = 0, failed = 0;
     uint32_t batch = ++app->undo_batch;
+    rubraview_picker_operand_t op = picker_operand(app);   /* R364 */
     for (size_t i = 0; i < app->picker_listing.count; ++i) {
-        if (!app->picker_selected || !app->picker_selected[i]) continue;
+        if (!picker_operand_has(app, &op, i)) continue;
         const rubraview_fs_entry_t *entry = &app->picker_listing.entries[i];
         if (entry->is_directory) continue;
         proven_u8str_view_t ext = rubraview_path_ext(entry->name);

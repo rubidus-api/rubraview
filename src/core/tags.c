@@ -853,21 +853,27 @@ static void mp4_chapters(proven_arena_t *arena, const uint8_t *p, size_t len, ru
 
 /* ---- WAV ---- */
 
-static void read_wav(proven_arena_t *arena, const uint8_t *p, size_t len, rubraview_tags_t *out) {
+/* RV-319 (R363): with the whole file there (`whole`, mapped), the chunks after `data` too: a LIST/INFO and an
+   "id3 " (or "ID3 ") chunk holding an ID3v2 tag, as tag editors append them. `data` is passed by its size; the
+   ID3 tag's values are taken over INFO's (they say their encoding; INFO's are a code page's bytes). */
+static void read_wav(proven_arena_t *arena, const uint8_t *p, size_t len, const uint8_t *whole, size_t whole_len,
+                     rubraview_tags_t *out) {
     out->codec = PROVEN_LIT("WAV");
+    if (whole && whole_len >= len) { p = whole; len = whole_len; }
     size_t at = 12;
     while (at + 8 <= len) {
         uint32_t size = le32(p + at + 4);
         const uint8_t *body = p + at + 8;
-        /* Only the head of the file is here, so `data` — which is the
-           whole recording — is nearly always longer than what we hold.
-           Its *declared* length is what the length is worked out from. */
+        /* With the head only, `data` — the whole recording — is nearly always longer than what is held: its
+           *declared* length gives the length, and nothing after it is read. */
         if (four(p + at, "data")) {
             if (out->sample_rate > 0 && out->channels > 0 && out->bits_per_sample > 0) {
                 double frame = (double)out->channels * (double)out->bits_per_sample / 8.0;
                 if (frame > 0.0) out->duration_seconds = (double)size / frame / (double)out->sample_rate;
             }
-            break;
+            if (!whole || size > len - at - 8) break;
+            at += 8 + (size_t)size + (size & 1);
+            continue;
         }
         if (size > len - at - 8) break;
         if (four(p + at, "fmt ") && size >= 16) {
@@ -886,10 +892,16 @@ static void read_wav(proven_arena_t *arena, const uint8_t *p, size_t len, rubrav
                 else if (four(body + in, "IART") && out->artist.size == 0) out->artist = trim(arena, text, item);
                 else if (four(body + in, "IPRD") && out->album.size == 0) out->album = trim(arena, text, item);
                 else if (four(body + in, "ICRD") && out->year.size == 0) out->year = trim(arena, text, item);
-                in += 8 + item + (item & 1);
+                else if (four(body + in, "IGNR") && out->genre.size == 0) out->genre = trim(arena, text, item);
+                else if ((four(body + in, "ITRK") || four(body + in, "IPRT")) && out->track_number.size == 0)
+                    out->track_number = trim(arena, text, item);
+                in += 8 + (size_t)item + (item & 1);
             }
+        } else if ((four(p + at, "id3 ") || four(p + at, "ID3 ")) && size >= 10) {
+            size_t end = 0;
+            read_id3v2(arena, rubraview_mem_view(body, size), out, &end);
         }
-        at += 8 + size + (size & 1);           /* chunks are padded to an even length */
+        at += 8 + (size_t)size + (size & 1);           /* chunks are padded to an even length */
     }
 }
 
@@ -1157,7 +1169,7 @@ rubraview_tags_t rubraview_tags_read(proven_arena_t *arena, rubraview_tags_sourc
         for (size_t i = 0; i < out.chapter_count; ++i)
             out.chapters[i].end_seconds = i + 1 < out.chapter_count ? out.chapters[i + 1].start_seconds : out.duration_seconds;
     } else if (four(p, "RIFF") && len > 12 && four(p + 8, "WAVE")) {
-        read_wav(arena, p, len, &out);
+        read_wav(arena, p, len, source.whole, source.whole_size, &out);
     } else if (len >= 16 && proven_sys_mem_cmp(p, ASF_HEADER, 16) == 0) {
         read_asf(arena, p, len, &out);
     } else if (!read_adts(p, len, after_id3 < len ? after_id3 : 0, &out)) {

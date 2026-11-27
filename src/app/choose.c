@@ -202,7 +202,8 @@ void choose_begin(app_state_t *app) {
 static void commit(app_state_t *app) {
     proven_u8str_view_t dir = app->picker_dir;
     size_t n = app->picker_listing.count, picked = 0;
-    for (size_t i = 0; app->picker_selected && i < n; ++i) if (app->picker_selected[i] && !picker_is_up(app, i)) picked++;
+    rubraview_picker_operand_t op = picker_operand(app);   /* R364: the ticked, else the focus */
+    for (size_t i = 0; i < n; ++i) if (picker_operand_has(app, &op, i)) picked++;
     if (C.req.mode == RUBRAVIEW_CHOOSE_SAVE) {
         proven_u8str_view_t save_dir = choose_real_dir(app, dir);
         if (!real_folder(app, save_dir)) { osd_say(app, TU8("open the folder to save in first")); return; }
@@ -226,8 +227,8 @@ static void commit(app_state_t *app) {
     }
     if (C.req.mode == RUBRAVIEW_CHOOSE_FOLDER) {
         proven_u8str_view_t chosen = choose_real_dir(app, dir);
-        for (size_t i = 0; app->picker_selected && i < n; ++i)   /* a folder picked: that one */
-            if (app->picker_selected[i] && !picker_is_up(app, i) && app->picker_listing.entries[i].is_directory) { chosen = app->picker_listing.entries[i].path; break; }
+        for (size_t i = 0; i < n; ++i)   /* a folder picked: that one */
+            if (picker_operand_has(app, &op, i) && app->picker_listing.entries[i].is_directory) { chosen = app->picker_listing.entries[i].path; break; }
         if (!real_folder(app, chosen)) { osd_say(app, TU8("open a folder of the disk first")); return; }
         answer(app, true, &chosen, 1);
         return;
@@ -235,9 +236,9 @@ static void commit(app_state_t *app) {
     /* a file or files: those picked, else the one with the focus */
     proven_u8str_view_t *paths = (proven_u8str_view_t *)rubraview_malloc_product(picked ? picked : 1, sizeof *paths, 1);
     size_t got = 0;
-    for (size_t i = 0; paths && app->picker_selected && i < n; ++i) {
+    for (size_t i = 0; paths && i < n; ++i) {
         const rubraview_fs_entry_t *e = &app->picker_listing.entries[i];
-        if (!app->picker_selected[i] || picker_is_up(app, i) || e->is_directory) continue;
+        if (!picker_operand_has(app, &op, i) || e->is_directory) continue;
         paths[got++] = e->path;
         if (C.req.mode == RUBRAVIEW_CHOOSE_FILE) break;
     }

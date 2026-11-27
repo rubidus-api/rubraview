@@ -1280,6 +1280,11 @@ typedef struct app_state {
     char                 (*picker_hist)[PICKER_HIST_PATH]; /* 1.24.0: the way back, then the way forward (PICKER_HIST each) */
     int32_t                picker_back_n, picker_fwd_n;
     size_t                 picker_anchor;        /* 1.24.0: where a Shift+click's range starts */
+    /* R364 (D-410): the check boxes and the focus apart. A row acted on alone while the focus stays on it (a right
+       click or a drag on a row not ticked, a file key with none ticked); SIZE_MAX none. The focus chosen (a click or a
+       key) since the folder was read: only then is it what the actions act on when nothing is ticked. */
+    size_t                 picker_alone;
+    bool                   picker_focus_set;
     int32_t                col_drag, col_drag_k, col_drag_left; /* 1.25.0: 1 a column's width, 2 a column's place; which column */
     double                 col_drag_x0, col_drag_w0, col_drag_w_left0;
     bool                   col_drag_moved, col_drag_drop_guard;
@@ -1838,7 +1843,8 @@ enum { PF_NONE = 0, PF_TITLE, PF_MENU, PF_NAME, PF_LIST, PF_BUTTONS };
 #define PICKER_TOOL_HEIGHT 48.0     /* RV-317: two-row touch header (48 + 48) */
 #define PICKER_NAV_W 44.0           /* RV-317: back, up and forward at the path bar's left, touch width */
 #define PICKER_STRIP_ARROW_W 38.0   /* RV-317: left/right scroll arrows on overflowing strips */
-#define PICKER_PATH_EDIT_W 46.0     /* RV-317: always-accessible Edit path button at Row 1 right */
+#define PICKER_PATH_EDIT_W 44.0     /* R364: the Edit path button, a pen, right after Back/Up/Forward */
+#define PICKER_TICKED_TINT 0x502E7BD6u   /* R364: a ticked row not under the focus (the check box's blue, faint) */
 #define PICKER_DETAIL_ROW 30.0
 #define PICKER_DETAIL_HEAD 26.0   /* the line naming the columns */
 #define PICKER_HEAD_CHECK_ROOM 30.0   /* 1.23.0: the heads' check box, before Name */
@@ -2614,7 +2620,12 @@ bool path_is_listed_kind(proven_u8str_view_t path);
 bool path_is_playlist(proven_u8str_view_t path);
 void picker_activate(app_state_t *app, size_t index);
 int picker_taps(app_state_t *app, size_t index);
-void picker_pick_alone(app_state_t *app, size_t index);
+/* R364 (D-410): what the actions act on: the ticked rows, else the focus (picker_operand); `..` never */
+rubraview_picker_operand_t picker_operand(const app_state_t *app);
+bool picker_operand_has(const app_state_t *app, const rubraview_picker_operand_t *op, size_t index);
+size_t picker_operand_count(const app_state_t *app);
+void picker_act_alone(app_state_t *app, size_t index);
+void picker_alone_forget(app_state_t *app);
 void picker_add_to_list(app_state_t *app);
 void picker_button(app_state_t *app, picker_button_t button);
 rubraview_pal_rect_t picker_button_rect(double win_w, double win_h, double dpi, int32_t index);
@@ -2639,7 +2650,6 @@ picker_columns_t picker_detail_columns(double win_w, double dpi);
 bool picker_details(const app_state_t *app);
 bool picker_folders_first(const app_state_t *app);
 bool picker_enter_book(app_state_t *app, size_t index);
-bool picker_path_edit_labeled(double dpi, double win_w);
 rubraview_pal_rect_t picker_path_edit_rect(double dpi, double win_w, double top);
 rubraview_hstrip_t picker_crumbs_strip(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, double dpi, double win_w);
 rubraview_pal_rect_t picker_crumb_rect(const app_state_t *app, const rubraview_breadcrumbs_t *crumbs, size_t index, double dpi, double win_w);

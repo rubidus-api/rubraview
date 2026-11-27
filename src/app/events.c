@@ -395,6 +395,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && scrollbar_press(app, RVSB_PICKER, event->mouse.x, event->mouse.y)) break;   /* RV-170 */
 
                 if (event->mouse.y >= (double)ph - PICKER_ACTION_HEIGHT * dpi) {
+                    picker_alone_forget(app);   /* R364: the bottom row acts on the ticked, never on a menu's one */
                     picker_button_t shown[PICKER_BOTTOM_COUNT];
                     int32_t shown_n = picker_bottom_list(app, shown);   /* D-260: as drawn */
                     for (int32_t b = 0; b < shown_n; ++b) {
@@ -442,6 +443,8 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 size_t index = row * columns + column;
                 if (column < columns && index < app->picker_listing.count) {
                     app->picker.focus = index;
+                    app->picker_focus_set = true;   /* R364: the focus is what a click moves; the ticks stay */
+                    picker_alone_forget(app);
                     if (!app->picker_in_book) {   /* 1.22.0 */
                         /* a check box picks, in any mode; folders too */
                         if (event->mouse.button == RUBRAVIEW_MOUSE_LEFT && !picker_is_up(app, index) && app->picker_selected &&
@@ -463,7 +466,7 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                             if (shift) {
                                 size_t from = app->picker_anchor < app->picker_listing.count ? app->picker_anchor : index;
                                 size_t lo = from < index ? from : index, hi = from < index ? index : from;
-                                if (!ctrl) for (size_t i = 0; i < app->picker_listing.count; ++i) app->picker_selected[i] = false;
+                                /* R364 (D-410): the range joins what is ticked; nothing let go */
                                 for (size_t i = lo; i <= hi; ++i) app->picker_selected[i] = !picker_is_up(app, i);
                             } else {
                                 app->picker_selected[index] = !app->picker_selected[index];
@@ -639,8 +642,8 @@ void frame_event(app_state_t *app, const rubraview_window_event_t *event) {
                 if (taps == 2) {
                     if (!app->picker_in_book) (void)rubraview_picker_tap(&app->picker, index);   /* the first tap undone (picking modes) */
                     picker_activate(app, index);
-                } else if (!rubraview_picker_tap(&app->picker, index)) {
-                    picker_pick_alone(app, index);   /* D-286: one click picks it alone, as Explorer; two open it */
+                } else {
+                    (void)rubraview_picker_tap(&app->picker, index);   /* R364 (D-410): one click the focus alone, two open it */
                 }
                 break;
             }

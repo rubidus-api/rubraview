@@ -106,6 +106,7 @@ static void picker_apply_sort(app_state_t *app) {
         proven_sys_mem_copy((void*)app->picker_listing.entries, entries, n * sizeof(rubraview_fs_entry_t));
         if (have_thumbs) proven_sys_mem_copy(app->picker_thumbs, thumbs, n * sizeof(struct picker_thumb));
         if (app->picker_selected) proven_sys_mem_copy(app->picker_selected, picked, n * sizeof(bool));
+        picker_alone_forget(app);   /* R364: the rows moved */
         if (app->picker_in_book && app->picker_page_of) {
             /* a page's place in the book goes with its entry; `..` stays first */
             size_t skip = app->picker_page_skip;
@@ -521,9 +522,16 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
     double dpi = rubraview_pal_window_dpi_scale(app->window);
     double tile = PICKER_TILE * dpi;
 
+    /* R364 (D-410): the same folder read again (a file job done, a refresh): what was ticked stays ticked, by name.
+       The old rows are in the other picker arena, still whole; under a filter the folder's own rows hold them. */
+    rubraview_fs_listing_t old_rows = app->picker_map ? app->picker_full : app->picker_listing;
+    const bool *old_ticked = app->picker_map ? app->picker_full_selected : app->picker_selected;
+    bool same_folder = app->picker_dir.size > 0 && proven_u8str_view_eq(dir, app->picker_dir);
     proven_result_mem_mut_t sel_res = rubraview_arena_alloc_array(pa, listing.count, sizeof(bool));
     app->picker_selected = proven_is_ok(sel_res.err) ? (bool*)(void*)sel_res.value.ptr : NULL;
     if (app->picker_selected) proven_sys_mem_set(app->picker_selected, 0, listing.count * sizeof(bool));
+    if (app->picker_selected && same_folder && old_ticked)
+        (void)rubraview_picker_carry_ticks(pa, &old_rows, old_ticked, &listing, app->picker_selected);
 
     rubraview_picker_mode_t mode = app->picker.mode;   /* the mode outlives the folder */
     picker_thumbs_free(app);
@@ -547,6 +555,8 @@ static void picker_navigate_to(app_state_t *app, proven_u8str_view_t dir, bool f
     for (size_t i = 0; i < listing.count; ++i) {
         if (!listing.entries[i].is_directory) { app->picker.focus = i; break; }
     }
+    app->picker_focus_set = false;   /* R364: a folder read anew: nothing chosen yet */
+    picker_alone_forget(app);
     picker_apply_sort(app);   /* the column chosen in the details view, kept (owner, 2026-10-16) */
     picker_filter_forget(app);   /* 1.22.0: the folder is what a filter is taken from */
     /* RV-202: kept by length: the lengths not known yet are read, and the folder sorted again when they are */
@@ -586,8 +596,9 @@ void open_set_from_entries(app_state_t *app, rubraview_fs_entry_t *entries, size
 size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out) {
     size_t picked = 0;
     if (picker_in_archive(app)) return 0;   /* RV-207: names inside an archive are no files to copy, move or recycle */
+    rubraview_picker_operand_t op = picker_operand(app);   /* R364: the ticked, else the focus */
     for (size_t i = 0; i < app->picker_listing.count; ++i) {
-        if (app->picker_selected && app->picker_selected[i] && !picker_is_up(app, i)) picked++;   /* 1.22.0: folders too */
+        if (picker_operand_has(app, &op, i)) picked++;   /* 1.22.0: folders too */
     }
     if (picked == 0) return 0;
     proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, picked, sizeof(rubraview_fs_entry_t));
@@ -595,8 +606,7 @@ size_t picker_picked_entries(app_state_t *app, rubraview_fs_entry_t **out) {
     rubraview_fs_entry_t *entries = (rubraview_fs_entry_t*)(void*)res.value.ptr;
     size_t n = 0;
     for (size_t i = 0; i < app->picker_listing.count; ++i) {
-        if (!app->picker_selected || !app->picker_selected[i]) continue;
-        if (picker_is_up(app, i)) continue;
+        if (!picker_operand_has(app, &op, i)) continue;
         entries[n++] = app->picker_listing.entries[i];
     }
     *out = entries;
@@ -819,14 +829,15 @@ size_t basket_total(const app_state_t *app) {
 /* The basket button's upper part: what is picked waits for a basket chosen in the list. A drag let go on the button (dragout.c) sets the waiting paths itself. */
 void basket_add_picked(app_state_t *app, double x, double y, double above_y) {
     rubraview_fs_entry_t *entries = NULL;
-    if (picker_in_archive(app) && picker_picked_count(app) > 0) {   /* RV-320 (D-402): an archive's entries, by their names in it */
+    rubraview_picker_operand_t op = picker_operand(app);   /* R364 */
+    if (picker_in_archive(app) && picker_operand_count(app) > 0) {   /* RV-320 (D-402): an archive's entries, by their names in it */
         size_t total = app->picker_listing.count, k = 0;
         proven_result_mem_mut_t res = rubraview_arena_alloc_array(app->arena, total ? total : 1, sizeof(proven_u8str_view_t));
         if (!proven_is_ok(res.err)) return;
         proven_u8str_view_t *names = (proven_u8str_view_t *)(void *)res.value.ptr;
         char rel[RUBRAVIEW_ARCHIVE_PATH];
-        for (size_t i = 0; app->picker_selected && i < total; ++i) {
-            if (!app->picker_selected[i] || picker_is_up(app, i)) continue;
+        for (size_t i = 0; i < total; ++i) {
+            if (!picker_operand_has(app, &op, i)) continue;
             if (picker_archive_rel(app, app->picker_listing.entries[i].path, rel, sizeof rel) && rel[0]) names[k++] = app_keep(app, cstr(rel));
         }
         if (k == 0) return;

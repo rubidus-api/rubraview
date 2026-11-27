@@ -472,6 +472,21 @@ typedef struct rubraview_picker_place {
 } rubraview_picker_place_t;
 uint32_t rubraview_picker_bottom_shows(const rubraview_picker_place_t *place);
 
+/* R364 (D-410): what the open-file screen's actions act on. The check boxes and the focus are apart: a click moves
+   the focus only. `one` is SIZE_MAX when the ticked ones are meant (`ticked` true), or when there is nothing. */
+typedef struct rubraview_picker_operand {
+    bool ticked;   /* the ticked rows */
+    size_t one;    /* else this row alone, or SIZE_MAX: none */
+} rubraview_picker_operand_t;
+/* `alone` (a right click or a drag on a row not ticked, or a file key) wins while the focus is still on it; else the
+   ticked rows when any is; else the focus when `focus_usable` (chosen by a click or a key, not `..`); else none. */
+rubraview_picker_operand_t rubraview_picker_operand(const bool *ticked, size_t count, size_t focus, bool focus_usable, size_t alone);
+bool rubraview_picker_operand_has(const rubraview_picker_operand_t *op, const bool *ticked, size_t count, size_t index);
+/* R364: the same folder read again (after a file job, a refresh): `now_ticked[i]` set for each row of `now` whose name
+   was ticked in `old` (names as bytes). Its table in `scratch`. Returns how many; 0 and nothing set without room. */
+size_t rubraview_picker_carry_ticks(proven_arena_t *scratch, const rubraview_fs_listing_t *old, const bool *old_ticked,
+                                    const rubraview_fs_listing_t *now, bool *now_ticked);
+
 #ifdef __cplusplus
 }
 #endif

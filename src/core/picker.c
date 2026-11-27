@@ -1199,3 +1199,53 @@ void rubraview_shape_cache_free(rubraview_shape_cache_t *cache) {
     rubraview_free(cache->slots);
     *cache = (rubraview_shape_cache_t){0};
 }
+
+rubraview_picker_operand_t rubraview_picker_operand(const bool *ticked, size_t count, size_t focus, bool focus_usable, size_t alone) {
+    rubraview_picker_operand_t op = { .ticked = false, .one = SIZE_MAX };
+    if (alone < count && alone == focus) { op.one = alone; return op; }
+    for (size_t i = 0; ticked && i < count; ++i) if (ticked[i]) { op.ticked = true; return op; }
+    if (focus_usable && focus < count) op.one = focus;
+    return op;
+}
+
+bool rubraview_picker_operand_has(const rubraview_picker_operand_t *op, const bool *ticked, size_t count, size_t index) {
+    if (!op || index >= count) return false;
+    if (op->ticked) return ticked && ticked[index];
+    return op->one == index;
+}
+
+static uint64_t name_hash(proven_u8str_view_t name) {
+    uint64_t h = 1469598103934665603ull;   /* FNV-1a */
+    for (size_t i = 0; i < name.size; ++i) { h ^= name.ptr[i]; h *= 1099511628211ull; }
+    return h;
+}
+
+size_t rubraview_picker_carry_ticks(proven_arena_t *scratch, const rubraview_fs_listing_t *old, const bool *old_ticked,
+                                    const rubraview_fs_listing_t *now, bool *now_ticked) {
+    if (!scratch || !old || !old_ticked || !now || !now_ticked) return 0;
+    size_t k = 0;
+    for (size_t i = 0; i < old->count; ++i) k += old_ticked[i] ? 1u : 0u;
+    if (k == 0 || now->count == 0) return 0;
+    size_t slots = 16;
+    while (slots < 2 * k && slots < (SIZE_MAX >> 2)) slots <<= 1;
+    proven_result_mem_mut_t res = rubraview_arena_alloc_array(scratch, slots, sizeof(size_t));
+    if (!proven_is_ok(res.err)) return 0;
+    size_t *table = (size_t *)(void *)res.value.ptr;   /* a ticked row of `old` + 1; 0 empty */
+    for (size_t s = 0; s < slots; ++s) table[s] = 0;
+    for (size_t i = 0; i < old->count; ++i) {
+        if (!old_ticked[i]) continue;
+        size_t s = (size_t)name_hash(old->entries[i].name) & (slots - 1);
+        while (table[s]) s = (s + 1) & (slots - 1);
+        table[s] = i + 1;
+    }
+    size_t carried = 0;
+    for (size_t j = 0; j < now->count; ++j) {
+        proven_u8str_view_t name = now->entries[j].name;
+        for (size_t s = (size_t)name_hash(name) & (slots - 1); table[s]; s = (s + 1) & (slots - 1)) {
+            if (!proven_u8str_view_eq(old->entries[table[s] - 1].name, name)) continue;
+            if (!now_ticked[j]) { now_ticked[j] = true; carried++; }
+            break;
+        }
+    }
+    return carried;
+}

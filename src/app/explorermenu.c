@@ -84,14 +84,13 @@ static void targets_for_page(app_state_t *app) {
 static void targets_for_picker(app_state_t *app, size_t index) {
     targets_clear(app);
     if (picker_in_archive(app) || app->picker_in_book) return;
-    bool folder = false, picked_any = false;
-    for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i)
-        if (app->picker_selected[i] && !picker_is_up(app, i)) { picked_any = true; break; }
-    if (picked_any) {
-        if (index < app->picker_listing.count && app->picker_selected[index] && !picker_is_up(app, index))
+    bool folder = false;
+    rubraview_picker_operand_t op = picker_operand(app);   /* R364: a row not ticked is acted on alone */
+    if (op.ticked) {
+        if (index < app->picker_listing.count && picker_operand_has(app, &op, index))
             targets_add(app, app->picker_listing.entries[index].path, &folder);   /* the one clicked first */
         for (size_t i = 0; i < app->picker_listing.count; ++i)
-            if (app->picker_selected[i] && !picker_is_up(app, i) && i != index) {
+            if (picker_operand_has(app, &op, i) && i != index) {
                 bool f = false;
                 targets_add(app, app->picker_listing.entries[i].path, app->shell_target_count == 0 ? &folder : &f);
             }
@@ -151,10 +150,7 @@ bool explorer_shift_click_page(app_state_t *app, double x, double y) {
 
 bool explorer_shift_click_picker(app_state_t *app, size_t index, double x, double y) {
     if (!rubraview_pal_shellmenu_shift_held()) return false;
-    if (app->picker_selected && index < app->picker_listing.count && !app->picker_selected[index]) {
-        for (size_t i = 0; i < app->picker_listing.count; ++i) app->picker_selected[i] = false;
-        app->picker_selected[index] = true;
-    }
+    if (index < app->picker_listing.count && !(app->picker_selected && app->picker_selected[index])) picker_act_alone(app, index);
     targets_for_picker(app, index);
     if (app->shell_target_count == 0) return false;
     show_menu(app, RUBRAVIEW_SHELLMENU_CLASSIC_EXTENDED, app->window, x, y);

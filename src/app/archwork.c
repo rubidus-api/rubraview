@@ -336,13 +336,14 @@ void archwork_extract_inside(app_state_t *app, int mode, bool choose_folder) {
         w->inner[n + 1] = '\0';
     }
     size_t picked = 0;
-    for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i)
-        if (app->picker_selected[i] && !picker_is_up(app, i)) picked++;
+    rubraview_picker_operand_t op = picker_operand(app);   /* R364: the ticked, else the focus */
+    for (size_t i = 0; i < app->picker_listing.count; ++i)
+        if (picker_operand_has(app, &op, i)) picked++;
     if (picked > 0) {
         w->only = rubraview_alloc(ix->count * sizeof *w->only);
         if (!w->only) { work_free(w); return; }
         for (size_t i = 0; i < app->picker_listing.count; ++i) {
-            if (!app->picker_selected[i] || picker_is_up(app, i)) continue;
+            if (!picker_operand_has(app, &op, i)) continue;
             if (!picker_archive_rel(app, app->picker_listing.entries[i].path, rel, sizeof rel)) continue;
             size_t room = ix->count - w->only_count;
             size_t k = rubraview_archive_index_under(ix, proven_u8str_view_from_cstr(rel), w->only + w->only_count, room);

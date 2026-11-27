@@ -818,7 +818,10 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         bool picked = app->picker_selected && app->picker_selected[index];
         double check_room = 30.0 * dpi;   /* 1.22.0: the check box at the left */
         double font = 14.0 * dpi;
-        if (picked) rubraview_pal_render_fill_rect(app->renderer, row, COLOR_TILE_CURRENT, 0.0);
+        /* R364 (D-410): the focus a click chose is the strong fill; a ticked row only a tint beside its check box */
+        bool chosen = app->picker_focus_set && index == app->picker.focus;
+        if (chosen) rubraview_pal_render_fill_rect(app->renderer, row, COLOR_TILE_CURRENT, 0.0);
+        else if (picked) rubraview_pal_render_fill_rect(app->renderer, row, PICKER_TICKED_TINT, 0.0);
         else if (index % 2 == 1) rubraview_pal_render_fill_rect(app->renderer, row, 0x18FFFFFFu, 0.0);
         if (index == app->picker.focus) rubraview_pal_render_stroke_rect(app->renderer, row, COLOR_TEXT, 1.0, 0.0);
 
@@ -897,6 +900,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
 
         rubraview_pal_rect_t tile = { x + 6.0 * dpi, y + 6.0 * dpi, cell_w - 12.0 * dpi, cell - 12.0 * dpi };
         bool picked = app->picker_selected && index < app->picker_listing.count && app->picker_selected[index];
+        bool chosen = app->picker_focus_set && index == app->picker.focus;   /* R364 */
         rubraview_texture_t *thumb = (app->picker_thumbs && index < app->picker_thumb_count)
                                          ? app->picker_thumbs[index].texture : NULL;
         rubraview_pal_rect_t caption = { tile.x, tile.y + tile.height * 0.62, tile.width, tile.height * 0.38 };
@@ -917,17 +921,18 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
             }
             if (picked) rubraview_pal_render_fill_rect(app->renderer, tile, 0x705B9BD5u, 0.0);
             rubraview_pal_render_stroke_rect(app->renderer, tile,
-                                             picked ? COLOR_TILE_CURRENT : (index == app->picker.focus ? COLOR_TEXT : COLOR_BOX_BORDER),
-                                             picked ? 3.0 * dpi : (index == app->picker.focus ? 2.0 : 1.0), 0.0);
+                                             chosen ? COLOR_TILE_CURRENT : picked ? 0xFF2E7BD6u : (index == app->picker.focus ? COLOR_TEXT : COLOR_BOX_BORDER),
+                                             chosen ? 3.0 * dpi : picked ? 2.0 * dpi : (index == app->picker.focus ? 2.0 : 1.0), 0.0);
             draw_outlined_text(app->renderer, entry->name, caption, cell * 0.11, 2.0 * dpi, 0xFFFFF4D6u);
             if (entry->is_directory) {
                 draw_outlined_text(app->renderer, TU8("[ folder ]"), kind, cell * 0.10, 1.5 * dpi, 0xFFB8D8FFu);
             }
         } else {
-            rubraview_pal_render_fill_rect(app->renderer, tile, picked ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 0.0);
+            rubraview_pal_render_fill_rect(app->renderer, tile, chosen ? COLOR_TILE_CURRENT : COLOR_TILE_FILL, 0.0);
+            if (picked && !chosen) rubraview_pal_render_fill_rect(app->renderer, tile, PICKER_TICKED_TINT, 0.0);
             rubraview_pal_render_stroke_rect(app->renderer, tile,
-                                             index == app->picker.focus ? COLOR_TEXT : COLOR_BOX_BORDER,
-                                             index == app->picker.focus ? 2.0 : 1.0, 0.0);
+                                             picked && !chosen ? 0xFF2E7BD6u : index == app->picker.focus ? COLOR_TEXT : COLOR_BOX_BORDER,
+                                             picked && !chosen ? 2.0 * dpi : index == app->picker.focus ? 2.0 : 1.0, 0.0);
             rubraview_pal_render_draw_text(app->renderer, entry->name, caption,
                                            cell * 0.11, COLOR_TEXT, RUBRAVIEW_TEXT_CENTER);
             rubraview_pal_render_draw_text(app->renderer,
@@ -1018,15 +1023,7 @@ static void draw_picker(app_state_t *app, double win_w, double win_h) {
         bool over = pal_rect_has(edit_r, app->pointer_x, app->pointer_y);
         rubraview_pal_render_fill_rect(app->renderer, edit_r, app->rename_is_path ? COLOR_TILE_CURRENT : over ? 0x40FFFFFFu : COLOR_TILE_FILL, 3.0);
         rubraview_pal_render_stroke_rect(app->renderer, edit_r, COLOR_BOX_BORDER, 1.0, 3.0);
-        if (picker_path_edit_labeled(dpi, win_w)) {
-            double icon_w = 26.0 * dpi;
-            rubraview_pal_rect_t ir = { edit_r.x + 2.0 * dpi, edit_r.y, icon_w, edit_r.height };
-            rubraview_pal_rect_t lr = { edit_r.x + icon_w, edit_r.y, fmax(0.0, edit_r.width - icon_w - 6.0 * dpi), edit_r.height };
-            draw_sign(app->renderer, 0xE70Fu, "\xE2\x9C\x8E", ir, edit_r.height * 0.44, COLOR_TEXT);
-            rubraview_pal_render_draw_text(app->renderer, TU8("Edit path"), lr, crumb_h * 0.30, COLOR_TEXT, RUBRAVIEW_TEXT_LEFT);
-        } else {
-            draw_sign(app->renderer, 0xE70Fu, "\xE2\x9C\x8E", edit_r, edit_r.height * 0.46, COLOR_TEXT);
-        }
+        draw_sign(app->renderer, 0xE70Fu, "\xE2\x9C\x8E", edit_r, edit_r.height * 0.46, COLOR_TEXT);   /* R364: a pen alone */
     }
     {
         rubraview_breadcrumbs_t crumbs = rubraview_picker_breadcrumbs(app->picker_dir);

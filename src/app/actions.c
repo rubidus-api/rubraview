@@ -1023,6 +1023,7 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
             else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_compress"))) archwork_compress_ask(app);
             else if (proven_u8str_view_eq(action, PROVEN_LIT("picker_deselect_all"))) {
                 for (size_t i = 0; app->picker_selected && i < app->picker_listing.count; ++i) app->picker_selected[i] = false;
+                picker_alone_forget(app);   /* R364 */
                 osd_say(app, TU8("nothing picked"));
             }
         }
@@ -1328,7 +1329,18 @@ void handle_action(app_state_t *app, proven_u8str_view_t action) {
 
 /* While the picker is open it owns the keyboard (§3.7.1's modal
    context): letters jump, arrows move, Enter opens, Esc closes. */
+static bool picker_handle_key_in(app_state_t *app, rubraview_key_combo_t combo);
+
+/* R364: a key that moves the focus chooses it, as a click does: then it is what the actions act on, none ticked */
 static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
+    size_t before = app->picker.focus;
+    uint32_t gen = app->picker_generation;   /* a folder gone into chooses nothing */
+    bool took = picker_handle_key_in(app, combo);
+    if (app->picker_open && app->picker_generation == gen && app->picker.focus != before) { app->picker_focus_set = true; picker_alone_forget(app); }
+    return took;
+}
+
+static bool picker_handle_key_in(app_state_t *app, rubraview_key_combo_t combo) {
     if (!app->picker_open) return false;
     picker_layout(app);
     size_t columns = (size_t)app->picker.columns;
@@ -1346,8 +1358,8 @@ static bool picker_handle_key(app_state_t *app, rubraview_key_combo_t combo) {
         return true;
     }
     if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && !(combo.modifiers & (RUBRAVIEW_MOD_SHIFT | RUBRAVIEW_MOD_ALT))) {   /* RV-207 */
-        if (key_is(combo, "C")) { picker_clip_put(app, false); return true; }
-        if (key_is(combo, "X")) { picker_clip_put(app, true); return true; }
+        if (key_is(combo, "C")) { picker_alone_forget(app); picker_clip_put(app, false); return true; }   /* R364: the ticked */
+        if (key_is(combo, "X")) { picker_alone_forget(app); picker_clip_put(app, true); return true; }
         if (key_is(combo, "V")) { picker_clip_paste(app); return true; }
     }
     if ((combo.modifiers & RUBRAVIEW_MOD_CTRL) && key_is(combo, "A")) { picker_select_everything(app); return true; }   /* 1.22.0 */
